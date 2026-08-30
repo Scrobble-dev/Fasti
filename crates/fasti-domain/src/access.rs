@@ -1,4 +1,7 @@
-use crate::{AuthSubjectId, BrowserSessionId, ProfileGrantId, WorkspaceId};
+use crate::{
+    AuthSubjectId, BrowserSessionId, MembershipId, OperationId, ProfileGrantId,
+    RequestCorrelationId, Sha256Digest, TrailBaseInstanceId, WorkspaceId,
+};
 use chrono::{DateTime, TimeDelta, Utc};
 use thiserror::Error;
 
@@ -10,8 +13,18 @@ pub enum AccessInvariantError {
     DeletedSubjectIsTerminal,
     #[error("the Access epoch cannot advance")]
     EpochOverflow,
+    #[error("the TrailBase activation generation cannot advance")]
+    ActivationGenerationOverflow,
+    #[error("the TrailBase activation state is invalid")]
+    InvalidActivationState,
+    #[error("the TrailBase activation generation is invalid")]
+    InvalidActivationGeneration,
+    #[error("the TrailBase installation is blocked")]
+    TrailBaseInstallationBlocked,
     #[error("the membership transition is not allowed")]
     InvalidMembershipTransition,
+    #[error("the membership role is not allowed for its lifecycle")]
+    InvalidMembershipRole,
     #[error("a removed membership is terminal")]
     RemovedMembershipIsTerminal,
     #[error("the final viable administrator cannot be removed")]
@@ -20,8 +33,329 @@ pub enum AccessInvariantError {
     MembershipSubjectMismatch,
     #[error("the authentication ceremony transition is not allowed")]
     InvalidCeremonyTransition,
+    #[error("the authentication ceremony purpose and return target do not match")]
+    InvalidCeremonyPurposeTarget,
+    #[error("the authentication callback path is invalid")]
+    InvalidCallbackPath,
+    #[error("the authentication ceremony browser binding does not match")]
+    CeremonyBindingMismatch,
+    #[error("the authentication ceremony TrailBase installation does not match")]
+    CeremonyInstallationMismatch,
+    #[error("the authentication ceremony activation generation does not match")]
+    CeremonyGenerationMismatch,
+    #[error("the authentication ceremony callback path does not match")]
+    CeremonyCallbackMismatch,
+    #[error("the authentication ceremony has expired")]
+    CeremonyExpired,
     #[error("the authentication proof expiry must follow verification")]
     InvalidAuthenticationProofExpiry,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TrailBaseSubject([u8; 16]);
+
+impl TrailBaseSubject {
+    pub const fn from_bytes(bytes: [u8; 16]) -> Self {
+        Self(bytes)
+    }
+
+    pub const fn as_bytes(&self) -> &[u8; 16] {
+        &self.0
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrailBaseActivationBlocker {
+    ReleaseMismatch,
+    PhysicalRootIdentityMismatch,
+    DeclaredRestore,
+}
+
+impl TrailBaseActivationBlocker {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ReleaseMismatch => "release_mismatch",
+            Self::PhysicalRootIdentityMismatch => "physical_root_identity_mismatch",
+            Self::DeclaredRestore => "declared_restore",
+        }
+    }
+
+    pub fn from_storage(value: &str) -> Option<Self> {
+        match value {
+            "release_mismatch" => Some(Self::ReleaseMismatch),
+            "physical_root_identity_mismatch" => Some(Self::PhysicalRootIdentityMismatch),
+            "declared_restore" => Some(Self::DeclaredRestore),
+            _ => None,
+        }
+    }
+
+    const fn is_recoverable_in_c1(self) -> bool {
+        matches!(self, Self::ReleaseMismatch)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrailBaseActivationState {
+    Inactive,
+    Active,
+    Blocked(TrailBaseActivationBlocker),
+}
+
+impl TrailBaseActivationState {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Inactive => "inactive",
+            Self::Active => "active",
+            Self::Blocked(_) => "blocked",
+        }
+    }
+
+    pub fn from_storage(state: &str, blocker: Option<&str>) -> Option<Self> {
+        match (state, blocker) {
+            ("inactive", None) => Some(Self::Inactive),
+            ("active", None) => Some(Self::Active),
+            ("blocked", Some(value)) => {
+                TrailBaseActivationBlocker::from_storage(value).map(Self::Blocked)
+            }
+            _ => None,
+        }
+    }
+
+    pub const fn blocker(self) -> Option<TrailBaseActivationBlocker> {
+        match self {
+            Self::Blocked(blocker) => Some(blocker),
+            Self::Inactive | Self::Active => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrailBaseInstallation {
+    id: TrailBaseInstanceId,
+    physical_root_identity: Sha256Digest,
+    activation_state: TrailBaseActivationState,
+    activation_generation: u64,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+}
+
+impl TrailBaseInstallation {
+    pub fn new(
+        id: TrailBaseInstanceId,
+        physical_root_identity: Sha256Digest,
+        created_at: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            id,
+            physical_root_identity,
+            activation_state: TrailBaseActivationState::Inactive,
+            activation_generation: 0,
+            created_at,
+            updated_at: created_at,
+        }
+    }
+
+    pub fn try_from_persisted(
+        id: TrailBaseInstanceId,
+        physical_root_identity: Sha256Digest,
+        activation_state: TrailBaseActivationState,
+        activation_generation: u64,
+        created_at: DateTime<Utc>,
+        updated_at: DateTime<Utc>,
+    ) -> Result<Self, AccessInvariantError> {
+        if updated_at < created_at {
+            return Err(AccessInvariantError::InvalidTimestampOrder);
+        }
+        if matches!(activation_state, TrailBaseActivationState::Inactive)
+            && activation_generation != 0
+            || matches!(activation_state, TrailBaseActivationState::Active)
+                && activation_generation == 0
+        {
+            return Err(AccessInvariantError::InvalidActivationState);
+        }
+        Ok(Self {
+            id,
+            physical_root_identity,
+            activation_state,
+            activation_generation,
+            created_at,
+            updated_at,
+        })
+    }
+
+    pub const fn id(&self) -> TrailBaseInstanceId {
+        self.id
+    }
+    pub const fn physical_root_identity(&self) -> &Sha256Digest {
+        &self.physical_root_identity
+    }
+    pub const fn activation_state(&self) -> TrailBaseActivationState {
+        self.activation_state
+    }
+    pub const fn activation_generation(&self) -> u64 {
+        self.activation_generation
+    }
+    pub const fn created_at(&self) -> DateTime<Utc> {
+        self.created_at
+    }
+    pub const fn updated_at(&self) -> DateTime<Utc> {
+        self.updated_at
+    }
+
+    pub fn verify(
+        &mut self,
+        observed_root_identity: &Sha256Digest,
+        release_matches: bool,
+        at: DateTime<Utc>,
+    ) -> Result<bool, AccessInvariantError> {
+        self.validate_time(at)?;
+        if matches!(
+            self.activation_state,
+            TrailBaseActivationState::Blocked(blocker) if !blocker.is_recoverable_in_c1()
+        ) {
+            return Err(AccessInvariantError::TrailBaseInstallationBlocked);
+        }
+        if observed_root_identity != &self.physical_root_identity {
+            return self.block(TrailBaseActivationBlocker::PhysicalRootIdentityMismatch, at);
+        }
+        if !release_matches {
+            return self.block(TrailBaseActivationBlocker::ReleaseMismatch, at);
+        }
+
+        let next_generation = match self.activation_state {
+            TrailBaseActivationState::Inactive => self
+                .activation_generation
+                .checked_add(1)
+                .ok_or(AccessInvariantError::ActivationGenerationOverflow)?,
+            TrailBaseActivationState::Blocked(TrailBaseActivationBlocker::ReleaseMismatch)
+                if self.activation_generation == 0 =>
+            {
+                self.activation_generation
+                    .checked_add(1)
+                    .ok_or(AccessInvariantError::ActivationGenerationOverflow)?
+            }
+            TrailBaseActivationState::Blocked(TrailBaseActivationBlocker::ReleaseMismatch) => {
+                self.activation_generation
+            }
+            TrailBaseActivationState::Active => return Ok(false),
+            TrailBaseActivationState::Blocked(_) => {
+                return Err(AccessInvariantError::TrailBaseInstallationBlocked);
+            }
+        };
+        self.activation_state = TrailBaseActivationState::Active;
+        self.activation_generation = next_generation;
+        self.updated_at = at;
+        Ok(true)
+    }
+
+    pub fn declare_restore(&mut self, at: DateTime<Utc>) -> Result<bool, AccessInvariantError> {
+        self.block(TrailBaseActivationBlocker::DeclaredRestore, at)
+    }
+
+    fn block(
+        &mut self,
+        blocker: TrailBaseActivationBlocker,
+        at: DateTime<Utc>,
+    ) -> Result<bool, AccessInvariantError> {
+        self.validate_time(at)?;
+        match self.activation_state {
+            TrailBaseActivationState::Blocked(current) if current == blocker => return Ok(false),
+            TrailBaseActivationState::Blocked(current) if !current.is_recoverable_in_c1() => {
+                return Ok(false);
+            }
+            TrailBaseActivationState::Active => {
+                self.activation_generation = self
+                    .activation_generation
+                    .checked_add(1)
+                    .ok_or(AccessInvariantError::ActivationGenerationOverflow)?;
+            }
+            TrailBaseActivationState::Inactive | TrailBaseActivationState::Blocked(_) => {}
+        }
+        self.activation_state = TrailBaseActivationState::Blocked(blocker);
+        self.updated_at = at;
+        Ok(true)
+    }
+
+    fn validate_time(&self, at: DateTime<Utc>) -> Result<(), AccessInvariantError> {
+        if at < self.updated_at {
+            return Err(AccessInvariantError::InvalidTimestampOrder);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TrailBaseExternalAnchor {
+    trailbase_instance_id: TrailBaseInstanceId,
+    trailbase_subject: TrailBaseSubject,
+    auth_subject_id: AuthSubjectId,
+    linked_at: DateTime<Utc>,
+}
+
+impl TrailBaseExternalAnchor {
+    pub const fn new(
+        trailbase_instance_id: TrailBaseInstanceId,
+        trailbase_subject: TrailBaseSubject,
+        auth_subject_id: AuthSubjectId,
+        linked_at: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            trailbase_instance_id,
+            trailbase_subject,
+            auth_subject_id,
+            linked_at,
+        }
+    }
+
+    pub const fn trailbase_instance_id(&self) -> TrailBaseInstanceId {
+        self.trailbase_instance_id
+    }
+    pub const fn trailbase_subject(&self) -> TrailBaseSubject {
+        self.trailbase_subject
+    }
+    pub const fn auth_subject_id(&self) -> AuthSubjectId {
+        self.auth_subject_id
+    }
+    pub const fn linked_at(&self) -> DateTime<Utc> {
+        self.linked_at
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdministratorContinuity {
+    Preserved,
+    FinalAdministratorWouldBeRemoved,
+}
+
+impl AdministratorContinuity {
+    pub const fn for_membership_change(
+        currently_viable: bool,
+        remains_viable: bool,
+        viable_administrator_count: u64,
+    ) -> Self {
+        if currently_viable && !remains_viable && viable_administrator_count == 1 {
+            Self::FinalAdministratorWouldBeRemoved
+        } else {
+            Self::Preserved
+        }
+    }
+
+    pub const fn for_subject_deactivation(sole_administrator_workspace_count: u64) -> Self {
+        if sole_administrator_workspace_count > 0 {
+            Self::FinalAdministratorWouldBeRemoved
+        } else {
+            Self::Preserved
+        }
+    }
+
+    const fn ensure(self) -> Result<(), AccessInvariantError> {
+        match self {
+            Self::Preserved => Ok(()),
+            Self::FinalAdministratorWouldBeRemoved => {
+                Err(AccessInvariantError::FinalAdministratorRequired)
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,6 +441,7 @@ impl AuthSubject {
     pub fn transition_lifecycle(
         &mut self,
         lifecycle: AuthSubjectLifecycle,
+        administrator_continuity: AdministratorContinuity,
         at: DateTime<Utc>,
     ) -> Result<bool, AccessInvariantError> {
         if at < self.updated_at {
@@ -118,13 +453,29 @@ impl AuthSubject {
         if matches!(self.lifecycle, AuthSubjectLifecycle::Deleted) {
             return Err(AccessInvariantError::DeletedSubjectIsTerminal);
         }
+        if matches!(self.lifecycle, AuthSubjectLifecycle::Active)
+            && !matches!(lifecycle, AuthSubjectLifecycle::Active)
+        {
+            administrator_continuity.ensure()?;
+        }
+        self.advance_authentication_epoch(at)?;
+        self.lifecycle = lifecycle;
+        Ok(true)
+    }
+
+    pub fn advance_authentication_epoch(
+        &mut self,
+        at: DateTime<Utc>,
+    ) -> Result<(), AccessInvariantError> {
+        if at < self.updated_at {
+            return Err(AccessInvariantError::InvalidTimestampOrder);
+        }
         self.auth_epoch = self
             .auth_epoch
             .checked_add(1)
             .ok_or(AccessInvariantError::EpochOverflow)?;
-        self.lifecycle = lifecycle;
         self.updated_at = at;
-        Ok(true)
+        Ok(())
     }
 
     pub fn advance_authorization_epoch(
@@ -201,6 +552,11 @@ impl MembershipLifecycle {
         matches!(self, Self::Active)
     }
 
+    const fn allows_role(self, role: WorkspaceRole) -> bool {
+        !matches!(self, Self::Invited | Self::PendingApproval)
+            || matches!(role, WorkspaceRole::Member)
+    }
+
     const fn can_transition_to(self, next: Self) -> bool {
         matches!(
             (self, next),
@@ -217,6 +573,7 @@ impl MembershipLifecycle {
 /// transaction after a successful transition.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WorkspaceMembership {
+    id: MembershipId,
     subject_id: AuthSubjectId,
     workspace_id: WorkspaceId,
     lifecycle: MembershipLifecycle,
@@ -227,6 +584,7 @@ pub struct WorkspaceMembership {
 
 impl WorkspaceMembership {
     pub fn try_new(
+        id: MembershipId,
         subject_id: AuthSubjectId,
         workspace_id: WorkspaceId,
         lifecycle: MembershipLifecycle,
@@ -237,7 +595,11 @@ impl WorkspaceMembership {
         if updated_at < created_at {
             return Err(AccessInvariantError::InvalidTimestampOrder);
         }
+        if !lifecycle.allows_role(role) {
+            return Err(AccessInvariantError::InvalidMembershipRole);
+        }
         Ok(Self {
+            id,
             subject_id,
             workspace_id,
             lifecycle,
@@ -247,6 +609,9 @@ impl WorkspaceMembership {
         })
     }
 
+    pub const fn id(&self) -> MembershipId {
+        self.id
+    }
     pub const fn subject_id(&self) -> AuthSubjectId {
         self.subject_id
     }
@@ -289,12 +654,8 @@ impl WorkspaceMembership {
         if !self.lifecycle.can_transition_to(lifecycle) {
             return Err(AccessInvariantError::InvalidMembershipTransition);
         }
-        self.ensure_administrator_continuity(
-            subject,
-            lifecycle,
-            self.role,
-            viable_administrator_count,
-        )?;
+        self.administrator_continuity(subject, lifecycle, self.role, viable_administrator_count)
+            .ensure()?;
         subject.advance_authorization_epoch(at)?;
         self.lifecycle = lifecycle;
         self.updated_at = at;
@@ -315,12 +676,11 @@ impl WorkspaceMembership {
         if matches!(self.lifecycle, MembershipLifecycle::Removed) {
             return Err(AccessInvariantError::RemovedMembershipIsTerminal);
         }
-        self.ensure_administrator_continuity(
-            subject,
-            self.lifecycle,
-            role,
-            viable_administrator_count,
-        )?;
+        if !self.lifecycle.allows_role(role) {
+            return Err(AccessInvariantError::InvalidMembershipRole);
+        }
+        self.administrator_continuity(subject, self.lifecycle, role, viable_administrator_count)
+            .ensure()?;
         subject.advance_authorization_epoch(at)?;
         self.role = role;
         self.updated_at = at;
@@ -341,23 +701,21 @@ impl WorkspaceMembership {
         Ok(())
     }
 
-    fn ensure_administrator_continuity(
+    fn administrator_continuity(
         &self,
         subject: &AuthSubject,
         lifecycle: MembershipLifecycle,
         role: WorkspaceRole,
         viable_administrator_count: u64,
-    ) -> Result<(), AccessInvariantError> {
+    ) -> AdministratorContinuity {
         let remains_viable = matches!(subject.lifecycle(), AuthSubjectLifecycle::Active)
             && lifecycle.grants_access()
             && matches!(role, WorkspaceRole::Administrator);
-        if self.is_authorization_viable_administrator(subject)
-            && !remains_viable
-            && viable_administrator_count <= 1
-        {
-            return Err(AccessInvariantError::FinalAdministratorRequired);
-        }
-        Ok(())
+        AdministratorContinuity::for_membership_change(
+            self.is_authorization_viable_administrator(subject),
+            remains_viable,
+            viable_administrator_count,
+        )
     }
 }
 
@@ -401,52 +759,490 @@ impl AuthCeremonyState {
             Self::Completed | Self::Failed | Self::CleanupUncertain | Self::Expired
         )
     }
+}
 
-    pub fn claim(&mut self) -> Result<(), AccessInvariantError> {
-        if !matches!(self, Self::Pending) {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthCeremonyPurpose {
+    SignIn,
+    RecentAuthentication,
+    FirstAdministratorBootstrap,
+}
+
+impl AuthCeremonyPurpose {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::SignIn => "sign_in",
+            Self::RecentAuthentication => "recent_authentication",
+            Self::FirstAdministratorBootstrap => "first_administrator_bootstrap",
+        }
+    }
+
+    pub fn from_storage(value: &str) -> Option<Self> {
+        match value {
+            "sign_in" => Some(Self::SignIn),
+            "recent_authentication" => Some(Self::RecentAuthentication),
+            "first_administrator_bootstrap" => Some(Self::FirstAdministratorBootstrap),
+            _ => None,
+        }
+    }
+
+    pub const fn return_target(self) -> AuthReturnTarget {
+        match self {
+            Self::SignIn => AuthReturnTarget::ApplicationHome,
+            Self::RecentAuthentication => AuthReturnTarget::AccountSecurity,
+            Self::FirstAdministratorBootstrap => AuthReturnTarget::FirstRun,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthReturnTarget {
+    ApplicationHome,
+    AccountSecurity,
+    FirstRun,
+}
+
+impl AuthReturnTarget {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ApplicationHome => "application_home",
+            Self::AccountSecurity => "account_security",
+            Self::FirstRun => "first_run",
+        }
+    }
+
+    pub fn from_storage(value: &str) -> Option<Self> {
+        match value {
+            "application_home" => Some(Self::ApplicationHome),
+            "account_security" => Some(Self::AccountSecurity),
+            "first_run" => Some(Self::FirstRun),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthCeremonyProtocol {
+    TrailBaseAuthorizationCodePkce,
+}
+
+impl AuthCeremonyProtocol {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::TrailBaseAuthorizationCodePkce => "trailbase_authorization_code_pkce",
+        }
+    }
+
+    pub fn from_storage(value: &str) -> Option<Self> {
+        match value {
+            "trailbase_authorization_code_pkce" => Some(Self::TrailBaseAuthorizationCodePkce),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthCeremonyFailure {
+    VerifierLostOnRestart,
+    ExchangeOutcomeUncertain,
+    ExchangeFailed,
+    StatusRejected,
+    LogoutUncertain,
+    LocalAuthorizationDenied,
+}
+
+impl AuthCeremonyFailure {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::VerifierLostOnRestart => "verifier_lost_on_restart",
+            Self::ExchangeOutcomeUncertain => "exchange_outcome_uncertain",
+            Self::ExchangeFailed => "exchange_failed",
+            Self::StatusRejected => "status_rejected",
+            Self::LogoutUncertain => "logout_uncertain",
+            Self::LocalAuthorizationDenied => "local_authorization_denied",
+        }
+    }
+
+    pub fn from_storage(value: &str) -> Option<Self> {
+        match value {
+            "verifier_lost_on_restart" => Some(Self::VerifierLostOnRestart),
+            "exchange_outcome_uncertain" => Some(Self::ExchangeOutcomeUncertain),
+            "exchange_failed" => Some(Self::ExchangeFailed),
+            "status_rejected" => Some(Self::StatusRejected),
+            "logout_uncertain" => Some(Self::LogoutUncertain),
+            "local_authorization_denied" => Some(Self::LocalAuthorizationDenied),
+            _ => None,
+        }
+    }
+}
+
+const MAX_AUTH_CALLBACK_PATH_BYTES: usize = 128;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AuthCallbackPath(String);
+
+impl AuthCallbackPath {
+    pub fn parse(value: impl Into<String>) -> Result<Self, AccessInvariantError> {
+        let value = value.into();
+        if value.is_empty()
+            || value.len() > MAX_AUTH_CALLBACK_PATH_BYTES
+            || !value.starts_with('/')
+            || value.starts_with("//")
+            || !value.bytes().all(|byte| {
+                byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'-' | b'_' | b'.')
+            })
+        {
+            return Err(AccessInvariantError::InvalidCallbackPath);
+        }
+        Ok(Self(value))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthCeremony {
+    id: OperationId,
+    purpose: AuthCeremonyPurpose,
+    protocol: AuthCeremonyProtocol,
+    trailbase_instance_id: TrailBaseInstanceId,
+    activation_generation: u64,
+    browser_binding_digest: Sha256Digest,
+    callback_path: AuthCallbackPath,
+    return_target: AuthReturnTarget,
+    correlation_id: RequestCorrelationId,
+    state: AuthCeremonyState,
+    failure: Option<AuthCeremonyFailure>,
+    created_at: DateTime<Utc>,
+    expires_at: DateTime<Utc>,
+    claimed_at: Option<DateTime<Utc>>,
+    terminal_at: Option<DateTime<Utc>>,
+}
+
+impl AuthCeremony {
+    #[allow(clippy::too_many_arguments)]
+    pub fn try_new(
+        id: OperationId,
+        purpose: AuthCeremonyPurpose,
+        protocol: AuthCeremonyProtocol,
+        trailbase_instance_id: TrailBaseInstanceId,
+        activation_generation: u64,
+        browser_binding_digest: Sha256Digest,
+        callback_path: AuthCallbackPath,
+        return_target: AuthReturnTarget,
+        correlation_id: RequestCorrelationId,
+        created_at: DateTime<Utc>,
+        expires_at: DateTime<Utc>,
+    ) -> Result<Self, AccessInvariantError> {
+        if expires_at <= created_at {
+            return Err(AccessInvariantError::InvalidTimestampOrder);
+        }
+        if activation_generation == 0 {
+            return Err(AccessInvariantError::InvalidActivationGeneration);
+        }
+        if purpose.return_target() != return_target {
+            return Err(AccessInvariantError::InvalidCeremonyPurposeTarget);
+        }
+        Ok(Self {
+            id,
+            purpose,
+            protocol,
+            trailbase_instance_id,
+            activation_generation,
+            browser_binding_digest,
+            callback_path,
+            return_target,
+            correlation_id,
+            state: AuthCeremonyState::Pending,
+            failure: None,
+            created_at,
+            expires_at,
+            claimed_at: None,
+            terminal_at: None,
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn try_from_persisted(
+        id: OperationId,
+        purpose: AuthCeremonyPurpose,
+        protocol: AuthCeremonyProtocol,
+        trailbase_instance_id: TrailBaseInstanceId,
+        activation_generation: u64,
+        browser_binding_digest: Sha256Digest,
+        callback_path: AuthCallbackPath,
+        return_target: AuthReturnTarget,
+        correlation_id: RequestCorrelationId,
+        state: AuthCeremonyState,
+        failure: Option<AuthCeremonyFailure>,
+        created_at: DateTime<Utc>,
+        expires_at: DateTime<Utc>,
+        claimed_at: Option<DateTime<Utc>>,
+        terminal_at: Option<DateTime<Utc>>,
+    ) -> Result<Self, AccessInvariantError> {
+        let ceremony = Self {
+            id,
+            purpose,
+            protocol,
+            trailbase_instance_id,
+            activation_generation,
+            browser_binding_digest,
+            callback_path,
+            return_target,
+            correlation_id,
+            state,
+            failure,
+            created_at,
+            expires_at,
+            claimed_at,
+            terminal_at,
+        };
+        ceremony.validate_persisted_state()?;
+        Ok(ceremony)
+    }
+
+    pub const fn id(&self) -> OperationId {
+        self.id
+    }
+    pub const fn purpose(&self) -> AuthCeremonyPurpose {
+        self.purpose
+    }
+    pub const fn protocol(&self) -> AuthCeremonyProtocol {
+        self.protocol
+    }
+    pub const fn trailbase_instance_id(&self) -> TrailBaseInstanceId {
+        self.trailbase_instance_id
+    }
+    pub const fn activation_generation(&self) -> u64 {
+        self.activation_generation
+    }
+    pub const fn browser_binding_digest(&self) -> &Sha256Digest {
+        &self.browser_binding_digest
+    }
+    pub const fn callback_path(&self) -> &AuthCallbackPath {
+        &self.callback_path
+    }
+    pub const fn return_target(&self) -> AuthReturnTarget {
+        self.return_target
+    }
+    pub const fn correlation_id(&self) -> RequestCorrelationId {
+        self.correlation_id
+    }
+    pub const fn state(&self) -> AuthCeremonyState {
+        self.state
+    }
+    pub const fn failure(&self) -> Option<AuthCeremonyFailure> {
+        self.failure
+    }
+    pub const fn created_at(&self) -> DateTime<Utc> {
+        self.created_at
+    }
+    pub const fn expires_at(&self) -> DateTime<Utc> {
+        self.expires_at
+    }
+    pub const fn claimed_at(&self) -> Option<DateTime<Utc>> {
+        self.claimed_at
+    }
+    pub const fn terminal_at(&self) -> Option<DateTime<Utc>> {
+        self.terminal_at
+    }
+
+    pub fn claim(
+        &mut self,
+        browser_binding_digest: &Sha256Digest,
+        trailbase_instance_id: TrailBaseInstanceId,
+        activation_generation: u64,
+        callback_path: &AuthCallbackPath,
+        at: DateTime<Utc>,
+    ) -> Result<(), AccessInvariantError> {
+        if !matches!(self.state, AuthCeremonyState::Pending) {
             return Err(AccessInvariantError::InvalidCeremonyTransition);
         }
-        *self = Self::Claimed;
+        if at < self.created_at {
+            return Err(AccessInvariantError::InvalidTimestampOrder);
+        }
+        if at >= self.expires_at {
+            self.state = AuthCeremonyState::Expired;
+            self.terminal_at = Some(at);
+            return Err(AccessInvariantError::CeremonyExpired);
+        }
+        if browser_binding_digest != &self.browser_binding_digest {
+            return Err(AccessInvariantError::CeremonyBindingMismatch);
+        }
+        if trailbase_instance_id != self.trailbase_instance_id {
+            return Err(AccessInvariantError::CeremonyInstallationMismatch);
+        }
+        if activation_generation != self.activation_generation {
+            return Err(AccessInvariantError::CeremonyGenerationMismatch);
+        }
+        if callback_path != &self.callback_path {
+            return Err(AccessInvariantError::CeremonyCallbackMismatch);
+        }
+        self.state = AuthCeremonyState::Claimed;
+        self.claimed_at = Some(at);
         Ok(())
     }
 
-    pub fn complete(&mut self) -> Result<(), AccessInvariantError> {
-        if !matches!(self, Self::Claimed) {
-            return Err(AccessInvariantError::InvalidCeremonyTransition);
-        }
-        *self = Self::Completed;
+    pub fn complete(&mut self, at: DateTime<Utc>) -> Result<(), AccessInvariantError> {
+        self.validate_claimed_transition(at)?;
+        self.state = AuthCeremonyState::Completed;
+        self.terminal_at = Some(at);
         Ok(())
     }
 
-    pub fn fail(&mut self) -> Result<(), AccessInvariantError> {
-        if self.is_terminal() {
+    pub fn fail(
+        &mut self,
+        failure: AuthCeremonyFailure,
+        at: DateTime<Utc>,
+    ) -> Result<(), AccessInvariantError> {
+        if self.state.is_terminal() || !Self::failure_matches_state(self.state, failure) {
             return Err(AccessInvariantError::InvalidCeremonyTransition);
         }
-        *self = Self::Failed;
+        self.validate_transition_time(at)?;
+        self.state = AuthCeremonyState::Failed;
+        self.failure = Some(failure);
+        self.terminal_at = Some(at);
         Ok(())
     }
 
-    pub fn mark_cleanup_uncertain(&mut self) -> Result<(), AccessInvariantError> {
-        if !matches!(self, Self::Claimed) {
+    pub fn mark_cleanup_uncertain(
+        &mut self,
+        failure: AuthCeremonyFailure,
+        at: DateTime<Utc>,
+    ) -> Result<(), AccessInvariantError> {
+        self.validate_claimed_transition(at)?;
+        if !matches!(
+            failure,
+            AuthCeremonyFailure::ExchangeOutcomeUncertain | AuthCeremonyFailure::LogoutUncertain
+        ) {
             return Err(AccessInvariantError::InvalidCeremonyTransition);
         }
-        *self = Self::CleanupUncertain;
+        self.state = AuthCeremonyState::CleanupUncertain;
+        self.failure = Some(failure);
+        self.terminal_at = Some(at);
         Ok(())
     }
 
-    pub fn expire(&mut self) -> Result<(), AccessInvariantError> {
-        if !matches!(self, Self::Pending) {
+    pub fn recover_after_restart(
+        &mut self,
+        at: DateTime<Utc>,
+    ) -> Result<bool, AccessInvariantError> {
+        match self.state {
+            AuthCeremonyState::Pending => {
+                self.fail(AuthCeremonyFailure::VerifierLostOnRestart, at)?;
+                Ok(true)
+            }
+            AuthCeremonyState::Claimed => {
+                self.mark_cleanup_uncertain(AuthCeremonyFailure::ExchangeOutcomeUncertain, at)?;
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
+    fn validate_claimed_transition(&self, at: DateTime<Utc>) -> Result<(), AccessInvariantError> {
+        if !matches!(self.state, AuthCeremonyState::Claimed) {
             return Err(AccessInvariantError::InvalidCeremonyTransition);
         }
-        *self = Self::Expired;
+        self.validate_transition_time(at)
+    }
+
+    fn validate_transition_time(&self, at: DateTime<Utc>) -> Result<(), AccessInvariantError> {
+        if at < self.claimed_at.unwrap_or(self.created_at) {
+            return Err(AccessInvariantError::InvalidTimestampOrder);
+        }
         Ok(())
+    }
+
+    fn validate_persisted_state(&self) -> Result<(), AccessInvariantError> {
+        if self.expires_at <= self.created_at {
+            return Err(AccessInvariantError::InvalidTimestampOrder);
+        }
+        if self.activation_generation == 0 {
+            return Err(AccessInvariantError::InvalidActivationGeneration);
+        }
+        if self.purpose.return_target() != self.return_target {
+            return Err(AccessInvariantError::InvalidCeremonyPurposeTarget);
+        }
+        if self
+            .claimed_at
+            .is_some_and(|claimed_at| claimed_at < self.created_at || claimed_at >= self.expires_at)
+            || self
+                .terminal_at
+                .is_some_and(|terminal_at| terminal_at < self.claimed_at.unwrap_or(self.created_at))
+        {
+            return Err(AccessInvariantError::InvalidTimestampOrder);
+        }
+
+        let valid = match self.state {
+            AuthCeremonyState::Pending => {
+                self.failure.is_none() && self.claimed_at.is_none() && self.terminal_at.is_none()
+            }
+            AuthCeremonyState::Claimed => {
+                self.failure.is_none() && self.claimed_at.is_some() && self.terminal_at.is_none()
+            }
+            AuthCeremonyState::Completed => {
+                self.failure.is_none() && self.claimed_at.is_some() && self.terminal_at.is_some()
+            }
+            AuthCeremonyState::Failed => {
+                self.failure.is_some_and(|failure| {
+                    Self::failure_matches_state(
+                        if self.claimed_at.is_some() {
+                            AuthCeremonyState::Claimed
+                        } else {
+                            AuthCeremonyState::Pending
+                        },
+                        failure,
+                    )
+                }) && self.terminal_at.is_some()
+            }
+            AuthCeremonyState::CleanupUncertain => {
+                self.claimed_at.is_some()
+                    && self.terminal_at.is_some()
+                    && matches!(
+                        self.failure,
+                        Some(
+                            AuthCeremonyFailure::ExchangeOutcomeUncertain
+                                | AuthCeremonyFailure::LogoutUncertain
+                        )
+                    )
+            }
+            AuthCeremonyState::Expired => {
+                self.failure.is_none()
+                    && self.claimed_at.is_none()
+                    && self
+                        .terminal_at
+                        .is_some_and(|terminal_at| terminal_at >= self.expires_at)
+            }
+        };
+        if valid {
+            Ok(())
+        } else {
+            Err(AccessInvariantError::InvalidCeremonyTransition)
+        }
+    }
+
+    const fn failure_matches_state(state: AuthCeremonyState, failure: AuthCeremonyFailure) -> bool {
+        match state {
+            AuthCeremonyState::Pending => {
+                matches!(failure, AuthCeremonyFailure::VerifierLostOnRestart)
+            }
+            AuthCeremonyState::Claimed => matches!(
+                failure,
+                AuthCeremonyFailure::ExchangeFailed
+                    | AuthCeremonyFailure::StatusRejected
+                    | AuthCeremonyFailure::LocalAuthorizationDenied
+            ),
+            _ => false,
+        }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthenticationMethod {
     TrailBasePassword,
-    TrailBasePasswordTotp,
     TrailBaseSocial,
 }
 
@@ -460,7 +1256,6 @@ impl AuthenticationMethod {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::TrailBasePassword => "trailbase_password",
-            Self::TrailBasePasswordTotp => "trailbase_password_totp",
             Self::TrailBaseSocial => "trailbase_social",
         }
     }
@@ -468,18 +1263,80 @@ impl AuthenticationMethod {
     pub fn from_storage(value: &str) -> Option<Self> {
         match value {
             "trailbase_password" => Some(Self::TrailBasePassword),
-            "trailbase_password_totp" => Some(Self::TrailBasePasswordTotp),
             "trailbase_social" => Some(Self::TrailBaseSocial),
             _ => None,
         }
     }
 
     pub const fn assurance(self) -> AuthenticationAssurance {
+        AuthenticationAssurance::SingleFactor
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthenticationUnavailableReason {
+    TrailBasePasswordTotpContinuityUnavailable,
+}
+
+impl AuthenticationUnavailableReason {
+    pub const fn as_str(self) -> &'static str {
         match self {
-            Self::TrailBasePassword | Self::TrailBaseSocial => {
-                AuthenticationAssurance::SingleFactor
+            Self::TrailBasePasswordTotpContinuityUnavailable => {
+                "trailbase_password_totp_continuity_unavailable"
             }
-            Self::TrailBasePasswordTotp => AuthenticationAssurance::MultiFactor,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccessAuditEventKind {
+    TrailBaseActivated,
+    TrailBaseBlocked,
+    AnchorLinked,
+    FirstAdministratorBootstrapped,
+    SubjectLifecycleChanged,
+    MembershipInvited,
+    MembershipLifecycleChanged,
+    MembershipRoleChanged,
+    CeremonyClaimed,
+    CeremonyCompleted,
+    CeremonyFailed,
+    BrowserSessionIssued,
+}
+
+impl AccessAuditEventKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::TrailBaseActivated => "trailbase_activated",
+            Self::TrailBaseBlocked => "trailbase_blocked",
+            Self::AnchorLinked => "anchor_linked",
+            Self::FirstAdministratorBootstrapped => "first_administrator_bootstrapped",
+            Self::SubjectLifecycleChanged => "subject_lifecycle_changed",
+            Self::MembershipInvited => "membership_invited",
+            Self::MembershipLifecycleChanged => "membership_lifecycle_changed",
+            Self::MembershipRoleChanged => "membership_role_changed",
+            Self::CeremonyClaimed => "ceremony_claimed",
+            Self::CeremonyCompleted => "ceremony_completed",
+            Self::CeremonyFailed => "ceremony_failed",
+            Self::BrowserSessionIssued => "browser_session_issued",
+        }
+    }
+
+    pub fn from_storage(value: &str) -> Option<Self> {
+        match value {
+            "trailbase_activated" => Some(Self::TrailBaseActivated),
+            "trailbase_blocked" => Some(Self::TrailBaseBlocked),
+            "anchor_linked" => Some(Self::AnchorLinked),
+            "first_administrator_bootstrapped" => Some(Self::FirstAdministratorBootstrapped),
+            "subject_lifecycle_changed" => Some(Self::SubjectLifecycleChanged),
+            "membership_invited" => Some(Self::MembershipInvited),
+            "membership_lifecycle_changed" => Some(Self::MembershipLifecycleChanged),
+            "membership_role_changed" => Some(Self::MembershipRoleChanged),
+            "ceremony_claimed" => Some(Self::CeremonyClaimed),
+            "ceremony_completed" => Some(Self::CeremonyCompleted),
+            "ceremony_failed" => Some(Self::CeremonyFailed),
+            "browser_session_issued" => Some(Self::BrowserSessionIssued),
+            _ => None,
         }
     }
 }
@@ -749,6 +1606,7 @@ mod tests {
 
     fn membership(subject: &AuthSubject, role: WorkspaceRole) -> WorkspaceMembership {
         WorkspaceMembership::try_new(
+            MembershipId::new_v7(),
             subject.id(),
             WorkspaceId::new_v7(),
             MembershipLifecycle::Active,
@@ -763,14 +1621,26 @@ mod tests {
     fn lifecycle_changes_advance_auth_epoch_and_deleted_is_terminal() {
         let mut subject = active_subject();
         assert!(subject
-            .transition_lifecycle(AuthSubjectLifecycle::Disabled, at(1))
+            .transition_lifecycle(
+                AuthSubjectLifecycle::Disabled,
+                AdministratorContinuity::Preserved,
+                at(1),
+            )
             .expect("disable"));
         assert_eq!(subject.auth_epoch(), 3);
         assert!(subject
-            .transition_lifecycle(AuthSubjectLifecycle::Deleted, at(2))
+            .transition_lifecycle(
+                AuthSubjectLifecycle::Deleted,
+                AdministratorContinuity::Preserved,
+                at(2),
+            )
             .expect("delete"));
         assert_eq!(
-            subject.transition_lifecycle(AuthSubjectLifecycle::Active, at(3)),
+            subject.transition_lifecycle(
+                AuthSubjectLifecycle::Active,
+                AdministratorContinuity::Preserved,
+                at(3),
+            ),
             Err(AccessInvariantError::DeletedSubjectIsTerminal)
         );
     }
@@ -811,6 +1681,40 @@ mod tests {
         assert_eq!(
             session.state(&other, at(1)),
             BrowserSessionState::SubjectMismatch
+        );
+        assert_eq!(
+            session.state(&subject, at(120)),
+            BrowserSessionState::AbsoluteExpired
+        );
+
+        let revoked = FastiBrowserSession::try_new(
+            BrowserSessionId::new_v7(),
+            subject.id(),
+            WorkspaceId::new_v7(),
+            ProfileGrantId::new_v7(),
+            at(0),
+            at(0),
+            at(30),
+            at(120),
+            Some(at(1)),
+            subject.auth_epoch(),
+            subject.authorization_epoch(),
+            0,
+        )
+        .expect("revoked session");
+        assert_eq!(revoked.state(&subject, at(2)), BrowserSessionState::Revoked);
+
+        let mut inactive = subject;
+        inactive
+            .transition_lifecycle(
+                AuthSubjectLifecycle::Disabled,
+                AdministratorContinuity::Preserved,
+                at(1),
+            )
+            .expect("disable");
+        assert_eq!(
+            session.state(&inactive, at(2)),
+            BrowserSessionState::SubjectInactive
         );
     }
 
@@ -894,7 +1798,6 @@ mod tests {
         }
         for value in [
             AuthenticationMethod::TrailBasePassword,
-            AuthenticationMethod::TrailBasePasswordTotp,
             AuthenticationMethod::TrailBaseSocial,
         ] {
             assert_eq!(
@@ -907,6 +1810,37 @@ mod tests {
         assert_eq!(MembershipLifecycle::from_storage("unknown"), None);
         assert_eq!(AuthCeremonyState::from_storage("retryable"), None);
         assert_eq!(AuthenticationMethod::from_storage("totp_enrolled"), None);
+        assert_eq!(
+            AuthenticationMethod::from_storage("trailbase_password_totp"),
+            None
+        );
+        assert_eq!(
+            AuthenticationUnavailableReason::TrailBasePasswordTotpContinuityUnavailable.as_str(),
+            "trailbase_password_totp_continuity_unavailable"
+        );
+        for value in [
+            AccessAuditEventKind::TrailBaseActivated,
+            AccessAuditEventKind::TrailBaseBlocked,
+            AccessAuditEventKind::AnchorLinked,
+            AccessAuditEventKind::FirstAdministratorBootstrapped,
+            AccessAuditEventKind::SubjectLifecycleChanged,
+            AccessAuditEventKind::MembershipInvited,
+            AccessAuditEventKind::MembershipLifecycleChanged,
+            AccessAuditEventKind::MembershipRoleChanged,
+            AccessAuditEventKind::CeremonyClaimed,
+            AccessAuditEventKind::CeremonyCompleted,
+            AccessAuditEventKind::CeremonyFailed,
+            AccessAuditEventKind::BrowserSessionIssued,
+        ] {
+            assert_eq!(
+                AccessAuditEventKind::from_storage(value.as_str()),
+                Some(value)
+            );
+        }
+        assert_eq!(
+            AccessAuditEventKind::from_storage("vendor_token_saved"),
+            None
+        );
     }
 
     #[test]
@@ -929,14 +1863,35 @@ mod tests {
         assert_eq!(membership.role(), WorkspaceRole::Administrator);
         assert_eq!(subject.authorization_epoch(), 3);
 
+        let mut zero_count_membership = WorkspaceMembership::try_new(
+            MembershipId::new_v7(),
+            subject.id(),
+            WorkspaceId::new_v7(),
+            MembershipLifecycle::Active,
+            WorkspaceRole::Administrator,
+            at(0),
+            at(0),
+        )
+        .expect("zero-count membership");
+        assert!(zero_count_membership
+            .change_role(&mut subject, WorkspaceRole::Member, 0, at(1))
+            .expect("zero does not claim a final administrator exists"));
+
         assert_eq!(
-            membership.change_role(&mut subject, WorkspaceRole::Member, 0, at(1)),
+            subject.transition_lifecycle(
+                AuthSubjectLifecycle::Disabled,
+                AdministratorContinuity::for_subject_deactivation(1),
+                at(2),
+            ),
             Err(AccessInvariantError::FinalAdministratorRequired)
         );
-
         subject
-            .transition_lifecycle(AuthSubjectLifecycle::Disabled, at(2))
-            .expect("disable subject");
+            .transition_lifecycle(
+                AuthSubjectLifecycle::Disabled,
+                AdministratorContinuity::for_subject_deactivation(0),
+                at(2),
+            )
+            .expect("disable subject with continuity");
         assert!(!membership.is_authorization_viable_administrator(&subject));
         assert!(membership
             .change_role(&mut subject, WorkspaceRole::Member, 0, at(3))
@@ -944,9 +1899,175 @@ mod tests {
     }
 
     #[test]
+    fn trailbase_activation_is_generation_bound_and_nonrecoverable_blocks_are_terminal_in_c1() {
+        let root = Sha256Digest::from_bytes(&[1; 32]);
+        let mut installation =
+            TrailBaseInstallation::new(TrailBaseInstanceId::new_v7(), root.clone(), at(0));
+
+        assert_eq!(
+            installation.activation_state(),
+            TrailBaseActivationState::Inactive
+        );
+        assert!(installation.verify(&root, true, at(1)).expect("activate"));
+        assert_eq!(installation.activation_generation(), 1);
+        assert!(!installation
+            .verify(&root, true, at(1))
+            .expect("repeat verification"));
+
+        assert!(installation
+            .verify(&root, false, at(2))
+            .expect("release mismatch blocks"));
+        assert_eq!(installation.activation_generation(), 2);
+        assert_eq!(
+            installation.activation_state(),
+            TrailBaseActivationState::Blocked(TrailBaseActivationBlocker::ReleaseMismatch)
+        );
+        assert!(!installation
+            .verify(&root, false, at(2))
+            .expect("repeat blocker is idempotent"));
+        assert!(installation
+            .verify(&root, true, at(3))
+            .expect("exact release repair"));
+        assert_eq!(installation.activation_generation(), 2);
+
+        assert!(installation
+            .declare_restore(at(4))
+            .expect("declared restore"));
+        assert_eq!(installation.activation_generation(), 3);
+        assert_eq!(
+            installation.verify(&root, false, at(5)),
+            Err(AccessInvariantError::TrailBaseInstallationBlocked)
+        );
+        assert_eq!(
+            installation.activation_state(),
+            TrailBaseActivationState::Blocked(TrailBaseActivationBlocker::DeclaredRestore)
+        );
+
+        let mut root_mismatch =
+            TrailBaseInstallation::new(TrailBaseInstanceId::new_v7(), root.clone(), at(0));
+        root_mismatch.verify(&root, true, at(1)).expect("activate");
+        root_mismatch
+            .verify(&root, false, at(2))
+            .expect("release mismatch");
+        let generation_after_release_block = root_mismatch.activation_generation();
+        assert!(root_mismatch
+            .verify(&Sha256Digest::from_bytes(&[9; 32]), true, at(3))
+            .expect("non-recoverable blocker replaces release mismatch"));
+        assert_eq!(
+            root_mismatch.activation_state(),
+            TrailBaseActivationState::Blocked(
+                TrailBaseActivationBlocker::PhysicalRootIdentityMismatch
+            )
+        );
+        assert_eq!(
+            root_mismatch.activation_generation(),
+            generation_after_release_block
+        );
+        assert_eq!(
+            root_mismatch.verify(&root, false, at(4)),
+            Err(AccessInvariantError::TrailBaseInstallationBlocked)
+        );
+        assert_eq!(
+            root_mismatch.activation_state(),
+            TrailBaseActivationState::Blocked(
+                TrailBaseActivationBlocker::PhysicalRootIdentityMismatch
+            )
+        );
+    }
+
+    #[test]
+    fn trailbase_activation_overflow_fails_without_partial_mutation() {
+        let root = Sha256Digest::from_bytes(&[2; 32]);
+        let mut installation = TrailBaseInstallation::try_from_persisted(
+            TrailBaseInstanceId::new_v7(),
+            root.clone(),
+            TrailBaseActivationState::Active,
+            u64::MAX,
+            at(0),
+            at(0),
+        )
+        .expect("persisted installation");
+
+        assert_eq!(
+            installation.verify(&root, false, at(1)),
+            Err(AccessInvariantError::ActivationGenerationOverflow)
+        );
+        assert_eq!(
+            installation.activation_state(),
+            TrailBaseActivationState::Active
+        );
+        assert_eq!(installation.activation_generation(), u64::MAX);
+        assert_eq!(installation.updated_at(), at(0));
+    }
+
+    #[test]
+    fn trailbase_anchor_keeps_exact_instance_subject_and_fasti_subject() {
+        let instance_id = TrailBaseInstanceId::new_v7();
+        let trailbase_subject = TrailBaseSubject::from_bytes([7; 16]);
+        let auth_subject_id = AuthSubjectId::new_v7();
+        let anchor =
+            TrailBaseExternalAnchor::new(instance_id, trailbase_subject, auth_subject_id, at(1));
+
+        assert_eq!(anchor.trailbase_instance_id(), instance_id);
+        assert_eq!(anchor.trailbase_subject(), trailbase_subject);
+        assert_eq!(anchor.trailbase_subject().as_bytes(), &[7; 16]);
+        assert_eq!(anchor.auth_subject_id(), auth_subject_id);
+        assert_eq!(anchor.linked_at(), at(1));
+    }
+
+    #[test]
+    fn removed_membership_stays_terminal_and_reinvite_has_fresh_identity_and_no_access() {
+        let mut subject = active_subject();
+        let workspace_id = WorkspaceId::new_v7();
+        let first_id = MembershipId::new_v7();
+        let mut removed = WorkspaceMembership::try_new(
+            first_id,
+            subject.id(),
+            workspace_id,
+            MembershipLifecycle::Invited,
+            WorkspaceRole::Member,
+            at(0),
+            at(0),
+        )
+        .expect("membership");
+        removed
+            .transition_lifecycle(&mut subject, MembershipLifecycle::Removed, 0, at(1))
+            .expect("remove");
+
+        let reinvited = WorkspaceMembership::try_new(
+            MembershipId::new_v7(),
+            subject.id(),
+            workspace_id,
+            MembershipLifecycle::Invited,
+            WorkspaceRole::Member,
+            at(2),
+            at(2),
+        )
+        .expect("reinvite");
+        assert_ne!(reinvited.id(), first_id);
+        assert_eq!(removed.lifecycle(), MembershipLifecycle::Removed);
+        assert_eq!(reinvited.lifecycle(), MembershipLifecycle::Invited);
+        assert_eq!(reinvited.role(), WorkspaceRole::Member);
+        assert!(!reinvited.lifecycle().grants_access());
+    }
+
+    #[test]
     fn membership_rejects_invalid_terminal_subject_and_time_transitions() {
         let mut subject = active_subject();
+        assert_eq!(
+            WorkspaceMembership::try_new(
+                MembershipId::new_v7(),
+                subject.id(),
+                WorkspaceId::new_v7(),
+                MembershipLifecycle::Invited,
+                WorkspaceRole::Administrator,
+                at(0),
+                at(0),
+            ),
+            Err(AccessInvariantError::InvalidMembershipRole)
+        );
         let mut invited = WorkspaceMembership::try_new(
+            MembershipId::new_v7(),
             subject.id(),
             WorkspaceId::new_v7(),
             MembershipLifecycle::Invited,
@@ -955,6 +2076,14 @@ mod tests {
             at(0),
         )
         .expect("invited membership");
+
+        let authorization_epoch = subject.authorization_epoch();
+        assert_eq!(
+            invited.change_role(&mut subject, WorkspaceRole::Administrator, 0, at(1)),
+            Err(AccessInvariantError::InvalidMembershipRole)
+        );
+        assert_eq!(invited.role(), WorkspaceRole::Member);
+        assert_eq!(subject.authorization_epoch(), authorization_epoch);
 
         assert_eq!(
             invited.transition_lifecycle(&mut subject, MembershipLifecycle::Suspended, 0, at(1),),
@@ -988,43 +2117,386 @@ mod tests {
 
     #[test]
     fn ceremony_can_be_claimed_and_completed_only_once() {
-        let mut ceremony = AuthCeremonyState::Pending;
-        ceremony.claim().expect("claim");
+        let instance_id = TrailBaseInstanceId::new_v7();
+        let binding = Sha256Digest::from_bytes(&[1; 32]);
+        let callback = AuthCallbackPath::parse("/auth/trailbase/callback").expect("callback");
+        let mut ceremony = AuthCeremony::try_new(
+            OperationId::new_v7(),
+            AuthCeremonyPurpose::SignIn,
+            AuthCeremonyProtocol::TrailBaseAuthorizationCodePkce,
+            instance_id,
+            7,
+            binding.clone(),
+            callback.clone(),
+            AuthReturnTarget::ApplicationHome,
+            RequestCorrelationId::new_v7(),
+            at(0),
+            at(30),
+        )
+        .expect("ceremony");
+        ceremony
+            .claim(&binding, instance_id, 7, &callback, at(1))
+            .expect("claim");
         assert_eq!(
-            ceremony.claim(),
+            ceremony.claim(&binding, instance_id, 7, &callback, at(2)),
             Err(AccessInvariantError::InvalidCeremonyTransition)
         );
-        ceremony.complete().expect("complete");
-        assert!(ceremony.is_terminal());
+        ceremony.complete(at(2)).expect("complete");
+        assert!(ceremony.state().is_terminal());
         assert_eq!(
-            ceremony.fail(),
+            ceremony.fail(AuthCeremonyFailure::ExchangeFailed, at(3)),
             Err(AccessInvariantError::InvalidCeremonyTransition)
         );
 
-        let mut cleanup_failure = AuthCeremonyState::Claimed;
+        let mut cleanup_failure = AuthCeremony::try_new(
+            OperationId::new_v7(),
+            AuthCeremonyPurpose::RecentAuthentication,
+            AuthCeremonyProtocol::TrailBaseAuthorizationCodePkce,
+            instance_id,
+            7,
+            binding.clone(),
+            callback.clone(),
+            AuthReturnTarget::AccountSecurity,
+            RequestCorrelationId::new_v7(),
+            at(0),
+            at(30),
+        )
+        .expect("cleanup ceremony");
         cleanup_failure
-            .mark_cleanup_uncertain()
+            .claim(&binding, instance_id, 7, &callback, at(1))
+            .expect("claim cleanup ceremony");
+        cleanup_failure
+            .mark_cleanup_uncertain(AuthCeremonyFailure::LogoutUncertain, at(2))
             .expect("terminal failure");
-        assert_eq!(cleanup_failure, AuthCeremonyState::CleanupUncertain);
-        assert!(cleanup_failure.is_terminal());
+        assert_eq!(cleanup_failure.state(), AuthCeremonyState::CleanupUncertain);
+        assert!(cleanup_failure.state().is_terminal());
 
-        let mut never_exchanged = AuthCeremonyState::Pending;
+        let mut never_exchanged = AuthCeremony::try_new(
+            OperationId::new_v7(),
+            AuthCeremonyPurpose::FirstAdministratorBootstrap,
+            AuthCeremonyProtocol::TrailBaseAuthorizationCodePkce,
+            instance_id,
+            7,
+            binding.clone(),
+            callback.clone(),
+            AuthReturnTarget::FirstRun,
+            RequestCorrelationId::new_v7(),
+            at(0),
+            at(30),
+        )
+        .expect("bootstrap ceremony");
         assert_eq!(
-            never_exchanged.mark_cleanup_uncertain(),
+            never_exchanged
+                .mark_cleanup_uncertain(AuthCeremonyFailure::ExchangeOutcomeUncertain, at(1),),
             Err(AccessInvariantError::InvalidCeremonyTransition)
         );
 
-        let mut denied = AuthCeremonyState::Pending;
-        denied.fail().expect("fail before exchange");
-        assert_eq!(denied, AuthCeremonyState::Failed);
+        never_exchanged
+            .fail(AuthCeremonyFailure::VerifierLostOnRestart, at(1))
+            .expect("fail before exchange");
+        assert_eq!(never_exchanged.state(), AuthCeremonyState::Failed);
 
-        let mut expired = AuthCeremonyState::Pending;
-        expired.expire().expect("expire pending ceremony");
-        assert_eq!(expired, AuthCeremonyState::Expired);
+        let mut expired = AuthCeremony::try_new(
+            OperationId::new_v7(),
+            AuthCeremonyPurpose::SignIn,
+            AuthCeremonyProtocol::TrailBaseAuthorizationCodePkce,
+            instance_id,
+            7,
+            binding.clone(),
+            callback.clone(),
+            AuthReturnTarget::ApplicationHome,
+            RequestCorrelationId::new_v7(),
+            at(0),
+            at(2),
+        )
+        .expect("expiring ceremony");
         assert_eq!(
-            expired.claim(),
+            expired.claim(&binding, instance_id, 7, &callback, at(2)),
+            Err(AccessInvariantError::CeremonyExpired)
+        );
+        assert_eq!(expired.state(), AuthCeremonyState::Expired);
+    }
+
+    #[test]
+    fn ceremony_rejects_wrong_proof_without_consumption_and_restart_is_terminal() {
+        let instance_id = TrailBaseInstanceId::new_v7();
+        let binding = Sha256Digest::from_bytes(&[3; 32]);
+        let wrong_binding = Sha256Digest::from_bytes(&[4; 32]);
+        let callback = AuthCallbackPath::parse("/auth/trailbase/callback").expect("callback");
+        let wrong_callback = AuthCallbackPath::parse("/auth/other/callback").expect("callback");
+        let make = || {
+            AuthCeremony::try_new(
+                OperationId::new_v7(),
+                AuthCeremonyPurpose::SignIn,
+                AuthCeremonyProtocol::TrailBaseAuthorizationCodePkce,
+                instance_id,
+                7,
+                binding.clone(),
+                callback.clone(),
+                AuthReturnTarget::ApplicationHome,
+                RequestCorrelationId::new_v7(),
+                at(0),
+                at(30),
+            )
+            .expect("ceremony")
+        };
+        let mut ceremony = make();
+
+        assert_eq!(
+            ceremony.claim(&wrong_binding, instance_id, 7, &callback, at(1)),
+            Err(AccessInvariantError::CeremonyBindingMismatch)
+        );
+        assert_eq!(
+            ceremony.claim(&binding, TrailBaseInstanceId::new_v7(), 7, &callback, at(1),),
+            Err(AccessInvariantError::CeremonyInstallationMismatch)
+        );
+        assert_eq!(
+            ceremony.claim(&binding, instance_id, 8, &callback, at(1)),
+            Err(AccessInvariantError::CeremonyGenerationMismatch)
+        );
+        assert_eq!(
+            ceremony.claim(&binding, instance_id, 7, &wrong_callback, at(1)),
+            Err(AccessInvariantError::CeremonyCallbackMismatch)
+        );
+        assert_eq!(ceremony.state(), AuthCeremonyState::Pending);
+
+        assert!(ceremony.recover_after_restart(at(2)).expect("restart"));
+        assert_eq!(ceremony.state(), AuthCeremonyState::Failed);
+        assert_eq!(
+            ceremony.failure(),
+            Some(AuthCeremonyFailure::VerifierLostOnRestart)
+        );
+        assert!(!ceremony
+            .recover_after_restart(at(3))
+            .expect("terminal restart is unchanged"));
+
+        let mut claimed = make();
+        claimed
+            .claim(&binding, instance_id, 7, &callback, at(1))
+            .expect("claim");
+        assert!(claimed.recover_after_restart(at(2)).expect("restart"));
+        assert_eq!(claimed.state(), AuthCeremonyState::CleanupUncertain);
+        assert_eq!(
+            claimed.failure(),
+            Some(AuthCeremonyFailure::ExchangeOutcomeUncertain)
+        );
+    }
+
+    #[test]
+    fn ceremony_uses_only_fixed_purpose_target_pairs_and_local_callback_paths() {
+        let instance_id = TrailBaseInstanceId::new_v7();
+        let binding = Sha256Digest::from_bytes(&[5; 32]);
+        let callback = AuthCallbackPath::parse("/auth/trailbase/callback").expect("callback");
+        let pairs = [
+            (
+                AuthCeremonyPurpose::SignIn,
+                AuthReturnTarget::ApplicationHome,
+            ),
+            (
+                AuthCeremonyPurpose::RecentAuthentication,
+                AuthReturnTarget::AccountSecurity,
+            ),
+            (
+                AuthCeremonyPurpose::FirstAdministratorBootstrap,
+                AuthReturnTarget::FirstRun,
+            ),
+        ];
+        for (purpose, target) in pairs {
+            assert!(AuthCeremony::try_new(
+                OperationId::new_v7(),
+                purpose,
+                AuthCeremonyProtocol::TrailBaseAuthorizationCodePkce,
+                instance_id,
+                1,
+                binding.clone(),
+                callback.clone(),
+                target,
+                RequestCorrelationId::new_v7(),
+                at(0),
+                at(30),
+            )
+            .is_ok());
+            for mismatched in [
+                AuthReturnTarget::ApplicationHome,
+                AuthReturnTarget::AccountSecurity,
+                AuthReturnTarget::FirstRun,
+            ] {
+                if mismatched != target {
+                    assert_eq!(
+                        AuthCeremony::try_new(
+                            OperationId::new_v7(),
+                            purpose,
+                            AuthCeremonyProtocol::TrailBaseAuthorizationCodePkce,
+                            instance_id,
+                            1,
+                            binding.clone(),
+                            callback.clone(),
+                            mismatched,
+                            RequestCorrelationId::new_v7(),
+                            at(0),
+                            at(30),
+                        ),
+                        Err(AccessInvariantError::InvalidCeremonyPurposeTarget)
+                    );
+                }
+            }
+        }
+
+        for invalid in [
+            "https://fasti.invalid/callback",
+            "//fasti.invalid/callback",
+            "/callback?next=/settings",
+            "/callback#fragment",
+            "/callback%2fother",
+            "/callback\\other",
+            "/callback other",
+            "",
+        ] {
+            assert_eq!(
+                AuthCallbackPath::parse(invalid),
+                Err(AccessInvariantError::InvalidCallbackPath)
+            );
+        }
+    }
+
+    #[test]
+    fn ceremony_persistence_rejects_impossible_state_and_failure_combinations() {
+        let instance_id = TrailBaseInstanceId::new_v7();
+        let binding = Sha256Digest::from_bytes(&[6; 32]);
+        let callback = AuthCallbackPath::parse("/auth/trailbase/callback").expect("callback");
+        let restore = |state, failure, claimed_at, terminal_at| {
+            AuthCeremony::try_from_persisted(
+                OperationId::new_v7(),
+                AuthCeremonyPurpose::SignIn,
+                AuthCeremonyProtocol::TrailBaseAuthorizationCodePkce,
+                instance_id,
+                2,
+                binding.clone(),
+                callback.clone(),
+                AuthReturnTarget::ApplicationHome,
+                RequestCorrelationId::new_v7(),
+                state,
+                failure,
+                at(0),
+                at(30),
+                claimed_at,
+                terminal_at,
+            )
+        };
+
+        assert!(restore(AuthCeremonyState::Pending, None, None, None).is_ok());
+        assert!(restore(AuthCeremonyState::Claimed, None, Some(at(1)), None).is_ok());
+        assert!(restore(AuthCeremonyState::Completed, None, Some(at(1)), Some(at(2)),).is_ok());
+        assert!(restore(
+            AuthCeremonyState::Failed,
+            Some(AuthCeremonyFailure::VerifierLostOnRestart),
+            None,
+            Some(at(2)),
+        )
+        .is_ok());
+        assert!(restore(
+            AuthCeremonyState::Failed,
+            Some(AuthCeremonyFailure::LocalAuthorizationDenied),
+            Some(at(1)),
+            Some(at(2)),
+        )
+        .is_ok());
+        assert!(restore(
+            AuthCeremonyState::CleanupUncertain,
+            Some(AuthCeremonyFailure::ExchangeOutcomeUncertain),
+            Some(at(1)),
+            Some(at(2)),
+        )
+        .is_ok());
+        assert!(restore(AuthCeremonyState::Expired, None, None, Some(at(30))).is_ok());
+
+        assert_eq!(
+            restore(
+                AuthCeremonyState::Pending,
+                Some(AuthCeremonyFailure::ExchangeFailed),
+                None,
+                None,
+            ),
             Err(AccessInvariantError::InvalidCeremonyTransition)
         );
+        assert_eq!(
+            restore(
+                AuthCeremonyState::Failed,
+                Some(AuthCeremonyFailure::LocalAuthorizationDenied),
+                None,
+                Some(at(2)),
+            ),
+            Err(AccessInvariantError::InvalidCeremonyTransition)
+        );
+        assert_eq!(
+            restore(
+                AuthCeremonyState::CleanupUncertain,
+                Some(AuthCeremonyFailure::ExchangeFailed),
+                Some(at(1)),
+                Some(at(2)),
+            ),
+            Err(AccessInvariantError::InvalidCeremonyTransition)
+        );
+        assert_eq!(
+            restore(AuthCeremonyState::Claimed, None, Some(at(30)), None),
+            Err(AccessInvariantError::InvalidTimestampOrder)
+        );
+        assert_eq!(
+            AuthCeremony::try_new(
+                OperationId::new_v7(),
+                AuthCeremonyPurpose::SignIn,
+                AuthCeremonyProtocol::TrailBaseAuthorizationCodePkce,
+                instance_id,
+                0,
+                binding,
+                callback,
+                AuthReturnTarget::ApplicationHome,
+                RequestCorrelationId::new_v7(),
+                at(0),
+                at(30),
+            ),
+            Err(AccessInvariantError::InvalidActivationGeneration)
+        );
+    }
+
+    #[test]
+    fn ceremony_failure_reasons_follow_the_exchange_state() {
+        let instance_id = TrailBaseInstanceId::new_v7();
+        let binding = Sha256Digest::from_bytes(&[8; 32]);
+        let callback = AuthCallbackPath::parse("/auth/trailbase/callback").expect("callback");
+        let mut ceremony = AuthCeremony::try_new(
+            OperationId::new_v7(),
+            AuthCeremonyPurpose::SignIn,
+            AuthCeremonyProtocol::TrailBaseAuthorizationCodePkce,
+            instance_id,
+            1,
+            binding.clone(),
+            callback.clone(),
+            AuthReturnTarget::ApplicationHome,
+            RequestCorrelationId::new_v7(),
+            at(0),
+            at(30),
+        )
+        .expect("ceremony");
+
+        assert_eq!(
+            ceremony.fail(AuthCeremonyFailure::LocalAuthorizationDenied, at(1)),
+            Err(AccessInvariantError::InvalidCeremonyTransition)
+        );
+        ceremony
+            .claim(&binding, instance_id, 1, &callback, at(1))
+            .expect("claim");
+        assert_eq!(
+            ceremony.fail(AuthCeremonyFailure::VerifierLostOnRestart, at(2)),
+            Err(AccessInvariantError::InvalidCeremonyTransition)
+        );
+        assert_eq!(
+            ceremony.mark_cleanup_uncertain(AuthCeremonyFailure::ExchangeFailed, at(2)),
+            Err(AccessInvariantError::InvalidCeremonyTransition)
+        );
+        ceremony
+            .fail(AuthCeremonyFailure::LocalAuthorizationDenied, at(2))
+            .expect("post-exchange authorization denial");
     }
 
     #[test]
@@ -1081,15 +2553,25 @@ mod tests {
         assert!(!stale_epoch.satisfies(&subject, 7, AuthenticationAssurance::SingleFactor, at(2),));
 
         subject
-            .transition_lifecycle(AuthSubjectLifecycle::Disabled, at(3))
+            .transition_lifecycle(
+                AuthSubjectLifecycle::Disabled,
+                AdministratorContinuity::Preserved,
+                at(3),
+            )
             .expect("disable");
         assert!(!recent.satisfies(&subject, 7, AuthenticationAssurance::SingleFactor, at(4),));
 
-        let password_totp =
-            AuthenticationProvenance::new(AuthenticationMethod::TrailBasePasswordTotp, at(5), 7);
-        assert_eq!(
-            password_totp.assurance(),
-            AuthenticationAssurance::MultiFactor
-        );
+        let password =
+            AuthenticationProvenance::new(AuthenticationMethod::TrailBasePassword, at(5), 7);
+        assert_eq!(password.assurance(), AuthenticationAssurance::SingleFactor);
+        assert!(!RecentAuthentication::try_new(
+            subject.id(),
+            password,
+            subject.auth_epoch(),
+            at(10),
+            TimeDelta::seconds(10),
+        )
+        .expect("single-factor proof")
+        .satisfies(&subject, 7, AuthenticationAssurance::MultiFactor, at(6),));
     }
 }
