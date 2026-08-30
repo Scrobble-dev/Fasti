@@ -1309,7 +1309,9 @@ security, and first-administrator-bootstrap/first-run pairs. C1 records only
 single-factor password or social provenance. Password-plus-TOTP continuity is
 typed unavailable until a pinned release preserves and proves the complete
 PKCE ceremony. Node-local Access audit evidence uses mutation-time 90-day and
-10,000-row bounds and is not added to the frozen workspace archive.
+10,000-row bounds and is not added to the frozen workspace archive. Terminal
+ceremony replay tombstones use fixed 24-hour and 10,000-row bounds with startup
+and mutation-time pruning; they are not a second evidence ledger.
 
 TrailBase disable or deletion stops new sessions and moves `AuthSubject.lifecycle` to `disabled`, `deleted`, or `recovery_pending`. The durable anchor stays permanent and cannot be silently detached, replaced, or reused. The lifecycle change never cascades into Chronicle deletion. Fasti privacy erasure is a separate explicit capability with its own authorization, preview, recovery limits, and audit.
 

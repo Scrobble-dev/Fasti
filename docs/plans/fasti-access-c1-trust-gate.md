@@ -96,6 +96,16 @@ or route work:
   event, then prunes deterministic overflow by `(occurred_at, audit_event_id)`.
   No timer, configuration key, archive stream, per-workspace quota, secret, or
   vendor token is added.
+- Terminal authentication ceremonies are replay tombstones retained for
+  exactly 24 hours after `terminal_at`, with a 10,000-row hard ceiling per data
+  root. Startup atomically converts pending rows to
+  `failed/verifier_lost_on_restart` and claimed rows to
+  `cleanup_uncertain/exchange_outcome_uncertain`, then prunes terminal rows at
+  the exact boundary. Normal ceremony mutations expire pending rows, never
+  sweep claimed rows by expiry, and prune terminal rows. A new start rejects
+  with `capacity_exceeded` before a row, verifier, cookie, or redirect when the
+  ceiling remains full. No timer, background worker, or configuration key is
+  added; terminal audit evidence follows the separate 90-day rule.
 
 ## 3. Exact TrailBase evidence
 
