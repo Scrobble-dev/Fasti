@@ -20,7 +20,7 @@ import re
 import secrets
 import shutil
 import stat
-import subprocess
+import subprocess  # nosec B404 -- the governed launcher must execute exact verified binaries.
 import sys
 import tempfile
 import threading
@@ -342,7 +342,7 @@ def verify_archive(path: Path, release: dict[str, Any], target: str | None = Non
             executable.chmod(0o700)
             if sha256_file(executable) != artifact["executable_sha256"]:
                 raise ReleaseError("TrailBase executable digest differs from the approved release")
-            output = subprocess.run(
+            output = subprocess.run(  # nosec -- nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit,python.lang.security.audit.dangerous-subprocess-use-tainted-env-args -- executable bytes and digest are verified immediately above; argv is fixed.
                 [executable, "--version"],
                 check=True,
                 capture_output=True,
@@ -448,7 +448,7 @@ def _prepare_native_release(root: Path, release: dict[str, Any], offline: bool) 
 
     temporary_runtime = Path(tempfile.mkdtemp(prefix=f".{runtime.name}.", dir=runtime_parent))
     try:
-        os.chmod(temporary_runtime, 0o700)
+        os.chmod(temporary_runtime, 0o700)  # nosec B103 -- owner-only is the required mode.
         with zipfile.ZipFile(archive_path) as archive:
             _write_private(temporary_runtime / "trail", archive.read("trail"), 0o700)
             _write_private(temporary_runtime / "LICENSE", archive.read("LICENSE"), 0o600)
@@ -479,7 +479,7 @@ def verify_executable(executable: Path, release: dict[str, Any], expected_sha256
         raise ReleaseError(f"TrailBase executable is not a regular file: {executable}")
     if sha256_file(executable) != expected_sha256:
         raise ReleaseError("installed TrailBase executable digest does not match the release lock")
-    output = subprocess.run(
+    output = subprocess.run(  # nosec -- nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit,python.lang.security.audit.dangerous-subprocess-use-tainted-env-args -- executable is a regular file with the exact release-lock digest; argv is fixed.
         [executable, "--version"],
         check=True,
         capture_output=True,
@@ -501,7 +501,7 @@ def verify_private_root(root: Path, release_version: str | None = None) -> None:
         "schema_version": "fasti.trailbase-bootstrap.v1",
         "release": release_version,
         "admin": "admin@localhost",
-        "initial_password_rotated": True,
+        "initial_password_rotated": True,  # nosec B105 -- boolean receipt field, not a password.
     }
     if not isinstance(receipt, dict) or any(receipt.get(key) != value for key, value in expected.items()):
         raise ReleaseError("TrailBase bootstrap receipt does not match the exact release")
@@ -541,6 +541,22 @@ def _new_admin_password() -> str:
     return "Aa1!" + "".join(secrets.choice(alphabet) for _ in range(28))
 
 
+def _deliver_admin_password_to_tty(terminal_fd: int, password: str) -> None:
+    if not os.isatty(terminal_fd):
+        raise ReleaseError("administrator credential delivery requires the owning terminal")
+    payload = (
+        "TrailBase administrator: admin@localhost\n"
+        f"One-time delivered password: {password}\n"
+        "Store it now. It is not retained by Fasti or written to service logs.\n"
+        "Press Enter after storing the credential: "
+    ).encode("utf-8")
+    while payload:
+        written = os.write(terminal_fd, payload)
+        if written <= 0:
+            raise ReleaseError("administrator credential delivery did not complete")
+        payload = payload[written:]
+
+
 def _pin_to_one_cpu() -> None:
     if not hasattr(os, "sched_getaffinity") or not hasattr(os, "sched_setaffinity"):
         raise ReleaseError("TrailBase runtime requires Linux CPU-affinity controls")
@@ -551,7 +567,7 @@ def _pin_to_one_cpu() -> None:
 
 
 def _command_json(command: list[str]) -> Any:
-    output = subprocess.run(
+    output = subprocess.run(  # nosec -- nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit,python.lang.security.audit.dangerous-subprocess-use-tainted-env-args -- private callers use only the validated podman/docker allowlist and digest-pinned references.
         command,
         check=True,
         capture_output=True,
@@ -561,8 +577,23 @@ def _command_json(command: list[str]) -> Any:
     return json.loads(output)
 
 
-def _verify_oci_index(runtime: str, reference: str, release: dict[str, Any]) -> None:
-    index = _command_json([runtime, "manifest", "inspect", reference])
+def _oci_runtime_executable(runtime: str) -> str:
+    if runtime not in {"podman", "docker"}:
+        raise ReleaseError("OCI runtime must be podman or docker")
+    discovered = shutil.which(runtime)
+    if discovered is None:
+        raise ReleaseError(
+            f"OCI runtime is unavailable: {runtime}; install it or set "
+            "FASTI_CONTAINER_RUNTIME to an installed podman or docker runtime"
+        )
+    executable = Path(discovered).resolve()
+    if not executable.is_file() or not os.access(executable, os.X_OK):
+        raise ReleaseError(f"OCI runtime is not an executable regular file: {executable}")
+    return str(executable)
+
+
+def _verify_oci_index(runtime_executable: str, reference: str, release: dict[str, Any]) -> None:
+    index = _command_json([runtime_executable, "manifest", "inspect", reference])
     if not isinstance(index, dict) or index.get("schemaVersion") != 2:
         raise ReleaseError("OCI index inspection is invalid")
     descriptors = index.get("manifests")
@@ -642,8 +673,13 @@ def _fetch_oci_manifest(release: dict[str, Any], platform_name: str) -> None:
         raise ReleaseError("OCI config or layer graph differs from the release lock")
 
 
-def _verify_local_oci(runtime: str, reference: str, release: dict[str, Any], platform_name: str) -> None:
-    document = _command_json([runtime, "image", "inspect", reference])
+def _verify_local_oci(
+    runtime_executable: str,
+    reference: str,
+    release: dict[str, Any],
+    platform_name: str,
+) -> None:
+    document = _command_json([runtime_executable, "image", "inspect", reference])
     if not isinstance(document, list) or len(document) != 1 or not isinstance(document[0], dict):
         raise ReleaseError("local OCI image inspection is invalid")
     image = document[0]
@@ -668,25 +704,19 @@ def _verify_local_oci(runtime: str, reference: str, release: dict[str, Any], pla
 
 
 def prepare_oci(root: Path, runtime: str, offline: bool) -> str:
-    if runtime not in {"podman", "docker"}:
-        raise ReleaseError("OCI runtime must be podman or docker")
-    if not shutil.which(runtime):
-        raise ReleaseError(
-            f"OCI runtime is unavailable: {runtime}; install it or set "
-            "FASTI_CONTAINER_RUNTIME to an installed podman or docker runtime"
-        )
+    runtime_executable = _oci_runtime_executable(runtime)
     release = load_release()
     platform_name = host_oci_platform()
     reference = f"{release['oci']['repository']}@{release['oci']['index_digest']}"
     _private_directory(root)
     receipt_path = root / f"oci-{runtime}.json"
     if not offline:
-        subprocess.run(
-            [runtime, "pull", "--platform", platform_name.replace("-", "/", 1), reference],
+        subprocess.run(  # nosec -- nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit,python.lang.security.audit.dangerous-subprocess-use-tainted-env-args -- runtime is restricted to podman/docker and the image reference is digest-pinned.
+            [runtime_executable, "pull", "--platform", platform_name.replace("-", "/", 1), reference],
             check=True,
             timeout=600,
         )
-        _verify_oci_index(runtime, reference, release)
+        _verify_oci_index(runtime_executable, reference, release)
         _fetch_oci_manifest(release, platform_name)
         receipt = {
             "schema_version": "fasti.trailbase-oci-cache.v1",
@@ -722,14 +752,15 @@ def prepare_oci(root: Path, runtime: str, offline: bool) -> str:
         or not isinstance(receipt.get("prepared_at"), str)
     ):
         raise ReleaseError("OCI preparation receipt differs from the release lock")
-    _verify_local_oci(runtime, reference, release, platform_name)
+    _verify_local_oci(runtime_executable, reference, release, platform_name)
     return reference
 
 
 def verify_oci_container(root: Path, runtime: str, name: str) -> None:
     reference = prepare_oci(root, runtime, offline=True)
+    runtime_executable = _oci_runtime_executable(runtime)
     release = load_release()
-    document = _command_json([runtime, "inspect", name])
+    document = _command_json([runtime_executable, "inspect", name])
     if not isinstance(document, list) or len(document) != 1 or not isinstance(document[0], dict):
         raise ReleaseError("OCI container inspection is invalid")
     container = document[0]
@@ -888,7 +919,7 @@ def bootstrap_native(
         child_environment["RUST_LOG"] = "info"
         old_umask = os.umask(0o077)
         try:
-            process = subprocess.Popen(
+            process = subprocess.Popen(  # nosec -- nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit,python.lang.security.audit.dangerous-subprocess-use-tainted-env-args -- executable is release-lock verified and all listener inputs are validated loopback values.
                 [
                     str(executable),
                     "--depot",
@@ -915,9 +946,14 @@ def bootstrap_native(
         finally:
             os.umask(old_umask)
 
+        output_stream = process.stdout
+        if output_stream is None:
+            os.killpg(process.pid, 15)
+            process.wait(timeout=5)
+            raise ReleaseError("TrailBase bootstrap process has no output pipe")
+
         def read_bootstrap_output() -> None:
-            assert process.stdout is not None
-            for line in process.stdout:
+            for line in output_stream:
                 match = BOOTSTRAP_PASSWORD.fullmatch(line.rstrip("\r\n"))
                 if match and not initial_password:
                     initial_password.append(match.group(1))
@@ -979,11 +1015,7 @@ def bootstrap_native(
                     process.wait(timeout=5)
             reader.join(timeout=2)
 
-        terminal.write("TrailBase administrator: admin@localhost\n")
-        terminal.write(f"One-time delivered password: {new_password}\n")
-        terminal.write("Store it now. It is not retained by Fasti or written to service logs.\n")
-        terminal.write("Press Enter after storing the credential: ")
-        terminal.flush()
+        _deliver_admin_password_to_tty(terminal.fileno(), new_password)
         if sys.stdin.readline() == "":
             raise ReleaseError(
                 "credential custody was not confirmed; keep the unverified depot stopped and "
@@ -1024,7 +1056,7 @@ def run_native(
     _pin_to_one_cpu()
     environment = {key: value for key, value in os.environ.items() if not key.startswith("TRAIL_")}
     environment["RUST_LOG"] = "warn"
-    os.execve(
+    os.execve(  # nosec B606 -- nosemgrep -- executable is release-lock verified; listener and origin arguments are validated loopback values and no shell is used.
         executable,
         [
             str(executable),
@@ -1168,7 +1200,7 @@ def restore_depot(
     if not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
         raise ReleaseError("depot backup is not a regular file")
     temporary = Path(tempfile.mkdtemp(prefix=f".{target.name}.restore.", dir=parent))
-    os.chmod(temporary, 0o700)
+    os.chmod(temporary, 0o700)  # nosec B103 -- owner-only is the required mode.
     try:
         with zipfile.ZipFile(archive_path) as archive:
             names = archive.namelist()
@@ -1290,7 +1322,7 @@ def restore_depot(
 def _backup_restore_self_test() -> None:
     with tempfile.TemporaryDirectory(prefix="fasti-trailbase-depot-test-") as directory:
         base = Path(directory)
-        os.chmod(base, 0o700)
+        os.chmod(base, 0o700)  # nosec B103 -- owner-only is the required mode.
         root = base / "source"
         _private_directory(root)
         receipt = {
@@ -1412,6 +1444,32 @@ def self_test() -> None:
     match = BOOTSTRAP_PASSWORD.fullmatch("\tpassword: 'temporary-secret'")
     if match is None or match.group(1) != "temporary-secret":
         raise ReleaseError("bootstrap credential parser sentinel failed")
+    try:
+        _oci_runtime_executable("unsupported")
+    except ReleaseError:
+        pass
+    else:
+        raise ReleaseError("OCI runtime allowlist sentinel did not fail")
+    master_fd, terminal_fd = os.openpty()
+    try:
+        _deliver_admin_password_to_tty(terminal_fd, "self-test-secret")  # nosec B106 -- self-test sentinel only.
+        delivered = os.read(master_fd, 4096)
+        if b"One-time delivered password: self-test-secret" not in delivered:
+            raise ReleaseError("administrator credential delivery sentinel failed")
+    finally:
+        os.close(master_fd)
+        os.close(terminal_fd)
+    read_fd, write_fd = os.pipe()
+    try:
+        try:
+            _deliver_admin_password_to_tty(write_fd, "must-not-be-delivered")  # nosec B106 -- self-test sentinel only.
+        except ReleaseError:
+            pass
+        else:
+            raise ReleaseError("non-terminal credential delivery sentinel did not fail")
+    finally:
+        os.close(read_fd)
+        os.close(write_fd)
     _loopback_address("127.0.0.1:4000", "test address")
     try:
         _loopback_address("192.0.2.1:4000", "test address")

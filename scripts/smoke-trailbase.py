@@ -16,7 +16,7 @@ import queue
 import re
 import socketserver
 import struct
-import subprocess
+import subprocess  # nosec B404 -- this hermetic conformance runner must launch the pinned fixture.
 import tempfile
 import threading
 import time
@@ -29,6 +29,7 @@ import trailbase_runtime as runtime
 
 
 JWT = re.compile(r"\beyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b")
+OIDC_CALLBACK = "http://127.0.0.1:24500/api/auth/v1/oauth/oidc0/callback"
 
 
 class SmtpHandler(socketserver.StreamRequestHandler):
@@ -71,7 +72,8 @@ class SmtpServer(socketserver.ThreadingTCPServer):
 
 
 class OidcHandler(http.server.BaseHTTPRequestHandler):
-    def log_message(self, _format: str, *_args: object) -> None:
+    def log_message(self, format: str, *args: object) -> None:  # pylint: disable=redefined-builtin
+        del format, args
         return
 
     def send_json(self, status: int, payload: dict[str, object]) -> None:
@@ -88,7 +90,7 @@ class OidcHandler(http.server.BaseHTTPRequestHandler):
             query = urllib.parse.parse_qs(parsed.query)
             required = {
                 "client_id": "fixture-client",
-                "redirect_uri": "http://127.0.0.1:24500/api/auth/v1/oauth/oidc0/callback",
+                "redirect_uri": OIDC_CALLBACK,
                 "response_type": "code",
                 "code_challenge_method": "S256",
             }
@@ -107,7 +109,7 @@ class OidcHandler(http.server.BaseHTTPRequestHandler):
                 query["code_challenge"][0],
                 dict(server.profile),  # type: ignore[attr-defined]
             )
-            location = query["redirect_uri"][0] + "?" + urllib.parse.urlencode(
+            location = OIDC_CALLBACK + "?" + urllib.parse.urlencode(
                 {"code": code, "state": query["state"][0]}
             )
             self.send_response(302)
@@ -149,7 +151,10 @@ class OidcHandler(http.server.BaseHTTPRequestHandler):
             return
         token = f"fixture-access-{code}"
         self.server.tokens[token] = pending[1]  # type: ignore[attr-defined]
-        self.send_json(200, {"access_token": token, "token_type": "Bearer", "expires_in": 300})
+        self.send_json(
+            200,
+            {"access_token": token, "token_type": "Bearer", "expires_in": 300},  # nosec B105 -- OAuth token type, not a password.
+        )
 
 
 class OidcServer(http.server.ThreadingHTTPServer):
@@ -296,7 +301,7 @@ def start_fixture_release(
     output: int | None = subprocess.PIPE if initial_password is not None else subprocess.DEVNULL
     old_umask = os.umask(0o077)
     try:
-        process = subprocess.Popen(
+        process = subprocess.Popen(  # nosec -- nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit,python.lang.security.audit.dangerous-subprocess-use-tainted-env-args -- executable is an exact digest-verified TrailBase fixture; arguments are local constants and generated fixture paths.
             [
                 executable,
                 "--depot",
@@ -323,9 +328,13 @@ def start_fixture_release(
         os.umask(old_umask)
     reader = None
     if initial_password is not None:
+        output_stream = process.stdout
+        if output_stream is None:
+            stop_process(process)
+            raise AssertionError("TrailBase bootstrap fixture has no output pipe")
+
         def read_bootstrap() -> None:
-            assert process.stdout is not None
-            for line in process.stdout:
+            for line in output_stream:
                 match = runtime.BOOTSTRAP_PASSWORD.fullmatch(line.decode(errors="replace").rstrip())
                 if match and not initial_password:
                     initial_password.append(match.group(1))
@@ -358,7 +367,7 @@ def write_bootstrap_receipt(root: Path, version: str) -> None:
                 "schema_version": "fasti.trailbase-bootstrap.v1",
                 "release": version,
                 "admin": "admin@localhost",
-                "initial_password_rotated": True,
+                "initial_password_rotated": True,  # nosec B105 -- boolean receipt field, not a password.
                 "completed_at": "2026-08-30T00:00:00+00:00",
             },
             indent=2,
@@ -383,28 +392,28 @@ def run_upgrade_fixture(
     old_executable = runtime.prepare_upgrade_fixture(source_root, offline=True)
     old_root = fixture / "upgrade-old"
     old_depot = old_root / "depot"
-    old_depot.mkdir(mode=0o700, parents=True)
-    os.chmod(old_root, 0o700)
-    old_config = f'''email {{
+    old_depot.mkdir(mode=0o700, parents=True)  # nosec B103 -- owner-only is the required mode.
+    os.chmod(old_root, 0o700)  # nosec B103 -- owner-only is the required mode.
+    old_config = '''email {
   smtp_host: "127.0.0.1"
   smtp_port: 24525
   smtp_encryption: SMTP_ENCRYPTION_NONE
   sender_name: "Fasti TrailBase Upgrade Test"
   sender_address: "noreply@fasti.test"
-}}
-server {{
+}
+server {
   application_name: "Fasti TrailBase Upgrade Test"
   site_url: "http://127.0.0.1:24510"
-}}
-auth {{
+}
+auth {
   auth_token_ttl_sec: 300
   refresh_token_ttl_sec: 3600
   password_minimal_length: 12
   password_must_contain_upper_and_lower_case: true
   password_must_contain_digits: true
   password_must_contain_special_characters: true
-}}
-jobs {{}}
+}
+jobs {}
 '''
     (old_depot / "config.textproto").write_text(old_config, encoding="utf-8")
     os.chmod(old_depot / "config.textproto", 0o600)
@@ -416,7 +425,7 @@ jobs {{}}
     initial_password: list[str] = []
     process, reader = start_fixture_release(old_executable, old_root, 24510, initial_password)
     try:
-        admin_password = "UpgradeAdmin4!Fixture"
+        admin_password = "UpgradeAdmin4!Fixture"  # nosec B105 -- local conformance fixture only.
         status, body = request(
             "http://127.0.0.1:24510",
             "POST",
@@ -440,7 +449,7 @@ jobs {{}}
         if status != 200:
             raise AssertionError("prior-release administrator credential rotation failed")
         initial_password.clear()
-        password = "Upgrade5!Fixture"
+        password = "Upgrade5!Fixture"  # nosec B105 -- local conformance fixture only.
         status, _ = request(
             "http://127.0.0.1:24510",
             "POST",
@@ -475,7 +484,7 @@ jobs {{}}
                 "http://127.0.0.1:24510",
                 "POST",
                 "/api/auth/v1/login",
-                {"email": "upgrade@fasti.test", "password": "Upgrade5!Fixture"},
+                {"email": "upgrade@fasti.test", "password": "Upgrade5!Fixture"},  # nosec B105 -- local conformance fixture only.
             )
             if status != 200:
                 raise AssertionError(f"TrailBase v{version} did not preserve the sentinel account")
@@ -528,32 +537,32 @@ def run_fixture(source_root: Path, receipt_path: Path) -> None:
     checks: list[dict[str, object]] = []
     with tempfile.TemporaryDirectory(prefix="fasti-trailbase-conformance-") as directory:
         fixture = Path(directory)
-        os.chmod(fixture, 0o700)
+        os.chmod(fixture, 0o700)  # nosec B103 -- owner-only is the required mode.
         backup, backup_digest = runtime.backup_depot(source_root, fixture / "backups")
         test_root = fixture / "root"
         runtime.restore_depot(backup, test_root)
-        config = f'''email {{
+        config = '''email {
   smtp_host: "127.0.0.1"
   smtp_port: 24525
   smtp_encryption: SMTP_ENCRYPTION_NONE
   sender_name: "Fasti TrailBase Test"
   sender_address: "noreply@fasti.test"
-}}
-server {{
+}
+server {
   application_name: "Fasti TrailBase Test"
   site_url: "http://127.0.0.1:24500"
   logs_retention_sec: 3600
-}}
-auth {{
+}
+auth {
   auth_token_ttl_sec: 300
   refresh_token_ttl_sec: 3600
   password_minimal_length: 12
   password_must_contain_upper_and_lower_case: true
   password_must_contain_digits: true
   password_must_contain_special_characters: true
-  oauth_providers: [{{
+  oauth_providers: [{
     key: "oidc0"
-    value {{
+    value {
       client_id: "fixture-client"
       client_secret: "fixture-secret"
       provider_id: OIDC0
@@ -561,10 +570,10 @@ auth {{
       auth_url: "http://127.0.0.1:24526/authorize"
       token_url: "http://127.0.0.1:24526/token"
       user_api_url: "http://127.0.0.1:24526/userinfo"
-    }}
-  }}]
-}}
-jobs {{}}
+    }
+  }]
+}
+jobs {}
 '''
         (test_root / "depot/config.textproto").write_text(config, encoding="utf-8")
         os.chmod(test_root / "depot/config.textproto", 0o600)
@@ -599,7 +608,7 @@ jobs {{}}
             old_affinity = os.sched_getaffinity(0)
             try:
                 os.sched_setaffinity(0, {min(old_affinity)})
-                return subprocess.Popen(
+                return subprocess.Popen(  # nosec -- nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit,python.lang.security.audit.dangerous-subprocess-use-tainted-env-args -- command starts the exact digest-verified TrailBase binary with fixed loopback fixture arguments.
                     command,
                     env=environment,
                     stdout=subprocess.DEVNULL,
@@ -657,14 +666,14 @@ jobs {{}}
                     ),
                 }
             )
-            password = "Initial1!Fixture"
+            password = "Initial1!Fixture"  # nosec B105 -- local conformance fixture only.
             changed = "Changed2!Fixture"
             reset = "Reset3!Fixture"
             status, _ = request(
                 base,
                 "POST",
                 "/api/auth/v1/register",
-                {"email": "weak@fasti.test", "password": "weak", "password_repeat": "weak"},
+                {"email": "weak@fasti.test", "password": "weak", "password_repeat": "weak"},  # nosec B105 -- intentional policy-rejection fixture.
             )
             assert_status(status, 400, "registration_policy_rejects_weak_password", checks)
             status, _ = request(
@@ -959,13 +968,13 @@ jobs {{}}
             oidc_thread.join(timeout=2)
 
         runtime.verify_private_root(test_root)
-        openapi = subprocess.run(
+        openapi = subprocess.run(  # nosec -- nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit,python.lang.security.audit.dangerous-subprocess-use-tainted-env-args -- executable is digest-verified; argv is a fixed local inspection command.
             [executable, "--depot", test_root / "depot", "openapi", "print"],
             check=True,
             capture_output=True,
             timeout=30,
         ).stdout
-        admin_list = subprocess.run(
+        admin_list = subprocess.run(  # nosec -- nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit,python.lang.security.audit.dangerous-subprocess-use-tainted-env-args -- executable is digest-verified; argv is a fixed local administration check.
             [executable, "--depot", test_root / "depot", "admin", "list"],
             capture_output=True,
             timeout=30,
