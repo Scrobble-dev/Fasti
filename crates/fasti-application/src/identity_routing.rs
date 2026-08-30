@@ -16,6 +16,12 @@ pub enum AnimeGroupingPolicyScope {
     Client(ClientId),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnimeGroupingPolicySource {
+    ProfileDefault,
+    ClientOverride,
+}
+
 impl AnimeGroupingPolicyScope {
     pub const fn client_id(self) -> Option<ClientId> {
         match self {
@@ -245,6 +251,7 @@ impl ApplyAnimeGroupingPolicyChangeCommand {
 pub struct AnimeGroupingPolicyView {
     profile_id: ProfileId,
     scope: AnimeGroupingPolicyScope,
+    source: AnimeGroupingPolicySource,
     preference: AnimeGroupingPreference,
     revision: u64,
 }
@@ -253,12 +260,14 @@ impl AnimeGroupingPolicyView {
     pub const fn new(
         profile_id: ProfileId,
         scope: AnimeGroupingPolicyScope,
+        source: AnimeGroupingPolicySource,
         preference: AnimeGroupingPreference,
         revision: u64,
     ) -> Self {
         Self {
             profile_id,
             scope,
+            source,
             preference,
             revision,
         }
@@ -270,6 +279,10 @@ impl AnimeGroupingPolicyView {
 
     pub const fn scope(&self) -> AnimeGroupingPolicyScope {
         self.scope
+    }
+
+    pub const fn source(&self) -> AnimeGroupingPolicySource {
+        self.source
     }
 
     pub const fn preference(&self) -> AnimeGroupingPreference {
@@ -463,5 +476,18 @@ mod tests {
             AnimeGroupingPolicyScope::Client(client_id).client_id(),
             Some(client_id)
         );
+
+        let inherited = AnimeGroupingPolicyView::new(
+            ProfileId::new_v7(),
+            AnimeGroupingPolicyScope::Client(client_id),
+            AnimeGroupingPolicySource::ProfileDefault,
+            AnimeGroupingPreference::Automatic,
+            4,
+        );
+        assert_eq!(
+            inherited.source(),
+            AnimeGroupingPolicySource::ProfileDefault
+        );
+        assert_eq!(inherited.revision(), 4);
     }
 }

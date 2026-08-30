@@ -51,6 +51,10 @@ identifier and Fasti Record remain unchanged.
 Each profile has a default preference. An authorized client, including a Nuvio
 connection, can have an explicit override. Both scopes use the same four values:
 
+A client without an override reads the profile default and its revision. The
+response says whether the value is inherited or client-owned, so compare-and-set
+apply detects a profile change between preview and apply.
+
 | Value | Behavior |
 | --- | --- |
 | `group_by_tv_work` | Prefer an IMDb, TMDB, or TVDB work-style coordinate. |
