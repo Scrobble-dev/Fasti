@@ -8,13 +8,13 @@ use crate::{ApplicationResult, RequestAccessContext};
 use crate::{ProviderCapabilityState, ProviderId};
 use fasti_domain::{
     AnimeGroupingPreference, EnrichmentPolicy, ExternalIdentifierClaim, ExternalIdentifierError,
-    FieldClaim, FieldClaimStatus, FieldKey, Grain, IdentityRouteKind, MetadataAttribution,
-    MetadataCacheEntry, MetadataCacheReadState, MetadataFieldGroup, MetadataLocale,
-    MetadataProjection, MetadataProjectionPolicy, MetadataProviderId, MetadataRegion,
-    NamespaceDefinition, NamespaceDefinitionError, NamespaceLicencePosture, ProfileId, RatingClaim,
-    RecordId, RequestCorrelationId, ResolutionIntent, MAX_EXTERNAL_IDENTIFIER_BYTES,
-    ORIGINAL_TITLE_FIELD_KEY, OVERVIEW_FIELD_KEY, POSTER_FIELD_KEY, RELEASE_YEAR_FIELD_KEY,
-    TITLE_FIELD_KEY,
+    FieldClaim, FieldClaimStatus, FieldKey, Grain, IdentityRouteEvidenceKind, IdentityRouteKind,
+    MetadataAttribution, MetadataCacheEntry, MetadataCacheReadState, MetadataFieldGroup,
+    MetadataLocale, MetadataProjection, MetadataProjectionPolicy, MetadataProviderId,
+    MetadataRegion, NamespaceDefinition, NamespaceDefinitionError, NamespaceLicencePosture,
+    ProfileId, RatingClaim, RecordId, RequestCorrelationId, ResolutionIntent,
+    MAX_EXTERNAL_IDENTIFIER_BYTES, ORIGINAL_TITLE_FIELD_KEY, OVERVIEW_FIELD_KEY, POSTER_FIELD_KEY,
+    RELEASE_YEAR_FIELD_KEY, TITLE_FIELD_KEY,
 };
 use std::{future::Future, pin::Pin};
 
@@ -154,6 +154,30 @@ pub struct PurposeIdentityRoute {
     kind: IdentityRouteKind,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IdentityRouteEvidence {
+    identifier: ExternalIdentifierClaim,
+    kind: IdentityRouteEvidenceKind,
+}
+
+impl IdentityRouteEvidence {
+    pub const fn new(identifier: ExternalIdentifierClaim, kind: IdentityRouteEvidenceKind) -> Self {
+        Self { identifier, kind }
+    }
+
+    pub const fn direct(identifier: ExternalIdentifierClaim) -> Self {
+        Self::new(identifier, IdentityRouteEvidenceKind::Direct)
+    }
+
+    pub const fn identifier(&self) -> &ExternalIdentifierClaim {
+        &self.identifier
+    }
+
+    pub const fn kind(&self) -> IdentityRouteEvidenceKind {
+        self.kind
+    }
+}
+
 impl PurposeIdentityRoute {
     pub const fn identifier(&self) -> &ExternalIdentifierClaim {
         &self.identifier
@@ -211,11 +235,12 @@ fn route_priority(
     intent: ResolutionIntent,
     target_provider: &str,
     anime_preference: AnimeGroupingPreference,
-    identifier: &ExternalIdentifierClaim,
+    evidence: &IdentityRouteEvidence,
 ) -> Option<(u8, IdentityRouteKind)> {
+    let identifier = evidence.identifier();
     let namespace = identifier.namespace();
     let grain = identifier.grain();
-    match (intent, target_provider, namespace, grain) {
+    match (intent, target_provider, namespace, grain, evidence.kind()) {
         (
             ResolutionIntent::MetadataLookup
             | ResolutionIntent::MetadataEnrichment
@@ -223,6 +248,7 @@ fn route_priority(
             "tmdb",
             "tmdb.movie",
             Grain::Film,
+            IdentityRouteEvidenceKind::Direct,
         )
         | (
             ResolutionIntent::MetadataLookup
@@ -231,6 +257,7 @@ fn route_priority(
             "tmdb",
             "tmdb.tv",
             Grain::Series,
+            IdentityRouteEvidenceKind::Direct,
         ) => Some((0, IdentityRouteKind::ProviderNative)),
         (
             ResolutionIntent::MetadataLookup
@@ -239,7 +266,26 @@ fn route_priority(
             "tmdb",
             "imdb.title",
             Grain::Film | Grain::Series | Grain::Release,
+            IdentityRouteEvidenceKind::Direct,
         ) => Some((1, IdentityRouteKind::VerifiedAlias)),
+        (
+            ResolutionIntent::MetadataLookup
+            | ResolutionIntent::MetadataEnrichment
+            | ResolutionIntent::DisplayProjection,
+            "tmdb",
+            "tvdb.movie" | "tvdb.series" | "wikidata.item",
+            Grain::Film | Grain::Series | Grain::Release,
+            IdentityRouteEvidenceKind::Direct,
+        ) => Some((2, IdentityRouteKind::VerifiedAlias)),
+        (
+            ResolutionIntent::MetadataLookup
+            | ResolutionIntent::MetadataEnrichment
+            | ResolutionIntent::DisplayProjection,
+            "tmdb",
+            "tmdb.movie" | "tmdb.tv",
+            Grain::Film | Grain::Series,
+            IdentityRouteEvidenceKind::AcceptedCrosswalk,
+        ) => Some((3, IdentityRouteKind::AcceptedCrosswalk)),
         (
             ResolutionIntent::MetadataLookup
             | ResolutionIntent::MetadataEnrichment
@@ -247,20 +293,29 @@ fn route_priority(
             "google-books",
             "googlebooks.volume",
             Grain::Edition,
+            IdentityRouteEvidenceKind::Direct,
         )
         | (
             ResolutionIntent::TrackerRead | ResolutionIntent::TrackerWrite,
             "mal",
             "mal.anime",
             Grain::Release,
+            IdentityRouteEvidenceKind::Direct,
         )
         | (
             ResolutionIntent::TrackerRead | ResolutionIntent::TrackerWrite,
             "kitsu",
             "kitsu.anime",
             Grain::Release,
+            IdentityRouteEvidenceKind::Direct,
         ) => Some((0, IdentityRouteKind::ProviderNative)),
-        (ResolutionIntent::NuvioExport, "nuvio", _, Grain::Release) => {
+        (
+            ResolutionIntent::NuvioExport,
+            "nuvio",
+            _,
+            Grain::Release,
+            IdentityRouteEvidenceKind::Direct,
+        ) => {
             let priority = match (anime_preference, namespace) {
                 (
                     AnimeGroupingPreference::GroupByTvWork | AnimeGroupingPreference::Automatic,
@@ -301,7 +356,24 @@ pub fn plan_purpose_identity_route(
     anime_preference: AnimeGroupingPreference,
     identifiers: &[ExternalIdentifierClaim],
 ) -> PurposeIdentityRoutePlan {
-    let mut known_identifiers = identifiers.to_vec();
+    let evidence = identifiers
+        .iter()
+        .cloned()
+        .map(IdentityRouteEvidence::direct)
+        .collect::<Vec<_>>();
+    plan_purpose_identity_route_with_evidence(intent, target_provider, anime_preference, &evidence)
+}
+
+pub fn plan_purpose_identity_route_with_evidence(
+    intent: ResolutionIntent,
+    target_provider: ProviderId,
+    anime_preference: AnimeGroupingPreference,
+    evidence: &[IdentityRouteEvidence],
+) -> PurposeIdentityRoutePlan {
+    let mut known_identifiers = evidence
+        .iter()
+        .map(|item| item.identifier().clone())
+        .collect::<Vec<_>>();
     known_identifiers.sort_by(|left, right| {
         (left.namespace(), left.grain(), left.value()).cmp(&(
             right.namespace(),
@@ -311,24 +383,20 @@ pub fn plan_purpose_identity_route(
     });
     known_identifiers.dedup();
 
-    let mut candidates = known_identifiers
+    let mut candidates = evidence
         .iter()
-        .filter_map(|identifier| {
-            route_priority(
-                intent,
-                target_provider.as_str(),
-                anime_preference,
-                identifier,
+        .filter_map(|evidence| {
+            route_priority(intent, target_provider.as_str(), anime_preference, evidence).map(
+                |(priority, kind)| {
+                    (
+                        priority,
+                        PurposeIdentityRoute {
+                            identifier: evidence.identifier().clone(),
+                            kind,
+                        },
+                    )
+                },
             )
-            .map(|(priority, kind)| {
-                (
-                    priority,
-                    PurposeIdentityRoute {
-                        identifier: identifier.clone(),
-                        kind,
-                    },
-                )
-            })
         })
         .collect::<Vec<_>>();
     candidates.sort_by(|(left_priority, left), (right_priority, right)| {
@@ -1542,6 +1610,10 @@ mod tests {
             .expect("identity fixture")
     }
 
+    fn identity_claim_at(namespace: &str, grain: Grain, value: &str) -> ExternalIdentifierClaim {
+        ExternalIdentifierClaim::try_new(namespace, grain, value).expect("identity fixture")
+    }
+
     #[test]
     fn tmdb_metadata_uses_the_pinned_nuvio_imdb_alias_without_rekeying() {
         let identifiers = vec![
@@ -1580,6 +1652,52 @@ mod tests {
         let route = plan.selected_route().expect("native TMDB route");
         assert_eq!(route.identifier(), &tmdb);
         assert_eq!(route.kind(), IdentityRouteKind::ProviderNative);
+    }
+
+    #[test]
+    fn tmdb_metadata_routes_aliases_before_an_accepted_crosswalk() {
+        let imdb = IdentityRouteEvidence::direct(identity_claim_at(
+            "imdb.title",
+            Grain::Series,
+            "tt0944947",
+        ));
+        let tvdb = IdentityRouteEvidence::direct(identity_claim_at(
+            "tvdb.series",
+            Grain::Series,
+            "121361",
+        ));
+        let crosswalk = IdentityRouteEvidence::new(
+            identity_claim_at("tmdb.tv", Grain::Series, "1399"),
+            IdentityRouteEvidenceKind::AcceptedCrosswalk,
+        );
+
+        for (evidence, namespace, kind) in [
+            (
+                vec![imdb.clone(), tvdb.clone(), crosswalk.clone()],
+                "imdb.title",
+                IdentityRouteKind::VerifiedAlias,
+            ),
+            (
+                vec![tvdb.clone(), crosswalk.clone()],
+                "tvdb.series",
+                IdentityRouteKind::VerifiedAlias,
+            ),
+            (
+                vec![crosswalk.clone()],
+                "tmdb.tv",
+                IdentityRouteKind::AcceptedCrosswalk,
+            ),
+        ] {
+            let plan = plan_purpose_identity_route_with_evidence(
+                ResolutionIntent::MetadataEnrichment,
+                ProviderId::try_new("tmdb").expect("TMDB provider"),
+                AnimeGroupingPreference::Automatic,
+                &evidence,
+            );
+            let route = plan.selected_route().expect("selected TMDB route");
+            assert_eq!(route.identifier().namespace(), namespace);
+            assert_eq!(route.kind(), kind);
+        }
     }
 
     #[test]

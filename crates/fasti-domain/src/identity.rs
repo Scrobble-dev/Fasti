@@ -439,6 +439,15 @@ impl ResolutionIntent {
 pub enum IdentityRouteKind {
     ProviderNative,
     VerifiedAlias,
+    AcceptedCrosswalk,
+}
+
+/// Why a coordinate is eligible for route planning.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IdentityRouteEvidenceKind {
+    Direct,
+    AcceptedCrosswalk,
 }
 
 /// A profile or connection's anime grouping and export preference.
