@@ -304,7 +304,7 @@ pub struct AnimeGroupingPolicyView {
 }
 
 impl AnimeGroupingPolicyView {
-    pub const fn try_new(
+    pub fn try_new(
         profile_id: ProfileId,
         scope: AnimeGroupingPolicyScope,
         source: AnimeGroupingPolicySource,
@@ -453,7 +453,7 @@ pub struct ApplyAnimeGroupingPolicyChangeOutcome {
 
 impl ApplyAnimeGroupingPolicyChangeOutcome {
     #[allow(clippy::too_many_arguments)]
-    pub const fn new(
+    pub fn try_new(
         operation_id: OperationId,
         previous_preference: AnimeGroupingPreference,
         previous_source: AnimeGroupingPolicySource,
@@ -462,8 +462,14 @@ impl ApplyAnimeGroupingPolicyChangeOutcome {
         unresolved_routes: u64,
         possible_season_regroupings: u64,
         rolled_back_operation_id: Option<OperationId>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, AnimeGroupingPolicyResultError> {
+        if !previous_source.is_valid_for(policy.scope())
+            || possible_season_regroupings > affected_records
+            || rolled_back_operation_id == Some(operation_id)
+        {
+            return Err(AnimeGroupingPolicyResultError);
+        }
+        Ok(Self {
             operation_id,
             previous_preference,
             previous_source,
@@ -472,7 +478,7 @@ impl ApplyAnimeGroupingPolicyChangeOutcome {
             unresolved_routes,
             possible_season_regroupings,
             rolled_back_operation_id,
-        }
+        })
     }
 
     pub const fn operation_id(&self) -> OperationId {
@@ -669,6 +675,31 @@ mod tests {
             Sha256Digest::from_bytes(&[0; 32]),
             0,
             AnimeGroupingPolicyChange::InheritProfile,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn apply_outcome_rejects_self_rollback() {
+        let operation_id = OperationId::new_v7();
+        let policy = AnimeGroupingPolicyView::try_new(
+            ProfileId::new_v7(),
+            AnimeGroupingPolicyScope::Profile,
+            AnimeGroupingPolicySource::ProfileDefault,
+            AnimeGroupingPreference::Automatic,
+            1,
+        )
+        .expect("valid profile policy");
+
+        assert!(ApplyAnimeGroupingPolicyChangeOutcome::try_new(
+            operation_id,
+            AnimeGroupingPreference::Automatic,
+            AnimeGroupingPolicySource::ProfileDefault,
+            policy,
+            0,
+            0,
+            0,
+            Some(operation_id),
         )
         .is_err());
     }
