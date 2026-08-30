@@ -152,7 +152,7 @@ pub fn provider_identity_mapping_for_grain(
 pub struct PurposeIdentityRoute {
     identifier: ExternalIdentifierClaim,
     kind: IdentityRouteKind,
-    accepted_assertion_id: Option<IdentityAssertionId>,
+    accepted_assertion_ids: Vec<IdentityAssertionId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -204,8 +204,8 @@ impl PurposeIdentityRoute {
         self.kind
     }
 
-    pub const fn accepted_assertion_id(&self) -> Option<IdentityAssertionId> {
-        self.accepted_assertion_id
+    pub fn accepted_assertion_ids(&self) -> &[IdentityAssertionId] {
+        &self.accepted_assertion_ids
     }
 }
 
@@ -495,28 +495,62 @@ pub fn plan_purpose_identity_route_with_evidence(
                         PurposeIdentityRoute {
                             identifier: evidence.identifier().clone(),
                             kind,
-                            accepted_assertion_id: evidence.accepted_assertion_id(),
+                            accepted_assertion_ids: evidence
+                                .accepted_assertion_id()
+                                .into_iter()
+                                .collect(),
                         },
                     )
                 },
             )
         })
         .collect::<Vec<_>>();
+    let kind_order = |kind| match kind {
+        IdentityRouteKind::ProviderNative => 0,
+        IdentityRouteKind::VerifiedAlias => 1,
+        IdentityRouteKind::AcceptedCrosswalk => 2,
+    };
     candidates.sort_by(|(left_priority, left), (right_priority, right)| {
         (
             left_priority,
             left.identifier.namespace(),
             left.identifier.grain(),
             left.identifier.value(),
+            kind_order(left.kind),
         )
             .cmp(&(
                 right_priority,
                 right.identifier.namespace(),
                 right.identifier.grain(),
                 right.identifier.value(),
+                kind_order(right.kind),
             ))
     });
-    candidates.dedup();
+    let mut merged_candidates: Vec<(u8, PurposeIdentityRoute)> =
+        Vec::with_capacity(candidates.len());
+    for (priority, mut route) in candidates {
+        let same_coordinate =
+            merged_candidates
+                .last()
+                .is_some_and(|(previous_priority, previous)| {
+                    *previous_priority == priority
+                        && previous.identifier == route.identifier
+                        && previous.kind == route.kind
+                });
+        if same_coordinate {
+            let (_, previous) = merged_candidates
+                .last_mut()
+                .expect("same coordinate requires a previous candidate");
+            previous
+                .accepted_assertion_ids
+                .append(&mut route.accepted_assertion_ids);
+            previous.accepted_assertion_ids.sort_by_key(|id| id.uuid());
+            previous.accepted_assertion_ids.dedup();
+        } else {
+            merged_candidates.push((priority, route));
+        }
+    }
+    let candidates = merged_candidates;
 
     let best_priority = candidates.first().map(|(priority, _)| *priority);
     let best = candidates
@@ -1827,9 +1861,11 @@ mod tests {
             let route = plan.selected_route().expect("selected TMDB route");
             assert_eq!(route.identifier().namespace(), namespace);
             assert_eq!(route.kind(), kind);
+            let expected_assertions =
+                (kind == IdentityRouteKind::AcceptedCrosswalk).then_some(assertion_id);
             assert_eq!(
-                route.accepted_assertion_id(),
-                (kind == IdentityRouteKind::AcceptedCrosswalk).then_some(assertion_id)
+                route.accepted_assertion_ids(),
+                expected_assertions.as_slice()
             );
         }
     }
@@ -2093,7 +2129,7 @@ mod tests {
         let route = plan.selected_route().expect("accepted preferred route");
         assert_eq!(route.identifier().namespace(), "mal.anime");
         assert_eq!(route.kind(), IdentityRouteKind::AcceptedCrosswalk);
-        assert_eq!(route.accepted_assertion_id(), Some(assertion_id));
+        assert_eq!(route.accepted_assertion_ids(), &[assertion_id]);
 
         let direct_mal = IdentityRouteEvidence::direct(identity_claim("mal.anime", "49894"));
         let direct_plan = plan_purpose_identity_route_with_evidence(
@@ -2131,8 +2167,34 @@ mod tests {
             preview
                 .proposed_route()
                 .expect("accepted MAL projection")
-                .accepted_assertion_id(),
-            Some(assertion_id)
+                .accepted_assertion_ids(),
+            &[assertion_id]
+        );
+    }
+
+    #[test]
+    fn corroborating_assertions_for_one_coordinate_are_not_ambiguous() {
+        let first = IdentityAssertionId::new_v7();
+        let second = IdentityAssertionId::new_v7();
+        let identifier = identity_claim("mal.anime", "49894");
+        let plan = plan_purpose_identity_route_with_evidence(
+            ResolutionIntent::NuvioExport,
+            ProviderId::try_new("nuvio").expect("Nuvio provider"),
+            AnimeGroupingPreference::KeepMalReleasesSeparate,
+            &[
+                IdentityRouteEvidence::accepted_crosswalk(identifier.clone(), second),
+                IdentityRouteEvidence::accepted_crosswalk(identifier, first),
+            ],
+        );
+
+        assert_eq!(plan.status(), PurposeIdentityRouteStatus::Selected);
+        let mut expected = vec![first, second];
+        expected.sort_by_key(|id| id.uuid());
+        assert_eq!(
+            plan.selected_route()
+                .expect("one corroborated coordinate")
+                .accepted_assertion_ids(),
+            expected
         );
     }
 
