@@ -10,9 +10,9 @@
 
 The conformance package also uses exact, unmodified TrailBase `v0.33.4` native
 artifacts only as an adjacent-version upgrade and rollback fixture. Its tag is
-`e00b2df30c3cc403f1b42fdd1af21755dd98f504`, and its included `LICENSE` has the
-same reviewed SHA-256. It is not a supported runtime selection or a modified
-distribution.
+`v0.33.4` at commit `e00b2df30c3cc403f1b42fdd1af21755dd98f504`, and its included
+`LICENSE` has the same reviewed SHA-256. It is not a supported runtime selection
+or a modified distribution.
 
 ## Boundary
 

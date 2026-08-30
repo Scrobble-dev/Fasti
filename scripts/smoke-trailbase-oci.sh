@@ -6,9 +6,12 @@ scope="${FASTI_DEV_SCOPE:-$(basename "$repo_root")}"
 scope="${scope//[^A-Za-z0-9_.-]/-}"
 container="trailbase-dev-$scope"
 inspect_file="$(mktemp -p "$repo_root/target" fasti-trailbase-oci-inspect.XXXXXX)"
+owns_container=false
 
 cleanup() {
-  "$repo_root/scripts/dev.sh" trailbase stop >/dev/null 2>&1 || true
+  if [[ "$owns_container" == true ]]; then
+    podman stop "$container" >/dev/null 2>&1 || true
+  fi
   rm -f -- "$inspect_file"
 }
 trap cleanup EXIT INT TERM
@@ -19,6 +22,7 @@ if podman inspect "$container" --format '{{.State.Running}}' 2>/dev/null | grep 
   exit 1
 fi
 
+owns_container=true
 "$repo_root/scripts/dev.sh" trailbase start --podman
 status="$("$repo_root/scripts/dev.sh" trailbase status)"
 grep -q 'Process: RUNNING (podman container:' <<<"$status"
@@ -75,12 +79,14 @@ PY
 }
 
 "$repo_root/scripts/dev.sh" trailbase stop >/dev/null
+owns_container=false
 if podman inspect "$container" >/dev/null 2>&1; then
   echo "Stopped OCI container was not removed." >&2
   exit 1
 fi
 reference="$(python3 -B "$repo_root/scripts/trailbase_runtime.py" prepare-oci \
   "$repo_root/.dev-trailbase" --runtime podman --offline)"
+owns_container=true
 podman run -d --name "$container" --rm --pull never \
   --userns keep-id --user "$(id -u):$(id -g)" \
   --volume "$repo_root/.dev-trailbase:/app/trailroot:Z" \
@@ -93,4 +99,5 @@ if "$repo_root/scripts/dev.sh" trailbase start --podman >/dev/null 2>&1; then
   exit 1
 fi
 podman stop "$container" >/dev/null
+owns_container=false
 echo "PASS: exact TrailBase OCI lifecycle, isolation, and active-backup guard"

@@ -48,13 +48,24 @@ class ReleaseError(ValueError):
     """The checked-in release lock or a supplied artifact is invalid."""
 
 
-def _read_regular_file(path: Path, maximum_bytes: int) -> bytes:
+def _open_safe_regular_file(path: Path) -> int:
     flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
     descriptor = os.open(path, flags)
     try:
         metadata = os.fstat(descriptor)
-        if not stat.S_ISREG(metadata.st_mode):
-            raise ReleaseError(f"not a regular file: {path}")
+        if stat.S_ISREG(metadata.st_mode):
+            return descriptor
+    except OSError:
+        os.close(descriptor)
+        raise
+    os.close(descriptor)
+    raise ReleaseError(f"not a regular file: {path}")
+
+
+def _read_regular_file(path: Path, maximum_bytes: int) -> bytes:
+    descriptor = _open_safe_regular_file(path)
+    try:
+        metadata = os.fstat(descriptor)
         if metadata.st_size > maximum_bytes:
             raise ReleaseError(f"file exceeds {maximum_bytes} bytes: {path}")
         with os.fdopen(os.dup(descriptor), "rb") as source:
@@ -296,12 +307,8 @@ def host_oci_platform() -> str:
 
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
-    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
-    descriptor = os.open(path, flags)
+    descriptor = _open_safe_regular_file(path)
     try:
-        metadata = os.fstat(descriptor)
-        if not stat.S_ISREG(metadata.st_mode):
-            raise ReleaseError(f"not a regular artifact: {path}")
         with os.fdopen(os.dup(descriptor), "rb") as source:
             for block in iter(lambda: source.read(1024 * 1024), b""):
                 digest.update(block)
@@ -479,8 +486,8 @@ def verify_executable(executable: Path, release: dict[str, Any], expected_sha256
         raise ReleaseError(f"TrailBase executable is not a regular file: {executable}")
     if sha256_file(executable) != expected_sha256:
         raise ReleaseError("installed TrailBase executable digest does not match the release lock")
-    output = subprocess.run(  # nosec -- nosemgrep -- regular file with exact release-lock digest; fixed argv.
-        [executable, "--version"],
+    output = subprocess.run(  # nosec -- regular file with exact release-lock digest; fixed argv.
+        [executable, "--version"],  # nosemgrep -- exact release-lock executable and fixed argument.
         check=True,
         capture_output=True,
         text=True,
@@ -567,8 +574,8 @@ def _pin_to_one_cpu() -> None:
 
 
 def _command_json(command: list[str]) -> Any:
-    output = subprocess.run(  # nosec -- nosemgrep -- absolute allowlisted runtime; digest-pinned internal argv.
-        command,
+    output = subprocess.run(  # nosec -- absolute allowlisted runtime; digest-pinned internal argv.
+        command,  # nosemgrep -- absolute allowlisted OCI runtime and internal fixed-shape arguments.
         check=True,
         capture_output=True,
         text=True,
@@ -711,8 +718,8 @@ def prepare_oci(root: Path, runtime: str, offline: bool) -> str:
     _private_directory(root)
     receipt_path = root / f"oci-{runtime}.json"
     if not offline:
-        subprocess.run(  # nosec -- nosemgrep -- absolute allowlisted runtime; digest-pinned reference.
-            [runtime_executable, "pull", "--platform", platform_name.replace("-", "/", 1), reference],
+        subprocess.run(  # nosec -- absolute allowlisted runtime; digest-pinned reference.
+            [runtime_executable, "pull", "--platform", platform_name.replace("-", "/", 1), reference],  # nosemgrep -- absolute allowlisted OCI runtime and digest-pinned reference.
             check=True,
             timeout=600,
         )
@@ -867,8 +874,7 @@ def _loopback_address(value: str, label: str) -> None:
         raise ReleaseError(f"{label} must be a numeric loopback socket address")
 
 
-def bootstrap_native(
-    root: Path,
+def _validate_listener_configuration(
     public_url: str,
     address: str,
     admin_address: str,
@@ -887,9 +893,19 @@ def bootstrap_native(
         or parsed_public_url.fragment
         or parsed_public_url.username is not None
     ):
-        raise ReleaseError("bootstrap public_url must name the exact loopback account listener")
+        raise ReleaseError("public_url must name the exact loopback account listener")
     if cors_origin.rstrip("/") != public_url.rstrip("/"):
-        raise ReleaseError("bootstrap CORS origin must equal the loopback public URL")
+        raise ReleaseError("CORS origin must equal the loopback public URL")
+
+
+def bootstrap_native(
+    root: Path,
+    public_url: str,
+    address: str,
+    admin_address: str,
+    cors_origin: str,
+) -> None:
+    _validate_listener_configuration(public_url, address, admin_address, cors_origin)
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         raise ReleaseError("first initialization requires the owning operator's terminal")
     terminal = sys.stdout
@@ -919,8 +935,8 @@ def bootstrap_native(
         child_environment["RUST_LOG"] = "info"
         old_umask = os.umask(0o077)
         try:
-            process = subprocess.Popen(  # nosec -- nosemgrep -- release-lock verified binary; validated loopback argv.
-                [
+            process = subprocess.Popen(  # nosec -- release-lock verified binary; validated loopback argv.
+                [  # nosemgrep -- exact digest-verified executable and validated fixed-shape arguments.
                     str(executable),
                     "--depot",
                     str(depot),
@@ -1042,10 +1058,7 @@ def run_native(
     admin_address: str,
     cors_origin: str,
 ) -> None:
-    _loopback_address(address, "address")
-    _loopback_address(admin_address, "admin_address")
-    if address == admin_address or cors_origin.rstrip("/") != public_url.rstrip("/"):
-        raise ReleaseError("TrailBase runtime listener configuration is inconsistent")
+    _validate_listener_configuration(public_url, address, admin_address, cors_origin)
     verify_private_root(root)
     executable = prepare_native(root, offline=True)
     try:
@@ -1196,6 +1209,9 @@ def restore_depot(
     parent = target.parent
     if not parent.is_dir() or parent.is_symlink():
         raise ReleaseError("isolated restore parent must be an existing directory")
+    parent_metadata = parent.lstat()
+    if parent_metadata.st_uid != os.geteuid() or parent_metadata.st_mode & 0o077:
+        raise ReleaseError("isolated restore parent must be owned by this user and owner-only")
     metadata = archive_path.lstat()
     if not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
         raise ReleaseError("depot backup is not a regular file")
@@ -1329,7 +1345,7 @@ def _backup_restore_self_test() -> None:
             "schema_version": "fasti.trailbase-bootstrap.v1",
             "release": load_release()["version"],
             "admin": "admin@localhost",
-            "initial_password_rotated": True,
+            "initial_password_rotated": True,  # nosec B105 -- nosemgrep -- boolean receipt field.
             "completed_at": "2026-08-30T00:00:00+00:00",
         }
         _write_private(root / "bootstrap.json", json.dumps(receipt).encode(), 0o600)
@@ -1379,6 +1395,15 @@ def _backup_restore_self_test() -> None:
         else:
             raise ReleaseError("member-size-mismatched restore self-test did not fail")
 
+        unsafe_parent = base / "unsafe-parent"
+        unsafe_parent.mkdir(mode=0o777)
+        os.chmod(unsafe_parent, 0o777)
+        try:
+            restore_depot(backup, unsafe_parent / "restored")
+        except ReleaseError:
+            pass
+        else:
+            raise ReleaseError("non-private restore parent self-test did not fail")
 
 def self_test() -> None:
     release = load_release()
@@ -1477,6 +1502,32 @@ def self_test() -> None:
         pass
     else:
         raise ReleaseError("bootstrap non-loopback mutation sentinel failed")
+    _validate_listener_configuration(
+        "http://127.0.0.1:4000",
+        "127.0.0.1:4000",
+        "127.0.0.1:4001",
+        "http://127.0.0.1:4000",
+    )
+    for public_url, address, admin_address, cors_origin in [
+        (
+            "https://example.invalid",
+            "127.0.0.1:4000",
+            "127.0.0.1:4001",
+            "https://example.invalid",
+        ),
+        (
+            "http://127.0.0.1:4002",
+            "127.0.0.1:4000",
+            "127.0.0.1:4001",
+            "http://127.0.0.1:4002",
+        ),
+    ]:
+        try:
+            _validate_listener_configuration(public_url, address, admin_address, cors_origin)
+        except ReleaseError:
+            pass
+        else:
+            raise ReleaseError("non-loopback or mismatched public URL self-test did not fail")
     _backup_restore_self_test()
     print("PASS: TrailBase release-lock mutation sentinels")
 
