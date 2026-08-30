@@ -467,17 +467,30 @@ fn session_grants(
     Ok(grants)
 }
 
-/// PR A has no Membership or Role aggregate. Returning zero keeps the old
-/// client-credential adapter from pretending that BrowserUser still proves
-/// administrator continuity. C1 must replace this call with the final role
-/// owner before it activates identity administration.
 pub(crate) fn viable_administrator_count(
-    _connection: &Connection,
-    _workspace_id: &str,
-    _capability: CapabilityKey,
-    _correlation_id: fasti_domain::RequestCorrelationId,
+    connection: &Connection,
+    workspace_id: &str,
+    capability: CapabilityKey,
+    correlation_id: fasti_domain::RequestCorrelationId,
 ) -> ApplicationResult<i64> {
-    Ok(0)
+    map_sql(
+        connection.query_row(
+            r#"
+            SELECT COUNT(*)
+            FROM workspace_memberships membership
+            JOIN auth_subjects subject
+              ON subject.auth_subject_id = membership.auth_subject_id
+            WHERE membership.workspace_id = ?1
+              AND membership.lifecycle = 'active'
+              AND membership.role = 'administrator'
+              AND subject.lifecycle = 'active'
+            "#,
+            [workspace_id],
+            |row| row.get(0),
+        ),
+        capability,
+        correlation_id,
+    )
 }
 
 fn rotate_session(
@@ -1109,6 +1122,47 @@ mod tests {
                 .expect("session command"),
             )
             .expect("session")
+    }
+
+    #[test]
+    fn viable_administrators_require_active_subject_membership_and_role() {
+        let fixture = fixture();
+        let correlation_id = fasti_domain::RequestCorrelationId::new_v7();
+        let connection = fixture
+            .kernel
+            .lock_connection(CapabilityKey::CreateBrowserSession, correlation_id)
+            .expect("connection");
+        let count = || {
+            viable_administrator_count(
+                &connection,
+                &fixture.workspace_id.to_string(),
+                CapabilityKey::CreateBrowserSession,
+                correlation_id,
+            )
+            .expect("administrator count")
+        };
+        assert_eq!(count(), 0);
+
+        connection
+            .execute(
+                "INSERT INTO workspace_memberships(membership_id, auth_subject_id, workspace_id, lifecycle, role, created_at, updated_at) VALUES (?1, ?2, ?3, 'active', 'administrator', ?4, ?4)",
+                params![
+                    fasti_domain::MembershipId::new_v7().to_string(),
+                    fixture.subject_id.to_string(),
+                    fixture.workspace_id.to_string(),
+                    timestamp(fixture.created_at),
+                ],
+            )
+            .expect("administrator membership");
+        assert_eq!(count(), 1);
+
+        connection
+            .execute(
+                "UPDATE auth_subjects SET lifecycle = 'disabled' WHERE auth_subject_id = ?1",
+                [fixture.subject_id.to_string()],
+            )
+            .expect("disable subject");
+        assert_eq!(count(), 0);
     }
 
     fn assert_problem<T>(result: ApplicationResult<T>, expected: ProblemCode) {
