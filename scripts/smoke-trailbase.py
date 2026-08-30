@@ -522,6 +522,7 @@ jobs {{}}
 
 def run_fixture(source_root: Path, receipt_path: Path) -> None:
     started = time.monotonic()
+    receipt_path.unlink(missing_ok=True)
     runtime.verify_private_root(source_root)
     executable = runtime.prepare_native(source_root, offline=True)
     checks: list[dict[str, object]] = []
@@ -784,9 +785,18 @@ jobs {{}}
             )
             assert_status(status, 200, "totp_removal", checks)
 
-            status, _ = request(base, "POST", "/api/auth/v1/refresh", {"refresh_token": refresh_token})
+            status, body = request(
+                base, "POST", "/api/auth/v1/refresh", {"refresh_token": refresh_token}
+            )
             assert_status(status, 200, "refresh_session", checks)
-            checks[-1]["observed_limit"] = "refresh succeeds without rotating the presented token"
+            json_object(body)
+            status, _ = request(
+                base, "POST", "/api/auth/v1/refresh", {"refresh_token": refresh_token}
+            )
+            assert_status(status, 200, "refresh_token_reuse_after_refresh", checks)
+            checks[-1]["observed_limit"] = (
+                "the same presented refresh token remains valid after a successful refresh"
+            )
             status, _ = request(base, "POST", "/api/auth/v1/logout", {"refresh_token": refresh_token})
             assert_status(status, 200, "refresh_revocation", checks)
             status, _ = request(base, "POST", "/api/auth/v1/refresh", {"refresh_token": refresh_token})
@@ -891,13 +901,18 @@ jobs {{}}
             )
             assert_status(status, 401, "deleted_account_login_rejected", checks)
 
-            for label, url in [
-                ("public_admin_absent", f"{base}/api/_admin/info"),
-                ("record_api_unconfigured", f"{base}/api/records/v1"),
-                ("private_health_absent", "http://127.0.0.1:24501/api/healthcheck"),
-                ("private_admin_mfa_absent", "http://127.0.0.1:24501/api/auth/v1/login_mfa"),
+            for label, method, url in [
+                ("public_admin_absent", "GET", f"{base}/api/_admin/info"),
+                ("record_api_unconfigured", "GET", f"{base}/api/records/v1"),
+                ("private_health_absent", "GET", "http://127.0.0.1:24501/api/healthcheck"),
+                (
+                    "private_admin_mfa_absent",
+                    "POST",
+                    "http://127.0.0.1:24501/api/auth/v1/login_mfa",
+                ),
             ]:
-                status, _ = request(url.rsplit("/", 1)[0], "GET", "/" + url.rsplit("/", 1)[1])
+                endpoint, path = url.rsplit("/", 1)
+                status, _ = request(endpoint, method, f"/{path}", {} if method == "POST" else None)
                 assert_status(status, 404, label, checks)
 
             os.killpg(process.pid, 15)

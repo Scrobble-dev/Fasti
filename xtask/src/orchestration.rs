@@ -1,9 +1,19 @@
 use crate::verify::{run_additional_gates, write_gate_suite_receipt, CommandGate};
 use anyhow::{ensure, Context};
+use std::fs;
 use std::path::Path;
 use std::process::Command;
 
 pub(crate) fn run_access_b(root: &Path) -> anyhow::Result<()> {
+    let receipt = root.join("target/fasti-receipts/access-b.json");
+    match fs::remove_file(&receipt) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("failed to remove stale receipt {}", receipt.display()));
+        }
+    }
     let source_before = git_status(root)?;
     let gates = access_b_gates();
     let records = run_additional_gates(root, &gates)?;

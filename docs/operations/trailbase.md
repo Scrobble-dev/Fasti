@@ -17,6 +17,15 @@ upgrade and rollback fixture. `v0.33.4` is not a supported runtime selection.
 TrailBase remains alpha. The [licence review](../../third_party/trailbase/LICENSE-REVIEW.md)
 requires it to remain a separate, unmodified process.
 
+## Prerequisites
+
+- Linux, Python 3, `curl`, and `ss`.
+- Native mode: user systemd with cgroup v2 for the enforced CPU and memory scope.
+- OCI mode: Podman or Docker. Set `FASTI_CONTAINER_RUNTIME` to the installed
+  runtime before offline preparation.
+- Network access for the first preparation. Later start and conformance commands
+  use the verified local cache.
+
 ## Prepare offline inputs
 
 Run this once with network access:
@@ -70,13 +79,19 @@ OCI:
 Use `--docker` instead of `--podman` only on a host with Docker and the exact
 image already prepared.
 
-The public account listener is `127.0.0.1:4000`. Native mode keeps the admin
-listener on `127.0.0.1:4001`. OCI mode does not publish the admin listener.
-The launcher verifies that public admin and Record API roots are absent. It
-does not trust forwarded headers or expose a remote listener. TrailBase
-`v0.33.5` accepts protocol-relative values in its shared redirect validator.
-Remote account and OAuth route exposure is therefore unavailable. A reverse
-proxy, TLS endpoint, or public route is not part of this package.
+The route-exposure contract is:
+
+| Mode | Account routes | Admin routes | Record API | Readiness evidence |
+|---|---|---|---|---|
+| Native | `127.0.0.1:4000` | `127.0.0.1:4001` only | Not configured; public root must return 404 | Health check plus public-route boundary |
+| OCI | `127.0.0.1:4000` | Container loopback only; not host-published | Not configured; public root must return 404 | Exact running image plus health and route boundary |
+| Remote | Unavailable | Unavailable | Unavailable | No claim; do not expose this release remotely |
+
+TrailBase `v0.33.5` accepts protocol-relative values in its shared redirect
+validator. Therefore remote account and OAuth routes are unavailable. The next
+action is to keep the service loopback-only until a pinned release proves safe
+redirect validation and the remote TLS and trusted-proxy package passes review.
+A reverse proxy, TLS endpoint, or public route is not part of this package.
 
 The process uses one CPU and the repository's 192 MiB memory ceiling. OCI mode
 also uses no extra swap, a 128-process limit, a read-only root filesystem,

@@ -41,6 +41,7 @@ COMMIT = re.compile(r"^[0-9a-f]{40}$")
 VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 BOOTSTRAP_PASSWORD = re.compile(r"^\s*password:\s*'([^']+)'\s*$")
 TRAILBASE_LICENSE_SHA256 = "be4741d827008446e5e8bf9ee42f9e57b57245b6aed260fbdaf00ffebe958fb7"
+TRAILBASE_REPOSITORY_URL = "https://github.com/trailbaseio/trailbase"
 
 
 class ReleaseError(ValueError):
@@ -119,9 +120,9 @@ def validate_release(release: Any) -> None:
         raise ReleaseError("tag_commit must be a lowercase 40-character commit")
     release_url = _require_https(release["release_url"], "release_url")
     source_url = _require_https(release["source_url"], "source_url")
-    if not release_url.endswith(f"/releases/tag/v{version}"):
+    if release_url != f"{TRAILBASE_REPOSITORY_URL}/releases/tag/v{version}":
         raise ReleaseError("release_url does not name the exact version")
-    if not source_url.endswith(f"/tree/v{version}"):
+    if source_url != f"{TRAILBASE_REPOSITORY_URL}/tree/v{version}":
         raise ReleaseError("source_url does not name the exact version")
 
     license_info = release["license"]
@@ -138,10 +139,17 @@ def validate_release(release: Any) -> None:
         raise ReleaseError("TrailBase must remain a separate, unmodified process")
     if license_info["file_sha256"] != TRAILBASE_LICENSE_SHA256:
         raise ReleaseError("TrailBase licence differs from the reviewed v0.33.5 text")
-    _require_https(license_info["source_url"], "license.source_url")
+    if _require_https(license_info["source_url"], "license.source_url") != (
+        f"{TRAILBASE_REPOSITORY_URL}/blob/v{version}/LICENSE"
+    ):
+        raise ReleaseError("license.source_url does not name the reviewed release licence")
 
     expected_version = release["expected_version_line"]
-    if not isinstance(expected_version, str) or not expected_version.startswith(f"trail v{version}-"):
+    if (
+        not isinstance(expected_version, str)
+        or not expected_version.startswith(f"trail v{version}-")
+        or f"-g{release['tag_commit'][:8]} " not in expected_version
+    ):
         raise ReleaseError("expected_version_line does not identify the exact release")
 
     _validate_native_release(release, "release")
@@ -173,17 +181,20 @@ def validate_release(release: Any) -> None:
         upgrade_fixture["tag_commit"]
     ):
         raise ReleaseError("upgrade_fixture.tag_commit must be a lowercase 40-character commit")
-    if not _require_https(
+    if _require_https(
         upgrade_fixture["release_url"], "upgrade_fixture.release_url"
-    ).endswith(f"/releases/tag/v{fixture_version}"):
+    ) != f"{TRAILBASE_REPOSITORY_URL}/releases/tag/v{fixture_version}":
         raise ReleaseError("upgrade_fixture.release_url does not name the exact version")
-    if not _require_https(
+    if _require_https(
         upgrade_fixture["source_url"], "upgrade_fixture.source_url"
-    ).endswith(f"/tree/v{fixture_version}"):
+    ) != f"{TRAILBASE_REPOSITORY_URL}/tree/v{fixture_version}":
         raise ReleaseError("upgrade_fixture.source_url does not name the exact version")
-    if not isinstance(upgrade_fixture["expected_version_line"], str) or not upgrade_fixture[
-        "expected_version_line"
-    ].startswith(f"trail v{fixture_version}-"):
+    if (
+        not isinstance(upgrade_fixture["expected_version_line"], str)
+        or not upgrade_fixture["expected_version_line"].startswith(f"trail v{fixture_version}-")
+        or f"-g{upgrade_fixture['tag_commit'][:8]} "
+        not in upgrade_fixture["expected_version_line"]
+    ):
         raise ReleaseError("upgrade_fixture.expected_version_line does not identify its release")
     _validate_native_release(upgrade_fixture, "upgrade_fixture")
 
@@ -247,7 +258,12 @@ def _validate_native_release(release: dict[str, Any], label: str) -> None:
             f"{label}.native.{target}",
         )
         url = _require_https(artifact["url"], f"{label}.native.{target}.url")
-        if f"/releases/download/v{version}/trailbase_v{version}_" not in url:
+        architecture = {"linux-aarch64": "arm64", "linux-x86_64": "x86_64"}[target]
+        expected_url = (
+            f"{TRAILBASE_REPOSITORY_URL}/releases/download/v{version}/"
+            f"trailbase_v{version}_{architecture}_linux.zip"
+        )
+        if url != expected_url:
             raise ReleaseError(f"{label}.native.{target}.url is not pinned to the exact release")
         if not isinstance(artifact["bytes"], int) or artifact["bytes"] <= 0:
             raise ReleaseError(f"{label}.native.{target}.bytes must be positive")
@@ -398,11 +414,18 @@ def _prepare_native_release(root: Path, release: dict[str, Any], offline: bool) 
         if runtime.is_symlink() or not runtime.is_dir():
             raise ReleaseError(f"TrailBase runtime is not a directory: {runtime}")
         verify_executable(executable, release, artifact["executable_sha256"])
+        installed_license = runtime / "LICENSE"
+        if hashlib.sha256(_read_regular_file(installed_license, 1024 * 1024)).hexdigest() != release[
+            "license"
+        ]["file_sha256"]:
+            raise ReleaseError("installed TrailBase licence differs from the reviewed text")
         return executable
-
     if not archive_path.exists():
         if offline:
-            raise ReleaseError(f"exact TrailBase archive is not cached: {archive_path}")
+            raise ReleaseError(
+                f"exact TrailBase archive is not cached: {archive_path}; "
+                "run './scripts/dev.sh --prepare-offline' with network access"
+            )
         temporary = cache / f".{archive_path.name}.{os.getpid()}.tmp"
         request = urllib.request.Request(artifact["url"], headers={"User-Agent": "Fasti/TrailBase-pin"})
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -648,7 +671,10 @@ def prepare_oci(root: Path, runtime: str, offline: bool) -> str:
     if runtime not in {"podman", "docker"}:
         raise ReleaseError("OCI runtime must be podman or docker")
     if not shutil.which(runtime):
-        raise ReleaseError(f"OCI runtime is unavailable: {runtime}")
+        raise ReleaseError(
+            f"OCI runtime is unavailable: {runtime}; install it or set "
+            "FASTI_CONTAINER_RUNTIME to an installed podman or docker runtime"
+        )
     release = load_release()
     platform_name = host_oci_platform()
     reference = f"{release['oci']['repository']}@{release['oci']['index_digest']}"
@@ -698,6 +724,79 @@ def prepare_oci(root: Path, runtime: str, offline: bool) -> str:
         raise ReleaseError("OCI preparation receipt differs from the release lock")
     _verify_local_oci(runtime, reference, release, platform_name)
     return reference
+
+
+def verify_oci_container(root: Path, runtime: str, name: str) -> None:
+    reference = prepare_oci(root, runtime, offline=True)
+    release = load_release()
+    document = _command_json([runtime, "inspect", name])
+    if not isinstance(document, list) or len(document) != 1 or not isinstance(document[0], dict):
+        raise ReleaseError("OCI container inspection is invalid")
+    container = document[0]
+    config = container.get("Config")
+    state = container.get("State")
+    host = container.get("HostConfig")
+    mounts = container.get("Mounts")
+    expected_config = release["oci"]["platform_manifests"][host_oci_platform()][
+        "config_digest"
+    ].removeprefix("sha256:")
+    image_id = container.get("Image", "")
+    if isinstance(image_id, str):
+        image_id = image_id.removeprefix("sha256:")
+    if (
+        not isinstance(config, dict)
+        or not isinstance(state, dict)
+        or not isinstance(host, dict)
+        or state.get("Running") is not True
+        or config.get("Image") != reference
+        or image_id != expected_config
+    ):
+        raise ReleaseError("running OCI container identity differs from the release lock")
+    expected_host = {
+        "Memory": 192 * 1024 * 1024,
+        "MemorySwap": 192 * 1024 * 1024,
+        "NanoCpus": 1_000_000_000,
+        "PidsLimit": 128,
+        "ReadonlyRootfs": True,
+    }
+    if (
+        any(host.get(key) != value for key, value in expected_host.items())
+        or "no-new-privileges" not in host.get("SecurityOpt", [])
+        or host.get("CapAdd") not in (None, [])
+        or host.get("LogConfig", {}).get("Type") != "none"
+        or host.get("PortBindings")
+        != {"4000/tcp": [{"HostIp": "127.0.0.1", "HostPort": "4000"}]}
+    ):
+        raise ReleaseError("running OCI container isolation policy differs from the launcher")
+    user = str(config.get("User", "")).split(":", 1)[0]
+    command = config.get("Cmd", [])
+    entrypoint = config.get("Entrypoint", [])
+    required_pairs = [
+        ["--depot", "/app/trailroot/depot"],
+        ["--public-url", "http://127.0.0.1:4000"],
+        ["--address", "0.0.0.0:4000"],
+        ["--admin-address", "127.0.0.1:4001"],
+        ["--cors-allowed-origins", "http://127.0.0.1:4000"],
+        ["--runtime-threads", "1"],
+    ]
+    if (
+        user in {"", "0", "root"}
+        or entrypoint not in (["/usr/bin/flock"], "/usr/bin/flock")
+        or not isinstance(command, list)
+        or not all(
+            any(command[index : index + 2] == pair for index in range(len(command) - 1))
+            for pair in required_pairs
+        )
+        or not isinstance(mounts, list)
+        or not any(
+            mount.get("Source") == str(root.resolve())
+            and mount.get("Destination") == "/app/trailroot"
+            and mount.get("RW") is True
+            for mount in mounts
+            if isinstance(mount, dict)
+        )
+    ):
+        raise ReleaseError("running OCI container command or data boundary differs from the launcher")
 
 
 def _post_json(
@@ -880,6 +979,16 @@ def bootstrap_native(
                     process.wait(timeout=5)
             reader.join(timeout=2)
 
+        terminal.write("TrailBase administrator: admin@localhost\n")
+        terminal.write(f"One-time delivered password: {new_password}\n")
+        terminal.write("Store it now. It is not retained by Fasti or written to service logs.\n")
+        terminal.write("Press Enter after storing the credential: ")
+        terminal.flush()
+        if sys.stdin.readline() == "":
+            raise ReleaseError(
+                "credential custody was not confirmed; keep the unverified depot stopped and "
+                "restore or remove it explicitly before retrying initialization"
+            )
         receipt = {
             "schema_version": "fasti.trailbase-bootstrap.v1",
             "release": load_release()["version"],
@@ -888,12 +997,6 @@ def bootstrap_native(
             "completed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         }
         _write_private(marker, (json.dumps(receipt, indent=2) + "\n").encode("utf-8"), 0o600)
-        terminal.write("TrailBase administrator: admin@localhost\n")
-        terminal.write(f"One-time delivered password: {new_password}\n")
-        terminal.write("Store it now. It is not retained by Fasti or written to service logs.\n")
-        terminal.write("Press Enter after storing the credential: ")
-        terminal.flush()
-        sys.stdin.readline()
     finally:
         if runtime_lock is not None:
             os.close(runtime_lock)
@@ -1071,6 +1174,10 @@ def restore_depot(
             names = archive.namelist()
             if len(names) != len(set(names)) or "manifest.json" not in names or len(names) > 100_000:
                 raise ReleaseError("depot backup member inventory is invalid")
+            member_info = {entry.filename: entry for entry in archive.infolist()}
+            manifest_info = member_info["manifest.json"]
+            if manifest_info.is_dir() or manifest_info.file_size > 16 * 1024:
+                raise ReleaseError("depot backup manifest exceeds its size limit")
             manifest = json.loads(archive.read("manifest.json"))
             if not isinstance(manifest, dict) or set(manifest) != {
                 "schema_version",
@@ -1122,6 +1229,14 @@ def restore_depot(
             )
             if set(names) != expected_members:
                 raise ReleaseError("depot backup members differ from its manifest")
+            for name, entry in entries.items():
+                archive_name = f"{name}/" if entry["kind"] == "directory" else name
+                info = member_info[archive_name]
+                if bool(info.is_dir()) != (entry["kind"] == "directory") or (
+                    entry["kind"] == "file" and info.file_size != entry["bytes"]
+                ):
+                    raise ReleaseError(f"depot backup member size or type mismatch: {name}")
+            extracted_bytes = 0
             for name, entry in sorted(entries.items(), key=lambda item: len(Path(item[0]).parts)):
                 destination = temporary / _archive_path(name)
                 if entry["kind"] == "directory":
@@ -1146,6 +1261,12 @@ def restore_depot(
                     ) as output_file:
                         for block in iter(lambda: input_file.read(1024 * 1024), b""):
                             size += len(block)
+                            extracted_bytes += len(block)
+                            if (
+                                size > entry["bytes"]
+                                or extracted_bytes > 4 * 1024 * 1024 * 1024
+                            ):
+                                raise ReleaseError(f"depot backup content exceeds its bound: {name}")
                             digest.update(block)
                             output_file.write(block)
                         output_file.flush()
@@ -1198,6 +1319,33 @@ def _backup_restore_self_test() -> None:
         verify_private_root(restored)
         if (restored / "depot/uploads/example.bin").read_bytes() != b"depot/uploads/example.bin":
             raise ReleaseError("full-depot backup self-test lost nested content")
+        try:
+            restore_depot(backup, base / "wrong-release", "0.0.0")
+        except ReleaseError:
+            pass
+        else:
+            raise ReleaseError("release-mismatched restore self-test did not fail")
+
+        mismatched = base / "mismatched.zip"
+        with zipfile.ZipFile(backup) as source, zipfile.ZipFile(
+            mismatched, "w", compression=zipfile.ZIP_DEFLATED
+        ) as destination:
+            manifest = json.loads(source.read("manifest.json"))
+            file_entry = next(entry for entry in manifest["entries"] if entry["kind"] == "file")
+            file_entry["bytes"] += 1
+            for info in source.infolist():
+                payload = (
+                    json.dumps(manifest, indent=2, sort_keys=True).encode()
+                    if info.filename == "manifest.json"
+                    else source.read(info.filename)
+                )
+                destination.writestr(info, payload)
+        try:
+            restore_depot(mismatched, base / "mismatched-restore")
+        except ReleaseError:
+            pass
+        else:
+            raise ReleaseError("member-size-mismatched restore self-test did not fail")
 
 
 def self_test() -> None:
@@ -1209,6 +1357,16 @@ def self_test() -> None:
         "https://github.com/trailbaseio/trailbase/releases/latest/download/trail.zip"
     )
     mutations.append(floating_url)
+
+    spoofed_release_host = copy.deepcopy(release)
+    spoofed_release_host["release_url"] = (
+        "https://example.invalid/trailbaseio/trailbase/releases/tag/v0.33.5"
+    )
+    mutations.append(spoofed_release_host)
+
+    wrong_tag_commit = copy.deepcopy(release)
+    wrong_tag_commit["tag_commit"] = "0" * 40
+    mutations.append(wrong_tag_commit)
 
     floating_image = copy.deepcopy(release)
     floating_image["oci"]["index_digest"] = "latest"
@@ -1291,6 +1449,14 @@ def main() -> int:
     prepare_oci_parser.add_argument("root", type=Path)
     prepare_oci_parser.add_argument("--runtime", choices=["podman", "docker"], required=True)
     prepare_oci_parser.add_argument("--offline", action="store_true")
+    verify_oci_container_parser = subcommands.add_parser(
+        "verify-oci-container", help="verify a running container uses the exact release image"
+    )
+    verify_oci_container_parser.add_argument("root", type=Path)
+    verify_oci_container_parser.add_argument(
+        "--runtime", choices=["podman", "docker"], required=True
+    )
+    verify_oci_container_parser.add_argument("--name", required=True)
     bootstrap_parser = subcommands.add_parser(
         "bootstrap-native", help="initialize and rotate the private TrailBase administrator"
     )
@@ -1342,6 +1508,9 @@ def main() -> int:
             print(executable)
         elif arguments.command == "prepare-oci":
             print(prepare_oci(arguments.root, arguments.runtime, arguments.offline))
+        elif arguments.command == "verify-oci-container":
+            verify_oci_container(arguments.root, arguments.runtime, arguments.name)
+            print(f"PASS: exact running TrailBase OCI container {arguments.name}")
         elif arguments.command == "bootstrap-native":
             bootstrap_native(
                 arguments.root,

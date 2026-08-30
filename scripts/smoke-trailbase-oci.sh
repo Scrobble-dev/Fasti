@@ -79,4 +79,18 @@ if podman inspect "$container" >/dev/null 2>&1; then
   echo "Stopped OCI container was not removed." >&2
   exit 1
 fi
+reference="$(python3 -B "$repo_root/scripts/trailbase_runtime.py" prepare-oci \
+  "$repo_root/.dev-trailbase" --runtime podman --offline)"
+podman run -d --name "$container" --rm --pull never \
+  --userns keep-id --user "$(id -u):$(id -g)" \
+  --volume "$repo_root/.dev-trailbase:/app/trailroot:Z" \
+  "$reference" \
+  /app/trail --depot /app/trailroot/depot --public-url http://127.0.0.1:4000 \
+  run --address 0.0.0.0:4000 --admin-address 127.0.0.1:4001 \
+  --cors-allowed-origins http://127.0.0.1:4000 --runtime-threads 1 >/dev/null
+if "$repo_root/scripts/dev.sh" trailbase start --podman >/dev/null 2>&1; then
+  echo "Launcher accepted a scoped container with a drifted isolation policy." >&2
+  exit 1
+fi
+podman stop "$container" >/dev/null
 echo "PASS: exact TrailBase OCI lifecycle, isolation, and active-backup guard"
