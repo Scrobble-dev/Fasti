@@ -104,6 +104,15 @@ const config: Config = {
             },
           ],
         },
+        {
+          title: "Related",
+          items: [
+            {
+              label: "Scrobble.dev independent field guide",
+              href: "https://scrobble.dev/",
+            },
+          ],
+        },
       ],
       copyright: `Copyright ${new Date().getFullYear()} Fasti contributors. AGPL-3.0-or-later.`,
     },
