@@ -3,12 +3,27 @@ use crate::{
     RequestAccessContext,
 };
 use fasti_domain::{
-    AnimeGroupingPreference, OperationId, ProfileId, RecordId, RequestCorrelationId,
+    AnimeGroupingPreference, ClientId, OperationId, ProfileId, RecordId, RequestCorrelationId,
     ResolutionIntent, Sha256Digest,
 };
 use std::num::NonZeroU16;
 
 pub const MAX_IDENTITY_IMPACT_PAGE: u16 = 100;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnimeGroupingPolicyScope {
+    Profile,
+    Client(ClientId),
+}
+
+impl AnimeGroupingPolicyScope {
+    pub const fn client_id(self) -> Option<ClientId> {
+        match self {
+            Self::Profile => None,
+            Self::Client(client_id) => Some(client_id),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct IdentityImpactPageLimit(NonZeroU16);
@@ -76,13 +91,19 @@ impl ResolveIdentityRouteQuery {
 pub struct ReadAnimeGroupingPolicyQuery {
     correlation_id: RequestCorrelationId,
     access: RequestAccessContext,
+    scope: AnimeGroupingPolicyScope,
 }
 
 impl ReadAnimeGroupingPolicyQuery {
-    pub const fn new(correlation_id: RequestCorrelationId, access: RequestAccessContext) -> Self {
+    pub const fn new(
+        correlation_id: RequestCorrelationId,
+        access: RequestAccessContext,
+        scope: AnimeGroupingPolicyScope,
+    ) -> Self {
         Self {
             correlation_id,
             access,
+            scope,
         }
     }
 
@@ -92,6 +113,10 @@ impl ReadAnimeGroupingPolicyQuery {
 
     pub const fn access(&self) -> &RequestAccessContext {
         &self.access
+    }
+
+    pub const fn scope(&self) -> AnimeGroupingPolicyScope {
+        self.scope
     }
 }
 
@@ -105,6 +130,7 @@ pub enum AnimeGroupingPolicyChange {
 pub struct PreviewAnimeGroupingPolicyChangeQuery {
     correlation_id: RequestCorrelationId,
     access: RequestAccessContext,
+    scope: AnimeGroupingPolicyScope,
     change: AnimeGroupingPolicyChange,
     after_record_id: Option<RecordId>,
     limit: IdentityImpactPageLimit,
@@ -114,6 +140,7 @@ impl PreviewAnimeGroupingPolicyChangeQuery {
     pub const fn new(
         correlation_id: RequestCorrelationId,
         access: RequestAccessContext,
+        scope: AnimeGroupingPolicyScope,
         change: AnimeGroupingPolicyChange,
         after_record_id: Option<RecordId>,
         limit: IdentityImpactPageLimit,
@@ -121,6 +148,7 @@ impl PreviewAnimeGroupingPolicyChangeQuery {
         Self {
             correlation_id,
             access,
+            scope,
             change,
             after_record_id,
             limit,
@@ -133,6 +161,10 @@ impl PreviewAnimeGroupingPolicyChangeQuery {
 
     pub const fn access(&self) -> &RequestAccessContext {
         &self.access
+    }
+
+    pub const fn scope(&self) -> AnimeGroupingPolicyScope {
+        self.scope
     }
 
     pub const fn change(&self) -> AnimeGroupingPolicyChange {
@@ -152,6 +184,7 @@ impl PreviewAnimeGroupingPolicyChangeQuery {
 pub struct ApplyAnimeGroupingPolicyChangeCommand {
     correlation_id: RequestCorrelationId,
     access: RequestAccessContext,
+    scope: AnimeGroupingPolicyScope,
     operation_id: OperationId,
     semantic_digest: Sha256Digest,
     expected_revision: u64,
@@ -162,6 +195,7 @@ impl ApplyAnimeGroupingPolicyChangeCommand {
     pub const fn new(
         correlation_id: RequestCorrelationId,
         access: RequestAccessContext,
+        scope: AnimeGroupingPolicyScope,
         operation_id: OperationId,
         semantic_digest: Sha256Digest,
         expected_revision: u64,
@@ -170,6 +204,7 @@ impl ApplyAnimeGroupingPolicyChangeCommand {
         Self {
             correlation_id,
             access,
+            scope,
             operation_id,
             semantic_digest,
             expected_revision,
@@ -183,6 +218,10 @@ impl ApplyAnimeGroupingPolicyChangeCommand {
 
     pub const fn access(&self) -> &RequestAccessContext {
         &self.access
+    }
+
+    pub const fn scope(&self) -> AnimeGroupingPolicyScope {
+        self.scope
     }
 
     pub const fn operation_id(&self) -> OperationId {
@@ -205,6 +244,7 @@ impl ApplyAnimeGroupingPolicyChangeCommand {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AnimeGroupingPolicyView {
     profile_id: ProfileId,
+    scope: AnimeGroupingPolicyScope,
     preference: AnimeGroupingPreference,
     revision: u64,
 }
@@ -212,11 +252,13 @@ pub struct AnimeGroupingPolicyView {
 impl AnimeGroupingPolicyView {
     pub const fn new(
         profile_id: ProfileId,
+        scope: AnimeGroupingPolicyScope,
         preference: AnimeGroupingPreference,
         revision: u64,
     ) -> Self {
         Self {
             profile_id,
+            scope,
             preference,
             revision,
         }
@@ -224,6 +266,10 @@ impl AnimeGroupingPolicyView {
 
     pub const fn profile_id(&self) -> ProfileId {
         self.profile_id
+    }
+
+    pub const fn scope(&self) -> AnimeGroupingPolicyScope {
+        self.scope
     }
 
     pub const fn preference(&self) -> AnimeGroupingPreference {
@@ -406,6 +452,16 @@ mod tests {
                 .expect("maximum page")
                 .get(),
             MAX_IDENTITY_IMPACT_PAGE
+        );
+    }
+
+    #[test]
+    fn policy_scope_distinguishes_profile_default_from_client_override() {
+        let client_id = ClientId::new_v7();
+        assert_eq!(AnimeGroupingPolicyScope::Profile.client_id(), None);
+        assert_eq!(
+            AnimeGroupingPolicyScope::Client(client_id).client_id(),
+            Some(client_id)
         );
     }
 }

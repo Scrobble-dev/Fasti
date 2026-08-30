@@ -48,7 +48,8 @@ identifier and Fasti Record remain unchanged.
 
 ## Anime grouping and export preference
 
-The profile preference has four values:
+Each profile has a default preference. An authorized client, including a Nuvio
+connection, can have an explicit override. Both scopes use the same four values:
 
 | Value | Behavior |
 | --- | --- |
