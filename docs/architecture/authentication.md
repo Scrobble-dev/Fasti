@@ -75,6 +75,21 @@ functions. Fasti owns `AuthSubject`, browser sessions, workspaces, memberships,
 roles, profiles, grants, scopes, clients, devices, passkeys, recovery codes,
 authorization, audit, and Chronicle state.
 
+C1 uses a server-only direct backchannel to the exact supervised TrailBase
+origin. Fasti exchanges the one-use ceremony's authorization code at
+`/api/auth/v1/token`, rechecks the returned proof and refresh session at
+`/api/auth/v1/status`, and revokes that refresh session at
+`/api/auth/v1/logout`. It discards every TrailBase token before it creates an
+opaque Fasti browser session. Fasti does not accept a browser-supplied
+TrailBase token, validate TrailBase tokens offline, or treat TrailBase
+administrator and TOTP-enrollment claims as Fasti authorization or proof of
+multi-factor use.
+
+TrailBase hardening that is useful beyond C1 is tracked in the separate
+[upstream hardening plan](../plans/trailbase-upstream-hardening.md). That work
+does not authorize a Fasti-maintained fork and does not block the direct C1
+profile.
+
 Fasti assigns one stable `TrailBaseInstanceId` to the installation and links it
 to the proven TrailBase subject. Fasti must not use a TrailBase database row ID
 as its identity, read or write TrailBase tables, or use TrailBase Record APIs
