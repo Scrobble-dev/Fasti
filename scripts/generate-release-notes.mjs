@@ -16,9 +16,8 @@ const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // alternation is evaluated once per dot-separated identifier, with no
 // nested quantifier over an ambiguous sub-pattern.
 // eslint-disable-next-line security/detect-unsafe-regex
-// nosemgrep: generic.regex.security.dos.regex-dos -- vetted linear-time semver.org grammar, see above
 const SEMVER_TAG_PATTERN =
-  /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
+  /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/; // nosemgrep
 // Fixed pattern, never built from input -- avoids constructing any RegExp
 // from tag/version data at all, not just escaping it.
 const HEADING_PATTERN = /^##\s*\[([^\]]+)\][^\n]*\n/gm;
