@@ -129,6 +129,7 @@ impl ReadAnimeGroupingPolicyQuery {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AnimeGroupingPolicyChange {
     Set(AnimeGroupingPreference),
+    InheritProfile,
     Rollback { applied_operation_id: OperationId },
 }
 
@@ -367,6 +368,7 @@ impl AnimeGroupingPolicyImpact {
 pub struct ApplyAnimeGroupingPolicyChangeOutcome {
     operation_id: OperationId,
     previous_preference: AnimeGroupingPreference,
+    previous_source: AnimeGroupingPolicySource,
     policy: AnimeGroupingPolicyView,
     affected_records: u64,
     unresolved_routes: u64,
@@ -379,6 +381,7 @@ impl ApplyAnimeGroupingPolicyChangeOutcome {
     pub const fn new(
         operation_id: OperationId,
         previous_preference: AnimeGroupingPreference,
+        previous_source: AnimeGroupingPolicySource,
         policy: AnimeGroupingPolicyView,
         affected_records: u64,
         unresolved_routes: u64,
@@ -388,6 +391,7 @@ impl ApplyAnimeGroupingPolicyChangeOutcome {
         Self {
             operation_id,
             previous_preference,
+            previous_source,
             policy,
             affected_records,
             unresolved_routes,
@@ -402,6 +406,10 @@ impl ApplyAnimeGroupingPolicyChangeOutcome {
 
     pub const fn previous_preference(&self) -> AnimeGroupingPreference {
         self.previous_preference
+    }
+
+    pub const fn previous_source(&self) -> AnimeGroupingPolicySource {
+        self.previous_source
     }
 
     pub const fn policy(&self) -> &AnimeGroupingPolicyView {

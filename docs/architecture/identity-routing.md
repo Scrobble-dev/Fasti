@@ -53,7 +53,8 @@ connection, can have an explicit override. Both scopes use the same four values:
 
 A client without an override reads the profile default and its revision. The
 response says whether the value is inherited or client-owned, so compare-and-set
-apply detects a profile change between preview and apply.
+apply detects a profile change between preview and apply. A client override can
+be cleared explicitly to resume profile inheritance.
 
 | Value | Behavior |
 | --- | --- |
