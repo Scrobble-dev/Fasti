@@ -1,0 +1,23 @@
+{
+  "api_version": "fasti.scrobble.dev/addons/fixture/v0.1",
+  "kind": "MetadataProviderResponse",
+  "case": "success",
+  "status": 200,
+  "headers": {
+    "content-type": "application/json"
+  },
+  "body": {
+    "totalItems": 1,
+    "items": [
+      {
+        "id": "fixture-volume-1",
+        "volumeInfo": {
+          "title": "A Synthetic Book",
+          "authors": [
+            "Fixture Author"
+          ]
+        }
+      }
+    ]
+  }
+}

@@ -1,9 +1,9 @@
 ---
 type: Fasti Problem Catalogue
-title: B1 problem codes
-description: Shared problem-code identifiers referenced by finalized B1 capabilities.
+title: Governed problem codes
+description: Shared problem-code identifiers referenced by finalized catalogue capabilities.
 resource: https://fasti.scrobble.dev/ns/knowledge/v1/problems
-tags: [fasti, b1, contracts, problems]
+tags: [fasti, contracts, problems]
 status: draft
 identifiers:
   - already_initialized
@@ -19,6 +19,13 @@ identifiers:
   - invalid_observation
   - malformed_json
   - payload_too_large
+  - provider_credential_expired
+  - provider_credential_invalid
+  - provider_credential_missing
+  - provider_rate_limited
+  - provider_response_invalid
+  - provider_route_unavailable
+  - provider_unavailable
   - receipt_not_found
   - record_not_found
   - storage_unavailable
@@ -30,7 +37,7 @@ sources:
     title: Fasti capability registry v1
 ---
 
-# B1 problem codes
+# Governed problem codes
 
 These are the stable problem names referenced by finalized B1 capabilities in
 the [registry](../../registry/v1/capabilities.yaml).[^fasti-capability-registry]
@@ -38,26 +45,33 @@ The shared RFC 9457 representation carries a capability ID, safe state,
 retryability, ordered next actions, and a correlation ID. Individual codes do
 not claim a later-body failure path is executable.
 
-| Code                     | Contract meaning                                                     |
-| ------------------------ | -------------------------------------------------------------------- |
-| `already_initialized`    | One-time durable node initialization already completed.              |
-| `authentication_failed`  | The bearer credential is missing, malformed, or inactive.            |
-| `bootstrap_closed`       | The enrollment proof is invalid, expired, or already consumed.       |
-| `capacity_exceeded`      | A bounded application resource rejected work without mutation.       |
-| `capability_unavailable` | The requested capability is owned by another runtime body.           |
-| `forbidden`              | The request context is not authorized for the capability.            |
-| `idempotency_conflict`   | An operation identifier was reused with different semantics.         |
-| `identity_conflict`      | An exact external identifier is already attached to another active record. |
-| `integrity_failed`       | Durable local state failed a recorded integrity invariant.           |
-| `invalid_identifier`     | An identifier or grain does not satisfy the governed format.         |
-| `invalid_observation`    | An observation violates the governed input contract.                 |
-| `malformed_json`         | The request body is not well-formed JSON; no mutation occurred.      |
-| `payload_too_large`      | The request exceeded its documented bounded body limit.              |
-| `receipt_not_found`      | No visible receipt matches the requested identifier and context.     |
-| `record_not_found`       | No active record is available for the requested identifier.          |
-| `storage_unavailable`    | The local durability boundary is temporarily unavailable.            |
-| `unsupported_media_type` | The request did not use the required JSON media type.                |
-| `validation_failed`      | One or more public fields fail contract validation.                  |
+| Code                          | Contract meaning                                                           |
+| ----------------------------- | -------------------------------------------------------------------------- |
+| `already_initialized`         | One-time durable node initialization already completed.                    |
+| `authentication_failed`       | The bearer credential is missing, malformed, or inactive.                  |
+| `bootstrap_closed`            | The enrollment proof is invalid, expired, or already consumed.             |
+| `capacity_exceeded`           | A bounded application resource rejected work without mutation.             |
+| `capability_unavailable`      | The requested capability is owned by another runtime body.                 |
+| `forbidden`                   | The request context is not authorized for the capability.                  |
+| `idempotency_conflict`        | An operation identifier was reused with different semantics.               |
+| `identity_conflict`           | An exact external identifier is already attached to another active record. |
+| `integrity_failed`            | Durable local state failed a recorded integrity invariant.                 |
+| `invalid_identifier`          | An identifier or grain does not satisfy the governed format.               |
+| `invalid_observation`         | An observation violates the governed input contract.                       |
+| `malformed_json`              | The request body is not well-formed JSON; no mutation occurred.            |
+| `payload_too_large`           | The request exceeded its documented bounded body limit.                    |
+| `provider_credential_expired` | The provider credential has expired and must be replaced.                  |
+| `provider_credential_invalid` | The provider rejected the configured credential.                           |
+| `provider_credential_missing` | The capability requires a credential that is not available.                |
+| `provider_rate_limited`       | The provider rejected the request because its rate limit was reached.      |
+| `provider_response_invalid`   | The provider returned an invalid or unsafe response.                       |
+| `provider_route_unavailable`  | The governed provider route could not be reached.                          |
+| `provider_unavailable`        | The provider or requested capability is unavailable in this runtime.       |
+| `receipt_not_found`           | No visible receipt matches the requested identifier and context.           |
+| `record_not_found`            | No active record is available for the requested identifier.                |
+| `storage_unavailable`         | The local durability boundary is temporarily unavailable.                  |
+| `unsupported_media_type`      | The request did not use the required JSON media type.                      |
+| `validation_failed`           | One or more public fields fail contract validation.                        |
 
 See [capabilities](capabilities.md) for which codes each capability declares and
 [lifecycle](lifecycle.md) before treating a declared problem as a production

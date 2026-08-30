@@ -15,6 +15,7 @@ path = "src/main.rs"
 [dependencies]
 fasti-api = { workspace = true }
 fasti-application = { workspace = true }
+fasti-provider-runtime = { workspace = true }
 fasti-store = { workspace = true }
 axum = { workspace = true }
 getrandom = { workspace = true }
@@ -22,3 +23,4 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
+sha2 = "0.11.0"

@@ -350,6 +350,62 @@ define_problem_catalog!(
         default_next_action: ("reduce_request_body", "Reduce the request body and retry"),
         param_policy: ProblemParamPolicy::None
     },
+    ProviderUnavailable => "provider_unavailable" {
+        title: "Provider unavailable", status: 503,
+        detail: ProblemDetail::Static("the provider is unavailable within the bounded request policy"),
+        documentation_path: "v1/problems/provider-unavailable", safe_state: PriorStateRetained,
+        retryability: RetrySafe,
+        default_next_action: ("retry_provider", "Retry after checking provider and network status"),
+        param_policy: ProblemParamPolicy::None
+    },
+    ProviderCredentialMissing => "provider_credential_missing" {
+        title: "Provider credential missing", status: 409,
+        detail: ProblemDetail::Static("this provider capability requires a stored credential"),
+        documentation_path: "v1/problems/provider-credential-missing", safe_state: PriorStateRetained,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("configure_provider_credential", "Configure the required provider credential"),
+        param_policy: ProblemParamPolicy::None
+    },
+    ProviderCredentialInvalid => "provider_credential_invalid" {
+        title: "Provider credential invalid", status: 401,
+        detail: ProblemDetail::Static("the provider rejected the configured credential"),
+        documentation_path: "v1/problems/provider-credential-invalid", safe_state: PriorStateRetained,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("replace_provider_credential", "Replace the provider credential and test it again"),
+        param_policy: ProblemParamPolicy::None
+    },
+    ProviderCredentialExpired => "provider_credential_expired" {
+        title: "Provider credential expired", status: 401,
+        detail: ProblemDetail::Static("the configured provider credential has expired"),
+        documentation_path: "v1/problems/provider-credential-expired", safe_state: PriorStateRetained,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("reauthorize_provider", "Reauthorize the provider connection"),
+        param_policy: ProblemParamPolicy::None
+    },
+    ProviderRateLimited => "provider_rate_limited" {
+        title: "Provider rate limited", status: 429,
+        detail: ProblemDetail::Static("the provider request budget is temporarily exhausted"),
+        documentation_path: "v1/problems/provider-rate-limited", safe_state: PriorStateRetained,
+        retryability: RetrySafe,
+        default_next_action: ("retry_after_provider_limit", "Retry after the provider limit resets"),
+        param_policy: ProblemParamPolicy::None
+    },
+    ProviderResponseInvalid => "provider_response_invalid" {
+        title: "Provider response invalid", status: 502,
+        detail: ProblemDetail::Static("the provider response did not satisfy the bounded response contract"),
+        documentation_path: "v1/problems/provider-response-invalid", safe_state: PriorStateRetained,
+        retryability: RetrySafe,
+        default_next_action: ("inspect_provider_health", "Inspect provider health before retrying"),
+        param_policy: ProblemParamPolicy::None
+    },
+    ProviderRouteUnavailable => "provider_route_unavailable" {
+        title: "Provider route unavailable", status: 422,
+        detail: ProblemDetail::Static("no verified provider route is available for this capability"),
+        documentation_path: "v1/problems/provider-route-unavailable", safe_state: PriorStateRetained,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("review_provider_route", "Review the provider capability and identity route"),
+        param_policy: ProblemParamPolicy::None
+    },
     ReceiptNotFound => "receipt_not_found" {
         title: "Receipt not found", status: 404,
         detail: ProblemDetail::Static("no receipt is available for the requested identifier"),
@@ -473,6 +529,13 @@ impl ProblemCode {
             Self::BrowserSessionExpired
             | Self::BrowserSessionRevoked
             | Self::SessionPolicyChanged => CapabilityBody::C1,
+            Self::ProviderUnavailable
+            | Self::ProviderCredentialMissing
+            | Self::ProviderCredentialInvalid
+            | Self::ProviderCredentialExpired
+            | Self::ProviderRateLimited
+            | Self::ProviderResponseInvalid
+            | Self::ProviderRouteUnavailable => CapabilityBody::M1,
             Self::DataRootLocked
             | Self::ExportCanceled
             | Self::OperationCanceled
@@ -497,6 +560,7 @@ impl ProblemCode {
             | Self::StorageUnavailable => ContractState::Finalized,
             _ => match self.introduced_in() {
                 CapabilityBody::B0 | CapabilityBody::B1 => ContractState::Finalized,
+                CapabilityBody::M1 => ContractState::Finalized,
                 CapabilityBody::B2 | CapabilityBody::B3 | CapabilityBody::C1 => {
                     ContractState::Reserved
                 }
@@ -977,6 +1041,20 @@ mod tests {
         ] {
             assert_eq!(code.introduced_in(), CapabilityBody::C1);
             assert_eq!(code.contract_state(), ContractState::Finalized);
+        }
+
+        for code in [
+            ProblemCode::ProviderUnavailable,
+            ProblemCode::ProviderCredentialMissing,
+            ProblemCode::ProviderCredentialInvalid,
+            ProblemCode::ProviderCredentialExpired,
+            ProblemCode::ProviderRateLimited,
+            ProblemCode::ProviderResponseInvalid,
+            ProblemCode::ProviderRouteUnavailable,
+        ] {
+            assert_eq!(code.introduced_in(), CapabilityBody::M1);
+            assert_eq!(code.contract_state(), ContractState::Finalized);
+            assert_eq!(code.contract().safe_state(), SafeState::PriorStateRetained);
         }
 
         for code in [

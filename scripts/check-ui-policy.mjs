@@ -290,8 +290,13 @@ forbidText(
 );
 requireText(
   "apps/web/src/web-host.ts",
-  "The browser host never accepts or stores provider secrets.",
-  "the browser host must preserve the provider credential trust boundary",
+  "client.configureProviderCredential(provider, capabilityId, {",
+  "the browser host must send provider credentials through the governed write-only SDK operation",
+);
+requireText(
+  "apps/web/src/web-host.ts",
+  "secret: credential",
+  "the browser host must keep the provider secret in the write-only request body",
 );
 
 for (const rule of [

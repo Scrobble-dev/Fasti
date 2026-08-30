@@ -14,19 +14,20 @@ Those commands report contract state. They do not activate later-body runtime be
 
 ## Current runtime truth
 
-| Capability group                                                                                             | Runtime truth                                                                                                                                         |
-| ------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `system.health`                                                                                              | Implemented by the production daemon and its production OpenAPI document                                                                              |
-| `system.node.initialize` and `access.client.enroll`                                                          | Durable production routes with `FASTI_DATA_ROOT` and direct loopback or an explicit loopback-only port forward; also covered by the nondurable fixture |
-| PR A browser-session foundation                                                                              | Dormant domain, application, and store model only. Production identity, sign-in, session issuance, inventory, and revocation are `Unavailable until C1` |
-| `observation.accept`                                                                                         | Durable production HTTP route (`POST /api/v1/observations`), authorized by a scoped bearer client credential                                           |
-| Other B1 administration, receipt, and `receipt.stream` capabilities                                          | Executable only in the feature-gated loopback conformance fixture; state is bounded, in-memory, and nondurable                                        |
-| Identity records, identifiers, namespaces, profile tracking disposition, and Nuvio Collections configuration | Durable local and authenticated remote HTTP routes, covered by `cargo xtask contract verify`                                                          |
-| Identity review (inspect, defer, resume, resolve)                                                            | Implemented behind internal B2 ports for review; no production route exists                                                                           |
-| Corrections and portability                                                                                  | Implemented behind internal B3 ports for review; export, restore, and verify remain explicit nonzero CLI guards                                       |
-| Browser Workbench                                                                                            | Pre-production data surfaces. Human sign-in and Account and security controls must show one persistent unavailable state until C1                     |
-| Trusted desktop network settings and provider metadata                                                       | Local Tauri IPC search/read, bounded local artwork, and atomic Google Books/TMDB claim writes; no public mutation route or browser provider execution |
-| Product packaging and release behavior                                                                       | Later bodies; absent now                                                                                                                              |
+| Capability group                                                                                             | Runtime truth                                                                                                                                                             |
+| ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `system.health`                                                                                              | Implemented by the production daemon and its production OpenAPI document                                                                                                  |
+| `system.node.initialize` and `access.client.enroll`                                                          | Durable production routes with `FASTI_DATA_ROOT` and direct loopback or an explicit loopback-only port forward; also covered by the nondurable fixture                    |
+| PR A browser-session foundation                                                                              | Dormant domain, application, and store model only. Production identity, sign-in, session issuance, inventory, and revocation are `Unavailable until C1`                   |
+| `observation.accept`                                                                                         | Durable production HTTP route (`POST /api/v1/observations`), authorized by a scoped bearer client credential                                                              |
+| Other B1 administration, receipt, and `receipt.stream` capabilities                                          | Executable only in the feature-gated loopback conformance fixture; state is bounded, in-memory, and nondurable                                                            |
+| Identity records, identifiers, namespaces, profile tracking disposition, and Nuvio Collections configuration | Durable local and authenticated remote HTTP routes, covered by `cargo xtask contract verify`                                                                              |
+| Identity review (inspect, defer, resume, resolve)                                                            | Implemented behind internal B2 ports for review; no production route exists                                                                                               |
+| Corrections and portability                                                                                  | Implemented behind internal B3 ports for review; export, restore, and verify remain explicit nonzero CLI guards                                                           |
+| Browser Workbench                                                                                            | Pre-production data surfaces. Human sign-in and Account and security controls must show one persistent unavailable state until C1                                         |
+| M1 provider registry, credentials, and health                                                                | Durable scoped HTTP/SDK/UI status and write-only credential management; shared governed Google Books/TMDB runtime; ten additional providers remain explicitly unavailable |
+| Trusted desktop provider metadata                                                                            | Shared governed search/read runtime, bounded local artwork, and atomic Google Books/TMDB claim writes; Desktop credentials use the platform credential store              |
+| Product packaging and release behavior                                                                       | Later bodies; absent now                                                                                                                                                  |
 
 The fixture separates contract proof from availability claims. Its finite routes are generated into a dedicated conformance OpenAPI document. `receipt.stream` is governed as an AsyncAPI 3.x SSE operation. Successful fixture responses identify `fixture_only` availability and `none` durability; problem-only routes cannot imply a false success. The production router mounts health, durable node setup (initialize/enroll), observation acceptance, and the identity records/identifiers/namespaces routes above. All other fixture paths return `404` in production.
 
@@ -36,20 +37,22 @@ The browser Workbench consumes generated production DTO parsers for active data 
 
 PR A records these authentication contract dispositions:
 
-| Surface | Disposition |
-| --- | --- |
-| Production OpenAPI and SDK | No human-account or browser-session route. C1 owns activation and the public contract. |
-| AsyncAPI | `N/A — PR A exposes no externally visible asynchronous authentication event.` |
-| JSON-LD | `N/A — subjects, sessions, credentials, and tokens are security state, not public semantic entities.` |
-| Public CLI | `N/A — PR A uses direct deterministic domain, application, and store fixtures; C1 owns trusted identity bootstrap and activation commands.` |
+| Surface                    | Disposition                                                                                                                                 |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Production OpenAPI and SDK | No human-account or browser-session route. C1 owns activation and the public contract.                                                      |
+| AsyncAPI                   | `N/A — PR A exposes no externally visible asynchronous authentication event.`                                                               |
+| JSON-LD                    | `N/A — subjects, sessions, credentials, and tokens are security state, not public semantic entities.`                                       |
+| Public CLI                 | `N/A — PR A uses direct deterministic domain, application, and store fixtures; C1 owns trusted identity bootstrap and activation commands.` |
 
 Reserved or dormant authentication identifiers do not authorize a route,
 session, fixture listener, success response, or UI success state.
 
 The trusted Tauri host can persist non-secret network preferences, test a
 configured Fasti service, store Google Books and TMDB credentials in the
-platform credential store, and return bounded neutral search candidates. It
-refetches the exact selected item, downloads provider artwork through a
+platform credential store, and return bounded neutral search candidates. The
+durable daemon exposes scoped provider inventory, write-only credential
+configuration/removal/test, and health routes through the same provider runtime.
+It refetches the exact selected item, downloads provider artwork through a
 separate governed request into a bounded owner-only cache, and serves only a
 narrowly scoped local Tauri asset to the Desktop UI. The application then
 atomically creates a Record with its identifier and claims or appends refreshed

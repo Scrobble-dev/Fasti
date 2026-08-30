@@ -94,6 +94,10 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     "/api/v1/profile/nuvio-collections",
     "/api/v1/profile/record-tracking-dispositions",
     "/api/v1/profile/record-tracking-dispositions/{record_id}",
+    "/api/v1/providers",
+    "/api/v1/providers/{provider_id}/credentials/{capability_id}",
+    "/api/v1/providers/{provider_id}/credentials/{capability_id}/tests",
+    "/api/v1/providers/{provider_id}/health",
     "/api/v1/records",
     "/api/v1/records/identifiers",
   ]);
@@ -166,7 +170,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
 
   assert.equal(registry.contract_version, "1.0.0");
   assert.equal(registry.capability_base_uri.endsWith("/v1/"), true);
-  assert.equal(registry.capabilities.length, 39);
+  assert.equal(registry.capabilities.length, 43);
   const capabilityIds = registry.capabilities.map(({ id }) => id);
   assert.equal(new Set(capabilityIds).size, capabilityIds.length);
   assert.deepEqual(capabilityIds, [...capabilityIds].sort());
@@ -188,6 +192,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     if (capability.id.startsWith("browser.")) {
       return "c1_browser_session_foundation";
     }
+    if (capability.id.startsWith("provider.")) return "m1_providers";
     if (
       capability.id.startsWith("profile.record.tracking_disposition.") ||
       capability.id.startsWith("profile.nuvio_collections.")
@@ -461,13 +466,20 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
             binding,
             capability.id === "system.health"
               ? "package-smoke:production-health"
-              : ["client.enroll", "node.initialize"].includes(capability.id)
-                ? "package-smoke:production-bootstrap"
-                : "package-smoke:b1-conformance-fixture",
+              : capability.id.startsWith("provider.")
+                ? "package-smoke:production-providers"
+                : ["client.enroll", "node.initialize"].includes(capability.id)
+                  ? "package-smoke:production-bootstrap"
+                  : "package-smoke:b1-conformance-fixture",
           );
           break;
         case "ui":
-          assert.equal(binding, `ui:${capability.id}`);
+          assert.equal(
+            binding,
+            capability.id.startsWith("provider.")
+              ? "ui:provider-settings"
+              : `ui:${capability.id}`,
+          );
           break;
         default:
           assert.fail(`unresolved required surface ${surface}`);

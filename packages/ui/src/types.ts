@@ -242,10 +242,34 @@ export interface EndpointConnectionStatus {
 
 export interface ProviderCredentialStatus {
   readonly provider: string;
+  readonly capability_id: string;
   readonly label: string;
-  readonly configured: boolean;
-  readonly source: "none" | "environment" | "credential_store";
+  readonly purpose: string;
+  readonly credential_requirement:
+    | "none"
+    | "optional_api_key"
+    | "api_key"
+    | "bearer_token"
+    | "basic_auth"
+    | "oauth2"
+    | "user_agent_only"
+    | "custom_header"
+    | "operator_secret_mount";
+  readonly credential_state:
+    | "not_required"
+    | "optional"
+    | "missing"
+    | "stored_unverified"
+    | "valid"
+    | "invalid"
+    | "expired"
+    | "unavailable"
+    | "revoked";
+  readonly state: "available" | "degraded" | "unavailable" | "disabled";
+  readonly source:
+    "none" | "environment" | "credential_store" | "operator_secret_mount";
   readonly writable: boolean;
+  readonly testable: boolean;
   readonly docs_url: string;
 }
 
@@ -287,11 +311,18 @@ export interface WorkbenchHost {
   providerCredentialStatus(): Promise<ProviderCredentialStatus[]>;
   saveProviderCredential(
     provider: string,
+    capabilityId: string,
     credential: string,
   ): Promise<ProviderCredentialStatus[]>;
   deleteProviderCredential(
     provider: string,
+    capabilityId: string,
   ): Promise<ProviderCredentialStatus[]>;
+  testProviderCredential(
+    provider: string,
+    capabilityId: string,
+  ): Promise<ProviderCredentialStatus[]>;
+  readProviderHealth(provider: string): Promise<ProviderCredentialStatus[]>;
   searchProvider(
     provider: string,
     query: string,

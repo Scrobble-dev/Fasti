@@ -280,6 +280,33 @@ surface_profiles:
       }
     ui: { state: required, binding: "ui:{capability_id}" }
 
+  m1_providers:
+    domain_application:
+      { state: required, binding: "application:{application_key}" }
+    http_openapi: { state: required, binding: "openapi:{capability_id}" }
+    sse_asyncapi:
+      {
+        state: not_applicable,
+        reason: Provider registry credential and health operations are finite requests with no event channel.,
+      }
+    cli: { state: required, binding: "cli:capability-discovery" }
+    json_schema:
+      {
+        state: required,
+        binding: "schema:production-openapi-operation:{capability_id}",
+      }
+    json_ld:
+      {
+        state: not_applicable,
+        reason: Provider configuration and health are private operational state rather than linked domain evidence.,
+      }
+    okf: { state: required, binding: "okf:capability-catalog" }
+    sdk: { state: required, binding: "sdk:{capability_id}" }
+    knowledge: { state: required, binding: "knowledge:problem-catalog" }
+    package_smoke:
+      { state: required, binding: "package-smoke:production-providers" }
+    ui: { state: required, binding: "ui:provider-settings" }
+
   c1_browser_session_foundation:
     domain_application:
       { state: required, binding: "application:{application_key}" }
@@ -1385,4 +1412,112 @@ capabilities:
     scopes: [workspace_verify]
     problems: [capability_unavailable, forbidden, validation_failed]
     examples: []
+    uat: []
+
+  - application_key: list_providers
+    id: provider.list
+    bounded_context: connections.providers
+    contract_body: m1
+    runtime_body: m1
+    authorization: scoped
+    lifecycle:
+      {
+        introduced_in: m1,
+        contract_state: finalized,
+        runtime_availability: implemented,
+      }
+    surface_profile: m1_providers
+    scopes: [provider_read]
+    problems:
+      [authentication_failed, forbidden, integrity_failed, storage_unavailable]
+    examples: [provider.list.forbidden]
+    uat: []
+
+  - application_key: configure_provider_credential
+    id: provider.credential.configure
+    bounded_context: connections.providers
+    contract_body: m1
+    runtime_body: m1
+    authorization: scoped
+    lifecycle:
+      {
+        introduced_in: m1,
+        contract_state: finalized,
+        runtime_availability: implemented,
+      }
+    surface_profile: m1_providers
+    scopes: [provider_credential_manage]
+    problems:
+      [
+        authentication_failed,
+        forbidden,
+        integrity_failed,
+        malformed_json,
+        payload_too_large,
+        provider_credential_invalid,
+        provider_unavailable,
+        storage_unavailable,
+        unsupported_media_type,
+        validation_failed,
+      ]
+    examples: [provider.credential.configure.validation_failed]
+    uat: []
+
+  - application_key: test_provider_credential
+    id: provider.credential.test
+    bounded_context: connections.providers
+    contract_body: m1
+    runtime_body: m1
+    authorization: scoped
+    lifecycle:
+      {
+        introduced_in: m1,
+        contract_state: finalized,
+        runtime_availability: implemented,
+      }
+    surface_profile: m1_providers
+    scopes: [provider_credential_manage]
+    problems:
+      [
+        authentication_failed,
+        forbidden,
+        integrity_failed,
+        provider_credential_expired,
+        provider_credential_invalid,
+        provider_credential_missing,
+        provider_rate_limited,
+        provider_response_invalid,
+        provider_route_unavailable,
+        provider_unavailable,
+        storage_unavailable,
+      ]
+    examples: [provider.credential.test.provider_credential_missing]
+    uat: []
+
+  - application_key: read_provider_health
+    id: provider.health.read
+    bounded_context: connections.providers
+    contract_body: m1
+    runtime_body: m1
+    authorization: scoped
+    lifecycle:
+      {
+        introduced_in: m1,
+        contract_state: finalized,
+        runtime_availability: implemented,
+      }
+    surface_profile: m1_providers
+    scopes: [provider_read]
+    problems:
+      [
+        authentication_failed,
+        forbidden,
+        integrity_failed,
+        provider_rate_limited,
+        provider_response_invalid,
+        provider_route_unavailable,
+        provider_unavailable,
+        storage_unavailable,
+      ]
+    examples: [provider.health.read.provider_unavailable]
     uat: []

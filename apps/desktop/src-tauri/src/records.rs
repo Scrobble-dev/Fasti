@@ -89,6 +89,7 @@ pub(crate) fn list_records(
         .list_records(ListRecordsQuery::new(correlation_id, access))
         .map_err(|problem| DesktopProblem::application(&problem))?;
     Ok(summaries
+        .into_records()
         .into_iter()
         .map(|summary| {
             let poster_asset_path = summary

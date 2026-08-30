@@ -89,10 +89,20 @@
     }
   }
   const supportedProviders = $derived(
-    (providerCredentials ?? []).filter((provider) =>
-      ["google-books", "tmdb"].includes(provider.provider),
+    (providerCredentials ?? []).filter(
+      (provider) =>
+        provider.capability_id === "metadata.search" &&
+        ["google-books", "tmdb"].includes(provider.provider),
     ),
   );
+  function providerAvailable(provider: ProviderCredentialStatus): boolean {
+    return (
+      ["available", "degraded"].includes(provider.state) &&
+      ["not_required", "optional", "stored_unverified", "valid"].includes(
+        provider.credential_state,
+      )
+    );
+  }
   const selectedProvider = $derived(
     supportedProviders.find(
       (provider) => provider.provider === selectedProviderId,
@@ -111,7 +121,7 @@
     }
     selectionExplicit = false;
     selectedProviderId =
-      supportedProviders.find((provider) => provider.configured)?.provider ??
+      supportedProviders.find(providerAvailable)?.provider ??
       supportedProviders[0].provider;
   });
 
@@ -136,7 +146,13 @@
   async function search(event: SubmitEvent): Promise<void> {
     event.preventDefault();
     const value = query.trim();
-    if (!value || !selectedProvider?.configured || searching) return;
+    if (
+      !value ||
+      !selectedProvider ||
+      !providerAvailable(selectedProvider) ||
+      searching
+    )
+      return;
     if (
       /[\u0000-\u001f\u007f]/u.test(value) ||
       new TextEncoder().encode(value).byteLength > 256
@@ -220,13 +236,15 @@
       >
         {#each supportedProviders as provider (provider.provider)}
           <option value={provider.provider}>
-            {provider.label}{provider.configured ? "" : " — setup required"}
+            {provider.label}{providerAvailable(provider)
+              ? ""
+              : " — setup required"}
           </option>
         {/each}
       </select>
     </div>
 
-    {#if !selectedProvider.configured}
+    {#if !providerAvailable(selectedProvider)}
       <section class="unavailable" aria-labelledby="discover-setup-title">
         <svelte:element this={embedded ? "h4" : "h2"} id="discover-setup-title">
           {selectedProvider.label} needs a credential

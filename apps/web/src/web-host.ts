@@ -24,73 +24,6 @@ import type {
 
 const NETWORK_STORAGE_KEY = "fasti-network-config";
 
-const PROVIDERS: ReadonlyArray<{
-  provider: string;
-  label: string;
-  docs_url: string;
-}> = [
-  {
-    provider: "open-library",
-    label: "Open Library (Books)",
-    docs_url: "https://openlibrary.org/developers/api",
-  },
-  {
-    provider: "kitsu",
-    label: "Kitsu (Anime & Manga)",
-    docs_url: "https://kitsu.docs.apiary.io",
-  },
-  {
-    provider: "anilist",
-    label: "AniList GraphQL (Anime/Manga)",
-    docs_url: "https://docs.anilist.co",
-  },
-  {
-    provider: "musicbrainz",
-    label: "MusicBrainz (Music)",
-    docs_url: "https://musicbrainz.org/doc/MusicBrainz_API",
-  },
-  {
-    provider: "tmdb",
-    label: "TheMovieDatabase (TMDB)",
-    docs_url: "https://developer.themoviedb.org/docs",
-  },
-  {
-    provider: "tvdb",
-    label: "TheTVDB v4",
-    docs_url: "https://thetvdb.com/api-information",
-  },
-  {
-    provider: "google-books",
-    label: "Google Books API",
-    docs_url: "https://developers.google.com/books/docs/v1/using",
-  },
-  {
-    provider: "mal",
-    label: "MyAnimeList API v2",
-    docs_url: "https://myanimelist.net/apiconfig/references/api/v2",
-  },
-  {
-    provider: "rawg",
-    label: "RAWG Video Games Database",
-    docs_url: "https://rawg.io/apidocs",
-  },
-  {
-    provider: "igdb",
-    label: "IGDB (Games)",
-    docs_url: "https://api-docs.igdb.com",
-  },
-  {
-    provider: "comicvine",
-    label: "ComicVine (Comics)",
-    docs_url: "https://comicvine.gamespot.com/api/documentation",
-  },
-  {
-    provider: "podcast-index",
-    label: "Podcast Index (Podcasts)",
-    docs_url: "https://podcastindex-org.github.io/docs-api",
-  },
-];
-
 const INTEGRATION_STATES = new Set([
   "available",
   "setup_required",
@@ -222,6 +155,27 @@ function parseIntegrationStatusResponse(
   return integrations as unknown as IntegrationRuntimeStatus[];
 }
 
+async function loadProviderRows(
+  client: FastiClient,
+): Promise<ProviderCredentialStatus[]> {
+  const response = await client.listProviders();
+  return response.providers.flatMap((provider) =>
+    provider.capabilities.map((capability) => ({
+      provider: provider.provider_id,
+      capability_id: capability.capability_id,
+      label: provider.display_name,
+      purpose: capability.purpose,
+      credential_requirement: capability.credential_requirement,
+      credential_state: capability.credential_state,
+      state: capability.state,
+      source: capability.credential_source,
+      writable: capability.writable,
+      testable: capability.testable,
+      docs_url: provider.documentation_url,
+    })),
+  );
+}
+
 export async function fetchIntegrationStatus(
   endpoint: string,
   signal?: AbortSignal,
@@ -311,28 +265,37 @@ export function createWebHost(
       return parseIntegrationStatusResponse(response.integrations);
     },
     async providerCredentialStatus(): Promise<ProviderCredentialStatus[]> {
-      return PROVIDERS.map((provider) => ({
-        provider: provider.provider,
-        label: provider.label,
-        configured: false,
-        source: "none",
-        writable: false,
-        docs_url: provider.docs_url,
-      }));
+      return loadProviderRows(client);
     },
     async saveProviderCredential(
       provider: string,
+      capabilityId: string,
+      credential: string,
     ): Promise<ProviderCredentialStatus[]> {
-      throw unavailable(
-        `${provider} credentials require the trusted native or server host. The browser host never accepts or stores provider secrets.`,
-      );
+      await client.configureProviderCredential(provider, capabilityId, {
+        secret: credential,
+      });
+      return loadProviderRows(client);
     },
     async deleteProviderCredential(
       provider: string,
+      capabilityId: string,
     ): Promise<ProviderCredentialStatus[]> {
-      throw unavailable(
-        `${provider} credentials are not managed by the browser host.`,
-      );
+      await client.removeProviderCredential(provider, capabilityId);
+      return loadProviderRows(client);
+    },
+    async testProviderCredential(
+      provider: string,
+      capabilityId: string,
+    ): Promise<ProviderCredentialStatus[]> {
+      await client.testProviderCredential(provider, capabilityId);
+      return loadProviderRows(client);
+    },
+    async readProviderHealth(
+      provider: string,
+    ): Promise<ProviderCredentialStatus[]> {
+      await client.readProviderHealth(provider);
+      return loadProviderRows(client);
     },
     async searchProvider(
       provider: string,

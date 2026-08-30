@@ -106,6 +106,12 @@
     onClearCache,
   }: Props = $props();
 
+  function hasStoredCredential(provider: ProviderCredentialStatus): boolean {
+    return ["stored_unverified", "valid", "invalid", "expired"].includes(
+      provider.credential_state,
+    );
+  }
+
   let activeSettingsSection:
     | "appearance"
     | "navigation"
@@ -400,7 +406,8 @@
         : undefined,
       providerKeys: (providerKeys ?? []).map((p) => ({
         provider: p.provider,
-        configured: p.configured,
+        capability: p.capability_id,
+        credentialState: p.credential_state,
         source: p.source,
       })),
       oidcEnabled: oidcConfig?.enabled ?? false,
@@ -1358,9 +1365,11 @@
                   </div>
                   <span
                     class="prov-status-chip"
-                    class:configured={prov.configured}
+                    class:configured={hasStoredCredential(prov)}
                   >
-                    {prov.configured ? "Configured" : "Not configured"}
+                    {hasStoredCredential(prov)
+                      ? "Configured"
+                      : "Not configured"}
                   </span>
                 </div>
 
@@ -1412,7 +1421,7 @@
                       ? "Saving…"
                       : "Save credential"}
                   </button>
-                  {#if prov.writable && prov.configured}
+                  {#if prov.writable && hasStoredCredential(prov)}
                     <button
                       type="button"
                       class="remove-key-btn"

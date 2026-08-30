@@ -151,6 +151,14 @@ def post(path, payload, bearer=None):
     connection.close()
     return response.status, body
 
+def get(path, bearer):
+    connection = http.client.HTTPConnection("127.0.0.1", 8420, timeout=5)
+    connection.request("GET", path, headers={"authorization": f"Bearer {bearer}"})
+    response = connection.getresponse()
+    body = json.loads(response.read())
+    connection.close()
+    return response.status, body
+
 status, initialized = post("/api/v1/node/initialization", {}, bearer=bootstrap_secret)
 if status != 200 or not re.fullmatch(r"[0-9a-f]{64}", initialized.get("initialization_proof", "")):
     raise SystemExit("Durable node initialization failed")
@@ -165,6 +173,25 @@ if (
     or not re.fullmatch(r"[0-9a-f]{64}", enrolled.get("credential", ""))
 ):
     raise SystemExit("Durable first-client enrollment failed")
+
+status, providers = get("/api/v1/providers", enrolled["credential"])
+provider_rows = providers.get("providers", [])
+provider_states = {
+    row.get("provider_id"): {capability.get("state") for capability in row.get("capabilities", [])}
+    for row in provider_rows
+}
+if (
+    status != 200
+    or len(provider_rows) != 12
+    or provider_states.get("tmdb") != {"available"}
+    or provider_states.get("google-books") != {"available"}
+    or any(
+        states != {"unavailable"}
+        for provider_id, states in provider_states.items()
+        if provider_id not in {"tmdb", "google-books"}
+    )
+):
+    raise SystemExit("Packaged provider registry did not report the governed runtime boundary")
 
 status, problem = post("/api/v1/node/initialization", {}, bearer=bootstrap_secret)
 if status != 409 or problem.get("code") != "already_initialized":
@@ -190,5 +217,5 @@ if (( rss_kib > idle_limit_mib * 1024 )); then
   exit 1
 fi
 
-echo "native offline smoke: CLI guard, durable bootstrap, daemon health, and ${rss_mib} MiB idle memory all pass with no network"
+echo "native offline smoke: CLI guard, durable bootstrap, provider registry, daemon health, and ${rss_mib} MiB idle memory all pass with no network"
 ' _ "$work_dir" "$(realpath "$daemon")" "$(realpath "$cli")" "$idle_limit_mib"
