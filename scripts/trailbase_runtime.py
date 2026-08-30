@@ -1495,7 +1495,7 @@ def restore_depot(
 
 
 def _backup_restore_self_test() -> None:
-    with tempfile.TemporaryDirectory(prefix="fasti-trailbase-depot-test-") as directory:
+    with tempfile.TemporaryDirectory(prefix="fasti-trailbase-depot-test-", dir=Path.home()) as directory:
         base = Path(directory)
         os.chmod(base, 0o700)  # nosec B103 -- nosemgrep -- owner-only is required.
         root = base / "source"
