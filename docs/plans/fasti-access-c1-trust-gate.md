@@ -74,16 +74,18 @@ or route work:
 - Subject lifecycle transitions are exact: `active` may become `disabled`,
   `recovery_pending`, or `deleted`; `disabled` may become `active`,
   `recovery_pending`, or `deleted`; `recovery_pending` may become `active`,
-  `disabled`, or `deleted`; and `deleted` is terminal. Direct deletion is
-  required when TrailBase reports deletion without a prior local disablement.
+  `disabled`, or `deleted`; and `deleted` is terminal. Direct deletion remains
+  a domain transition for a future explicit, supported deletion-evidence
+  owner; it is never inferred from a failed TrailBase exchange or status call.
   Every real transition advances the authentication epoch, revokes every Fasti
   browser session, and records the exact resulting lifecycle.
 - Administrator membership and subject-lifecycle mutations require a current
   browser session, matching CSRF and request-boundary proof, an unexpired
   recent-authentication record, and transaction-local administrator authority.
   The administrator command can disable, begin recovery, or reactivate; it
-  cannot set `deleted`. Only the C1.2 TrailBase status/deletion evidence owner
-  may apply that terminal state.
+  cannot set `deleted`. C1.2 cannot apply that terminal state because pinned
+  TrailBase `v0.33.5` exposes no result that distinguishes deletion from an
+  invalid proof, missing refresh session, or outage.
   Invitation acceptance does not reuse that administrator command: C1.2 binds
   it to the proved TrailBase subject and claimed one-use ceremony before any
   ordinary Fasti browser session exists.
@@ -145,13 +147,15 @@ browser routes or generated contracts owned by C1.3.
   numeric-loopback address. Browser input cannot select any origin, address,
   scheme, path, or header.
 - The Fasti callback path is
-  `/api/access/v1/trailbase/callback`. The trusted host derives its absolute
-  callback URI from the effective Fasti origin and provisions that exact URI
-  in TrailBase `auth.redirect_uri_allowlist`. Local HTTP is permitted only on
-  numeric loopback. Remote use requires the already governed absolute HTTPS
-  `FASTI_PUBLIC_URL`. Authentication readiness rejects an unprovisioned URI or
-  a port fallback that changes it; non-authentication health behavior keeps
-  its existing fallback semantics.
+  `/api/access/v1/trailbase/callback`, and its only C1 browser origin is
+  `http://127.0.0.1:8420`. The trusted host provisions the exact absolute URI
+  `http://127.0.0.1:8420/api/access/v1/trailbase/callback` in TrailBase
+  `auth.redirect_uri_allowlist`. Authentication readiness rejects a different
+  port, unprovisioned URI, relative redirect, protocol-relative redirect, or
+  any non-loopback origin. Existing non-authentication port-fallback behavior
+  is unchanged. Remote browser authentication remains explicitly unavailable
+  until a separate reviewed browser-facing proxy/origin work package exists;
+  `FASTI_PUBLIC_URL` does not activate TrailBase browser authentication in C1.
 - Keep at most 64 `OperationId -> Zeroizing<verifier>` entries behind one
   process-local mutex. Reserve capacity before generating a verifier, durable
   row, cookie, or redirect. Insert memory before the durable row and remove it
@@ -159,15 +163,17 @@ browser routes or generated contracts owned by C1.3.
   verifier. Cancellation commits first and removes memory second. Restart
   recovery never makes a remote call.
 - Extend the unpublished v14 ceremony with only the non-secret associations
-  required to finish its purpose: optional bound browser session, workspace,
-  selected profile grant, and remembered-browser choice. Database and domain
-  checks require:
-  - sign-in: workspace and selected grant, no bound session;
+  required to finish its purpose: optional bound browser session, optional
+  exact invited membership, workspace, selected profile grant, and
+  remembered-browser choice. Database and domain checks require:
+  - sign-in: workspace and selected grant, no bound session, and at most one
+    invited membership already bound to the permanent TrailBase anchor;
   - recent authentication: one bound session and its existing workspace and
-    selected grant;
+    selected grant, no invited membership, and no C1 production start because
+    pinned TrailBase does not prove a fresh credential challenge;
   - first-administrator bootstrap: workspace and an existing active selected
-    grant chosen by the trusted operator path, no bound session, and
-    `remembered = false`.
+    grant chosen by the trusted operator path, no bound session or invited
+    membership, and `remembered = false`.
   The browser may request a selection, but the durable ceremony stores the
   server-normalized identifiers and the final transaction proves the subject
   owns the grant. TrailBase proof never selects or grants a profile.
@@ -181,8 +187,20 @@ browser routes or generated contracts owned by C1.3.
 - Ordinary sign-in resolves only `(TrailBaseInstanceId, TrailBaseSubject)` and
   loads every currently active grant for that subject and ceremony workspace.
   It requires the ceremony-selected grant among them. It never links by email
-  and never selects the first or only row implicitly. Recent authentication
-  updates only its bound live session and creates no second session.
+  and never selects the first or only row implicitly. When the ceremony binds
+  an invitation, the final transaction requires that exact membership to be
+  `invited`, owned by the resolved subject, and in the ceremony workspace;
+  it applies `AcceptInvitation`, advances the subject authorization epoch,
+  records the exact membership audit, rechecks the selected grant and client,
+  then issues provenance and the session atomically. An unknown TrailBase
+  subject is never linked by email and cannot use an invitation in C1.2.
+- Recent authentication remains visible but unavailable in C1.2. Exact
+  TrailBase `v0.33.5` can reuse an existing TrailBase or social-provider
+  session and exposes neither a forced fresh challenge nor trusted
+  `auth_time`. C1.2 therefore never starts or finalizes a production
+  `recent_authentication` ceremony and never stamps callback time as recent
+  credential proof. The durable purpose and association remain reserved for
+  a later source-backed work package.
 - Do not hold a SQLite transaction across network input/output. After status,
   perform a non-mutating local preauthorization. Attempt TrailBase logout
   exactly once after every successful exchange, including status or local
@@ -229,7 +247,8 @@ methods, paths, headers, bodies, content types, bounds, redirect refusal,
 timeout behavior, token parsing, provider classification, cleanup-on-failure,
 and exactly-once logout; and domain/store tests prove capacity compensation,
 claim/cancel and two-tab races, activation-generation rechecks, anchor and
-membership/grant/client denials, stale epochs, recent-auth binding,
+membership/grant/client denials, invitation binding and atomic acceptance,
+stale epochs, recent-auth unavailability,
 post-cleanup bootstrap, final-transaction atomicity, restart windows, response
 loss, and existing-session behavior during a later TrailBase outage.
 
