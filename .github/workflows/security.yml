@@ -3,8 +3,34 @@ name: Security Audit
 on:
   push:
     branches: ["dev", "release"]
+    paths-ignore:
+      - ".github/workflows/ci.yml"
+      - ".github/workflows/docs-pages.yml"
+      - "apps/docs/**"
+      - "brand/logos/**"
+      - "diagrams/documentation-publication.svg"
+      - "docs/**"
+      - "packages/deploy-plan/**"
+      - "scripts/classify-ci-scope.mjs"
+      - "scripts/validate-docs*.mjs"
+      - "tests/js/ci-docs-routing.test.mjs"
+      - "tests/js/docs-*.test.mjs"
+      - "xtask/src/docs.rs"
   pull_request:
     branches: ["dev", "release"]
+    paths-ignore:
+      - ".github/workflows/ci.yml"
+      - ".github/workflows/docs-pages.yml"
+      - "apps/docs/**"
+      - "brand/logos/**"
+      - "diagrams/documentation-publication.svg"
+      - "docs/**"
+      - "packages/deploy-plan/**"
+      - "scripts/classify-ci-scope.mjs"
+      - "scripts/validate-docs*.mjs"
+      - "tests/js/ci-docs-routing.test.mjs"
+      - "tests/js/docs-*.test.mjs"
+      - "xtask/src/docs.rs"
   schedule:
     - cron: "0 0 * * 0" # Weekly on Sundays
 

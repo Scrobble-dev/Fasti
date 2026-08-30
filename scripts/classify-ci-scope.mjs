@@ -14,7 +14,7 @@ const portalOnlyPaths = [
 ];
 
 const routingPaths = [
-  /^\.github\/workflows\/ci\.yml$/u,
+  /^\.github\/workflows\/(?:ci|conformance|security)\.yml$/u,
   /^scripts\/classify-ci-scope\.mjs$/u,
   /^tests\/js\/ci-docs-routing\.test\.mjs$/u,
 ];
