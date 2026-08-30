@@ -205,7 +205,7 @@ fn query_session_row(
     )
 }
 
-fn authenticate_session(
+pub(crate) fn authenticate_session(
     connection: &Connection,
     session_secret: &fasti_application::SecretMaterial,
     csrf_secret: Option<&fasti_application::SecretMaterial>,
@@ -669,11 +669,7 @@ impl BrowserSessionPort for SqliteKernel {
             correlation_id,
         )?;
         if !matches!(subject.lifecycle(), AuthSubjectLifecycle::Active) {
-            return Err(problem(
-                ProblemCode::SessionPolicyChanged,
-                capability,
-                correlation_id,
-            ));
+            return Err(problem(ProblemCode::Forbidden, capability, correlation_id));
         }
         let created = insert_session(
             &transaction,
@@ -1170,6 +1166,42 @@ mod tests {
             Ok(_) => panic!("expected {expected:?}"),
             Err(problem) => assert_eq!(problem.code(), expected),
         }
+    }
+
+    #[test]
+    fn session_creation_rejects_an_inactive_subject_without_problem_contract_panic() {
+        let fixture = fixture();
+        {
+            let connection = fixture
+                .kernel
+                .lock_connection(
+                    CapabilityKey::CreateBrowserSession,
+                    fasti_domain::RequestCorrelationId::new_v7(),
+                )
+                .expect("connection");
+            connection
+                .execute(
+                    "UPDATE auth_subjects SET lifecycle = 'disabled' WHERE auth_subject_id = ?1",
+                    [fixture.subject_id.to_string()],
+                )
+                .expect("disable subject");
+        }
+        assert_problem(
+            fixture.kernel.create_browser_session(
+                CreateBrowserSessionCommand::try_new(
+                    fasti_domain::RequestCorrelationId::new_v7(),
+                    fixture.subject_id,
+                    fixture.workspace_id,
+                    fixture.grants[..1].to_vec(),
+                    fixture.grants[0],
+                    policy(),
+                    false,
+                    fixture.created_at,
+                )
+                .expect("session command"),
+            ),
+            ProblemCode::Forbidden,
+        );
     }
 
     #[test]

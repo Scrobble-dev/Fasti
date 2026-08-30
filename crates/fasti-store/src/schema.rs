@@ -2079,9 +2079,13 @@ fn migrate_v14(connection: &Connection) -> Result<()> {
             audit_event_id INTEGER PRIMARY KEY AUTOINCREMENT,
             event_kind TEXT NOT NULL CHECK (event_kind IN (
                 'trailbase_activated', 'trailbase_blocked', 'anchor_linked',
-                'first_administrator_bootstrapped', 'subject_lifecycle_changed',
-                'membership_invited', 'membership_lifecycle_changed',
-                'membership_role_changed', 'ceremony_claimed', 'ceremony_completed',
+                'first_administrator_bootstrapped', 'subject_disabled',
+                'subject_deleted', 'subject_recovery_pending', 'subject_reactivated',
+                'membership_invited', 'membership_approval_requested',
+                'membership_invitation_accepted', 'membership_approved',
+                'membership_suspended', 'membership_resumed', 'membership_removed',
+                'membership_promoted', 'membership_demoted',
+                'ceremony_claimed', 'ceremony_completed',
                 'ceremony_cancelled', 'ceremony_expired',
                 'ceremony_cleanup_uncertain', 'ceremony_failed',
                 'browser_session_issued', 'browser_session_revoked'
@@ -2102,6 +2106,15 @@ fn migrate_v14(connection: &Connection) -> Result<()> {
                     AND substr(auth_subject_id, 5) NOT GLOB '*[^0-9a-f]*'
                     AND substr(auth_subject_id, 17, 1) = '7'
                     AND substr(auth_subject_id, 21, 1) GLOB '[89ab]'
+                )
+            ),
+            actor_auth_subject_id TEXT CHECK (
+                actor_auth_subject_id IS NULL OR (
+                    length(actor_auth_subject_id) = 36
+                    AND substr(actor_auth_subject_id, 1, 4) = 'sub_'
+                    AND substr(actor_auth_subject_id, 5) NOT GLOB '*[^0-9a-f]*'
+                    AND substr(actor_auth_subject_id, 17, 1) = '7'
+                    AND substr(actor_auth_subject_id, 21, 1) GLOB '[89ab]'
                 )
             ),
             workspace_id TEXT CHECK (
@@ -2163,14 +2176,22 @@ fn migrate_v14(connection: &Connection) -> Result<()> {
                     AND membership_id IS NOT NULL
                     AND operation_id IS NOT NULL)
                 OR
-                (event_kind = 'subject_lifecycle_changed'
-                    AND auth_subject_id IS NOT NULL)
+                (event_kind IN (
+                    'subject_disabled', 'subject_deleted',
+                    'subject_recovery_pending', 'subject_reactivated'
+                )
+                    AND auth_subject_id IS NOT NULL
+                    AND actor_auth_subject_id IS NOT NULL)
                 OR
                 (event_kind IN (
-                        'membership_invited', 'membership_lifecycle_changed',
-                        'membership_role_changed'
+                        'membership_invited', 'membership_approval_requested',
+                        'membership_invitation_accepted', 'membership_approved',
+                        'membership_suspended', 'membership_resumed',
+                        'membership_removed', 'membership_promoted',
+                        'membership_demoted'
                     )
                     AND auth_subject_id IS NOT NULL
+                    AND actor_auth_subject_id IS NOT NULL
                     AND workspace_id IS NOT NULL
                     AND membership_id IS NOT NULL)
                 OR
@@ -2192,6 +2213,7 @@ fn migrate_v14(connection: &Connection) -> Result<()> {
                 (event_kind = 'browser_session_revoked'
                     AND trailbase_instance_id IS NOT NULL
                     AND auth_subject_id IS NOT NULL
+                    AND actor_auth_subject_id IS NOT NULL
                     AND workspace_id IS NOT NULL
                     AND browser_session_id IS NOT NULL)
             )
@@ -3403,13 +3425,13 @@ mod tests {
 
         connection
             .execute(
-                "INSERT INTO access_audit_events(event_kind, trailbase_instance_id, auth_subject_id, workspace_id, membership_id, operation_id, browser_session_id, correlation_id, occurred_at) VALUES ('membership_invited', ?1, ?2, ?3, ?4, NULL, NULL, ?5, ?6)",
+                "INSERT INTO access_audit_events(event_kind, trailbase_instance_id, auth_subject_id, actor_auth_subject_id, workspace_id, membership_id, operation_id, browser_session_id, correlation_id, occurred_at) VALUES ('membership_invited', ?1, ?2, ?2, ?3, ?4, NULL, NULL, ?5, ?6)",
                 params![instance_id, subject_id, workspace_id, next_membership_id, correlation_id, CREATED_AT],
             )
             .expect("audit event");
         assert!(connection
             .execute(
-                "UPDATE access_audit_events SET event_kind = 'membership_role_changed'",
+                "UPDATE access_audit_events SET event_kind = 'membership_demoted'",
                 [],
             )
             .is_err());

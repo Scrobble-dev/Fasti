@@ -4,17 +4,20 @@ use crate::SqliteKernel;
 use chrono::{DateTime, Duration, Utc};
 use fasti_application::{
     AccessAdministrationPort, ApplicationResult, BootstrapFirstAdministratorCommand,
-    BootstrapFirstAdministratorOutcome, CancelAuthCeremonyCommand, CapabilityKey,
-    ClaimAuthCeremonyCommand, FastiProblem, HumanAccessPort, ProblemCode, StartAuthCeremonyCommand,
-    VerifyTrailBaseInstallationCommand,
+    BootstrapFirstAdministratorOutcome, BrowserSessionMutationCommand, CancelAuthCeremonyCommand,
+    CapabilityKey, ChangeAuthSubjectLifecycleCommand, ChangeMembershipLifecycleCommand,
+    ChangeMembershipRoleCommand, ClaimAuthCeremonyCommand, FastiProblem, HumanAccessPort,
+    ProblemCode, StartAuthCeremonyCommand, VerifyTrailBaseInstallationCommand,
 };
 use fasti_domain::{
-    AccessAuditEventKind, AccessInvariantError, AuthCallbackPath, AuthCeremony,
-    AuthCeremonyFailure, AuthCeremonyProtocol, AuthCeremonyPurpose, AuthCeremonyState,
-    AuthReturnTarget, AuthSubject, AuthSubjectId, AuthSubjectLifecycle, MembershipId,
-    MembershipLifecycle, OperationId, RequestCorrelationId, Sha256Digest, TrailBaseActivationState,
-    TrailBaseExternalAnchor, TrailBaseInstallation, TrailBaseInstanceId, TrailBaseSubject,
-    WorkspaceId, WorkspaceMembership, WorkspaceRole,
+    AccessAuditEventKind, AccessInvalidationEffect, AccessInvariantError, AdministratorContinuity,
+    AuthCallbackPath, AuthCeremony, AuthCeremonyFailure, AuthCeremonyProtocol, AuthCeremonyPurpose,
+    AuthCeremonyState, AuthReturnTarget, AuthSubject, AuthSubjectId, AuthSubjectLifecycle,
+    AuthenticationAssurance, AuthenticationMethod, AuthenticationProvenance, MembershipId,
+    MembershipLifecycle, MembershipLifecycleAction, OperationId, RecentAuthentication,
+    RequestCorrelationId, Sha256Digest, TrailBaseActivationState, TrailBaseExternalAnchor,
+    TrailBaseInstallation, TrailBaseInstanceId, TrailBaseSubject, WorkspaceId, WorkspaceMembership,
+    WorkspaceRole,
 };
 use rusqlite::{
     params, Connection, ErrorCode, OptionalExtension, Transaction, TransactionBehavior,
@@ -443,6 +446,249 @@ impl SqliteKernel {
             workspace_id,
         })
     }
+
+    fn persist_membership_lifecycle_change(
+        &self,
+        command: &ChangeMembershipLifecycleCommand,
+    ) -> ApplicationResult<bool> {
+        let capability = CapabilityKey::CreateBrowserSession;
+        let correlation_id = command.proof().correlation_id();
+        let connection = self
+            .inner
+            .connection
+            .lock()
+            .map_err(|_| access_problem(HumanAccessStoreError::Integrity, correlation_id))?;
+        let transaction = Transaction::new_unchecked(&connection, TransactionBehavior::Immediate)
+            .map_err(|error| {
+            access_problem(HumanAccessStoreError::Storage(error), correlation_id)
+        })?;
+        let actor = authenticate_administrator_session(&transaction, command.proof())?;
+        require_recent_authentication(&transaction, &actor, command.proof().now())
+            .map_err(|error| access_problem(error, correlation_id))?;
+        let mut membership = load_membership(&transaction, command.membership_id())
+            .map_err(|error| access_problem(error, correlation_id))?
+            .ok_or_else(|| access_problem(HumanAccessStoreError::NotFound, correlation_id))?;
+        authorize_workspace_administrator(&transaction, &actor, membership.workspace_id())
+            .map_err(|error| access_problem(error, correlation_id))?;
+        let mut subject = load_subject(&transaction, membership.subject_id())
+            .map_err(|error| access_problem(error, correlation_id))?;
+        let viable = crate::browser_auth::viable_administrator_count(
+            &transaction,
+            &membership.workspace_id().to_string(),
+            capability,
+            correlation_id,
+        )?;
+        let effect = membership
+            .apply_lifecycle_action(
+                &mut subject,
+                command.action().lifecycle_action(),
+                u64::try_from(viable).map_err(|_| {
+                    access_problem(HumanAccessStoreError::Integrity, correlation_id)
+                })?,
+                command.proof().now(),
+            )
+            .map_err(|error| {
+                access_problem(HumanAccessStoreError::Invariant(error), correlation_id)
+            })?
+            .ok_or_else(|| access_problem(HumanAccessStoreError::Integrity, correlation_id))?;
+        persist_membership_subject(&transaction, &membership, &subject)
+            .map_err(|error| access_problem(error, correlation_id))?;
+        if effect.revoke_browser_sessions() {
+            revoke_subject_sessions(
+                &transaction,
+                subject.id(),
+                Some(membership.workspace_id()),
+                actor.subject().id(),
+                correlation_id,
+                command.proof().now(),
+            )
+            .map_err(|error| access_problem(error, correlation_id))?;
+        }
+        insert_membership_audit(
+            &transaction,
+            command.action().lifecycle_action().audit_event(),
+            &membership,
+            actor.subject().id(),
+            correlation_id,
+            command.proof().now(),
+        )
+        .map_err(|error| access_problem(error, correlation_id))?;
+        transaction.commit().map_err(|error| {
+            access_problem(HumanAccessStoreError::Storage(error), correlation_id)
+        })?;
+        Ok(true)
+    }
+
+    fn persist_membership_role_change(
+        &self,
+        command: &ChangeMembershipRoleCommand,
+    ) -> ApplicationResult<bool> {
+        let capability = CapabilityKey::CreateBrowserSession;
+        let correlation_id = command.proof().correlation_id();
+        let connection = self
+            .inner
+            .connection
+            .lock()
+            .map_err(|_| access_problem(HumanAccessStoreError::Integrity, correlation_id))?;
+        let transaction = Transaction::new_unchecked(&connection, TransactionBehavior::Immediate)
+            .map_err(|error| {
+            access_problem(HumanAccessStoreError::Storage(error), correlation_id)
+        })?;
+        let actor = authenticate_administrator_session(&transaction, command.proof())?;
+        require_recent_authentication(&transaction, &actor, command.proof().now())
+            .map_err(|error| access_problem(error, correlation_id))?;
+        let mut membership = load_membership(&transaction, command.membership_id())
+            .map_err(|error| access_problem(error, correlation_id))?
+            .ok_or_else(|| access_problem(HumanAccessStoreError::NotFound, correlation_id))?;
+        authorize_workspace_administrator(&transaction, &actor, membership.workspace_id())
+            .map_err(|error| access_problem(error, correlation_id))?;
+        let mut subject = load_subject(&transaction, membership.subject_id())
+            .map_err(|error| access_problem(error, correlation_id))?;
+        let viable = crate::browser_auth::viable_administrator_count(
+            &transaction,
+            &membership.workspace_id().to_string(),
+            capability,
+            correlation_id,
+        )?;
+        let Some(_) = membership
+            .change_role(
+                &mut subject,
+                command.role(),
+                u64::try_from(viable).map_err(|_| {
+                    access_problem(HumanAccessStoreError::Integrity, correlation_id)
+                })?,
+                command.proof().now(),
+            )
+            .map_err(|error| {
+                access_problem(HumanAccessStoreError::Invariant(error), correlation_id)
+            })?
+        else {
+            transaction.commit().map_err(|error| {
+                access_problem(HumanAccessStoreError::Storage(error), correlation_id)
+            })?;
+            return Ok(false);
+        };
+        persist_membership_subject(&transaction, &membership, &subject)
+            .map_err(|error| access_problem(error, correlation_id))?;
+        insert_membership_audit(
+            &transaction,
+            membership.role().audit_event(),
+            &membership,
+            actor.subject().id(),
+            correlation_id,
+            command.proof().now(),
+        )
+        .map_err(|error| access_problem(error, correlation_id))?;
+        transaction.commit().map_err(|error| {
+            access_problem(HumanAccessStoreError::Storage(error), correlation_id)
+        })?;
+        Ok(true)
+    }
+
+    fn persist_subject_lifecycle_change(
+        &self,
+        command: &ChangeAuthSubjectLifecycleCommand,
+    ) -> ApplicationResult<bool> {
+        let correlation_id = command.proof().correlation_id();
+        let connection = self
+            .inner
+            .connection
+            .lock()
+            .map_err(|_| access_problem(HumanAccessStoreError::Integrity, correlation_id))?;
+        let transaction = Transaction::new_unchecked(&connection, TransactionBehavior::Immediate)
+            .map_err(|error| {
+            access_problem(HumanAccessStoreError::Storage(error), correlation_id)
+        })?;
+        let actor = authenticate_administrator_session(&transaction, command.proof())?;
+        require_recent_authentication(&transaction, &actor, command.proof().now())
+            .map_err(|error| access_problem(error, correlation_id))?;
+        authorize_subject_administrator(&transaction, &actor, command.subject_id())
+            .map_err(|error| access_problem(error, correlation_id))?;
+        let mut subject = load_subject(&transaction, command.subject_id())
+            .map_err(|error| access_problem(error, correlation_id))?;
+        let leaving_active = matches!(subject.lifecycle(), AuthSubjectLifecycle::Active)
+            && !matches!(command.action().lifecycle(), AuthSubjectLifecycle::Active);
+        let mut memberships = if leaving_active {
+            load_active_memberships(&transaction, subject.id())
+                .map_err(|error| access_problem(error, correlation_id))?
+        } else {
+            Vec::new()
+        };
+        let continuity = AdministratorContinuity::for_subject_deactivation(
+            sole_administrator_workspace_count(&transaction, subject.id())
+                .map_err(|error| access_problem(error, correlation_id))?,
+        );
+        let Some(effect) = subject
+            .transition_lifecycle(
+                command.action().lifecycle(),
+                continuity,
+                command.proof().now(),
+            )
+            .map_err(|error| {
+                access_problem(HumanAccessStoreError::Invariant(error), correlation_id)
+            })?
+        else {
+            transaction.commit().map_err(|error| {
+                access_problem(HumanAccessStoreError::Storage(error), correlation_id)
+            })?;
+            return Ok(false);
+        };
+        if !matches!(
+            effect,
+            AccessInvalidationEffect::SubjectAuthenticationChanged
+        ) {
+            return Err(access_problem(
+                HumanAccessStoreError::Integrity,
+                correlation_id,
+            ));
+        }
+        for membership in &mut memberships {
+            membership
+                .apply_lifecycle_action(
+                    &mut subject,
+                    MembershipLifecycleAction::Suspend,
+                    0,
+                    command.proof().now(),
+                )
+                .map_err(|error| {
+                    access_problem(HumanAccessStoreError::Invariant(error), correlation_id)
+                })?;
+            persist_membership(&transaction, membership)
+                .map_err(|error| access_problem(error, correlation_id))?;
+            insert_membership_audit(
+                &transaction,
+                AccessAuditEventKind::MembershipSuspended,
+                membership,
+                actor.subject().id(),
+                correlation_id,
+                command.proof().now(),
+            )
+            .map_err(|error| access_problem(error, correlation_id))?;
+        }
+        persist_subject(&transaction, &subject)
+            .map_err(|error| access_problem(error, correlation_id))?;
+        revoke_subject_sessions(
+            &transaction,
+            subject.id(),
+            None,
+            actor.subject().id(),
+            correlation_id,
+            command.proof().now(),
+        )
+        .map_err(|error| access_problem(error, correlation_id))?;
+        insert_subject_audit(
+            &transaction,
+            &subject,
+            actor.subject().id(),
+            correlation_id,
+            command.proof().now(),
+        )
+        .map_err(|error| access_problem(error, correlation_id))?;
+        transaction.commit().map_err(|error| {
+            access_problem(HumanAccessStoreError::Storage(error), correlation_id)
+        })?;
+        Ok(true)
+    }
 }
 
 pub(crate) fn recover_auth_ceremonies_on_open(
@@ -571,6 +817,409 @@ fn load_initialized_workspace(transaction: &Transaction<'_>) -> StoreResult<Work
         .ok_or(HumanAccessStoreError::Integrity)?
         .parse()
         .map_err(|_| HumanAccessStoreError::Integrity)
+}
+
+fn load_subject(
+    transaction: &Transaction<'_>,
+    subject_id: AuthSubjectId,
+) -> StoreResult<AuthSubject> {
+    let row = transaction
+        .query_row(
+            r#"
+            SELECT lifecycle, auth_epoch, authorization_epoch, created_at, updated_at
+            FROM auth_subjects WHERE auth_subject_id = ?1
+            "#,
+            [subject_id.to_string()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                ))
+            },
+        )
+        .optional()?
+        .ok_or(HumanAccessStoreError::NotFound)?;
+    AuthSubject::try_new(
+        subject_id,
+        AuthSubjectLifecycle::from_storage(&row.0).ok_or(HumanAccessStoreError::Integrity)?,
+        u64::try_from(row.1).map_err(|_| HumanAccessStoreError::Integrity)?,
+        u64::try_from(row.2).map_err(|_| HumanAccessStoreError::Integrity)?,
+        parse_time(&row.3)?,
+        parse_time(&row.4)?,
+    )
+    .map_err(HumanAccessStoreError::Invariant)
+}
+
+fn load_membership(
+    transaction: &Transaction<'_>,
+    membership_id: MembershipId,
+) -> StoreResult<Option<WorkspaceMembership>> {
+    let row = transaction
+        .query_row(
+            r#"
+            SELECT auth_subject_id, workspace_id, lifecycle, role, created_at, updated_at
+            FROM workspace_memberships WHERE membership_id = ?1
+            "#,
+            [membership_id.to_string()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                ))
+            },
+        )
+        .optional()?;
+    row.map(|row| {
+        WorkspaceMembership::try_new(
+            membership_id,
+            row.0
+                .parse()
+                .map_err(|_| HumanAccessStoreError::Integrity)?,
+            row.1
+                .parse()
+                .map_err(|_| HumanAccessStoreError::Integrity)?,
+            MembershipLifecycle::from_storage(&row.2).ok_or(HumanAccessStoreError::Integrity)?,
+            WorkspaceRole::from_storage(&row.3).ok_or(HumanAccessStoreError::Integrity)?,
+            parse_time(&row.4)?,
+            parse_time(&row.5)?,
+        )
+        .map_err(HumanAccessStoreError::Invariant)
+    })
+    .transpose()
+}
+
+fn load_active_memberships(
+    transaction: &Transaction<'_>,
+    subject_id: AuthSubjectId,
+) -> StoreResult<Vec<WorkspaceMembership>> {
+    let mut statement = transaction.prepare(
+        r#"
+        SELECT membership_id FROM workspace_memberships
+        WHERE auth_subject_id = ?1 AND lifecycle = 'active'
+        ORDER BY membership_id
+        "#,
+    )?;
+    let ids = statement
+        .query_map([subject_id.to_string()], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    ids.into_iter()
+        .map(|id| {
+            let id = id.parse().map_err(|_| HumanAccessStoreError::Integrity)?;
+            load_membership(transaction, id)?.ok_or(HumanAccessStoreError::Integrity)
+        })
+        .collect()
+}
+
+fn authorize_workspace_administrator(
+    transaction: &Transaction<'_>,
+    actor: &fasti_application::AuthenticatedBrowserSession,
+    workspace_id: WorkspaceId,
+) -> StoreResult<()> {
+    if actor.session().workspace_id() != workspace_id {
+        return Err(HumanAccessStoreError::NotFound);
+    }
+    let authorized: bool = transaction.query_row(
+        r#"
+        SELECT EXISTS(
+            SELECT 1 FROM workspace_memberships
+            WHERE auth_subject_id = ?1 AND workspace_id = ?2
+              AND lifecycle = 'active' AND role = 'administrator'
+        )
+        "#,
+        params![actor.subject().id().to_string(), workspace_id.to_string()],
+        |row| row.get(0),
+    )?;
+    if authorized {
+        Ok(())
+    } else {
+        Err(HumanAccessStoreError::NotFound)
+    }
+}
+
+fn authenticate_administrator_session(
+    transaction: &Transaction<'_>,
+    proof: &BrowserSessionMutationCommand,
+) -> ApplicationResult<fasti_application::AuthenticatedBrowserSession> {
+    crate::browser_auth::authenticate_session(
+        transaction,
+        proof.session_secret(),
+        Some(proof.csrf_secret()),
+        proof.now(),
+        CapabilityKey::EndBrowserSession,
+        proof.correlation_id(),
+    )
+    .map_err(|problem| {
+        let code = match problem.code() {
+            ProblemCode::CapabilityUnavailable => ProblemCode::CapabilityUnavailable,
+            ProblemCode::IntegrityFailed => ProblemCode::IntegrityFailed,
+            ProblemCode::StorageUnavailable => ProblemCode::StorageUnavailable,
+            _ => ProblemCode::Forbidden,
+        };
+        Box::new(FastiProblem::from_code(
+            code,
+            CapabilityKey::CreateBrowserSession,
+            proof.correlation_id(),
+        ))
+    })
+}
+
+fn require_recent_authentication(
+    transaction: &Transaction<'_>,
+    actor: &fasti_application::AuthenticatedBrowserSession,
+    at: DateTime<Utc>,
+) -> StoreResult<()> {
+    let row = transaction
+        .query_row(
+            r#"
+        SELECT authentication.method, authentication.verified_at,
+               authentication.recent_authentication_expires_at,
+               authentication.activation_generation,
+               installation.activation_state, installation.activation_generation
+        FROM fasti_browser_session_authentication authentication
+        JOIN trailbase_installation installation
+          ON installation.trailbase_instance_id = authentication.trailbase_instance_id
+        WHERE authentication.browser_session_id = ?1
+        "#,
+            [actor.session().id().to_string()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, i64>(5)?,
+                ))
+            },
+        )
+        .optional()?
+        .ok_or(HumanAccessStoreError::NotFound)?;
+    let provenance = AuthenticationProvenance::new(
+        AuthenticationMethod::from_storage(&row.0).ok_or(HumanAccessStoreError::Integrity)?,
+        parse_time(&row.1)?,
+        u64::try_from(row.3).map_err(|_| HumanAccessStoreError::Integrity)?,
+    );
+    let recent = RecentAuthentication::try_new(
+        actor.subject().id(),
+        provenance,
+        actor.subject().auth_epoch(),
+        parse_time(&row.2)?,
+        Duration::minutes(10),
+    )?;
+    let installation_generation =
+        u64::try_from(row.5).map_err(|_| HumanAccessStoreError::Integrity)?;
+    if row.4 == "active"
+        && recent.satisfies(
+            &actor.subject(),
+            installation_generation,
+            AuthenticationAssurance::SingleFactor,
+            at,
+        )
+    {
+        Ok(())
+    } else {
+        Err(HumanAccessStoreError::NotFound)
+    }
+}
+
+fn authorize_subject_administrator(
+    transaction: &Transaction<'_>,
+    actor: &fasti_application::AuthenticatedBrowserSession,
+    subject_id: AuthSubjectId,
+) -> StoreResult<()> {
+    let (affected, authorized): (i64, i64) = transaction.query_row(
+        r#"
+        SELECT
+            COUNT(*),
+            COALESCE(SUM(CASE WHEN EXISTS(
+                SELECT 1 FROM workspace_memberships actor
+                WHERE actor.auth_subject_id = ?1
+                  AND actor.workspace_id = target.workspace_id
+                  AND actor.lifecycle = 'active'
+                  AND actor.role = 'administrator'
+            ) THEN 1 ELSE 0 END), 0)
+        FROM workspace_memberships target
+        WHERE target.auth_subject_id = ?2 AND target.lifecycle <> 'removed'
+        "#,
+        params![actor.subject().id().to_string(), subject_id.to_string()],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    if affected > 0 && affected == authorized {
+        Ok(())
+    } else {
+        Err(HumanAccessStoreError::NotFound)
+    }
+}
+
+fn sole_administrator_workspace_count(
+    transaction: &Transaction<'_>,
+    subject_id: AuthSubjectId,
+) -> StoreResult<u64> {
+    let count: i64 = transaction.query_row(
+        r#"
+        SELECT COUNT(*)
+        FROM workspace_memberships target
+        JOIN auth_subjects target_subject
+          ON target_subject.auth_subject_id = target.auth_subject_id
+        WHERE target.auth_subject_id = ?1
+          AND target.lifecycle = 'active'
+          AND target.role = 'administrator'
+          AND target_subject.lifecycle = 'active'
+          AND 1 = (
+              SELECT COUNT(*)
+              FROM workspace_memberships viable
+              JOIN auth_subjects viable_subject
+                ON viable_subject.auth_subject_id = viable.auth_subject_id
+              WHERE viable.workspace_id = target.workspace_id
+                AND viable.lifecycle = 'active'
+                AND viable.role = 'administrator'
+                AND viable_subject.lifecycle = 'active'
+          )
+        "#,
+        [subject_id.to_string()],
+        |row| row.get(0),
+    )?;
+    u64::try_from(count).map_err(|_| HumanAccessStoreError::Integrity)
+}
+
+fn persist_membership_subject(
+    transaction: &Transaction<'_>,
+    membership: &WorkspaceMembership,
+    subject: &AuthSubject,
+) -> StoreResult<()> {
+    persist_subject(transaction, subject)?;
+    persist_membership(transaction, membership)
+}
+
+fn persist_membership(
+    transaction: &Transaction<'_>,
+    membership: &WorkspaceMembership,
+) -> StoreResult<()> {
+    let changed = transaction.execute(
+        r#"
+        UPDATE workspace_memberships
+        SET lifecycle = ?1, role = ?2, updated_at = ?3
+        WHERE membership_id = ?4 AND auth_subject_id = ?5 AND workspace_id = ?6
+        "#,
+        params![
+            membership.lifecycle().as_str(),
+            membership.role().as_str(),
+            timestamp(membership.updated_at()),
+            membership.id().to_string(),
+            membership.subject_id().to_string(),
+            membership.workspace_id().to_string(),
+        ],
+    )?;
+    if changed == 1 {
+        Ok(())
+    } else {
+        Err(HumanAccessStoreError::Conflict)
+    }
+}
+
+fn persist_subject(transaction: &Transaction<'_>, subject: &AuthSubject) -> StoreResult<()> {
+    let changed = transaction.execute(
+        r#"
+        UPDATE auth_subjects
+        SET lifecycle = ?1, auth_epoch = ?2, authorization_epoch = ?3, updated_at = ?4
+        WHERE auth_subject_id = ?5
+        "#,
+        params![
+            subject.lifecycle().as_str(),
+            i64::try_from(subject.auth_epoch()).map_err(|_| HumanAccessStoreError::Integrity)?,
+            i64::try_from(subject.authorization_epoch())
+                .map_err(|_| HumanAccessStoreError::Integrity)?,
+            timestamp(subject.updated_at()),
+            subject.id().to_string(),
+        ],
+    )?;
+    if changed == 1 {
+        Ok(())
+    } else {
+        Err(HumanAccessStoreError::Conflict)
+    }
+}
+
+fn revoke_subject_sessions(
+    transaction: &Transaction<'_>,
+    subject_id: AuthSubjectId,
+    workspace_id: Option<WorkspaceId>,
+    actor_id: AuthSubjectId,
+    correlation_id: RequestCorrelationId,
+    at: DateTime<Utc>,
+) -> StoreResult<u64> {
+    let rows = {
+        let (sql, workspace) = match workspace_id {
+            Some(workspace_id) => (
+                r#"
+                SELECT session.browser_session_id, session.workspace_id,
+                       anchor.trailbase_instance_id
+                FROM fasti_browser_sessions session
+                JOIN trailbase_auth_anchors anchor
+                  ON anchor.auth_subject_id = session.auth_subject_id
+                WHERE session.auth_subject_id = ?1 AND session.workspace_id = ?2
+                  AND session.revoked_at IS NULL
+                ORDER BY session.browser_session_id
+                "#,
+                Some(workspace_id.to_string()),
+            ),
+            None => (
+                r#"
+                SELECT session.browser_session_id, session.workspace_id,
+                       anchor.trailbase_instance_id
+                FROM fasti_browser_sessions session
+                JOIN trailbase_auth_anchors anchor
+                  ON anchor.auth_subject_id = session.auth_subject_id
+                WHERE session.auth_subject_id = ?1 AND session.revoked_at IS NULL
+                ORDER BY session.browser_session_id
+                "#,
+                None,
+            ),
+        };
+        let mut statement = transaction.prepare(sql)?;
+        let read = |row: &rusqlite::Row<'_>| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        };
+        match workspace {
+            Some(workspace) => statement
+                .query_map(params![subject_id.to_string(), workspace], read)?
+                .collect::<Result<Vec<_>, _>>()?,
+            None => statement
+                .query_map([subject_id.to_string()], read)?
+                .collect::<Result<Vec<_>, _>>()?,
+        }
+    };
+    for (session_id, workspace_id, instance_id) in &rows {
+        let changed = transaction.execute(
+            "UPDATE fasti_browser_sessions SET revoked_at = ?1 WHERE browser_session_id = ?2 AND revoked_at IS NULL",
+            params![timestamp(at), session_id],
+        )?;
+        if changed != 1 {
+            return Err(HumanAccessStoreError::Conflict);
+        }
+        insert_browser_session_revocation_audit(
+            transaction,
+            instance_id,
+            subject_id,
+            actor_id,
+            workspace_id,
+            session_id,
+            correlation_id,
+            at,
+        )?;
+    }
+    u64::try_from(rows.len()).map_err(|_| HumanAccessStoreError::Integrity)
 }
 
 fn persist_installation(
@@ -858,6 +1507,98 @@ fn insert_anchor_audit(
     Ok(())
 }
 
+fn insert_membership_audit(
+    transaction: &Transaction<'_>,
+    event: AccessAuditEventKind,
+    membership: &WorkspaceMembership,
+    actor_id: AuthSubjectId,
+    correlation_id: RequestCorrelationId,
+    at: DateTime<Utc>,
+) -> StoreResult<()> {
+    prune_audit_age(transaction, at)?;
+    transaction.execute(
+        r#"
+        INSERT INTO access_audit_events(
+            event_kind, auth_subject_id, actor_auth_subject_id, workspace_id,
+            membership_id, correlation_id, occurred_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        "#,
+        params![
+            event.as_str(),
+            membership.subject_id().to_string(),
+            actor_id.to_string(),
+            membership.workspace_id().to_string(),
+            membership.id().to_string(),
+            correlation_id.to_string(),
+            timestamp(at),
+        ],
+    )?;
+    prune_audit_overflow(transaction)?;
+    Ok(())
+}
+
+fn insert_subject_audit(
+    transaction: &Transaction<'_>,
+    subject: &AuthSubject,
+    actor_id: AuthSubjectId,
+    correlation_id: RequestCorrelationId,
+    at: DateTime<Utc>,
+) -> StoreResult<()> {
+    prune_audit_age(transaction, at)?;
+    transaction.execute(
+        r#"
+        INSERT INTO access_audit_events(
+            event_kind, auth_subject_id, actor_auth_subject_id,
+            correlation_id, occurred_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5)
+        "#,
+        params![
+            subject.lifecycle().audit_event().as_str(),
+            subject.id().to_string(),
+            actor_id.to_string(),
+            correlation_id.to_string(),
+            timestamp(at),
+        ],
+    )?;
+    prune_audit_overflow(transaction)?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn insert_browser_session_revocation_audit(
+    transaction: &Transaction<'_>,
+    instance_id: &str,
+    subject_id: AuthSubjectId,
+    actor_id: AuthSubjectId,
+    workspace_id: &str,
+    session_id: &str,
+    correlation_id: RequestCorrelationId,
+    at: DateTime<Utc>,
+) -> StoreResult<()> {
+    prune_audit_age(transaction, at)?;
+    transaction.execute(
+        r#"
+        INSERT INTO access_audit_events(
+            event_kind, trailbase_instance_id, auth_subject_id,
+            actor_auth_subject_id, workspace_id, browser_session_id,
+            correlation_id, occurred_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+        "#,
+        params![
+            AccessAuditEventKind::BrowserSessionRevoked.as_str(),
+            instance_id,
+            subject_id.to_string(),
+            actor_id.to_string(),
+            workspace_id,
+            session_id,
+            correlation_id.to_string(),
+            timestamp(at),
+        ],
+    )?;
+    prune_audit_overflow(transaction)?;
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn insert_first_administrator_audit(
     transaction: &Transaction<'_>,
@@ -1046,6 +1787,27 @@ impl HumanAccessPort for SqliteKernel {
         )
         .map_err(|error| access_problem(error, command.correlation_id()))
     }
+
+    fn change_membership_lifecycle(
+        &self,
+        command: ChangeMembershipLifecycleCommand,
+    ) -> ApplicationResult<bool> {
+        self.persist_membership_lifecycle_change(&command)
+    }
+
+    fn change_membership_role(
+        &self,
+        command: ChangeMembershipRoleCommand,
+    ) -> ApplicationResult<bool> {
+        self.persist_membership_role_change(&command)
+    }
+
+    fn change_auth_subject_lifecycle(
+        &self,
+        command: ChangeAuthSubjectLifecycleCommand,
+    ) -> ApplicationResult<bool> {
+        self.persist_subject_lifecycle_change(&command)
+    }
 }
 
 fn access_problem(
@@ -1083,7 +1845,11 @@ mod tests {
     use super::*;
     use crate::browser_auth::viable_administrator_count;
     use crate::test_support::TestNode;
-    use fasti_application::SecretMaterial;
+    use fasti_application::{
+        BrowserRequestBoundaryPolicy, BrowserSessionPort, CreateBrowserSessionCommand,
+        CreatedBrowserSession, SecretMaterial, SessionPolicy,
+    };
+    use fasti_domain::ProfileGrantId;
     use std::sync::{Arc, Barrier};
 
     fn at(minutes: i64) -> DateTime<Utc> {
@@ -1160,6 +1926,177 @@ mod tests {
                 at(2),
             )
             .expect("claim bootstrap ceremony");
+    }
+
+    fn copy_secret(secret: &SecretMaterial) -> SecretMaterial {
+        SecretMaterial::try_from_hex(&secret.expose_hex()).expect("copy test secret")
+    }
+
+    fn mutation_proof(
+        session: &CreatedBrowserSession,
+        now: DateTime<Utc>,
+    ) -> BrowserSessionMutationCommand {
+        let boundary =
+            BrowserRequestBoundaryPolicy::try_new("https://fasti.example", "fasti.example")
+                .expect("boundary policy")
+                .validate(Some("https://fasti.example"), Some("fasti.example"))
+                .expect("request boundary");
+        BrowserSessionMutationCommand::new(
+            RequestCorrelationId::new_v7(),
+            copy_secret(session.session_secret()),
+            copy_secret(session.csrf_secret()),
+            boundary,
+            now,
+        )
+    }
+
+    fn invalid_csrf_proof(
+        session: &CreatedBrowserSession,
+        now: DateTime<Utc>,
+    ) -> BrowserSessionMutationCommand {
+        let boundary =
+            BrowserRequestBoundaryPolicy::try_new("https://fasti.example", "fasti.example")
+                .expect("boundary policy")
+                .validate(Some("https://fasti.example"), Some("fasti.example"))
+                .expect("request boundary");
+        BrowserSessionMutationCommand::new(
+            RequestCorrelationId::new_v7(),
+            copy_secret(session.session_secret()),
+            SecretMaterial::from_bytes([99; 32]),
+            boundary,
+            now,
+        )
+    }
+
+    fn bootstrap_administrator(
+        node: &TestNode,
+        installation: &TrailBaseInstallation,
+    ) -> (AuthSubjectId, MembershipId, WorkspaceId) {
+        let ceremony = bootstrap_ceremony(installation, 71);
+        claim_bootstrap(&node.kernel, installation, &ceremony);
+        let BootstrapFirstAdministratorOutcome::Created {
+            subject_id,
+            membership_id,
+            workspace_id,
+        } = HumanAccessPort::bootstrap_first_administrator(
+            &node.kernel,
+            BootstrapFirstAdministratorCommand::new(
+                node.kernel
+                    .ensure_bootstrap_secret()
+                    .expect("bootstrap secret"),
+                ceremony.id(),
+                TrailBaseSubject::from_bytes([71; 16]),
+                RequestCorrelationId::new_v7(),
+                at(3),
+            ),
+        )
+        .expect("bootstrap administrator")
+        else {
+            panic!("fresh fixture must create administrator");
+        };
+        (subject_id, membership_id, workspace_id)
+    }
+
+    fn add_subject(
+        node: &TestNode,
+        installation: &TrailBaseInstallation,
+        workspace_id: WorkspaceId,
+        lifecycle: MembershipLifecycle,
+        role: WorkspaceRole,
+        subject_byte: u8,
+    ) -> (AuthSubjectId, MembershipId) {
+        let subject_id = AuthSubjectId::new_v7();
+        let membership_id = MembershipId::new_v7();
+        let connection = node.kernel.inner.connection.lock().expect("connection");
+        let transaction = connection.unchecked_transaction().expect("transaction");
+        transaction
+            .execute(
+                "INSERT INTO auth_subjects(auth_subject_id, lifecycle, auth_epoch, authorization_epoch, created_at, updated_at) VALUES (?1, 'active', 0, 0, ?2, ?2)",
+                params![subject_id.to_string(), timestamp(at(3))],
+            )
+            .expect("subject");
+        transaction
+            .execute(
+                "INSERT INTO trailbase_auth_anchors(trailbase_instance_id, trailbase_subject, auth_subject_id, linked_at) VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    installation.id().to_string(),
+                    vec![subject_byte; 16],
+                    subject_id.to_string(),
+                    timestamp(at(3)),
+                ],
+            )
+            .expect("anchor");
+        transaction
+            .execute(
+                "INSERT INTO workspace_memberships(membership_id, auth_subject_id, workspace_id, lifecycle, role, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
+                params![
+                    membership_id.to_string(),
+                    subject_id.to_string(),
+                    workspace_id.to_string(),
+                    lifecycle.as_str(),
+                    role.as_str(),
+                    timestamp(at(3)),
+                ],
+            )
+            .expect("membership");
+        transaction.commit().expect("commit subject");
+        (subject_id, membership_id)
+    }
+
+    fn create_test_session(
+        node: &TestNode,
+        installation: &TrailBaseInstallation,
+        subject_id: AuthSubjectId,
+        workspace_id: WorkspaceId,
+        grant_id: ProfileGrantId,
+        now: DateTime<Utc>,
+    ) -> CreatedBrowserSession {
+        {
+            let connection = node.kernel.inner.connection.lock().expect("connection");
+            connection
+                .execute(
+                    "INSERT OR IGNORE INTO auth_subject_profile_grants(auth_subject_id, profile_grant_id) VALUES (?1, ?2)",
+                    params![subject_id.to_string(), grant_id.to_string()],
+                )
+                .expect("subject grant");
+        }
+        let session = BrowserSessionPort::create_browser_session(
+            &node.kernel,
+            CreateBrowserSessionCommand::try_new(
+                RequestCorrelationId::new_v7(),
+                subject_id,
+                workspace_id,
+                vec![grant_id],
+                grant_id,
+                SessionPolicy::C1,
+                false,
+                now,
+            )
+            .expect("session command"),
+        )
+        .expect("browser session");
+        {
+            let connection = node.kernel.inner.connection.lock().expect("connection");
+            connection
+                .execute(
+                    r#"
+                    INSERT INTO fasti_browser_session_authentication(
+                        browser_session_id, trailbase_instance_id, activation_generation,
+                        method, verified_at, recent_authentication_expires_at
+                    ) VALUES (?1, ?2, ?3, 'trailbase_password', ?4, ?5)
+                    "#,
+                    params![
+                        session.session().id().to_string(),
+                        installation.id().to_string(),
+                        i64::try_from(installation.activation_generation())
+                            .expect("generation fits"),
+                        timestamp(now),
+                        timestamp(now + Duration::minutes(10)),
+                    ],
+                )
+                .expect("recent authentication");
+        }
+        session
     }
 
     fn insert_pending_rows(
@@ -1641,6 +2578,929 @@ mod tests {
             )
             .expect("blocked retry audits");
         assert_eq!(blocked_retry_audits, 3);
+    }
+
+    #[test]
+    fn membership_mutations_recheck_admin_continuity_and_revoke_suspended_sessions() {
+        let node = TestNode::new();
+        let installation = node
+            .kernel
+            .verify_trailbase_installation(
+                TrailBaseInstanceId::new_v7(),
+                true,
+                false,
+                RequestCorrelationId::new_v7(),
+                at(0),
+            )
+            .expect("installation");
+        let (actor_id, actor_membership_id, workspace_id) =
+            bootstrap_administrator(&node, &installation);
+        let (target_id, target_membership_id) = add_subject(
+            &node,
+            &installation,
+            workspace_id,
+            MembershipLifecycle::Active,
+            WorkspaceRole::Administrator,
+            72,
+        );
+        let actor_session = create_test_session(
+            &node,
+            &installation,
+            actor_id,
+            workspace_id,
+            node.access.grant_id(),
+            at(3),
+        );
+        let target_session = create_test_session(
+            &node,
+            &installation,
+            target_id,
+            workspace_id,
+            node.access.grant_id(),
+            at(3),
+        );
+
+        assert!(HumanAccessPort::change_membership_role(
+            &node.kernel,
+            ChangeMembershipRoleCommand::new(
+                mutation_proof(&actor_session, at(4)),
+                target_membership_id,
+                WorkspaceRole::Member,
+            ),
+        )
+        .expect("demote second administrator"));
+        assert!(HumanAccessPort::change_membership_lifecycle(
+            &node.kernel,
+            ChangeMembershipLifecycleCommand::new(
+                mutation_proof(&actor_session, at(5)),
+                target_membership_id,
+                fasti_application::AdministratorMembershipAction::Suspend,
+            ),
+        )
+        .expect("suspend member"));
+
+        let problem = HumanAccessPort::change_membership_role(
+            &node.kernel,
+            ChangeMembershipRoleCommand::new(
+                mutation_proof(&actor_session, at(6)),
+                actor_membership_id,
+                WorkspaceRole::Member,
+            ),
+        )
+        .expect_err("sole viable administrator must remain");
+        assert_eq!(problem.code(), ProblemCode::ValidationFailed);
+
+        let connection = node.kernel.inner.connection.lock().expect("connection");
+        let target: (String, String, i64, Option<String>) = connection
+            .query_row(
+                r#"
+                SELECT membership.lifecycle, membership.role,
+                       subject.authorization_epoch, session.revoked_at
+                FROM workspace_memberships membership
+                JOIN auth_subjects subject
+                  ON subject.auth_subject_id = membership.auth_subject_id
+                JOIN fasti_browser_sessions session
+                  ON session.auth_subject_id = membership.auth_subject_id
+                WHERE membership.membership_id = ?1
+                  AND session.browser_session_id = ?2
+                "#,
+                params![
+                    target_membership_id.to_string(),
+                    target_session.session().id().to_string(),
+                ],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("target state");
+        assert_eq!(target.0, "suspended");
+        assert_eq!(target.1, "member");
+        assert_eq!(target.2, 2);
+        assert_eq!(target.3, Some(timestamp(at(5))));
+        let actor: (String, i64) = connection
+            .query_row(
+                r#"
+                SELECT membership.role, subject.authorization_epoch
+                FROM workspace_memberships membership
+                JOIN auth_subjects subject
+                  ON subject.auth_subject_id = membership.auth_subject_id
+                WHERE membership.membership_id = ?1
+                "#,
+                [actor_membership_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("actor state");
+        assert_eq!(actor, ("administrator".to_owned(), 0));
+        let audits: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM access_audit_events WHERE event_kind IN ('membership_demoted', 'membership_suspended') AND auth_subject_id = ?1",
+                [target_id.to_string()],
+                |row| row.get(0),
+            )
+            .expect("membership audits");
+        assert_eq!(audits, 2);
+        let revocation_audits: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM access_audit_events WHERE event_kind = 'browser_session_revoked' AND auth_subject_id = ?1 AND browser_session_id = ?2",
+                params![
+                    target_id.to_string(),
+                    target_session.session().id().to_string(),
+                ],
+                |row| row.get(0),
+            )
+            .expect("revocation audit");
+        assert_eq!(revocation_audits, 1);
+    }
+
+    #[test]
+    fn membership_lifecycle_actions_persist_exact_state_and_audit_sequence() {
+        let node = TestNode::new();
+        let installation = node
+            .kernel
+            .verify_trailbase_installation(
+                TrailBaseInstanceId::new_v7(),
+                true,
+                false,
+                RequestCorrelationId::new_v7(),
+                at(0),
+            )
+            .expect("installation");
+        let (actor_id, _, workspace_id) = bootstrap_administrator(&node, &installation);
+        let (target_id, target_membership_id) = add_subject(
+            &node,
+            &installation,
+            workspace_id,
+            MembershipLifecycle::PendingApproval,
+            WorkspaceRole::Member,
+            77,
+        );
+        let actor_session = create_test_session(
+            &node,
+            &installation,
+            actor_id,
+            workspace_id,
+            node.access.grant_id(),
+            at(3),
+        );
+
+        for (minute, action) in [
+            (4, fasti_application::AdministratorMembershipAction::Approve),
+            (5, fasti_application::AdministratorMembershipAction::Suspend),
+            (6, fasti_application::AdministratorMembershipAction::Resume),
+            (7, fasti_application::AdministratorMembershipAction::Remove),
+        ] {
+            assert!(HumanAccessPort::change_membership_lifecycle(
+                &node.kernel,
+                ChangeMembershipLifecycleCommand::new(
+                    mutation_proof(&actor_session, at(minute)),
+                    target_membership_id,
+                    action,
+                ),
+            )
+            .expect("valid lifecycle action"));
+        }
+
+        let connection = node.kernel.inner.connection.lock().expect("connection");
+        let persisted: (String, i64) = connection
+            .query_row(
+                r#"
+                SELECT membership.lifecycle, subject.authorization_epoch
+                FROM workspace_memberships membership
+                JOIN auth_subjects subject
+                  ON subject.auth_subject_id = membership.auth_subject_id
+                WHERE membership.membership_id = ?1
+                "#,
+                [target_membership_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("lifecycle state");
+        assert_eq!(persisted, ("removed".to_owned(), 4));
+        let audit_sequence = {
+            let mut statement = connection
+                .prepare(
+                    r#"
+                    SELECT event_kind FROM access_audit_events
+                    WHERE membership_id = ?1 AND actor_auth_subject_id = ?2
+                    ORDER BY occurred_at, audit_event_id
+                    "#,
+                )
+                .expect("prepare lifecycle audits");
+            statement
+                .query_map(
+                    params![target_membership_id.to_string(), actor_id.to_string()],
+                    |row| row.get::<_, String>(0),
+                )
+                .expect("query lifecycle audits")
+                .collect::<Result<Vec<_>, _>>()
+                .expect("collect lifecycle audits")
+        };
+        assert_eq!(
+            audit_sequence,
+            [
+                "membership_approved",
+                "membership_suspended",
+                "membership_resumed",
+                "membership_removed",
+            ]
+        );
+        let target_lifecycle: String = connection
+            .query_row(
+                "SELECT lifecycle FROM auth_subjects WHERE auth_subject_id = ?1",
+                [target_id.to_string()],
+                |row| row.get(0),
+            )
+            .expect("target subject");
+        assert_eq!(target_lifecycle, "active");
+    }
+
+    #[test]
+    fn concurrent_admin_demotion_preserves_one_viable_administrator() {
+        let node = TestNode::new();
+        let installation = node
+            .kernel
+            .verify_trailbase_installation(
+                TrailBaseInstanceId::new_v7(),
+                true,
+                false,
+                RequestCorrelationId::new_v7(),
+                at(0),
+            )
+            .expect("installation");
+        let (first_id, first_membership_id, workspace_id) =
+            bootstrap_administrator(&node, &installation);
+        let (second_id, second_membership_id) = add_subject(
+            &node,
+            &installation,
+            workspace_id,
+            MembershipLifecycle::Active,
+            WorkspaceRole::Administrator,
+            78,
+        );
+        let first_session = create_test_session(
+            &node,
+            &installation,
+            first_id,
+            workspace_id,
+            node.access.grant_id(),
+            at(3),
+        );
+        let second_session = create_test_session(
+            &node,
+            &installation,
+            second_id,
+            workspace_id,
+            node.access.grant_id(),
+            at(3),
+        );
+        let barrier = Arc::new(Barrier::new(3));
+        let mut workers = Vec::new();
+        for (kernel, barrier, command) in [
+            (
+                node.kernel.clone(),
+                Arc::clone(&barrier),
+                ChangeMembershipRoleCommand::new(
+                    mutation_proof(&first_session, at(4)),
+                    second_membership_id,
+                    WorkspaceRole::Member,
+                ),
+            ),
+            (
+                node.kernel.clone(),
+                Arc::clone(&barrier),
+                ChangeMembershipRoleCommand::new(
+                    mutation_proof(&second_session, at(4)),
+                    first_membership_id,
+                    WorkspaceRole::Member,
+                ),
+            ),
+        ] {
+            workers.push(std::thread::spawn(move || {
+                barrier.wait();
+                HumanAccessPort::change_membership_role(&kernel, command)
+            }));
+        }
+        barrier.wait();
+        let outcomes: Vec<_> = workers
+            .into_iter()
+            .map(|worker| worker.join().expect("demotion worker"))
+            .collect();
+        assert_eq!(outcomes.iter().filter(|outcome| outcome.is_ok()).count(), 1);
+        assert_eq!(
+            outcomes.iter().filter(|outcome| outcome.is_err()).count(),
+            1
+        );
+
+        let connection = node.kernel.inner.connection.lock().expect("connection");
+        let persisted: (i64, i64) = connection
+            .query_row(
+                r#"
+                SELECT
+                    (SELECT COUNT(*) FROM workspace_memberships membership
+                     JOIN auth_subjects subject
+                       ON subject.auth_subject_id = membership.auth_subject_id
+                     WHERE membership.workspace_id = ?1
+                       AND membership.lifecycle = 'active'
+                       AND membership.role = 'administrator'
+                       AND subject.lifecycle = 'active'),
+                    (SELECT COUNT(*) FROM access_audit_events
+                     WHERE workspace_id = ?1 AND event_kind = 'membership_demoted')
+                "#,
+                [workspace_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("administrator continuity");
+        assert_eq!(persisted, (1, 1));
+    }
+
+    #[test]
+    fn subject_lifecycle_change_is_authorized_atomic_and_revokes_all_sessions() {
+        let node = TestNode::new();
+        let installation = node
+            .kernel
+            .verify_trailbase_installation(
+                TrailBaseInstanceId::new_v7(),
+                true,
+                false,
+                RequestCorrelationId::new_v7(),
+                at(0),
+            )
+            .expect("installation");
+        let (actor_id, _, workspace_id) = bootstrap_administrator(&node, &installation);
+        let (target_id, _) = add_subject(
+            &node,
+            &installation,
+            workspace_id,
+            MembershipLifecycle::Active,
+            WorkspaceRole::Member,
+            73,
+        );
+        let actor_session = create_test_session(
+            &node,
+            &installation,
+            actor_id,
+            workspace_id,
+            node.access.grant_id(),
+            at(3),
+        );
+        let target_session = create_test_session(
+            &node,
+            &installation,
+            target_id,
+            workspace_id,
+            node.access.grant_id(),
+            at(3),
+        );
+
+        assert!(HumanAccessPort::change_auth_subject_lifecycle(
+            &node.kernel,
+            ChangeAuthSubjectLifecycleCommand::new(
+                mutation_proof(&actor_session, at(4)),
+                target_id,
+                fasti_application::AdministratorSubjectAction::Disable,
+            ),
+        )
+        .expect("disable subject"));
+
+        let connection = node.kernel.inner.connection.lock().expect("connection");
+        let persisted: (String, i64, i64, String, Option<String>, i64, i64, i64) = connection
+            .query_row(
+                r#"
+                SELECT subject.lifecycle, subject.auth_epoch,
+                       subject.authorization_epoch, membership.lifecycle,
+                       session.revoked_at,
+                       (SELECT COUNT(*) FROM access_audit_events
+                        WHERE event_kind = 'subject_disabled'
+                          AND auth_subject_id = ?1
+                          AND actor_auth_subject_id = ?3),
+                       (SELECT COUNT(*) FROM access_audit_events
+                        WHERE event_kind = 'membership_suspended'
+                          AND membership_id = membership.membership_id
+                          AND actor_auth_subject_id = ?3),
+                       (SELECT COUNT(*) FROM access_audit_events
+                        WHERE event_kind = 'browser_session_revoked'
+                          AND auth_subject_id = ?1
+                          AND actor_auth_subject_id = ?3)
+                FROM auth_subjects subject
+                JOIN workspace_memberships membership
+                  ON membership.auth_subject_id = subject.auth_subject_id
+                JOIN fasti_browser_sessions session
+                  ON session.auth_subject_id = subject.auth_subject_id
+                WHERE subject.auth_subject_id = ?1
+                  AND session.browser_session_id = ?2
+                "#,
+                params![
+                    target_id.to_string(),
+                    target_session.session().id().to_string(),
+                    actor_id.to_string(),
+                ],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                    ))
+                },
+            )
+            .expect("subject state");
+        assert_eq!(persisted.0, "disabled");
+        assert_eq!(persisted.1, 1);
+        assert_eq!(persisted.2, 1);
+        assert_eq!(persisted.3, "suspended");
+        assert_eq!(persisted.4, Some(timestamp(at(4))));
+        assert_eq!(persisted.5, 1);
+        assert_eq!(persisted.6, 1);
+        assert_eq!(persisted.7, 1);
+    }
+
+    #[test]
+    fn subject_lifecycle_requires_admin_authority_in_every_current_workspace() {
+        let node = TestNode::new();
+        let installation = node
+            .kernel
+            .verify_trailbase_installation(
+                TrailBaseInstanceId::new_v7(),
+                true,
+                false,
+                RequestCorrelationId::new_v7(),
+                at(0),
+            )
+            .expect("installation");
+        let (actor_id, _, workspace_id) = bootstrap_administrator(&node, &installation);
+        let (target_id, target_membership_id) = add_subject(
+            &node,
+            &installation,
+            workspace_id,
+            MembershipLifecycle::Active,
+            WorkspaceRole::Member,
+            79,
+        );
+        let other_workspace_id = WorkspaceId::new_v7();
+        let other_membership_id = MembershipId::new_v7();
+        {
+            let connection = node.kernel.inner.connection.lock().expect("connection");
+            let transaction = connection.unchecked_transaction().expect("transaction");
+            transaction
+                .execute(
+                    "INSERT INTO workspaces(workspace_id, created_at) VALUES (?1, ?2)",
+                    params![other_workspace_id.to_string(), timestamp(at(3))],
+                )
+                .expect("other workspace");
+            transaction
+                .execute(
+                    "INSERT INTO workspace_memberships(membership_id, auth_subject_id, workspace_id, lifecycle, role, created_at, updated_at) VALUES (?1, ?2, ?3, 'active', 'member', ?4, ?4)",
+                    params![
+                        other_membership_id.to_string(),
+                        target_id.to_string(),
+                        other_workspace_id.to_string(),
+                        timestamp(at(3)),
+                    ],
+                )
+                .expect("other membership");
+            transaction.commit().expect("other workspace membership");
+        }
+        let actor_session = create_test_session(
+            &node,
+            &installation,
+            actor_id,
+            workspace_id,
+            node.access.grant_id(),
+            at(3),
+        );
+        let target_session = create_test_session(
+            &node,
+            &installation,
+            target_id,
+            workspace_id,
+            node.access.grant_id(),
+            at(3),
+        );
+
+        let problem = HumanAccessPort::change_auth_subject_lifecycle(
+            &node.kernel,
+            ChangeAuthSubjectLifecycleCommand::new(
+                mutation_proof(&actor_session, at(4)),
+                target_id,
+                fasti_application::AdministratorSubjectAction::Disable,
+            ),
+        )
+        .expect_err("partial cross-workspace authority must fail");
+        assert_eq!(problem.code(), ProblemCode::Forbidden);
+
+        let connection = node.kernel.inner.connection.lock().expect("connection");
+        let persisted: (String, i64, i64, Option<String>, i64) = connection
+            .query_row(
+                r#"
+                SELECT subject.lifecycle, subject.auth_epoch,
+                       (SELECT COUNT(*) FROM workspace_memberships
+                        WHERE auth_subject_id = ?1 AND lifecycle = 'active'),
+                       session.revoked_at,
+                       (SELECT COUNT(*) FROM access_audit_events
+                        WHERE auth_subject_id = ?1
+                          AND event_kind IN (
+                              'subject_disabled', 'membership_suspended',
+                              'browser_session_revoked'
+                          ))
+                FROM auth_subjects subject
+                JOIN fasti_browser_sessions session
+                  ON session.auth_subject_id = subject.auth_subject_id
+                WHERE subject.auth_subject_id = ?1
+                  AND session.browser_session_id = ?2
+                "#,
+                params![
+                    target_id.to_string(),
+                    target_session.session().id().to_string(),
+                ],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .expect("unchanged cross-workspace target");
+        assert_eq!(persisted, ("active".to_owned(), 0, 2, None, 0));
+        let original_membership: String = connection
+            .query_row(
+                "SELECT lifecycle FROM workspace_memberships WHERE membership_id = ?1",
+                [target_membership_id.to_string()],
+                |row| row.get(0),
+            )
+            .expect("original membership");
+        assert_eq!(original_membership, "active");
+    }
+
+    #[test]
+    fn subject_audit_failure_rolls_back_membership_epoch_and_revocation() {
+        let node = TestNode::new();
+        let installation = node
+            .kernel
+            .verify_trailbase_installation(
+                TrailBaseInstanceId::new_v7(),
+                true,
+                false,
+                RequestCorrelationId::new_v7(),
+                at(0),
+            )
+            .expect("installation");
+        let (actor_id, _, workspace_id) = bootstrap_administrator(&node, &installation);
+        let (target_id, target_membership_id) = add_subject(
+            &node,
+            &installation,
+            workspace_id,
+            MembershipLifecycle::Active,
+            WorkspaceRole::Member,
+            80,
+        );
+        let actor_session = create_test_session(
+            &node,
+            &installation,
+            actor_id,
+            workspace_id,
+            node.access.grant_id(),
+            at(3),
+        );
+        let target_session = create_test_session(
+            &node,
+            &installation,
+            target_id,
+            workspace_id,
+            node.access.grant_id(),
+            at(3),
+        );
+        {
+            let connection = node.kernel.inner.connection.lock().expect("connection");
+            connection
+                .execute_batch(
+                    r#"
+                    CREATE TRIGGER reject_subject_disabled_audit
+                    BEFORE INSERT ON access_audit_events
+                    WHEN NEW.event_kind = 'subject_disabled'
+                    BEGIN
+                        SELECT RAISE(ABORT, 'injected subject audit failure');
+                    END;
+                    "#,
+                )
+                .expect("subject audit fault");
+        }
+
+        let problem = HumanAccessPort::change_auth_subject_lifecycle(
+            &node.kernel,
+            ChangeAuthSubjectLifecycleCommand::new(
+                mutation_proof(&actor_session, at(4)),
+                target_id,
+                fasti_application::AdministratorSubjectAction::Disable,
+            ),
+        )
+        .expect_err("subject audit failure must roll back");
+        assert_eq!(problem.code(), ProblemCode::StorageUnavailable);
+
+        let connection = node.kernel.inner.connection.lock().expect("connection");
+        let persisted: (String, i64, i64, String, Option<String>, i64) = connection
+            .query_row(
+                r#"
+                SELECT subject.lifecycle, subject.auth_epoch,
+                       subject.authorization_epoch, membership.lifecycle,
+                       session.revoked_at,
+                       (SELECT COUNT(*) FROM access_audit_events
+                        WHERE auth_subject_id = ?1
+                          AND event_kind IN (
+                              'subject_disabled', 'membership_suspended',
+                              'browser_session_revoked'
+                          ))
+                FROM auth_subjects subject
+                JOIN workspace_memberships membership
+                  ON membership.auth_subject_id = subject.auth_subject_id
+                 AND membership.membership_id = ?2
+                JOIN fasti_browser_sessions session
+                  ON session.auth_subject_id = subject.auth_subject_id
+                 AND session.browser_session_id = ?3
+                WHERE subject.auth_subject_id = ?1
+                "#,
+                params![
+                    target_id.to_string(),
+                    target_membership_id.to_string(),
+                    target_session.session().id().to_string(),
+                ],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .expect("rolled back subject state");
+        assert_eq!(
+            persisted,
+            ("active".to_owned(), 0, 0, "active".to_owned(), None, 0)
+        );
+    }
+
+    #[test]
+    fn store_epoch_boundary_fails_before_partial_role_change() {
+        let node = TestNode::new();
+        let installation = node
+            .kernel
+            .verify_trailbase_installation(
+                TrailBaseInstanceId::new_v7(),
+                true,
+                false,
+                RequestCorrelationId::new_v7(),
+                at(0),
+            )
+            .expect("installation");
+        let (actor_id, _, workspace_id) = bootstrap_administrator(&node, &installation);
+        let (target_id, target_membership_id) = add_subject(
+            &node,
+            &installation,
+            workspace_id,
+            MembershipLifecycle::Active,
+            WorkspaceRole::Member,
+            81,
+        );
+        let actor_session = create_test_session(
+            &node,
+            &installation,
+            actor_id,
+            workspace_id,
+            node.access.grant_id(),
+            at(3),
+        );
+        {
+            let connection = node.kernel.inner.connection.lock().expect("connection");
+            connection
+                .execute(
+                    "UPDATE auth_subjects SET authorization_epoch = ?1 WHERE auth_subject_id = ?2",
+                    params![i64::MAX, target_id.to_string()],
+                )
+                .expect("set persisted epoch boundary");
+        }
+
+        let problem = HumanAccessPort::change_membership_role(
+            &node.kernel,
+            ChangeMembershipRoleCommand::new(
+                mutation_proof(&actor_session, at(4)),
+                target_membership_id,
+                WorkspaceRole::Administrator,
+            ),
+        )
+        .expect_err("next epoch cannot fit the persisted representation");
+        assert_eq!(problem.code(), ProblemCode::IntegrityFailed);
+
+        let connection = node.kernel.inner.connection.lock().expect("connection");
+        let persisted: (String, i64, i64) = connection
+            .query_row(
+                r#"
+                SELECT membership.role, subject.authorization_epoch,
+                       (SELECT COUNT(*) FROM access_audit_events
+                        WHERE membership_id = ?1
+                          AND event_kind = 'membership_promoted')
+                FROM workspace_memberships membership
+                JOIN auth_subjects subject
+                  ON subject.auth_subject_id = membership.auth_subject_id
+                WHERE membership.membership_id = ?1
+                "#,
+                [target_membership_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("unchanged epoch boundary");
+        assert_eq!(persisted, ("member".to_owned(), i64::MAX, 0));
+    }
+
+    #[test]
+    fn membership_audit_failure_rolls_back_epoch_revocation_and_membership() {
+        let node = TestNode::new();
+        let installation = node
+            .kernel
+            .verify_trailbase_installation(
+                TrailBaseInstanceId::new_v7(),
+                true,
+                false,
+                RequestCorrelationId::new_v7(),
+                at(0),
+            )
+            .expect("installation");
+        let (actor_id, _, workspace_id) = bootstrap_administrator(&node, &installation);
+        let (target_id, target_membership_id) = add_subject(
+            &node,
+            &installation,
+            workspace_id,
+            MembershipLifecycle::Active,
+            WorkspaceRole::Member,
+            74,
+        );
+        let actor_session = create_test_session(
+            &node,
+            &installation,
+            actor_id,
+            workspace_id,
+            node.access.grant_id(),
+            at(3),
+        );
+        let target_session = create_test_session(
+            &node,
+            &installation,
+            target_id,
+            workspace_id,
+            node.access.grant_id(),
+            at(3),
+        );
+        {
+            let connection = node.kernel.inner.connection.lock().expect("connection");
+            connection
+                .execute_batch(
+                    r#"
+                    CREATE TRIGGER reject_membership_suspended_audit
+                    BEFORE INSERT ON access_audit_events
+                    WHEN NEW.event_kind = 'membership_suspended'
+                    BEGIN
+                        SELECT RAISE(ABORT, 'injected audit failure');
+                    END;
+                    "#,
+                )
+                .expect("audit fault");
+        }
+
+        let problem = HumanAccessPort::change_membership_lifecycle(
+            &node.kernel,
+            ChangeMembershipLifecycleCommand::new(
+                mutation_proof(&actor_session, at(4)),
+                target_membership_id,
+                fasti_application::AdministratorMembershipAction::Suspend,
+            ),
+        )
+        .expect_err("audit failure must roll back");
+        assert_eq!(problem.code(), ProblemCode::StorageUnavailable);
+
+        let connection = node.kernel.inner.connection.lock().expect("connection");
+        let state: (String, i64, Option<String>, i64) = connection
+            .query_row(
+                r#"
+                SELECT membership.lifecycle, subject.authorization_epoch,
+                       session.revoked_at,
+                       (SELECT COUNT(*) FROM access_audit_events
+                        WHERE auth_subject_id = ?1
+                          AND event_kind IN ('membership_suspended', 'browser_session_revoked'))
+                FROM workspace_memberships membership
+                JOIN auth_subjects subject
+                  ON subject.auth_subject_id = membership.auth_subject_id
+                JOIN fasti_browser_sessions session
+                  ON session.auth_subject_id = subject.auth_subject_id
+                WHERE membership.membership_id = ?2
+                  AND session.browser_session_id = ?3
+                "#,
+                params![
+                    target_id.to_string(),
+                    target_membership_id.to_string(),
+                    target_session.session().id().to_string(),
+                ],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("rolled back state");
+        assert_eq!(state, ("active".to_owned(), 0, None, 0));
+    }
+
+    #[test]
+    fn membership_mutation_denials_leave_target_and_audit_unchanged() {
+        let node = TestNode::new();
+        let installation = node
+            .kernel
+            .verify_trailbase_installation(
+                TrailBaseInstanceId::new_v7(),
+                true,
+                false,
+                RequestCorrelationId::new_v7(),
+                at(0),
+            )
+            .expect("installation");
+        let (actor_id, _, workspace_id) = bootstrap_administrator(&node, &installation);
+        let (target_id, target_membership_id) = add_subject(
+            &node,
+            &installation,
+            workspace_id,
+            MembershipLifecycle::Active,
+            WorkspaceRole::Member,
+            75,
+        );
+        let actor_session = create_test_session(
+            &node,
+            &installation,
+            actor_id,
+            workspace_id,
+            node.access.grant_id(),
+            at(3),
+        );
+        let target_session = create_test_session(
+            &node,
+            &installation,
+            target_id,
+            workspace_id,
+            node.access.grant_id(),
+            at(3),
+        );
+
+        for proof in [
+            invalid_csrf_proof(&actor_session, at(4)),
+            mutation_proof(&target_session, at(4)),
+        ] {
+            let problem = HumanAccessPort::change_membership_role(
+                &node.kernel,
+                ChangeMembershipRoleCommand::new(
+                    proof,
+                    target_membership_id,
+                    WorkspaceRole::Administrator,
+                ),
+            )
+            .expect_err("invalid actor proof must fail");
+            assert_eq!(problem.code(), ProblemCode::Forbidden);
+        }
+        {
+            let connection = node.kernel.inner.connection.lock().expect("connection");
+            connection
+                .execute(
+                    "DELETE FROM fasti_browser_session_authentication WHERE browser_session_id = ?1",
+                    [actor_session.session().id().to_string()],
+                )
+                .expect("expire recent proof");
+        }
+        let problem = HumanAccessPort::change_membership_role(
+            &node.kernel,
+            ChangeMembershipRoleCommand::new(
+                mutation_proof(&actor_session, at(4)),
+                target_membership_id,
+                WorkspaceRole::Administrator,
+            ),
+        )
+        .expect_err("recent authentication is required");
+        assert_eq!(problem.code(), ProblemCode::Forbidden);
+
+        let connection = node.kernel.inner.connection.lock().expect("connection");
+        let unchanged: (String, i64, i64) = connection
+            .query_row(
+                r#"
+                SELECT membership.role, subject.authorization_epoch,
+                       (SELECT COUNT(*) FROM access_audit_events
+                        WHERE auth_subject_id = ?1
+                          AND event_kind = 'membership_promoted')
+                FROM workspace_memberships membership
+                JOIN auth_subjects subject
+                  ON subject.auth_subject_id = membership.auth_subject_id
+                WHERE membership.membership_id = ?2
+                "#,
+                params![target_id.to_string(), target_membership_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("unchanged target");
+        assert_eq!(unchanged, ("member".to_owned(), 0, 0));
     }
 
     #[test]

@@ -1,8 +1,9 @@
-use crate::{ApplicationResult, SecretMaterial};
+use crate::{ApplicationResult, BrowserSessionMutationCommand, SecretMaterial};
 use chrono::{DateTime, Utc};
 use fasti_domain::{
-    AuthCallbackPath, AuthCeremony, AuthSubjectId, MembershipId, OperationId, RequestCorrelationId,
-    Sha256Digest, TrailBaseInstallation, TrailBaseInstanceId, TrailBaseSubject, WorkspaceId,
+    AuthCallbackPath, AuthCeremony, AuthSubjectId, AuthSubjectLifecycle, MembershipId,
+    MembershipLifecycleAction, OperationId, RequestCorrelationId, Sha256Digest,
+    TrailBaseInstallation, TrailBaseInstanceId, TrailBaseSubject, WorkspaceId, WorkspaceRole,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -169,6 +170,129 @@ pub enum BootstrapFirstAdministratorOutcome {
     AlreadyBootstrapped,
 }
 
+pub struct ChangeMembershipLifecycleCommand {
+    proof: BrowserSessionMutationCommand,
+    membership_id: MembershipId,
+    action: AdministratorMembershipAction,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdministratorMembershipAction {
+    Approve,
+    Suspend,
+    Resume,
+    Remove,
+}
+
+impl AdministratorMembershipAction {
+    pub const fn lifecycle_action(self) -> MembershipLifecycleAction {
+        match self {
+            Self::Approve => MembershipLifecycleAction::Approve,
+            Self::Suspend => MembershipLifecycleAction::Suspend,
+            Self::Resume => MembershipLifecycleAction::Resume,
+            Self::Remove => MembershipLifecycleAction::Remove,
+        }
+    }
+}
+
+impl ChangeMembershipLifecycleCommand {
+    pub const fn new(
+        proof: BrowserSessionMutationCommand,
+        membership_id: MembershipId,
+        action: AdministratorMembershipAction,
+    ) -> Self {
+        Self {
+            proof,
+            membership_id,
+            action,
+        }
+    }
+    pub const fn proof(&self) -> &BrowserSessionMutationCommand {
+        &self.proof
+    }
+    pub const fn membership_id(&self) -> MembershipId {
+        self.membership_id
+    }
+    pub const fn action(&self) -> AdministratorMembershipAction {
+        self.action
+    }
+}
+
+pub struct ChangeMembershipRoleCommand {
+    proof: BrowserSessionMutationCommand,
+    membership_id: MembershipId,
+    role: WorkspaceRole,
+}
+
+impl ChangeMembershipRoleCommand {
+    pub const fn new(
+        proof: BrowserSessionMutationCommand,
+        membership_id: MembershipId,
+        role: WorkspaceRole,
+    ) -> Self {
+        Self {
+            proof,
+            membership_id,
+            role,
+        }
+    }
+    pub const fn proof(&self) -> &BrowserSessionMutationCommand {
+        &self.proof
+    }
+    pub const fn membership_id(&self) -> MembershipId {
+        self.membership_id
+    }
+    pub const fn role(&self) -> WorkspaceRole {
+        self.role
+    }
+}
+
+pub struct ChangeAuthSubjectLifecycleCommand {
+    proof: BrowserSessionMutationCommand,
+    subject_id: AuthSubjectId,
+    action: AdministratorSubjectAction,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdministratorSubjectAction {
+    Disable,
+    BeginRecovery,
+    Reactivate,
+}
+
+impl AdministratorSubjectAction {
+    pub const fn lifecycle(self) -> AuthSubjectLifecycle {
+        match self {
+            Self::Disable => AuthSubjectLifecycle::Disabled,
+            Self::BeginRecovery => AuthSubjectLifecycle::RecoveryPending,
+            Self::Reactivate => AuthSubjectLifecycle::Active,
+        }
+    }
+}
+
+impl ChangeAuthSubjectLifecycleCommand {
+    pub const fn new(
+        proof: BrowserSessionMutationCommand,
+        subject_id: AuthSubjectId,
+        action: AdministratorSubjectAction,
+    ) -> Self {
+        Self {
+            proof,
+            subject_id,
+            action,
+        }
+    }
+    pub const fn proof(&self) -> &BrowserSessionMutationCommand {
+        &self.proof
+    }
+    pub const fn subject_id(&self) -> AuthSubjectId {
+        self.subject_id
+    }
+    pub const fn action(&self) -> AdministratorSubjectAction {
+        self.action
+    }
+}
+
 impl CancelAuthCeremonyCommand {
     pub const fn new(
         operation_id: OperationId,
@@ -210,4 +334,16 @@ pub trait HumanAccessPort: Send + Sync {
         &self,
         command: BootstrapFirstAdministratorCommand,
     ) -> ApplicationResult<BootstrapFirstAdministratorOutcome>;
+    fn change_membership_lifecycle(
+        &self,
+        command: ChangeMembershipLifecycleCommand,
+    ) -> ApplicationResult<bool>;
+    fn change_membership_role(
+        &self,
+        command: ChangeMembershipRoleCommand,
+    ) -> ApplicationResult<bool>;
+    fn change_auth_subject_lifecycle(
+        &self,
+        command: ChangeAuthSubjectLifecycleCommand,
+    ) -> ApplicationResult<bool>;
 }

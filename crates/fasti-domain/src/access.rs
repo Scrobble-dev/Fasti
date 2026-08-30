@@ -385,6 +385,40 @@ impl AuthSubjectLifecycle {
             _ => None,
         }
     }
+
+    const fn can_transition_to(self, next: Self) -> bool {
+        !matches!(self, Self::Deleted) && self as u8 != next as u8
+    }
+
+    pub const fn audit_event(self) -> AccessAuditEventKind {
+        match self {
+            Self::Active => AccessAuditEventKind::SubjectReactivated,
+            Self::Disabled => AccessAuditEventKind::SubjectDisabled,
+            Self::Deleted => AccessAuditEventKind::SubjectDeleted,
+            Self::RecoveryPending => AccessAuditEventKind::SubjectRecoveryPending,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccessInvalidationEffect {
+    SubjectAuthenticationChanged,
+    MembershipAuthorizationChanged,
+    MembershipAuthorizationChangedAndSessionsRevoked,
+}
+
+impl AccessInvalidationEffect {
+    pub const fn revoke_browser_sessions(self) -> bool {
+        matches!(
+            self,
+            Self::SubjectAuthenticationChanged
+                | Self::MembershipAuthorizationChangedAndSessionsRevoked
+        )
+    }
+
+    pub const fn invalidate_recent_authentication(self) -> bool {
+        matches!(self, Self::SubjectAuthenticationChanged)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -443,14 +477,14 @@ impl AuthSubject {
         lifecycle: AuthSubjectLifecycle,
         administrator_continuity: AdministratorContinuity,
         at: DateTime<Utc>,
-    ) -> Result<bool, AccessInvariantError> {
+    ) -> Result<Option<AccessInvalidationEffect>, AccessInvariantError> {
         if at < self.updated_at {
             return Err(AccessInvariantError::InvalidTimestampOrder);
         }
         if lifecycle == self.lifecycle {
-            return Ok(false);
+            return Ok(None);
         }
-        if matches!(self.lifecycle, AuthSubjectLifecycle::Deleted) {
+        if !self.lifecycle.can_transition_to(lifecycle) {
             return Err(AccessInvariantError::DeletedSubjectIsTerminal);
         }
         if matches!(self.lifecycle, AuthSubjectLifecycle::Active)
@@ -460,7 +494,7 @@ impl AuthSubject {
         }
         self.advance_authentication_epoch(at)?;
         self.lifecycle = lifecycle;
-        Ok(true)
+        Ok(Some(AccessInvalidationEffect::SubjectAuthenticationChanged))
     }
 
     pub fn advance_authentication_epoch(
@@ -515,6 +549,13 @@ impl WorkspaceRole {
             _ => None,
         }
     }
+
+    pub const fn audit_event(self) -> AccessAuditEventKind {
+        match self {
+            Self::Member => AccessAuditEventKind::MembershipDemoted,
+            Self::Administrator => AccessAuditEventKind::MembershipPromoted,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -524,6 +565,52 @@ pub enum MembershipLifecycle {
     Active,
     Suspended,
     Removed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MembershipLifecycleAction {
+    AcceptInvitation,
+    Approve,
+    Suspend,
+    Resume,
+    Remove,
+}
+
+impl MembershipLifecycleAction {
+    const fn target(self) -> MembershipLifecycle {
+        match self {
+            Self::AcceptInvitation | Self::Approve | Self::Resume => MembershipLifecycle::Active,
+            Self::Suspend => MembershipLifecycle::Suspended,
+            Self::Remove => MembershipLifecycle::Removed,
+        }
+    }
+
+    const fn applies_to(self, current: MembershipLifecycle) -> bool {
+        matches!(
+            (self, current),
+            (Self::AcceptInvitation, MembershipLifecycle::Invited)
+                | (Self::Approve, MembershipLifecycle::PendingApproval)
+                | (Self::Suspend, MembershipLifecycle::Active)
+                | (Self::Resume, MembershipLifecycle::Suspended)
+                | (
+                    Self::Remove,
+                    MembershipLifecycle::Invited
+                        | MembershipLifecycle::PendingApproval
+                        | MembershipLifecycle::Active
+                        | MembershipLifecycle::Suspended
+                )
+        )
+    }
+
+    pub const fn audit_event(self) -> AccessAuditEventKind {
+        match self {
+            Self::AcceptInvitation => AccessAuditEventKind::MembershipInvitationAccepted,
+            Self::Approve => AccessAuditEventKind::MembershipApproved,
+            Self::Suspend => AccessAuditEventKind::MembershipSuspended,
+            Self::Resume => AccessAuditEventKind::MembershipResumed,
+            Self::Remove => AccessAuditEventKind::MembershipRemoved,
+        }
+    }
 }
 
 impl MembershipLifecycle {
@@ -555,16 +642,6 @@ impl MembershipLifecycle {
     const fn allows_role(self, role: WorkspaceRole) -> bool {
         !matches!(self, Self::Invited | Self::PendingApproval)
             || matches!(role, WorkspaceRole::Member)
-    }
-
-    const fn can_transition_to(self, next: Self) -> bool {
-        matches!(
-            (self, next),
-            (Self::Invited, Self::Active | Self::Removed)
-                | (Self::PendingApproval, Self::Active | Self::Removed)
-                | (Self::Active, Self::Suspended | Self::Removed)
-                | (Self::Suspended, Self::Active | Self::Removed)
-        )
     }
 }
 
@@ -637,29 +714,36 @@ impl WorkspaceMembership {
             && matches!(self.role, WorkspaceRole::Administrator)
     }
 
-    pub fn transition_lifecycle(
+    pub fn apply_lifecycle_action(
         &mut self,
         subject: &mut AuthSubject,
-        lifecycle: MembershipLifecycle,
+        action: MembershipLifecycleAction,
         viable_administrator_count: u64,
         at: DateTime<Utc>,
-    ) -> Result<bool, AccessInvariantError> {
+    ) -> Result<Option<AccessInvalidationEffect>, AccessInvariantError> {
         self.validate_subject_and_time(subject, at)?;
-        if lifecycle == self.lifecycle {
-            return Ok(false);
-        }
         if matches!(self.lifecycle, MembershipLifecycle::Removed) {
             return Err(AccessInvariantError::RemovedMembershipIsTerminal);
         }
-        if !self.lifecycle.can_transition_to(lifecycle) {
+        if !action.applies_to(self.lifecycle) {
             return Err(AccessInvariantError::InvalidMembershipTransition);
         }
+        let lifecycle = action.target();
         self.administrator_continuity(subject, lifecycle, self.role, viable_administrator_count)
             .ensure()?;
         subject.advance_authorization_epoch(at)?;
         self.lifecycle = lifecycle;
         self.updated_at = at;
-        Ok(true)
+        Ok(Some(
+            if matches!(
+                lifecycle,
+                MembershipLifecycle::Suspended | MembershipLifecycle::Removed
+            ) {
+                AccessInvalidationEffect::MembershipAuthorizationChangedAndSessionsRevoked
+            } else {
+                AccessInvalidationEffect::MembershipAuthorizationChanged
+            },
+        ))
     }
 
     pub fn change_role(
@@ -668,10 +752,10 @@ impl WorkspaceMembership {
         role: WorkspaceRole,
         viable_administrator_count: u64,
         at: DateTime<Utc>,
-    ) -> Result<bool, AccessInvariantError> {
+    ) -> Result<Option<AccessInvalidationEffect>, AccessInvariantError> {
         self.validate_subject_and_time(subject, at)?;
         if role == self.role {
-            return Ok(false);
+            return Ok(None);
         }
         if matches!(self.lifecycle, MembershipLifecycle::Removed) {
             return Err(AccessInvariantError::RemovedMembershipIsTerminal);
@@ -684,7 +768,9 @@ impl WorkspaceMembership {
         subject.advance_authorization_epoch(at)?;
         self.role = role;
         self.updated_at = at;
-        Ok(true)
+        Ok(Some(
+            AccessInvalidationEffect::MembershipAuthorizationChanged,
+        ))
     }
 
     fn validate_subject_and_time(
@@ -1330,10 +1416,19 @@ pub enum AccessAuditEventKind {
     TrailBaseBlocked,
     AnchorLinked,
     FirstAdministratorBootstrapped,
-    SubjectLifecycleChanged,
+    SubjectDisabled,
+    SubjectDeleted,
+    SubjectRecoveryPending,
+    SubjectReactivated,
     MembershipInvited,
-    MembershipLifecycleChanged,
-    MembershipRoleChanged,
+    MembershipApprovalRequested,
+    MembershipInvitationAccepted,
+    MembershipApproved,
+    MembershipSuspended,
+    MembershipResumed,
+    MembershipRemoved,
+    MembershipPromoted,
+    MembershipDemoted,
     CeremonyClaimed,
     CeremonyCompleted,
     CeremonyCancelled,
@@ -1351,10 +1446,19 @@ impl AccessAuditEventKind {
             Self::TrailBaseBlocked => "trailbase_blocked",
             Self::AnchorLinked => "anchor_linked",
             Self::FirstAdministratorBootstrapped => "first_administrator_bootstrapped",
-            Self::SubjectLifecycleChanged => "subject_lifecycle_changed",
+            Self::SubjectDisabled => "subject_disabled",
+            Self::SubjectDeleted => "subject_deleted",
+            Self::SubjectRecoveryPending => "subject_recovery_pending",
+            Self::SubjectReactivated => "subject_reactivated",
             Self::MembershipInvited => "membership_invited",
-            Self::MembershipLifecycleChanged => "membership_lifecycle_changed",
-            Self::MembershipRoleChanged => "membership_role_changed",
+            Self::MembershipApprovalRequested => "membership_approval_requested",
+            Self::MembershipInvitationAccepted => "membership_invitation_accepted",
+            Self::MembershipApproved => "membership_approved",
+            Self::MembershipSuspended => "membership_suspended",
+            Self::MembershipResumed => "membership_resumed",
+            Self::MembershipRemoved => "membership_removed",
+            Self::MembershipPromoted => "membership_promoted",
+            Self::MembershipDemoted => "membership_demoted",
             Self::CeremonyClaimed => "ceremony_claimed",
             Self::CeremonyCompleted => "ceremony_completed",
             Self::CeremonyCancelled => "ceremony_cancelled",
@@ -1372,10 +1476,19 @@ impl AccessAuditEventKind {
             "trailbase_blocked" => Some(Self::TrailBaseBlocked),
             "anchor_linked" => Some(Self::AnchorLinked),
             "first_administrator_bootstrapped" => Some(Self::FirstAdministratorBootstrapped),
-            "subject_lifecycle_changed" => Some(Self::SubjectLifecycleChanged),
+            "subject_disabled" => Some(Self::SubjectDisabled),
+            "subject_deleted" => Some(Self::SubjectDeleted),
+            "subject_recovery_pending" => Some(Self::SubjectRecoveryPending),
+            "subject_reactivated" => Some(Self::SubjectReactivated),
             "membership_invited" => Some(Self::MembershipInvited),
-            "membership_lifecycle_changed" => Some(Self::MembershipLifecycleChanged),
-            "membership_role_changed" => Some(Self::MembershipRoleChanged),
+            "membership_approval_requested" => Some(Self::MembershipApprovalRequested),
+            "membership_invitation_accepted" => Some(Self::MembershipInvitationAccepted),
+            "membership_approved" => Some(Self::MembershipApproved),
+            "membership_suspended" => Some(Self::MembershipSuspended),
+            "membership_resumed" => Some(Self::MembershipResumed),
+            "membership_removed" => Some(Self::MembershipRemoved),
+            "membership_promoted" => Some(Self::MembershipPromoted),
+            "membership_demoted" => Some(Self::MembershipDemoted),
             "ceremony_claimed" => Some(Self::CeremonyClaimed),
             "ceremony_completed" => Some(Self::CeremonyCompleted),
             "ceremony_cancelled" => Some(Self::CeremonyCancelled),
@@ -1668,21 +1781,27 @@ mod tests {
     #[test]
     fn lifecycle_changes_advance_auth_epoch_and_deleted_is_terminal() {
         let mut subject = active_subject();
-        assert!(subject
-            .transition_lifecycle(
-                AuthSubjectLifecycle::Disabled,
-                AdministratorContinuity::Preserved,
-                at(1),
-            )
-            .expect("disable"));
+        assert_eq!(
+            subject
+                .transition_lifecycle(
+                    AuthSubjectLifecycle::Disabled,
+                    AdministratorContinuity::Preserved,
+                    at(1),
+                )
+                .expect("disable"),
+            Some(AccessInvalidationEffect::SubjectAuthenticationChanged)
+        );
         assert_eq!(subject.auth_epoch(), 3);
-        assert!(subject
-            .transition_lifecycle(
-                AuthSubjectLifecycle::Deleted,
-                AdministratorContinuity::Preserved,
-                at(2),
-            )
-            .expect("delete"));
+        assert_eq!(
+            subject
+                .transition_lifecycle(
+                    AuthSubjectLifecycle::Deleted,
+                    AdministratorContinuity::Preserved,
+                    at(2),
+                )
+                .expect("delete"),
+            Some(AccessInvalidationEffect::SubjectAuthenticationChanged)
+        );
         assert_eq!(
             subject.transition_lifecycle(
                 AuthSubjectLifecycle::Active,
@@ -1691,6 +1810,57 @@ mod tests {
             ),
             Err(AccessInvariantError::DeletedSubjectIsTerminal)
         );
+    }
+
+    #[test]
+    fn subject_lifecycle_table_and_epoch_overflow_are_explicit() {
+        let states = [
+            AuthSubjectLifecycle::Active,
+            AuthSubjectLifecycle::Disabled,
+            AuthSubjectLifecycle::RecoveryPending,
+            AuthSubjectLifecycle::Deleted,
+        ];
+        for current in states {
+            for next in states {
+                let mut subject =
+                    AuthSubject::try_new(AuthSubjectId::new_v7(), current, 0, 0, at(0), at(0))
+                        .expect("subject");
+                let result =
+                    subject.transition_lifecycle(next, AdministratorContinuity::Preserved, at(1));
+                if current == next {
+                    assert_eq!(result, Ok(None));
+                } else if matches!(current, AuthSubjectLifecycle::Deleted) {
+                    assert_eq!(result, Err(AccessInvariantError::DeletedSubjectIsTerminal));
+                } else {
+                    assert_eq!(
+                        result,
+                        Ok(Some(AccessInvalidationEffect::SubjectAuthenticationChanged))
+                    );
+                    assert_eq!(subject.lifecycle(), next);
+                    assert_eq!(subject.auth_epoch(), 1);
+                }
+            }
+        }
+
+        let mut overflow = AuthSubject::try_new(
+            AuthSubjectId::new_v7(),
+            AuthSubjectLifecycle::Active,
+            u64::MAX,
+            0,
+            at(0),
+            at(0),
+        )
+        .expect("subject");
+        assert_eq!(
+            overflow.transition_lifecycle(
+                AuthSubjectLifecycle::Disabled,
+                AdministratorContinuity::Preserved,
+                at(1),
+            ),
+            Err(AccessInvariantError::EpochOverflow)
+        );
+        assert_eq!(overflow.lifecycle(), AuthSubjectLifecycle::Active);
+        assert_eq!(overflow.updated_at(), at(0));
     }
 
     #[test]
@@ -1772,17 +1942,20 @@ mod tests {
         let mut membership = membership(&subject, WorkspaceRole::Member);
         let session_before_promotion = session(&subject);
 
-        assert!(!membership
-            .change_role(&mut subject, WorkspaceRole::Member, 0, at(0))
-            .expect("unchanged role"));
-        assert!(!membership
-            .transition_lifecycle(&mut subject, MembershipLifecycle::Active, 0, at(0))
-            .expect("unchanged lifecycle"));
+        assert_eq!(
+            membership
+                .change_role(&mut subject, WorkspaceRole::Member, 0, at(0))
+                .expect("unchanged role"),
+            None
+        );
         assert_eq!(subject.authorization_epoch(), 3);
 
-        assert!(membership
-            .change_role(&mut subject, WorkspaceRole::Administrator, 0, at(1))
-            .expect("promote"));
+        assert_eq!(
+            membership
+                .change_role(&mut subject, WorkspaceRole::Administrator, 0, at(1))
+                .expect("promote"),
+            Some(AccessInvalidationEffect::MembershipAuthorizationChanged)
+        );
         assert_eq!(subject.authorization_epoch(), 4);
         assert!(membership.is_authorization_viable_administrator(&subject));
         assert_eq!(
@@ -1806,15 +1979,144 @@ mod tests {
         )
         .expect("session before suspension");
 
-        assert!(membership
-            .transition_lifecycle(&mut subject, MembershipLifecycle::Suspended, 2, at(2))
-            .expect("suspend"));
+        assert_eq!(
+            membership
+                .apply_lifecycle_action(&mut subject, MembershipLifecycleAction::Suspend, 2, at(2))
+                .expect("suspend"),
+            Some(AccessInvalidationEffect::MembershipAuthorizationChangedAndSessionsRevoked)
+        );
         assert_eq!(subject.authorization_epoch(), 5);
         assert!(!membership.is_authorization_viable_administrator(&subject));
         assert_eq!(
             session_before_suspension.state(&subject, at(3)),
             BrowserSessionState::PolicyChanged
         );
+    }
+
+    #[test]
+    fn membership_actions_preserve_meaning_and_invalidation_policy() {
+        let cases = [
+            (
+                MembershipLifecycle::Invited,
+                MembershipLifecycleAction::AcceptInvitation,
+                MembershipLifecycle::Active,
+                AccessAuditEventKind::MembershipInvitationAccepted,
+                AccessInvalidationEffect::MembershipAuthorizationChanged,
+            ),
+            (
+                MembershipLifecycle::PendingApproval,
+                MembershipLifecycleAction::Approve,
+                MembershipLifecycle::Active,
+                AccessAuditEventKind::MembershipApproved,
+                AccessInvalidationEffect::MembershipAuthorizationChanged,
+            ),
+            (
+                MembershipLifecycle::Active,
+                MembershipLifecycleAction::Suspend,
+                MembershipLifecycle::Suspended,
+                AccessAuditEventKind::MembershipSuspended,
+                AccessInvalidationEffect::MembershipAuthorizationChangedAndSessionsRevoked,
+            ),
+            (
+                MembershipLifecycle::Suspended,
+                MembershipLifecycleAction::Resume,
+                MembershipLifecycle::Active,
+                AccessAuditEventKind::MembershipResumed,
+                AccessInvalidationEffect::MembershipAuthorizationChanged,
+            ),
+            (
+                MembershipLifecycle::Active,
+                MembershipLifecycleAction::Remove,
+                MembershipLifecycle::Removed,
+                AccessAuditEventKind::MembershipRemoved,
+                AccessInvalidationEffect::MembershipAuthorizationChangedAndSessionsRevoked,
+            ),
+        ];
+        for (current, action, expected, audit, effect) in cases {
+            let mut subject = active_subject();
+            let mut membership = WorkspaceMembership::try_new(
+                MembershipId::new_v7(),
+                subject.id(),
+                WorkspaceId::new_v7(),
+                current,
+                WorkspaceRole::Member,
+                at(0),
+                at(0),
+            )
+            .expect("membership");
+            assert_eq!(action.audit_event(), audit);
+            assert_eq!(
+                membership
+                    .apply_lifecycle_action(&mut subject, action, 0, at(1))
+                    .expect("action"),
+                Some(effect)
+            );
+            assert_eq!(membership.lifecycle(), expected);
+            assert_eq!(subject.authorization_epoch(), 4);
+            assert_eq!(
+                effect.revoke_browser_sessions(),
+                matches!(
+                    action,
+                    MembershipLifecycleAction::Suspend | MembershipLifecycleAction::Remove
+                )
+            );
+            assert!(!effect.invalidate_recent_authentication());
+        }
+
+        let mut subject = active_subject();
+        let mut invited = WorkspaceMembership::try_new(
+            MembershipId::new_v7(),
+            subject.id(),
+            WorkspaceId::new_v7(),
+            MembershipLifecycle::Invited,
+            WorkspaceRole::Member,
+            at(0),
+            at(0),
+        )
+        .expect("membership");
+        assert_eq!(
+            invited.apply_lifecycle_action(
+                &mut subject,
+                MembershipLifecycleAction::Approve,
+                0,
+                at(1),
+            ),
+            Err(AccessInvariantError::InvalidMembershipTransition)
+        );
+        assert_eq!(invited.lifecycle(), MembershipLifecycle::Invited);
+        assert_eq!(subject.authorization_epoch(), 3);
+
+        let mut overflow = AuthSubject::try_new(
+            AuthSubjectId::new_v7(),
+            AuthSubjectLifecycle::Active,
+            0,
+            u64::MAX,
+            at(0),
+            at(0),
+        )
+        .expect("subject");
+        let mut membership = WorkspaceMembership::try_new(
+            MembershipId::new_v7(),
+            overflow.id(),
+            WorkspaceId::new_v7(),
+            MembershipLifecycle::Active,
+            WorkspaceRole::Member,
+            at(0),
+            at(0),
+        )
+        .expect("membership");
+        assert_eq!(
+            membership.apply_lifecycle_action(
+                &mut overflow,
+                MembershipLifecycleAction::Suspend,
+                0,
+                at(1),
+            ),
+            Err(AccessInvariantError::EpochOverflow)
+        );
+        assert_eq!(membership.lifecycle(), MembershipLifecycle::Active);
+        assert_eq!(membership.updated_at(), at(0));
+        assert_eq!(overflow.authorization_epoch(), u64::MAX);
     }
 
     #[test]
@@ -1872,10 +2174,19 @@ mod tests {
             AccessAuditEventKind::TrailBaseBlocked,
             AccessAuditEventKind::AnchorLinked,
             AccessAuditEventKind::FirstAdministratorBootstrapped,
-            AccessAuditEventKind::SubjectLifecycleChanged,
+            AccessAuditEventKind::SubjectDisabled,
+            AccessAuditEventKind::SubjectDeleted,
+            AccessAuditEventKind::SubjectRecoveryPending,
+            AccessAuditEventKind::SubjectReactivated,
             AccessAuditEventKind::MembershipInvited,
-            AccessAuditEventKind::MembershipLifecycleChanged,
-            AccessAuditEventKind::MembershipRoleChanged,
+            AccessAuditEventKind::MembershipApprovalRequested,
+            AccessAuditEventKind::MembershipInvitationAccepted,
+            AccessAuditEventKind::MembershipApproved,
+            AccessAuditEventKind::MembershipSuspended,
+            AccessAuditEventKind::MembershipResumed,
+            AccessAuditEventKind::MembershipRemoved,
+            AccessAuditEventKind::MembershipPromoted,
+            AccessAuditEventKind::MembershipDemoted,
             AccessAuditEventKind::CeremonyClaimed,
             AccessAuditEventKind::CeremonyCompleted,
             AccessAuditEventKind::CeremonyCancelled,
@@ -1902,8 +2213,12 @@ mod tests {
         let mut membership = membership(&subject, WorkspaceRole::Administrator);
 
         assert_eq!(
-            membership
-                .transition_lifecycle(&mut subject, MembershipLifecycle::Suspended, 1, at(1),),
+            membership.apply_lifecycle_action(
+                &mut subject,
+                MembershipLifecycleAction::Suspend,
+                1,
+                at(1),
+            ),
             Err(AccessInvariantError::FinalAdministratorRequired)
         );
         assert_eq!(membership.lifecycle(), MembershipLifecycle::Active);
@@ -1926,9 +2241,12 @@ mod tests {
             at(0),
         )
         .expect("zero-count membership");
-        assert!(zero_count_membership
-            .change_role(&mut subject, WorkspaceRole::Member, 0, at(1))
-            .expect("zero does not claim a final administrator exists"));
+        assert_eq!(
+            zero_count_membership
+                .change_role(&mut subject, WorkspaceRole::Member, 0, at(1))
+                .expect("zero does not claim a final administrator exists"),
+            Some(AccessInvalidationEffect::MembershipAuthorizationChanged)
+        );
 
         assert_eq!(
             subject.transition_lifecycle(
@@ -1946,9 +2264,12 @@ mod tests {
             )
             .expect("disable subject with continuity");
         assert!(!membership.is_authorization_viable_administrator(&subject));
-        assert!(membership
-            .change_role(&mut subject, WorkspaceRole::Member, 0, at(3))
-            .expect("demote inactive subject"));
+        assert_eq!(
+            membership
+                .change_role(&mut subject, WorkspaceRole::Member, 0, at(3))
+                .expect("demote inactive subject"),
+            Some(AccessInvalidationEffect::MembershipAuthorizationChanged)
+        );
     }
 
     #[test]
@@ -2084,7 +2405,7 @@ mod tests {
         )
         .expect("membership");
         removed
-            .transition_lifecycle(&mut subject, MembershipLifecycle::Removed, 0, at(1))
+            .apply_lifecycle_action(&mut subject, MembershipLifecycleAction::Remove, 0, at(1))
             .expect("remove");
 
         let reinvited = WorkspaceMembership::try_new(
@@ -2139,7 +2460,12 @@ mod tests {
         assert_eq!(subject.authorization_epoch(), authorization_epoch);
 
         assert_eq!(
-            invited.transition_lifecycle(&mut subject, MembershipLifecycle::Suspended, 0, at(1),),
+            invited.apply_lifecycle_action(
+                &mut subject,
+                MembershipLifecycleAction::Suspend,
+                0,
+                at(1),
+            ),
             Err(AccessInvariantError::InvalidMembershipTransition)
         );
 
@@ -2150,14 +2476,19 @@ mod tests {
         );
 
         invited
-            .transition_lifecycle(&mut subject, MembershipLifecycle::Removed, 0, at(2))
+            .apply_lifecycle_action(&mut subject, MembershipLifecycleAction::Remove, 0, at(2))
             .expect("remove");
         assert_eq!(
             invited.change_role(&mut subject, WorkspaceRole::Administrator, 0, at(3)),
             Err(AccessInvariantError::RemovedMembershipIsTerminal)
         );
         assert_eq!(
-            invited.transition_lifecycle(&mut subject, MembershipLifecycle::Active, 0, at(3),),
+            invited.apply_lifecycle_action(
+                &mut subject,
+                MembershipLifecycleAction::AcceptInvitation,
+                0,
+                at(3),
+            ),
             Err(AccessInvariantError::RemovedMembershipIsTerminal)
         );
 

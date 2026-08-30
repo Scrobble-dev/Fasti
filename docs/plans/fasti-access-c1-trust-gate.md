@@ -71,6 +71,22 @@ or route work:
   administrator transition. Membership mutations and subject lifecycle
   mutations use the same continuity decision and advance the existing subject
   epochs through one shared owner.
+- Subject lifecycle transitions are exact: `active` may become `disabled`,
+  `recovery_pending`, or `deleted`; `disabled` may become `active`,
+  `recovery_pending`, or `deleted`; `recovery_pending` may become `active`,
+  `disabled`, or `deleted`; and `deleted` is terminal. Direct deletion is
+  required when TrailBase reports deletion without a prior local disablement.
+  Every real transition advances the authentication epoch, revokes every Fasti
+  browser session, and records the exact resulting lifecycle.
+- Administrator membership and subject-lifecycle mutations require a current
+  browser session, matching CSRF and request-boundary proof, an unexpired
+  recent-authentication record, and transaction-local administrator authority.
+  The administrator command can disable, begin recovery, or reactivate; it
+  cannot set `deleted`. Only the C1.2 TrailBase status/deletion evidence owner
+  may apply that terminal state.
+  Invitation acceptance does not reuse that administrator command: C1.2 binds
+  it to the proved TrailBase subject and claimed one-use ceremony before any
+  ordinary Fasti browser session exists.
 - TrailBase activation is `inactive`, `active`, or `blocked`. Blockers are
   `release_mismatch`, `physical_root_identity_mismatch`, and
   `declared_restore`. Initial verification changes generation `0` to `1`.
