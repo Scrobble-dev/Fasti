@@ -372,6 +372,93 @@ pub fn plan_purpose_identity_route(
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnimeGroupingRecordPreview {
+    record_id: RecordId,
+    previous_status: PurposeIdentityRouteStatus,
+    proposed_status: PurposeIdentityRouteStatus,
+    previous_route: Option<PurposeIdentityRoute>,
+    proposed_route: Option<PurposeIdentityRoute>,
+    route_changed: bool,
+    possible_season_regrouping: bool,
+}
+
+impl AnimeGroupingRecordPreview {
+    pub const fn record_id(&self) -> RecordId {
+        self.record_id
+    }
+
+    pub const fn previous_status(&self) -> PurposeIdentityRouteStatus {
+        self.previous_status
+    }
+
+    pub const fn proposed_status(&self) -> PurposeIdentityRouteStatus {
+        self.proposed_status
+    }
+
+    pub const fn previous_route(&self) -> Option<&PurposeIdentityRoute> {
+        self.previous_route.as_ref()
+    }
+
+    pub const fn proposed_route(&self) -> Option<&PurposeIdentityRoute> {
+        self.proposed_route.as_ref()
+    }
+
+    pub const fn route_changed(&self) -> bool {
+        self.route_changed
+    }
+
+    pub const fn unresolved(&self) -> bool {
+        !matches!(self.proposed_status, PurposeIdentityRouteStatus::Selected)
+    }
+
+    pub const fn possible_season_regrouping(&self) -> bool {
+        self.possible_season_regrouping
+    }
+}
+
+const fn groups_by_tv_work(preference: AnimeGroupingPreference) -> bool {
+    matches!(
+        preference,
+        AnimeGroupingPreference::GroupByTvWork | AnimeGroupingPreference::Automatic
+    )
+}
+
+/// Compare one Record's outward Nuvio route without mutating identity or history.
+pub fn preview_anime_grouping_change_for_record(
+    record_id: RecordId,
+    previous_preference: AnimeGroupingPreference,
+    proposed_preference: AnimeGroupingPreference,
+    identifiers: &[ExternalIdentifierClaim],
+) -> AnimeGroupingRecordPreview {
+    let nuvio = ProviderId::try_new("nuvio").expect("the fixed Nuvio provider ID is valid");
+    let previous = plan_purpose_identity_route(
+        ResolutionIntent::NuvioExport,
+        nuvio.clone(),
+        previous_preference,
+        identifiers,
+    );
+    let proposed = plan_purpose_identity_route(
+        ResolutionIntent::NuvioExport,
+        nuvio,
+        proposed_preference,
+        identifiers,
+    );
+    let route_changed =
+        previous.status != proposed.status || previous.selected_route != proposed.selected_route;
+
+    AnimeGroupingRecordPreview {
+        record_id,
+        previous_status: previous.status,
+        proposed_status: proposed.status,
+        previous_route: previous.selected_route,
+        proposed_route: proposed.selected_route,
+        route_changed,
+        possible_season_regrouping: route_changed
+            && groups_by_tv_work(previous_preference) != groups_by_tv_work(proposed_preference),
+    }
+}
+
 pub fn metadata_field_group(field_key: &FieldKey) -> Option<MetadataFieldGroup> {
     match field_key.as_str() {
         TITLE_FIELD_KEY | ORIGINAL_TITLE_FIELD_KEY => Some(MetadataFieldGroup::BasicInfo),
@@ -1585,6 +1672,65 @@ mod tests {
                 .iter()
                 .all(|identifier| plan.known_identifiers().contains(identifier)));
         }
+    }
+
+    #[test]
+    fn anime_grouping_preview_reports_change_and_possible_regrouping() {
+        let preview = preview_anime_grouping_change_for_record(
+            RecordId::new_v7(),
+            AnimeGroupingPreference::GroupByTvWork,
+            AnimeGroupingPreference::KeepMalReleasesSeparate,
+            &[
+                identity_claim("imdb.title", "tt28254942"),
+                identity_claim("mal.anime", "49894"),
+            ],
+        );
+
+        assert!(preview.route_changed());
+        assert!(!preview.unresolved());
+        assert!(preview.possible_season_regrouping());
+        assert_eq!(
+            preview
+                .previous_route()
+                .expect("previous route")
+                .identifier()
+                .namespace(),
+            "imdb.title"
+        );
+        assert_eq!(
+            preview
+                .proposed_route()
+                .expect("proposed route")
+                .identifier()
+                .namespace(),
+            "mal.anime"
+        );
+    }
+
+    #[test]
+    fn anime_grouping_preview_preserves_safe_missing_state() {
+        let record_id = RecordId::new_v7();
+        let preview = preview_anime_grouping_change_for_record(
+            record_id,
+            AnimeGroupingPreference::GroupByTvWork,
+            AnimeGroupingPreference::KeepKitsuReleasesSeparate,
+            &[identity_claim("anidb.anime", "17723")],
+        );
+
+        assert_eq!(preview.record_id(), record_id);
+        assert!(!preview.route_changed());
+        assert!(preview.unresolved());
+        assert!(!preview.possible_season_regrouping());
+        assert_eq!(
+            preview.previous_status(),
+            PurposeIdentityRouteStatus::Missing
+        );
+        assert_eq!(
+            preview.proposed_status(),
+            PurposeIdentityRouteStatus::Missing
+        );
+        assert!(preview.previous_route().is_none());
+        assert!(preview.proposed_route().is_none());
     }
 
     #[test]
