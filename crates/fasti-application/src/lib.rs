@@ -10,6 +10,7 @@ pub mod client_credentials;
 #[cfg(feature = "conformance-fixture")]
 pub mod conformance;
 pub mod corrections;
+pub mod human_access;
 pub mod ingest;
 pub mod kernel;
 pub mod limits;
@@ -32,6 +33,7 @@ pub use browser_auth::*;
 pub use capabilities::*;
 pub use client_credentials::*;
 pub use corrections::*;
+pub use human_access::*;
 pub use ingest::*;
 pub use kernel::*;
 pub use limits::*;

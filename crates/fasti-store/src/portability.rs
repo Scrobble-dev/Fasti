@@ -68,7 +68,8 @@ pub(crate) fn map_offline_open_error(
         | StoreOpenError::JournalMode(_)
         | StoreOpenError::SynchronousLevel(_)
         | StoreOpenError::SchemaVersion { .. }
-        | StoreOpenError::RestoreActivation => {
+        | StoreOpenError::RestoreActivation
+        | StoreOpenError::AccessRecovery => {
             Box::new(FastiProblem::integrity_failed(capability, correlation_id))
         }
     }

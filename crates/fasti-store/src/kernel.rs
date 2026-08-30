@@ -57,6 +57,8 @@ pub enum StoreOpenError {
     DataRootLocked,
     #[error("restore activation state is incomplete or invalid")]
     RestoreActivation,
+    #[error("human Access restart recovery failed")]
+    AccessRecovery,
 }
 
 #[derive(Debug, Clone)]
@@ -269,6 +271,17 @@ impl SqliteKernel {
                 actual: version,
             });
         }
+        crate::human_access::recover_auth_ceremonies_on_open(
+            &connection,
+            RequestCorrelationId::new_v7(),
+            now(),
+        )
+        .map_err(|error| match error {
+            crate::human_access::HumanAccessStoreError::Storage(error) => {
+                StoreOpenError::Sqlite(error)
+            }
+            _ => StoreOpenError::AccessRecovery,
+        })?;
 
         Ok(Self {
             inner: Arc::new(KernelInner {

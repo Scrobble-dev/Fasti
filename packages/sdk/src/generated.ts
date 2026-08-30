@@ -4418,6 +4418,7 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       },
       "problems": [
         "capability_unavailable",
+        "capacity_exceeded",
         "forbidden",
         "integrity_failed",
         "malformed_json",
@@ -6448,6 +6449,24 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "status": 501,
       "title": "Capability unavailable",
       "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "browser.session.create",
+      "code": "capacity_exceeded",
+      "detail": "bounded application capacity has been reached",
+      "next_actions": [
+        {
+          "id": "release_capacity",
+          "label": "Release retained capacity before retrying"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 507,
+      "title": "Capacity exceeded",
+      "type": "https://fasti.scrobble.dev/v1/problems/capacity-exceeded"
     },
     {
       "capability_id": "browser.session.create",

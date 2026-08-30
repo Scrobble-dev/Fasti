@@ -7,6 +7,7 @@ mod client_credentials;
 mod correction;
 mod crypto;
 mod evidence;
+mod human_access;
 mod identity;
 mod kernel;
 mod metadata;

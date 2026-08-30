@@ -1,0 +1,158 @@
+use crate::ApplicationResult;
+use chrono::{DateTime, Utc};
+use fasti_domain::{
+    AuthCallbackPath, AuthCeremony, OperationId, RequestCorrelationId, Sha256Digest,
+    TrailBaseInstallation, TrailBaseInstanceId,
+};
+
+#[derive(Debug, Clone, Copy)]
+pub struct VerifyTrailBaseInstallationCommand {
+    instance_id: TrailBaseInstanceId,
+    release_matches: bool,
+    declared_restore: bool,
+    correlation_id: RequestCorrelationId,
+    at: DateTime<Utc>,
+}
+
+impl VerifyTrailBaseInstallationCommand {
+    pub const fn new(
+        instance_id: TrailBaseInstanceId,
+        release_matches: bool,
+        declared_restore: bool,
+        correlation_id: RequestCorrelationId,
+        at: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            instance_id,
+            release_matches,
+            declared_restore,
+            correlation_id,
+            at,
+        }
+    }
+
+    pub const fn instance_id(&self) -> TrailBaseInstanceId {
+        self.instance_id
+    }
+    pub const fn release_matches(&self) -> bool {
+        self.release_matches
+    }
+    pub const fn declared_restore(&self) -> bool {
+        self.declared_restore
+    }
+    pub const fn correlation_id(&self) -> RequestCorrelationId {
+        self.correlation_id
+    }
+    pub const fn at(&self) -> DateTime<Utc> {
+        self.at
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct StartAuthCeremonyCommand {
+    ceremony: AuthCeremony,
+}
+
+impl StartAuthCeremonyCommand {
+    pub const fn new(ceremony: AuthCeremony) -> Self {
+        Self { ceremony }
+    }
+    pub const fn ceremony(&self) -> &AuthCeremony {
+        &self.ceremony
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ClaimAuthCeremonyCommand {
+    browser_binding_digest: Sha256Digest,
+    instance_id: TrailBaseInstanceId,
+    activation_generation: u64,
+    callback_path: AuthCallbackPath,
+    correlation_id: RequestCorrelationId,
+    at: DateTime<Utc>,
+}
+
+impl ClaimAuthCeremonyCommand {
+    #[allow(clippy::too_many_arguments)]
+    pub const fn new(
+        browser_binding_digest: Sha256Digest,
+        instance_id: TrailBaseInstanceId,
+        activation_generation: u64,
+        callback_path: AuthCallbackPath,
+        correlation_id: RequestCorrelationId,
+        at: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            browser_binding_digest,
+            instance_id,
+            activation_generation,
+            callback_path,
+            correlation_id,
+            at,
+        }
+    }
+    pub const fn browser_binding_digest(&self) -> &Sha256Digest {
+        &self.browser_binding_digest
+    }
+    pub const fn instance_id(&self) -> TrailBaseInstanceId {
+        self.instance_id
+    }
+    pub const fn activation_generation(&self) -> u64 {
+        self.activation_generation
+    }
+    pub const fn callback_path(&self) -> &AuthCallbackPath {
+        &self.callback_path
+    }
+    pub const fn correlation_id(&self) -> RequestCorrelationId {
+        self.correlation_id
+    }
+    pub const fn at(&self) -> DateTime<Utc> {
+        self.at
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct CancelAuthCeremonyCommand {
+    operation_id: OperationId,
+    correlation_id: RequestCorrelationId,
+    at: DateTime<Utc>,
+}
+
+impl CancelAuthCeremonyCommand {
+    pub const fn new(
+        operation_id: OperationId,
+        correlation_id: RequestCorrelationId,
+        at: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            operation_id,
+            correlation_id,
+            at,
+        }
+    }
+    pub const fn operation_id(&self) -> OperationId {
+        self.operation_id
+    }
+    pub const fn correlation_id(&self) -> RequestCorrelationId {
+        self.correlation_id
+    }
+    pub const fn at(&self) -> DateTime<Utc> {
+        self.at
+    }
+}
+
+pub trait HumanAccessPort: Send + Sync {
+    fn verify_trailbase_installation(
+        &self,
+        command: VerifyTrailBaseInstallationCommand,
+    ) -> ApplicationResult<TrailBaseInstallation>;
+    fn start_auth_ceremony(&self, command: StartAuthCeremonyCommand) -> ApplicationResult<()>;
+    fn claim_auth_ceremony(
+        &self,
+        command: ClaimAuthCeremonyCommand,
+    ) -> ApplicationResult<AuthCeremony>;
+    fn cancel_auth_ceremony(
+        &self,
+        command: CancelAuthCeremonyCommand,
+    ) -> ApplicationResult<AuthCeremony>;
+}

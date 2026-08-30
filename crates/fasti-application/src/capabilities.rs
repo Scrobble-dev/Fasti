@@ -263,6 +263,7 @@ define_capabilities!(
         [],
         [
             CapabilityUnavailable,
+            CapacityExceeded,
             Forbidden,
             IntegrityFailed,
             MalformedJson,

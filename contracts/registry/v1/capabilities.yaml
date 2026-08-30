@@ -633,6 +633,7 @@ capabilities:
     problems:
       [
         capability_unavailable,
+        capacity_exceeded,
         forbidden,
         integrity_failed,
         malformed_json,
