@@ -486,7 +486,7 @@ def verify_executable(executable: Path, release: dict[str, Any], expected_sha256
         raise ReleaseError(f"TrailBase executable is not a regular file: {executable}")
     if sha256_file(executable) != expected_sha256:
         raise ReleaseError("installed TrailBase executable digest does not match the release lock")
-    output = subprocess.run(  # nosec -- regular file with exact release-lock digest; fixed argv.
+    output = subprocess.run(  # nosec -- nosemgrep -- regular file with exact release-lock digest; fixed argv.
         [executable, "--version"],  # nosemgrep -- exact release-lock executable and fixed argument.
         check=True,
         capture_output=True,
@@ -574,7 +574,7 @@ def _pin_to_one_cpu() -> None:
 
 
 def _command_json(command: list[str]) -> Any:
-    output = subprocess.run(  # nosec -- absolute allowlisted runtime; digest-pinned internal argv.
+    output = subprocess.run(  # nosec -- nosemgrep -- absolute allowlisted runtime; digest-pinned internal argv.
         command,  # nosemgrep -- absolute allowlisted OCI runtime and internal fixed-shape arguments.
         check=True,
         capture_output=True,
@@ -718,7 +718,7 @@ def prepare_oci(root: Path, runtime: str, offline: bool) -> str:
     _private_directory(root)
     receipt_path = root / f"oci-{runtime}.json"
     if not offline:
-        subprocess.run(  # nosec -- absolute allowlisted runtime; digest-pinned reference.
+        subprocess.run(  # nosec -- nosemgrep -- absolute allowlisted runtime; digest-pinned reference.
             [runtime_executable, "pull", "--platform", platform_name.replace("-", "/", 1), reference],  # nosemgrep -- absolute allowlisted OCI runtime and digest-pinned reference.
             check=True,
             timeout=600,
@@ -935,7 +935,7 @@ def bootstrap_native(
         child_environment["RUST_LOG"] = "info"
         old_umask = os.umask(0o077)
         try:
-            process = subprocess.Popen(  # nosec -- release-lock verified binary; validated loopback argv.
+            process = subprocess.Popen(  # nosec -- nosemgrep -- release-lock verified binary; validated loopback argv.
                 [  # nosemgrep -- exact digest-verified executable and validated fixed-shape arguments.
                     str(executable),
                     "--depot",
@@ -1425,7 +1425,7 @@ def _backup_restore_self_test() -> None:
 
         unsafe_parent = base / "unsafe-parent"
         unsafe_parent.mkdir(mode=0o777)
-        os.chmod(unsafe_parent, 0o777)
+        os.chmod(unsafe_parent, 0o777)  # nosec B103 -- nosemgrep -- deliberate rejection fixture.
         try:
             restore_depot(backup, unsafe_parent / "restored")
         except ReleaseError:
@@ -1435,7 +1435,7 @@ def _backup_restore_self_test() -> None:
 
         unsafe_ancestor = base / "unsafe-ancestor"
         unsafe_ancestor.mkdir(mode=0o777)
-        os.chmod(unsafe_ancestor, 0o777)
+        os.chmod(unsafe_ancestor, 0o777)  # nosec B103 -- nosemgrep -- deliberate rejection fixture.
         private_child = unsafe_ancestor / "private"
         private_child.mkdir(mode=0o700)
         try:

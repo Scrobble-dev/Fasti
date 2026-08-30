@@ -301,7 +301,7 @@ def start_fixture_release(
     output: int | None = subprocess.PIPE if initial_password is not None else subprocess.DEVNULL
     old_umask = os.umask(0o077)
     try:
-        process = subprocess.Popen(  # nosec -- exact digest-verified fixture; fixed local argv, no shell.
+        process = subprocess.Popen(  # nosec -- nosemgrep -- exact digest-verified fixture; fixed local argv, no shell.
             [  # nosemgrep -- exact digest-verified executable and fixed loopback arguments.
                 executable,
                 "--depot",
@@ -614,7 +614,7 @@ jobs {}
             old_affinity = os.sched_getaffinity(0)
             try:
                 os.sched_setaffinity(0, {min(old_affinity)})
-                return subprocess.Popen(  # nosec -- digest-verified binary; fixed loopback argv, no shell.
+                return subprocess.Popen(  # nosec -- nosemgrep -- digest-verified binary; fixed loopback argv, no shell.
                     command,  # nosemgrep -- exact executable and fixed loopback argument vector.
                     env=environment,
                     stdout=subprocess.DEVNULL,
@@ -974,13 +974,13 @@ jobs {}
             oidc_thread.join(timeout=2)
 
         runtime.verify_private_root(test_root)
-        openapi = subprocess.run(  # nosec -- digest-verified binary; fixed local argv, no shell.
+        openapi = subprocess.run(  # nosec -- nosemgrep -- digest-verified binary; fixed local argv, no shell.
             [executable, "--depot", test_root / "depot", "openapi", "print"],  # nosemgrep -- exact executable and fixed local arguments.
             check=True,
             capture_output=True,
             timeout=30,
         ).stdout
-        admin_list = subprocess.run(  # nosec -- digest-verified binary; fixed local argv, no shell.
+        admin_list = subprocess.run(  # nosec -- nosemgrep -- digest-verified binary; fixed local argv, no shell.
             [executable, "--depot", test_root / "depot", "admin", "list"],  # nosemgrep -- exact executable and fixed local arguments.
             capture_output=True,
             timeout=30,
