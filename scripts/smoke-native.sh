@@ -176,19 +176,30 @@ if (
 
 status, providers = get("/api/v1/providers", enrolled["credential"])
 provider_rows = providers.get("providers", [])
-provider_states = {
-    row.get("provider_id"): {capability.get("state") for capability in row.get("capabilities", [])}
+provider_capabilities = {
+    row.get("provider_id"): row.get("capabilities", [])
     for row in provider_rows
 }
+active_providers = {"tmdb", "google-books"}
 if (
     status != 200
     or len(provider_rows) != 12
-    or provider_states.get("tmdb") != {"available"}
-    or provider_states.get("google-books") != {"available"}
     or any(
-        states != {"unavailable"}
-        for provider_id, states in provider_states.items()
-        if provider_id not in {"tmdb", "google-books"}
+        len(capabilities) != 2
+        or {capability.get("state") for capability in capabilities} != {"unavailable"}
+        or any(capability.get("credential_state") != "missing" for capability in capabilities)
+        or any(not capability.get("writable") for capability in capabilities)
+        or any(not capability.get("testable") for capability in capabilities)
+        for provider_id, capabilities in provider_capabilities.items()
+        if provider_id in active_providers
+    )
+    or any(
+        len(capabilities) != 2
+        or {capability.get("state") for capability in capabilities} != {"unavailable"}
+        or any(capability.get("writable") for capability in capabilities)
+        or any(capability.get("testable") for capability in capabilities)
+        for provider_id, capabilities in provider_capabilities.items()
+        if provider_id not in active_providers
     )
 ):
     raise SystemExit("Packaged provider registry did not report the governed runtime boundary")
