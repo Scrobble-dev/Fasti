@@ -616,7 +616,7 @@ mod tests {
             .expect("time")
     }
 
-    fn subject() -> AuthSubject {
+    fn active_subject() -> AuthSubject {
         AuthSubject::try_new(
             AuthSubjectId::new_v7(),
             AuthSubjectLifecycle::Active,
@@ -660,7 +660,7 @@ mod tests {
 
     #[test]
     fn lifecycle_changes_advance_auth_epoch_and_deleted_is_terminal() {
-        let mut subject = subject();
+        let mut subject = active_subject();
         assert!(subject
             .transition_lifecycle(AuthSubjectLifecycle::Disabled, at(1))
             .expect("disable"));
@@ -676,7 +676,7 @@ mod tests {
 
     #[test]
     fn session_rejects_invalid_time_order_and_distinguishes_terminal_states() {
-        let subject = subject();
+        let subject = active_subject();
         assert!(FastiBrowserSession::try_new(
             BrowserSessionId::new_v7(),
             subject.id(),
@@ -715,7 +715,7 @@ mod tests {
 
     #[test]
     fn membership_changes_advance_authorization_epoch() {
-        let mut subject = subject();
+        let mut subject = active_subject();
         let mut membership = membership(&subject, WorkspaceRole::Member);
 
         assert!(membership
@@ -733,7 +733,7 @@ mod tests {
 
     #[test]
     fn final_viable_administrator_is_preserved_without_partial_mutation() {
-        let mut subject = subject();
+        let mut subject = active_subject();
         let mut membership = membership(&subject, WorkspaceRole::Administrator);
 
         assert_eq!(
@@ -750,6 +750,49 @@ mod tests {
         );
         assert_eq!(membership.role(), WorkspaceRole::Administrator);
         assert_eq!(subject.authorization_epoch(), 3);
+    }
+
+    #[test]
+    fn membership_rejects_invalid_terminal_subject_and_time_transitions() {
+        let mut subject = active_subject();
+        let mut invited = WorkspaceMembership::try_new(
+            subject.id(),
+            WorkspaceId::new_v7(),
+            MembershipLifecycle::Invited,
+            WorkspaceRole::Member,
+            at(0),
+            at(0),
+        )
+        .expect("invited membership");
+
+        assert_eq!(
+            invited.transition_lifecycle(&mut subject, MembershipLifecycle::Suspended, 0, at(1),),
+            Err(AccessInvariantError::InvalidMembershipTransition)
+        );
+
+        let mut other_subject = active_subject();
+        assert_eq!(
+            invited.change_role(&mut other_subject, WorkspaceRole::Administrator, 0, at(1),),
+            Err(AccessInvariantError::MembershipSubjectMismatch)
+        );
+
+        invited
+            .transition_lifecycle(&mut subject, MembershipLifecycle::Removed, 0, at(2))
+            .expect("remove");
+        assert_eq!(
+            invited.change_role(&mut subject, WorkspaceRole::Administrator, 0, at(3)),
+            Err(AccessInvariantError::RemovedMembershipIsTerminal)
+        );
+        assert_eq!(
+            invited.transition_lifecycle(&mut subject, MembershipLifecycle::Active, 0, at(3),),
+            Err(AccessInvariantError::RemovedMembershipIsTerminal)
+        );
+
+        let mut active = membership(&subject, WorkspaceRole::Member);
+        assert_eq!(
+            active.change_role(&mut subject, WorkspaceRole::Administrator, 0, at(1)),
+            Err(AccessInvariantError::InvalidTimestampOrder)
+        );
     }
 
     #[test]
@@ -779,20 +822,50 @@ mod tests {
             never_exchanged.mark_cleanup_uncertain(),
             Err(AccessInvariantError::InvalidCeremonyTransition)
         );
+
+        let mut denied = AuthCeremonyState::Pending;
+        denied.fail().expect("fail before exchange");
+        assert_eq!(denied, AuthCeremonyState::Failed);
+
+        let mut expired = AuthCeremonyState::Pending;
+        expired.expire().expect("expire pending ceremony");
+        assert_eq!(expired, AuthCeremonyState::Expired);
+        assert_eq!(
+            expired.claim(),
+            Err(AccessInvariantError::InvalidCeremonyTransition)
+        );
     }
 
     #[test]
     fn recent_auth_requires_current_subject_generation_epoch_and_assurance() {
-        let mut subject = subject();
+        let mut subject = active_subject();
         let social = AuthenticationProvenance::new(AuthenticationMethod::TrailBaseSocial, at(1), 7);
         let recent =
             RecentAuthentication::try_new(subject.id(), social, subject.auth_epoch(), at(11))
                 .expect("recent authentication");
 
+        assert!(
+            RecentAuthentication::try_new(subject.id(), social, subject.auth_epoch(), at(1),)
+                .is_err()
+        );
         assert!(recent.satisfies(&subject, 7, AuthenticationAssurance::SingleFactor, at(2),));
+        assert!(!recent.satisfies(&subject, 7, AuthenticationAssurance::SingleFactor, at(0),));
         assert!(!recent.satisfies(&subject, 7, AuthenticationAssurance::MultiFactor, at(2),));
         assert!(!recent.satisfies(&subject, 8, AuthenticationAssurance::SingleFactor, at(2),));
         assert!(!recent.satisfies(&subject, 7, AuthenticationAssurance::SingleFactor, at(11),));
+
+        let wrong_subject = active_subject();
+        assert!(!recent.satisfies(
+            &wrong_subject,
+            7,
+            AuthenticationAssurance::SingleFactor,
+            at(2),
+        ));
+
+        let stale_epoch =
+            RecentAuthentication::try_new(subject.id(), social, subject.auth_epoch() - 1, at(11))
+                .expect("stale proof");
+        assert!(!stale_epoch.satisfies(&subject, 7, AuthenticationAssurance::SingleFactor, at(2),));
 
         subject
             .transition_lifecycle(AuthSubjectLifecycle::Disabled, at(3))
