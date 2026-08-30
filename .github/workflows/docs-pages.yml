@@ -33,6 +33,7 @@ jobs:
           version: 11.22.0
       - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b
       - run: pnpm install --frozen-lockfile
+      - run: cargo fetch --locked
       - run: cargo xtask docs package --locked
       - run: node scripts/validate-docs-build.mjs
       - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b

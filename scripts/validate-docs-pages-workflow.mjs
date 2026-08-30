@@ -51,6 +51,10 @@ assert.equal(
   "the documentation package needs rustfmt and clippy",
 );
 assert.ok(
+  build.steps.some(({ run }) => run === "cargo fetch --locked"),
+  "the offline documentation package needs the locked Rust graph",
+);
+assert.ok(
   build.steps.some(({ run }) => run === "cargo xtask docs package --locked"),
   "build must use the governed package command",
 );

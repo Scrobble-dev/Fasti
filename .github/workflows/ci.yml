@@ -106,6 +106,7 @@ jobs:
         with:
           version: 11.22.0
       - run: pnpm install --frozen-lockfile
+      - run: cargo fetch --locked
       - run: cargo xtask docs package --locked
 
   ui-quality:
