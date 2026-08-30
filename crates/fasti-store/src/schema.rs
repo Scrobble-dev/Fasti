@@ -2082,8 +2082,9 @@ fn migrate_v14(connection: &Connection) -> Result<()> {
                 'first_administrator_bootstrapped', 'subject_lifecycle_changed',
                 'membership_invited', 'membership_lifecycle_changed',
                 'membership_role_changed', 'ceremony_claimed', 'ceremony_completed',
-                'ceremony_cancelled', 'ceremony_failed', 'browser_session_issued',
-                'browser_session_revoked'
+                'ceremony_cancelled', 'ceremony_expired',
+                'ceremony_cleanup_uncertain', 'ceremony_failed',
+                'browser_session_issued', 'browser_session_revoked'
             )),
             trailbase_instance_id TEXT CHECK (
                 trailbase_instance_id IS NULL OR (
@@ -2175,7 +2176,8 @@ fn migrate_v14(connection: &Connection) -> Result<()> {
                 OR
                 (event_kind IN (
                         'ceremony_claimed', 'ceremony_completed',
-                        'ceremony_cancelled', 'ceremony_failed'
+                        'ceremony_cancelled', 'ceremony_expired',
+                        'ceremony_cleanup_uncertain', 'ceremony_failed'
                     )
                     AND trailbase_instance_id IS NOT NULL
                     AND operation_id IS NOT NULL)
