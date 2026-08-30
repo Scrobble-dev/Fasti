@@ -3675,6 +3675,13 @@ fn collect_generated_files(
     directory: &Path,
     files: &mut BTreeSet<PathBuf>,
 ) -> anyhow::Result<()> {
+    let metadata = fs::symlink_metadata(directory)
+        .with_context(|| format!("failed to inspect {}", directory.display()))?;
+    ensure!(
+        !metadata.file_type().is_symlink() && metadata.is_dir(),
+        "generated artifact directory {} must be a real directory",
+        directory.display()
+    );
     for entry in fs::read_dir(directory)
         .with_context(|| format!("failed to inspect {}", directory.display()))?
     {
@@ -3742,6 +3749,22 @@ mod tests {
         let second = build(workspace_root()).expect("second generation succeeds");
         assert_eq!(first, second);
         assert!(first.values().all(|artifact| artifact.ends_with(b"\n")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn generated_inventory_rejects_a_symlinked_root() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().expect("temporary root");
+        let real = root.path().join("real");
+        fs::create_dir(&real).expect("real directory");
+        let linked = root.path().join("linked");
+        symlink(&real, &linked).expect("symlink root");
+
+        let error = collect_generated_files(root.path(), &linked, &linked, &mut BTreeSet::new())
+            .expect_err("symlinked generated root must fail");
+        assert!(error.to_string().contains("must be a real directory"));
     }
 
     #[test]
