@@ -83,7 +83,9 @@ be cleared explicitly to resume profile inheritance.
 For Nuvio, the standard order is IMDb, TMDB, TVDB, MAL, AniDB, AniList,
 Kitsu, then SIMKL. The MAL preference tries MAL, Kitsu, and AniDB before the
 standard order. The Kitsu preference tries Kitsu, MAL, and AniDB before the
-standard order.
+standard order. TMDB and TVDB movie coordinates route only at `Film` grain,
+and their TV-series coordinates route only at `Series` grain. They are not
+relabelled as anime `Release` coordinates for export.
 
 A reviewed crosswalk can satisfy the selected coordinate preference. The
 selected route retains every immutable supporting assertion ID for inspection.

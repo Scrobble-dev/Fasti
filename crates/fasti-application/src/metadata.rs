@@ -310,10 +310,8 @@ impl PurposeIdentityRoutePlan {
 fn nuvio_standard_route_priority(namespace: &str, grain: Grain) -> Option<u8> {
     match (namespace, grain) {
         ("imdb.title", Grain::Film | Grain::Series | Grain::Release) => Some(0),
-        ("tmdb.movie", Grain::Film | Grain::Release)
-        | ("tmdb.tv", Grain::Series | Grain::Release) => Some(1),
-        ("tvdb.movie", Grain::Film | Grain::Release)
-        | ("tvdb.series", Grain::Series | Grain::Release) => Some(2),
+        ("tmdb.movie", Grain::Film) | ("tmdb.tv", Grain::Series) => Some(1),
+        ("tvdb.movie", Grain::Film) | ("tvdb.series", Grain::Series) => Some(2),
         ("mal.anime", Grain::Release) => Some(3),
         ("anidb.anime", Grain::Release) => Some(4),
         ("anilist.anime", Grain::Release) => Some(5),
@@ -2420,33 +2418,37 @@ mod tests {
     }
 
     #[test]
-    fn nuvio_release_grain_matrix_is_exact() {
-        for (namespace, value, expected) in [
-            ("imdb.title", "tt0944947", "tt0944947"),
-            ("tmdb.movie", "550", "tmdb:550"),
-            ("tmdb.tv", "1399", "tmdb:1399"),
-            ("tvdb.movie", "123", "tvdb:123"),
-            ("tvdb.series", "121361", "tvdb:121361"),
-            ("mal.anime", "49894", "mal:49894"),
-            ("anidb.anime", "15159", "anidb:15159"),
-            ("anilist.anime", "32281", "anilist:32281"),
-            ("kitsu.anime", "12268", "kitsu:12268"),
-            ("simkl.anime", "60001", "simkl:60001"),
+    fn nuvio_grain_matrix_is_exact() {
+        for (namespace, grain, value, expected) in [
+            ("imdb.title", Grain::Release, "tt0944947", "tt0944947"),
+            ("tmdb.movie", Grain::Film, "550", "tmdb:550"),
+            ("tmdb.tv", Grain::Series, "1399", "tmdb:1399"),
+            ("tvdb.movie", Grain::Film, "123", "tvdb:123"),
+            ("tvdb.series", Grain::Series, "121361", "tvdb:121361"),
+            ("mal.anime", Grain::Release, "49894", "mal:49894"),
+            ("anidb.anime", Grain::Release, "15159", "anidb:15159"),
+            ("anilist.anime", Grain::Release, "32281", "anilist:32281"),
+            ("kitsu.anime", Grain::Release, "12268", "kitsu:12268"),
+            ("simkl.anime", Grain::Release, "60001", "simkl:60001"),
         ] {
             let plan = plan_purpose_identity_route(
                 RecordId::new_v7(),
                 ResolutionIntent::NuvioExport,
                 ProviderId::try_new("nuvio").expect("Nuvio provider"),
                 AnimeGroupingPreference::Automatic,
-                &[identity_claim_at(namespace, Grain::Release, value)],
+                &[identity_claim_at(namespace, grain, value)],
             );
             assert_eq!(plan.nuvio_content_id().as_deref(), Some(expected));
         }
 
         for (namespace, grain) in [
+            ("tmdb.movie", Grain::Release),
             ("tmdb.movie", Grain::Series),
+            ("tmdb.tv", Grain::Release),
             ("tmdb.tv", Grain::Film),
+            ("tvdb.movie", Grain::Release),
             ("tvdb.movie", Grain::Series),
+            ("tvdb.series", Grain::Release),
             ("tvdb.series", Grain::Film),
             ("mal.anime", Grain::Series),
             ("kitsu.anime", Grain::Film),
