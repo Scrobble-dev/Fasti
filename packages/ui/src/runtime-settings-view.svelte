@@ -22,7 +22,10 @@
   import type {
     CustomFieldDefinition,
     CustomMediaTypeDefinition,
+    ConfigureMetadataProjectionRequest,
+    EnrichmentPolicyDto,
     MediaKind,
+    MetadataFieldGroupDto,
     NetworkConfiguration,
     NuvioCollectionsDocument,
     ProviderCredentialStatus,
@@ -34,6 +37,7 @@
   interface Props {
     host: WorkbenchHost;
     workbenchPreferences: WorkbenchPreferences;
+    metadataPolicyRecordId?: string;
     canAccessProfileData?: boolean;
     profileDataIdentity?: string;
     activeTab?:
@@ -59,6 +63,7 @@
     ) => void;
     onClientEndpointChanged?: () => void;
     onProviderCredentialsChanged?: () => void;
+    onMetadataPolicyChanged?: () => void;
     onClearCache?: (
       cache: "search" | "history" | "statistics" | "discover" | "all",
     ) => void;
@@ -67,6 +72,7 @@
   let {
     host,
     workbenchPreferences,
+    metadataPolicyRecordId,
     canAccessProfileData = true,
     profileDataIdentity = "trusted-host",
     activeTab = "network",
@@ -74,6 +80,7 @@
     onUpdateWorkbenchPreferences,
     onClientEndpointChanged,
     onProviderCredentialsChanged,
+    onMetadataPolicyChanged,
     onClearCache,
   }: Props = $props();
 
@@ -246,11 +253,55 @@
   let nuvioNotice = $state<string>();
   let nuvioRequestGeneration = 0;
   let activeNuvioIdentity: string | undefined;
+  let metadataPolicy = $state<EnrichmentPolicyDto>();
+  let metadataPolicyDraft = $state<ConfigureMetadataProjectionRequest>();
+  let metadataPolicyLoading = $state(false);
+  let metadataPolicySaving = $state(false);
+  let metadataPolicyProblem = $state<string>();
+  let metadataPolicyNotice = $state<string>();
+  let loadedMetadataPolicyRecordId = "";
+  let metadataPolicyGeneration = 0;
+
+  const metadataFieldGroups = [
+    "artwork",
+    "basic_info",
+    "details",
+    "release_dates",
+    "credits",
+    "production_companies",
+    "networks",
+    "episodes",
+    "season_artwork",
+    "recommendations",
+    "collections",
+    "trailers",
+    "watch_providers",
+  ] as const satisfies readonly MetadataFieldGroupDto[];
+
+  function metadataFieldGroupLabel(group: MetadataFieldGroupDto): string {
+    return group.replaceAll("_", " ");
+  }
+
+  function policyDraftFrom(
+    policy: EnrichmentPolicyDto,
+  ): ConfigureMetadataProjectionRequest {
+    return {
+      preferred_provider_id: policy.preferred_provider_id,
+      preferred_locale: policy.preferred_locale,
+      original_locale: policy.original_locale,
+      allow_english_fallback: policy.allow_english_fallback,
+      last_known_good: policy.last_known_good,
+      region: policy.region,
+      enabled_field_groups: [...policy.enabled_field_groups],
+      overrides: [],
+    };
+  }
 
   $effect(() => {
     const identity = profileDataIdentity;
     const tab = activeTab;
     const canLoadProfileData = canAccessProfileData;
+    const policyRecordId = metadataPolicyRecordId;
     untrack(() => {
       if (identity !== activeNuvioIdentity) {
         activeNuvioIdentity = identity;
@@ -261,9 +312,105 @@
         if (tab === "nuvio_collections" && canLoadProfileData) {
           void loadNuvioCollections();
         }
+        if (
+          tab === "preferences" &&
+          policyRecordId &&
+          policyRecordId !== loadedMetadataPolicyRecordId
+        ) {
+          void loadMetadataPolicy(policyRecordId);
+        }
       }
     });
   });
+
+  async function loadMetadataPolicy(
+    recordId: string,
+    restoreRetryFocus = false,
+  ): Promise<void> {
+    const generation = ++metadataPolicyGeneration;
+    loadedMetadataPolicyRecordId = recordId;
+    metadataPolicyProblem = undefined;
+    metadataPolicyNotice = undefined;
+    if (!host.readMetadataProjection) {
+      metadataPolicy = undefined;
+      metadataPolicyDraft = undefined;
+      metadataPolicyProblem =
+        "This host does not expose the governed profile metadata policy.";
+      return;
+    }
+    metadataPolicyLoading = true;
+    try {
+      const projection = await host.readMetadataProjection(recordId, false);
+      if (generation === metadataPolicyGeneration) {
+        metadataPolicy = projection.policy;
+        metadataPolicyDraft = policyDraftFrom(projection.policy);
+      }
+    } catch (error) {
+      if (generation === metadataPolicyGeneration) {
+        metadataPolicy = undefined;
+        metadataPolicyDraft = undefined;
+        metadataPolicyProblem = hostProblemText(
+          error,
+          "Fasti could not load this profile's metadata policy.",
+        );
+      }
+    } finally {
+      if (generation === metadataPolicyGeneration) {
+        metadataPolicyLoading = false;
+        if (restoreRetryFocus) {
+          await tick();
+          document.getElementById("retry-metadata-policy")?.focus();
+        }
+      }
+    }
+  }
+
+  function toggleMetadataFieldGroup(
+    group: MetadataFieldGroupDto,
+    enabled: boolean,
+  ): void {
+    if (!metadataPolicyDraft) return;
+    const groups = new Set(metadataPolicyDraft.enabled_field_groups);
+    if (enabled) groups.add(group);
+    else groups.delete(group);
+    const orderedGroups = [
+      ...metadataFieldGroups,
+      ...metadataPolicyDraft.enabled_field_groups.filter(
+        (item) => !metadataFieldGroups.includes(item),
+      ),
+    ];
+    metadataPolicyDraft = {
+      ...metadataPolicyDraft,
+      enabled_field_groups: orderedGroups.filter((item) => groups.has(item)),
+    };
+  }
+
+  async function saveMetadataPolicy(): Promise<void> {
+    if (
+      !host.configureMetadataProjection ||
+      !metadataPolicyDraft ||
+      metadataPolicySaving
+    )
+      return;
+    metadataPolicySaving = true;
+    metadataPolicyProblem = undefined;
+    metadataPolicyNotice = undefined;
+    try {
+      const response =
+        await host.configureMetadataProjection(metadataPolicyDraft);
+      metadataPolicy = response.policy;
+      metadataPolicyDraft = policyDraftFrom(response.policy);
+      onMetadataPolicyChanged?.();
+      metadataPolicyNotice = `Saved the profile metadata policy. Fasti invalidated ${response.invalidated_cache_entries.toLocaleString()} affected cache entries.`;
+    } catch (error) {
+      metadataPolicyProblem = hostProblemText(
+        error,
+        "Fasti could not save this profile's metadata policy.",
+      );
+    } finally {
+      metadataPolicySaving = false;
+    }
+  }
 
   function resetNuvioProfileState(): void {
     nuvioRequestGeneration += 1;
@@ -1319,6 +1466,226 @@
       {:else if active === "preferences"}
         <section aria-labelledby="preferences-settings-title">
           <h2 id="preferences-settings-title">Preferences & Metadata</h2>
+          <section
+            class="card metadata-policy-card"
+            data-testid="metadata-projection-policy"
+            aria-labelledby="metadata-policy-title"
+          >
+            <div class="card-header">
+              <div>
+                <h3 id="metadata-policy-title" class="card-title">
+                  Profile metadata projection
+                </h3>
+                <p class="card-subtitle text-secondary">
+                  Fasti owns and validates this profile policy. This browser
+                  does not store a second policy.
+                </p>
+              </div>
+            </div>
+            <div class="card-body">
+              {#if !metadataPolicyRecordId}
+                <div class="alert alert-warning" role="status">
+                  <strong>Current policy unavailable.</strong>
+                  Add a Record before editing this policy. The projection read requires
+                  a real Record context.
+                </div>
+              {:else if metadataPolicyLoading}
+                <p role="status">Loading the profile metadata policy…</p>
+              {:else if metadataPolicyProblem && !metadataPolicyDraft}
+                <div class="alert alert-danger" role="alert">
+                  <p>{metadataPolicyProblem}</p>
+                  <button
+                    id="retry-metadata-policy"
+                    type="button"
+                    class="btn btn-outline-danger"
+                    onclick={() =>
+                      void loadMetadataPolicy(metadataPolicyRecordId, true)}
+                  >
+                    Retry policy read
+                  </button>
+                </div>
+              {:else if metadataPolicy && metadataPolicyDraft}
+                <form
+                  onsubmit={(event) => {
+                    event.preventDefault();
+                    void saveMetadataPolicy();
+                  }}
+                >
+                  <div class="metadata-policy-grid">
+                    <div>
+                      <label class="form-label" for="metadata-provider-policy"
+                        >Preferred provider</label
+                      >
+                      <select
+                        id="metadata-provider-policy"
+                        class="form-select"
+                        value={metadataPolicyDraft.preferred_provider_id ?? ""}
+                        onchange={(event) =>
+                          (metadataPolicyDraft = {
+                            ...metadataPolicyDraft!,
+                            preferred_provider_id:
+                              event.currentTarget.value || null,
+                          })}
+                      >
+                        <option value="">No preferred provider</option>
+                        {#each Array.from(new Set( [...(metadataPolicy.preferred_provider_id ? [metadataPolicy.preferred_provider_id] : []), ...providers.map((provider) => provider.provider)] )) as provider}
+                          <option value={provider}>{provider}</option>
+                        {/each}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label class="form-label" for="metadata-preferred-locale"
+                        >Preferred locale</label
+                      >
+                      <input
+                        id="metadata-preferred-locale"
+                        class="form-control"
+                        value={metadataPolicyDraft.preferred_locale ?? ""}
+                        maxlength="16"
+                        placeholder="en-IE"
+                        onchange={(event) =>
+                          (metadataPolicyDraft = {
+                            ...metadataPolicyDraft!,
+                            preferred_locale:
+                              event.currentTarget.value.trim() || null,
+                          })}
+                      />
+                    </div>
+
+                    <div>
+                      <label class="form-label" for="metadata-original-locale"
+                        >Original locale</label
+                      >
+                      <input
+                        id="metadata-original-locale"
+                        class="form-control"
+                        value={metadataPolicyDraft.original_locale ?? ""}
+                        maxlength="16"
+                        placeholder="ja-JP"
+                        onchange={(event) =>
+                          (metadataPolicyDraft = {
+                            ...metadataPolicyDraft!,
+                            original_locale:
+                              event.currentTarget.value.trim() || null,
+                          })}
+                      />
+                    </div>
+
+                    <div>
+                      <label class="form-label" for="metadata-region-policy"
+                        >Region</label
+                      >
+                      <input
+                        id="metadata-region-policy"
+                        class="form-control"
+                        value={metadataPolicyDraft.region ?? ""}
+                        maxlength="8"
+                        placeholder="IE"
+                        onchange={(event) =>
+                          (metadataPolicyDraft = {
+                            ...metadataPolicyDraft!,
+                            region: event.currentTarget.value.trim() || null,
+                          })}
+                      />
+                    </div>
+
+                    <div>
+                      <label class="form-label" for="metadata-lkg-policy"
+                        >Last known good claims</label
+                      >
+                      <select
+                        id="metadata-lkg-policy"
+                        class="form-select"
+                        value={metadataPolicyDraft.last_known_good}
+                        onchange={(event) =>
+                          (metadataPolicyDraft = {
+                            ...metadataPolicyDraft!,
+                            last_known_good: event.currentTarget.value as
+                              "allow" | "deny",
+                          })}
+                      >
+                        <option value="allow">Allow when policy permits</option>
+                        <option value="deny">Deny</option>
+                      </select>
+                    </div>
+
+                    <label class="form-check metadata-policy-check">
+                      <input
+                        class="form-check-input"
+                        type="checkbox"
+                        checked={metadataPolicyDraft.allow_english_fallback}
+                        onchange={(event) =>
+                          (metadataPolicyDraft = {
+                            ...metadataPolicyDraft!,
+                            allow_english_fallback: event.currentTarget.checked,
+                          })}
+                      />
+                      <span class="form-check-label"
+                        >Allow English fallback</span
+                      >
+                    </label>
+                  </div>
+
+                  <fieldset class="metadata-field-groups">
+                    <legend class="form-label">Enabled field groups</legend>
+                    <div class="metadata-field-group-grid">
+                      {#each metadataFieldGroups as group}
+                        <label class="form-check metadata-field-group-check">
+                          <input
+                            class="form-check-input"
+                            type="checkbox"
+                            checked={metadataPolicyDraft.enabled_field_groups.includes(
+                              group,
+                            )}
+                            onchange={(event) =>
+                              toggleMetadataFieldGroup(
+                                group,
+                                event.currentTarget.checked,
+                              )}
+                          />
+                          <span class="form-check-label"
+                            >{metadataFieldGroupLabel(group)}</span
+                          >
+                        </label>
+                      {/each}
+                    </div>
+                  </fieldset>
+
+                  <div class="metadata-policy-actions">
+                    <button
+                      type="submit"
+                      class="btn btn-primary"
+                      data-testid="configure-metadata-projection"
+                      disabled={!host.configureMetadataProjection ||
+                        metadataPolicySaving}
+                      title={host.configureMetadataProjection
+                        ? undefined
+                        : "Metadata policy configuration is unavailable on this host"}
+                    >
+                      {metadataPolicySaving ? "Saving…" : "Save profile policy"}
+                    </button>
+                    <span class="text-secondary"
+                      >Profile <code>{metadataPolicy.profile_id}</code></span
+                    >
+                  </div>
+                </form>
+              {:else}
+                <p class="managed-note">
+                  The current profile metadata policy is unavailable.
+                </p>
+              {/if}
+
+              {#if metadataPolicyNotice}
+                <p class="notice" role="status">{metadataPolicyNotice}</p>
+              {/if}
+              {#if metadataPolicyProblem && metadataPolicyDraft}
+                <p class="problem" role="alert">{metadataPolicyProblem}</p>
+              {/if}
+            </div>
+          </section>
+
+          <h3 class="legacy-preferences-title">Legacy display preferences</h3>
           <p id="preferences-inactive" class="inactive-note" role="note">
             Not active. Saved values are preserved, but current provider
             searches and Records do not read these preferences yet.
@@ -2050,6 +2417,64 @@
     max-width: none;
     margin: 0;
     padding: clamp(20px, 2vw, 32px) clamp(16px, 2.5vw, 40px) 64px;
+  }
+
+  .metadata-policy-card {
+    margin-block: 20px 28px;
+  }
+
+  .metadata-policy-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+    gap: 18px;
+  }
+
+  .metadata-policy-check {
+    align-self: end;
+    min-height: 44px;
+    padding-block: 10px;
+  }
+
+  .metadata-field-group-check {
+    min-height: 44px;
+    align-items: center;
+    padding-block: 8px;
+  }
+
+  .metadata-policy-card .form-check-input {
+    flex: none;
+    width: 1rem;
+    min-width: 1rem;
+    min-height: 1rem;
+    padding: 0;
+  }
+
+  .metadata-field-groups {
+    margin-block: 24px;
+    padding: 0;
+    border: 0;
+  }
+
+  .metadata-field-group-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr));
+    gap: 12px 20px;
+  }
+
+  .metadata-policy-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .metadata-policy-actions .text-secondary {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .legacy-preferences-title {
+    margin-block: 32px 8px;
   }
 
   header {

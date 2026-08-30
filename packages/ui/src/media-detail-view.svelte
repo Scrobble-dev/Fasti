@@ -1,6 +1,7 @@
 <script lang="ts">
   import type {
     MediaRecord,
+    MetadataProjectionResponse,
     WatchStatus,
     ExternalId,
     ChronicleOccurrence,
@@ -69,6 +70,11 @@
     providerCredentials?: ProviderCredentialStatus[];
     providerLoading?: boolean;
     providerHostProblem?: string;
+    metadataProjection?: MetadataProjectionResponse;
+    metadataProjectionLoading?: boolean;
+    metadataProjectionProblem?: string;
+    metadataRefreshUnavailableFieldGroups?: string[];
+    metadataRefreshableFieldGroupCount?: number;
     onBack: () => void;
     onSearchMetadata?: (
       provider: string,
@@ -80,6 +86,8 @@
     ) => Promise<void>;
     onOpenProviderSettings?: () => void;
     onRetryProviders?: () => void;
+    onRetryMetadataProjection?: () => void;
+    onRefreshMetadataClaims?: (providerId: string) => Promise<void>;
     onSetTrackingDisposition?: (
       recordId: string,
       disposition: TrackingDispositionUpdate,
@@ -115,11 +123,18 @@
     providerCredentials,
     providerLoading = false,
     providerHostProblem,
+    metadataProjection,
+    metadataProjectionLoading = false,
+    metadataProjectionProblem,
+    metadataRefreshUnavailableFieldGroups = [],
+    metadataRefreshableFieldGroupCount = 0,
     onBack,
     onSearchMetadata,
     onApplyMetadata,
     onOpenProviderSettings,
     onRetryProviders,
+    onRetryMetadataProjection,
+    onRefreshMetadataClaims,
     onSetTrackingDisposition,
     onOpenReconciliation,
     onUpdateStatus,
@@ -151,6 +166,7 @@
   let metadataRefreshingId = $state("");
   let metadataProblem = $state("");
   let metadataNotice = $state("");
+  let projectedMetadataRefreshingProvider = $state("");
 
   // Context Menu State
   let contextMenuState = $state<{
@@ -224,6 +240,67 @@
   const selectedTrackingDisposition = $derived<TrackingDispositionUpdate>(
     record.trackingDisposition ?? "unset",
   );
+  const projectionProviders = $derived(
+    Array.from(
+      new Set([
+        ...(metadataProjection?.policy.preferred_provider_id
+          ? [metadataProjection.policy.preferred_provider_id]
+          : []),
+        ...(metadataProjection?.attributions.map(
+          (attribution) => attribution.provider_id,
+        ) ?? []),
+        ...(metadataProjection?.fields.flatMap((field) =>
+          field.provenance?.provider_id ? [field.provenance.provider_id] : [],
+        ) ?? []),
+        ...(metadataProjection?.ratings.flatMap((rating) =>
+          rating.provenance.provider_id ? [rating.provenance.provider_id] : [],
+        ) ?? []),
+      ]),
+    ),
+  );
+  const offlineCacheEntries = $derived(
+    metadataProjection?.cache_entries.filter(
+      (entry) => entry.key.purpose === "offline_read",
+    ) ?? [],
+  );
+
+  function metadataTimestamp(value: string | null | undefined): string {
+    if (!value) return "Not declared";
+    const timestamp = new Date(value);
+    return Number.isNaN(timestamp.getTime())
+      ? value
+      : new Intl.DateTimeFormat(undefined, {
+          dateStyle: "medium",
+          timeStyle: "short",
+        }).format(timestamp);
+  }
+
+  function ratingValue(
+    value: number,
+    scale: { minimum_millis: number; maximum_millis: number },
+  ): string {
+    return `${(value / 1000).toLocaleString()} on ${(
+      scale.minimum_millis / 1000
+    ).toLocaleString()}–${(scale.maximum_millis / 1000).toLocaleString()}`;
+  }
+
+  async function refreshProjectedMetadata(providerId: string): Promise<void> {
+    if (!onRefreshMetadataClaims || projectedMetadataRefreshingProvider) return;
+    projectedMetadataRefreshingProvider = providerId;
+    metadataProblem = "";
+    metadataNotice = "";
+    try {
+      await onRefreshMetadataClaims(providerId);
+      metadataNotice = `Refreshed governed claims from ${providerLabel(providerId)}.`;
+    } catch (error) {
+      metadataProblem = hostProblemText(
+        error,
+        "Governed metadata claim refresh failed.",
+      );
+    } finally {
+      projectedMetadataRefreshingProvider = "";
+    }
+  }
 
   function handleSaveNotes(): void {
     if (!onUpdateNotes) return;
@@ -1100,6 +1177,315 @@
               </p>
             </div>
           </div>
+
+          <section
+            class="metadata-projection"
+            data-testid="metadata-projection"
+            aria-labelledby="metadata-projection-title"
+          >
+            <div class="metadata-projection-heading">
+              <div>
+                <h3 id="metadata-projection-title">Metadata provenance</h3>
+                <p>
+                  The active profile selects display fields from immutable
+                  claims. Cache state and attribution remain visible.
+                </p>
+              </div>
+            </div>
+
+            {#if metadataProjectionLoading}
+              <p role="status">Loading metadata provenance…</p>
+            {:else if metadataProjectionProblem}
+              <div class="metadata-projection-problem" role="alert">
+                <p>{metadataProjectionProblem}</p>
+                {#if onRetryMetadataProjection}
+                  <button
+                    id="retry-metadata-projection"
+                    type="button"
+                    class="btn btn-outline-secondary"
+                    onclick={onRetryMetadataProjection}
+                  >
+                    Retry projection read
+                  </button>
+                {/if}
+              </div>
+            {:else if metadataProjection}
+              <div class="metadata-projection-summary">
+                <span>Profile <code>{metadataProjection.profile_id}</code></span
+                >
+                <span
+                  >{metadataProjection.fields.length.toLocaleString()} projected fields</span
+                >
+                <span
+                  >{metadataProjection.ratings.length.toLocaleString()} rating claims</span
+                >
+              </div>
+
+              <section
+                class="metadata-evidence-section"
+                data-testid="metadata-field-provenance"
+                aria-labelledby="metadata-field-provenance-title"
+              >
+                <h4 id="metadata-field-provenance-title">Projected fields</h4>
+                <!-- svelte-ignore a11y_no_noninteractive_tabindex (the overflow region must accept keyboard scrolling) -->
+                <div
+                  class="metadata-table-wrap table-responsive"
+                  role="region"
+                  tabindex="0"
+                  aria-label="Projected field provenance"
+                >
+                  <table class="table table-vcenter">
+                    <thead>
+                      <tr>
+                        <th scope="col">Field</th>
+                        <th scope="col">Selected value</th>
+                        <th scope="col">Selection</th>
+                        <th scope="col">Provenance</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {#each metadataProjection.fields as field (field.field_key)}
+                        <tr>
+                          <th scope="row" class="mono">{field.field_key}</th>
+                          <td class="metadata-value"
+                            >{field.value ?? "No selected value"}</td
+                          >
+                          <td>
+                            <span class="badge bg-blue-lt text-blue"
+                              >{field.tier.replaceAll("_", " ")}</span
+                            >
+                            {#if field.is_stale}
+                              <span class="badge bg-yellow-lt text-yellow"
+                                >stale</span
+                              >
+                            {:else}
+                              <span class="badge bg-green-lt text-green"
+                                >fresh</span
+                              >
+                            {/if}
+                            <span class="metadata-secondary"
+                              >Projected {metadataTimestamp(
+                                field.projected_at,
+                              )}</span
+                            >
+                          </td>
+                          <td>
+                            {#if field.provenance}
+                              <dl class="metadata-provenance-list">
+                                <div>
+                                  <dt>Source</dt>
+                                  <dd>{field.provenance.source_namespace}</dd>
+                                </div>
+                                <div>
+                                  <dt>Provider</dt>
+                                  <dd>
+                                    {field.provenance.provider_id ??
+                                      "Not declared"}
+                                  </dd>
+                                </div>
+                                <div>
+                                  <dt>Fetched</dt>
+                                  <dd>
+                                    {metadataTimestamp(
+                                      field.provenance.fetched_at,
+                                    )}
+                                  </dd>
+                                </div>
+                                <div>
+                                  <dt>Claim state</dt>
+                                  <dd>{field.provenance.status}</dd>
+                                </div>
+                              </dl>
+                            {:else}
+                              <span class="muted"
+                                >No provider claim selected</span
+                              >
+                            {/if}
+                          </td>
+                        </tr>
+                      {:else}
+                        <tr>
+                          <td colspan="4" class="muted"
+                            >No projected metadata fields were returned.</td
+                          >
+                        </tr>
+                      {/each}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section
+                class="metadata-evidence-section"
+                data-testid="metadata-rating-provenance"
+                aria-labelledby="metadata-rating-provenance-title"
+              >
+                <h4 id="metadata-rating-provenance-title">Rating claims</h4>
+                <div class="metadata-rating-list">
+                  {#each metadataProjection.ratings as rating (rating.claim_id)}
+                    <article>
+                      <strong
+                        >{ratingValue(
+                          rating.value_millis,
+                          rating.scale,
+                        )}</strong
+                      >
+                      <span
+                        >{rating.provenance.source_namespace} · {rating
+                          .provenance.provider_id ??
+                          "provider not declared"}</span
+                      >
+                      <span
+                        >{rating.provenance.status} · fetched {metadataTimestamp(
+                          rating.provenance.fetched_at,
+                        )}</span
+                      >
+                    </article>
+                  {:else}
+                    <p class="muted">No rating claims were returned.</p>
+                  {/each}
+                </div>
+              </section>
+
+              <div class="metadata-state-grid">
+                <section
+                  class="metadata-evidence-section"
+                  data-testid="metadata-cache-state"
+                  aria-labelledby="metadata-cache-state-title"
+                >
+                  <h4 id="metadata-cache-state-title">Cache freshness</h4>
+                  <ul class="metadata-state-list">
+                    {#each metadataProjection.cache_entries as entry}
+                      <li>
+                        <strong
+                          >{entry.key.field_group.replaceAll("_", " ")}</strong
+                        >
+                        <span>{entry.read_state.replaceAll("_", " ")}</span>
+                        <span
+                          >Fresh until {metadataTimestamp(
+                            entry.fresh_until,
+                          )}</span
+                        >
+                      </li>
+                    {:else}
+                      <li>No cache partitions were returned.</li>
+                    {/each}
+                  </ul>
+                </section>
+
+                <section
+                  class="metadata-evidence-section"
+                  data-testid="metadata-offline-state"
+                  aria-labelledby="metadata-offline-state-title"
+                >
+                  <h4 id="metadata-offline-state-title">Offline read state</h4>
+                  {#if offlineCacheEntries.length === 0}
+                    <p>
+                      Unavailable. This projection did not return an
+                      offline-read cache partition.
+                    </p>
+                  {:else}
+                    <ul class="metadata-state-list">
+                      {#each offlineCacheEntries as entry}
+                        <li>
+                          <strong
+                            >{entry.key.field_group.replaceAll(
+                              "_",
+                              " ",
+                            )}</strong
+                          >
+                          <span>{entry.read_state.replaceAll("_", " ")}</span>
+                          <span
+                            >Stale-on-error limit {metadataTimestamp(
+                              entry.stale_on_error_until,
+                            )}</span
+                          >
+                        </li>
+                      {/each}
+                    </ul>
+                    <p class="metadata-secondary">
+                      These are server-reported cache states. This view did not
+                      request offline fallback.
+                    </p>
+                  {/if}
+                </section>
+              </div>
+
+              <section
+                class="metadata-evidence-section"
+                data-testid="metadata-attributions"
+                aria-labelledby="metadata-attributions-title"
+              >
+                <h4 id="metadata-attributions-title">Attribution</h4>
+                <ul class="metadata-attribution-list">
+                  {#each metadataProjection.attributions as attribution (attribution.provider_id)}
+                    <li>
+                      <span>{attribution.text}</span>
+                      <a
+                        href={attribution.documentation_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        >Provider documentation <IconExternalLink
+                          size={14}
+                          aria-hidden="true"
+                        /></a
+                      >
+                    </li>
+                  {:else}
+                    <li>No provider attribution was returned.</li>
+                  {/each}
+                </ul>
+              </section>
+
+              <div
+                class="metadata-refresh-actions"
+                data-testid="refresh-metadata-claims"
+              >
+                <h4>Refresh provider claims</h4>
+                {#if metadataRefreshUnavailableFieldGroups.length > 0}
+                  <div class="alert alert-info mb-0" role="status">
+                    <strong>Some policy groups are not refreshed yet.</strong>
+                    This refresh skips
+                    {metadataRefreshUnavailableFieldGroups
+                      .map((group) => group.replaceAll("_", " "))
+                      .join(", ")}. The saved profile policy is unchanged.
+                  </div>
+                {/if}
+                {#if projectionProviders.length === 0}
+                  <p class="muted">
+                    Choose a preferred provider in Settings before the first
+                    refresh.
+                  </p>
+                {:else}
+                  {#each projectionProviders as providerId}
+                    <button
+                      type="button"
+                      class="btn btn-outline-secondary"
+                      disabled={!onRefreshMetadataClaims ||
+                        metadataRefreshableFieldGroupCount === 0 ||
+                        Boolean(projectedMetadataRefreshingProvider)}
+                      title={!onRefreshMetadataClaims
+                        ? "Governed metadata refresh is unavailable on this host"
+                        : metadataRefreshableFieldGroupCount === 0
+                          ? "Enable at least one currently refreshable field group in Settings"
+                          : undefined}
+                      onclick={() => refreshProjectedMetadata(providerId)}
+                    >
+                      <IconRefresh size={16} aria-hidden="true" />
+                      {projectedMetadataRefreshingProvider === providerId
+                        ? `Refreshing ${providerLabel(providerId)}…`
+                        : `Refresh ${providerLabel(providerId)}`}
+                    </button>
+                  {/each}
+                {/if}
+              </div>
+            {:else}
+              <p>
+                Metadata provenance is unavailable because this host did not
+                return a projection.
+              </p>
+            {/if}
+          </section>
 
           <!-- svelte-ignore a11y_no_noninteractive_tabindex (the overflow region must accept keyboard scrolling) -->
           <div
@@ -2023,6 +2409,142 @@
     font-size: 0.85rem;
     color: var(--fasti-text-muted);
     margin: 0;
+  }
+
+  .metadata-projection {
+    display: grid;
+    gap: 24px;
+    margin-block: 24px 32px;
+    padding-block: 24px;
+    border-block: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
+  }
+
+  .metadata-projection-heading h3,
+  .metadata-projection-heading p,
+  .metadata-evidence-section h4,
+  .metadata-refresh-actions h4 {
+    margin: 0;
+  }
+
+  .metadata-projection-heading p,
+  .metadata-secondary {
+    color: var(--fasti-text-muted);
+  }
+
+  .metadata-projection-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 20px;
+    padding-block: 12px;
+    border-block: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 18%, transparent);
+  }
+
+  .metadata-projection-summary code,
+  .metadata-value,
+  .metadata-provenance-list dd {
+    overflow-wrap: anywhere;
+  }
+
+  .metadata-evidence-section {
+    min-width: 0;
+  }
+
+  .metadata-evidence-section > h4 {
+    margin-bottom: 10px;
+  }
+
+  .metadata-table-wrap {
+    overflow-x: auto;
+  }
+
+  .metadata-table-wrap:focus-visible {
+    outline: 3px solid var(--fasti-focus);
+    outline-offset: 2px;
+  }
+
+  .metadata-value {
+    max-width: 44ch;
+    white-space: pre-wrap;
+  }
+
+  .metadata-secondary {
+    display: block;
+    margin-top: 6px;
+    font-size: 0.78rem;
+  }
+
+  .metadata-provenance-list {
+    display: grid;
+    gap: 4px;
+    margin: 0;
+  }
+
+  .metadata-provenance-list div {
+    display: grid;
+    grid-template-columns: minmax(70px, auto) minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .metadata-provenance-list dt {
+    color: var(--fasti-text-muted);
+    font-weight: 600;
+  }
+
+  .metadata-provenance-list dd {
+    margin: 0;
+  }
+
+  .metadata-rating-list,
+  .metadata-state-list,
+  .metadata-attribution-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .metadata-rating-list article,
+  .metadata-state-list li,
+  .metadata-attribution-list li {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+    padding-block: 10px;
+    border-bottom: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 15%, transparent);
+  }
+
+  .metadata-rating-list article span,
+  .metadata-state-list li span {
+    color: var(--fasti-text-muted);
+  }
+
+  .metadata-state-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+    gap: 28px;
+  }
+
+  .metadata-attribution-list a {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .metadata-refresh-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .metadata-refresh-actions h4 {
+    flex-basis: 100%;
+  }
+
+  .metadata-projection-problem {
+    color: var(--fasti-state-problem, #b42318);
   }
 
   .assertions-table {

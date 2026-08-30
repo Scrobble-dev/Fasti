@@ -25,6 +25,12 @@ const PORTABILITY_V1_EXAMPLE_PATH: &str =
     "contracts/portability/v1/workspace-manifest.example.json";
 const PORTABILITY_V2_EXAMPLE_PATH: &str =
     "contracts/portability/v2/workspace-manifest.example.json";
+const PORTABILITY_V3_SCHEMA_PATH: &str = "contracts/portability/v3/workspace-manifest.schema.json";
+const PORTABILITY_V3_EXAMPLE_PATH: &str =
+    "contracts/portability/v3/workspace-manifest.example.json";
+const PORTABILITY_V4_SCHEMA_PATH: &str = "contracts/portability/v4/workspace-manifest.schema.json";
+const PORTABILITY_V4_EXAMPLE_PATH: &str =
+    "contracts/portability/v4/workspace-manifest.example.json";
 const SDK_GENERATED_PATH: &str = "packages/sdk/src/generated.ts";
 const RUST_CAPABILITY_IDS_PATH: &str = "crates/fasti-contracts/src/generated_capability_ids.rs";
 const PROVIDER_MANIFEST_SCHEMA_PATH: &str =
@@ -182,7 +188,7 @@ const PRODUCTION_BOOTSTRAP_OPERATIONS: [ConformanceOperation; 2] = [
 /// surface. Kept separate from `PRODUCTION_BOOTSTRAP_OPERATIONS` because that
 /// array also drives the bootstrap-only SDK slice in
 /// `render_production_bootstrap_contract`, which must not grow to include them.
-const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 20] = [
+const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 23] = [
     ConformanceOperation {
         alias: "submitObservation",
         operation_id: "submit_observation",
@@ -403,6 +409,39 @@ const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 20] = [
         response: Some("ProviderHealthResponse"),
         retry: "safe",
     },
+    ConformanceOperation {
+        alias: "refreshMetadataClaims",
+        operation_id: "refresh_metadata_claims",
+        method: "post",
+        path: "/api/v1/metadata/claims/refresh",
+        capability_id: "metadata.claim.refresh",
+        authenticated: true,
+        request: Some("RefreshMetadataClaimsRequest"),
+        response: Some("RefreshMetadataClaimsResponse"),
+        retry: "stable_body_operation_id",
+    },
+    ConformanceOperation {
+        alias: "readMetadataProjection",
+        operation_id: "read_metadata_projection",
+        method: "get",
+        path: "/api/v1/records/{record_id}/metadata-projection",
+        capability_id: "metadata.projection.read",
+        authenticated: true,
+        request: None,
+        response: Some("MetadataProjectionResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "configureMetadataProjection",
+        operation_id: "configure_metadata_projection",
+        method: "put",
+        path: "/api/v1/profile/metadata-projection",
+        capability_id: "metadata.projection.configure",
+        authenticated: true,
+        request: Some("ConfigureMetadataProjectionRequest"),
+        response: Some("MetadataProjectionConfigurationResponse"),
+        retry: "never",
+    },
 ];
 
 pub(crate) fn generate_checked_in(workspace_root: &Path) -> anyhow::Result<Artifacts> {
@@ -489,6 +528,10 @@ fn build(workspace_root: &Path) -> anyhow::Result<Artifacts> {
     let provider_manifest_schema = integration::provider_manifest_schema()?;
     let portability_v2_schema = portability_v2_schema()?;
     let portability_v2_example = portability_v2_example(workspace_root)?;
+    let portability_v3_schema = portability_v3_schema()?;
+    let portability_v3_example = portability_v3_example(workspace_root)?;
+    let portability_v4_schema = portability_v4_schema()?;
+    let portability_v4_example = portability_v4_example(workspace_root)?;
     let asyncapi = load_yaml(workspace_root, ASYNCAPI_PATH)?;
     let mut production_openapi = serde_json::to_value(fasti_api::openapi())
         .context("production OpenAPI is not serializable")?;
@@ -564,6 +607,26 @@ fn build(workspace_root: &Path) -> anyhow::Result<Artifacts> {
         &mut artifacts,
         PORTABILITY_V2_EXAMPLE_PATH,
         portability_v2_example,
+    )?;
+    insert(
+        &mut artifacts,
+        PORTABILITY_V3_SCHEMA_PATH,
+        portability_v3_schema,
+    )?;
+    insert(
+        &mut artifacts,
+        PORTABILITY_V3_EXAMPLE_PATH,
+        portability_v3_example,
+    )?;
+    insert(
+        &mut artifacts,
+        PORTABILITY_V4_SCHEMA_PATH,
+        portability_v4_schema,
+    )?;
+    insert(
+        &mut artifacts,
+        PORTABILITY_V4_EXAMPLE_PATH,
+        portability_v4_example,
     )?;
     insert_bytes(&mut artifacts, SDK_GENERATED_PATH, sdk_source.into_bytes())?;
     insert_bytes(
@@ -643,7 +706,11 @@ fn portability_v2_schema() -> anyhow::Result<Value> {
         .context("generated portability schema omits format_version")? = serde_json::json!({
         "const": 2
     });
-    let entities = WorkspaceExportEntity::ALL.map(WorkspaceExportEntity::as_str);
+    let entities = WorkspaceExportEntity::V2.map(WorkspaceExportEntity::as_str);
+    *schema
+        .pointer_mut("/$defs/WorkspaceExportEntityDto/enum")
+        .context("generated portability schema omits export entity enum")? =
+        serde_json::to_value(entities)?;
     *schema
         .pointer_mut("/$defs/WorkspaceManifestDto/properties/streams")
         .context("generated portability schema omits streams")? = serde_json::json!({
@@ -676,7 +743,7 @@ fn portability_v2_example(workspace_root: &Path) -> anyhow::Result<Value> {
         .and_then(Value::as_array_mut)
         .context("archive-v1 example omits streams")?;
     let empty_digest = format!("sha256:{}", crate::evidence::sha256_bytes(&[]));
-    for entity in WorkspaceExportEntity::ALL[WorkspaceExportEntity::V1.len()..]
+    for entity in WorkspaceExportEntity::V2[WorkspaceExportEntity::V1.len()..]
         .iter()
         .map(|entity| entity.as_str())
     {
@@ -692,6 +759,186 @@ fn portability_v2_example(workspace_root: &Path) -> anyhow::Result<Value> {
         .context("archive-v1 example omits manifest")?;
     let canonical = serde_json_canonicalizer::to_vec(manifest)
         .context("archive-v2 example manifest is not canonicalizable")?;
+    example["manifest_digest"] = Value::String(format!(
+        "sha256:{}",
+        crate::evidence::sha256_bytes(&canonical)
+    ));
+    Ok(example)
+}
+
+fn portability_v3_schema() -> anyhow::Result<Value> {
+    let mut schema = draft_2020_12_schema::<ChecksummedWorkspaceManifestDto>()?;
+    let root = schema
+        .as_object_mut()
+        .context("portability schema root must be an object")?;
+    root.insert(
+        "$id".to_owned(),
+        Value::String(
+            "https://fasti.scrobble.dev/schemas/internal-staged/portability/v3/workspace-manifest.json"
+                .to_owned(),
+        ),
+    );
+    root.insert(
+        "title".to_owned(),
+        Value::String("InternalStagedChecksummedWorkspaceManifestV3".to_owned()),
+    );
+    root.insert(
+        "$comment".to_owned(),
+        Value::String(
+            "Internal staged B3 archive v3. It extends the frozen v2 stream prefix with authoritative M2 metadata state. Derived projections and disposable cache state are excluded."
+                .to_owned(),
+        ),
+    );
+    root.insert(
+        "x-fasti-contract-state".to_owned(),
+        Value::String("internal_staged_archive_v3".to_owned()),
+    );
+    *schema
+        .pointer_mut("/$defs/WorkspaceManifestDto/properties/format_version")
+        .context("generated portability schema omits format_version")? = serde_json::json!({
+        "const": 3
+    });
+    let entities = WorkspaceExportEntity::V3.map(WorkspaceExportEntity::as_str);
+    *schema
+        .pointer_mut("/$defs/WorkspaceExportEntityDto/enum")
+        .context("generated portability schema omits export entity enum")? =
+        serde_json::to_value(entities)?;
+    *schema
+        .pointer_mut("/$defs/WorkspaceManifestDto/properties/streams")
+        .context("generated portability schema omits streams")? = serde_json::json!({
+        "type": "array",
+        "minItems": entities.len(),
+        "maxItems": entities.len(),
+        "prefixItems": entities.map(|entity| serde_json::json!({
+            "allOf": [
+                { "$ref": "#/$defs/WorkspaceStreamDescriptorDto" },
+                {
+                    "type": "object",
+                    "properties": { "entity": { "const": entity } }
+                }
+            ]
+        })),
+        "items": false
+    });
+    Ok(schema)
+}
+
+fn portability_v3_example(workspace_root: &Path) -> anyhow::Result<Value> {
+    let source = fs::read(workspace_root.join(PORTABILITY_V2_EXAMPLE_PATH))?;
+    let mut example: Value =
+        serde_json::from_slice(&source).context("archive-v2 manifest example is not valid JSON")?;
+    *example
+        .pointer_mut("/manifest/format_version")
+        .context("archive-v2 example omits format_version")? = serde_json::json!(3);
+    let streams = example
+        .pointer_mut("/manifest/streams")
+        .and_then(Value::as_array_mut)
+        .context("archive-v2 example omits streams")?;
+    let empty_digest = format!("sha256:{}", crate::evidence::sha256_bytes(&[]));
+    for entity in WorkspaceExportEntity::V3[WorkspaceExportEntity::V2.len()..]
+        .iter()
+        .map(|entity| entity.as_str())
+    {
+        streams.push(serde_json::json!({
+            "entity": entity,
+            "row_count": 0,
+            "byte_length": 0,
+            "digest": empty_digest,
+        }));
+    }
+    let manifest = example
+        .get("manifest")
+        .context("archive-v2 example omits manifest")?;
+    let canonical = serde_json_canonicalizer::to_vec(manifest)
+        .context("archive-v3 example manifest is not canonicalizable")?;
+    example["manifest_digest"] = Value::String(format!(
+        "sha256:{}",
+        crate::evidence::sha256_bytes(&canonical)
+    ));
+    Ok(example)
+}
+
+fn portability_v4_schema() -> anyhow::Result<Value> {
+    let mut schema = draft_2020_12_schema::<ChecksummedWorkspaceManifestDto>()?;
+    let root = schema
+        .as_object_mut()
+        .context("portability schema root must be an object")?;
+    root.insert(
+        "$id".to_owned(),
+        Value::String(
+            "https://fasti.scrobble.dev/schemas/internal-staged/portability/v4/workspace-manifest.json"
+                .to_owned(),
+        ),
+    );
+    root.insert(
+        "title".to_owned(),
+        Value::String("InternalStagedChecksummedWorkspaceManifestV4".to_owned()),
+    );
+    root.insert(
+        "$comment".to_owned(),
+        Value::String(
+            "Internal staged B3 archive v4. It extends the frozen v3 stream prefix with immutable metadata refresh receipts."
+                .to_owned(),
+        ),
+    );
+    root.insert(
+        "x-fasti-contract-state".to_owned(),
+        Value::String("internal_staged_archive_v4".to_owned()),
+    );
+    *schema
+        .pointer_mut("/$defs/WorkspaceManifestDto/properties/format_version")
+        .context("generated portability schema omits format_version")? = serde_json::json!({
+        "const": 4
+    });
+    let entities = WorkspaceExportEntity::ALL.map(WorkspaceExportEntity::as_str);
+    *schema
+        .pointer_mut("/$defs/WorkspaceManifestDto/properties/streams")
+        .context("generated portability schema omits streams")? = serde_json::json!({
+        "type": "array",
+        "minItems": entities.len(),
+        "maxItems": entities.len(),
+        "prefixItems": entities.map(|entity| serde_json::json!({
+            "allOf": [
+                { "$ref": "#/$defs/WorkspaceStreamDescriptorDto" },
+                {
+                    "type": "object",
+                    "properties": { "entity": { "const": entity } }
+                }
+            ]
+        })),
+        "items": false
+    });
+    Ok(schema)
+}
+
+fn portability_v4_example(workspace_root: &Path) -> anyhow::Result<Value> {
+    let source = fs::read(workspace_root.join(PORTABILITY_V3_EXAMPLE_PATH))?;
+    let mut example: Value =
+        serde_json::from_slice(&source).context("archive-v3 manifest example is not valid JSON")?;
+    *example
+        .pointer_mut("/manifest/format_version")
+        .context("archive-v3 example omits format_version")? = serde_json::json!(4);
+    let streams = example
+        .pointer_mut("/manifest/streams")
+        .and_then(Value::as_array_mut)
+        .context("archive-v3 example omits streams")?;
+    let empty_digest = format!("sha256:{}", crate::evidence::sha256_bytes(&[]));
+    for entity in WorkspaceExportEntity::ALL[WorkspaceExportEntity::V3.len()..]
+        .iter()
+        .map(|entity| entity.as_str())
+    {
+        streams.push(serde_json::json!({
+            "entity": entity,
+            "row_count": 0,
+            "byte_length": 0,
+            "digest": empty_digest,
+        }));
+    }
+    let manifest = example
+        .get("manifest")
+        .context("archive-v3 example omits manifest")?;
+    let canonical = serde_json_canonicalizer::to_vec(manifest)
+        .context("archive-v4 example manifest is not canonicalizable")?;
     example["manifest_digest"] = Value::String(format!(
         "sha256:{}",
         crate::evidence::sha256_bytes(&canonical)
@@ -1062,7 +1309,7 @@ fn enrich_discovery_collection_schema(
         ),
         (
             "/components/schemas/CapabilitySurfaceDispositionDto/properties/body",
-            vec!["b0", "b1", "b2", "b3", "c1"],
+            vec!["b0", "b1", "b2", "b3", "c1", "m1", "m2"],
         ),
         (
             "/components/schemas/CapabilityUatDto/properties/relationship",
@@ -1070,7 +1317,7 @@ fn enrich_discovery_collection_schema(
         ),
         (
             "/components/schemas/CapabilityUatDto/properties/owner_body",
-            vec!["b1", "b2", "b3", "c1"],
+            vec!["b1", "b2", "b3", "c1", "m1", "m2"],
         ),
     ] {
         openapi
@@ -1246,7 +1493,10 @@ fn validate_production_operation_security(
         | "configure_provider_credential"
         | "remove_provider_credential"
         | "test_provider_credential"
-        | "read_provider_health" => vec!["credential_bearer"],
+        | "read_provider_health"
+        | "refresh_metadata_claims"
+        | "read_metadata_projection"
+        | "configure_metadata_projection" => vec!["credential_bearer"],
         "nuvio_webhook" | "tautulli_webhook" | "jellyfin_webhook" | "emby_webhook"
         | "plex_webhook" => vec!["credential_bearer"],
         "enroll_first_client" | "health_check" | "integration_status" => Vec::new(),
@@ -1397,7 +1647,7 @@ fn validate_required_bindings(
     health_schema: &Value,
     sdk_source: &str,
 ) -> anyhow::Result<()> {
-    for required in registry::finalized_b1_m1_required_bindings(workspace_root)? {
+    for required in registry::finalized_required_bindings(workspace_root)? {
         resolve_required_binding(
             workspace_root,
             required.surface,
@@ -1615,6 +1865,18 @@ fn resolve_required_binding(
                     "production provider smoke is absent"
                 );
             }
+            "package-smoke:production-metadata" => {
+                let smoke = fs::read_to_string(workspace_root.join("scripts/smoke-native.sh"))?;
+                ensure!(
+                    smoke.contains("/api/v1/metadata/claims/refresh")
+                        && smoke.contains("\"operation_id\"")
+                        && smoke.contains("/api/v1/records/")
+                        && smoke.contains("/metadata-projection")
+                        && smoke.contains("metadata_claim_stale")
+                        && smoke.contains("projection.get(\"fields\")"),
+                    "production metadata smoke is absent"
+                );
+            }
             _ => anyhow::bail!("unknown package-smoke binding"),
         },
         "ui" => match binding {
@@ -1629,6 +1891,30 @@ fn resolve_required_binding(
                         && view.contains("testProviderCredential")
                         && view.contains("readProviderHealth"),
                     "provider settings UI does not cover every M1 provider operation"
+                );
+            }
+            "ui:metadata-provenance" => {
+                let types = fs::read_to_string(workspace_root.join("packages/ui/src/types.ts"))?;
+                let detail = fs::read_to_string(
+                    workspace_root.join("packages/ui/src/media-detail-view.svelte"),
+                )?;
+                let settings = fs::read_to_string(
+                    workspace_root.join("packages/ui/src/runtime-settings-view.svelte"),
+                )?;
+                ensure!(
+                    types.contains("readMetadataProjection")
+                        && types.contains("configureMetadataProjection")
+                        && types.contains("refreshMetadataClaims")
+                        && detail.contains("metadata-projection")
+                        && detail.contains("metadata-field-provenance")
+                        && detail.contains("metadata-rating-provenance")
+                        && detail.contains("metadata-attributions")
+                        && detail.contains("metadata-cache-state")
+                        && detail.contains("metadata-offline-state")
+                        && detail.contains("refresh-metadata-claims")
+                        && settings.contains("metadata-projection-policy")
+                        && settings.contains("configure-metadata-projection"),
+                    "metadata UI does not cover projection, provenance, attribution, freshness, offline state, refresh, and profile policy"
                 );
             }
             _ => anyhow::bail!("unknown UI binding"),
@@ -2075,7 +2361,10 @@ fn render_production_bootstrap_contract(openapi: &Value) -> anyhow::Result<Strin
         let schema = schemas
             .get(name)
             .with_context(|| format!("production OpenAPI omits {name}"))?;
-        output.push_str(&render_interface(name, schema)?);
+        output.push_str(
+            &render_interface(name, schema)
+                .with_context(|| format!("failed to render production DTO {name}"))?,
+        );
         output.push('\n');
     }
 
@@ -2253,6 +2542,15 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         "ProviderCredentialSourceDto",
         "ProviderCapabilityStateDto",
         "ProviderCheckStateDto",
+        "MetadataFieldGroupDto",
+        "MetadataRefreshModeDto",
+        "MetadataClaimStatusDto",
+        "MetadataProjectionTierDto",
+        "LastKnownGoodPolicyDto",
+        "MetadataCachePurposeDto",
+        "MetadataDataClassificationDto",
+        "MetadataCacheInvalidationReasonDto",
+        "MetadataCacheReadStateDto",
     ] {
         let schema = schemas
             .get(name)
@@ -2260,7 +2558,8 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         writeln!(
             output,
             "// prettier-ignore\nexport type {name} = {};\n",
-            typescript_type(schema)?
+            typescript_type(schema)
+                .with_context(|| format!("failed to render production runtime type {name}"))?
         )?;
     }
     output.push_str(
@@ -2293,11 +2592,31 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         "ConfigureProviderCredentialRequest",
         "ProviderCapabilityResponse",
         "ProviderHealthResponse",
+        "RefreshMetadataClaimsRequest",
+        "MetadataClaimProvenanceDto",
+        "MetadataClaimDto",
+        "RatingScaleDto",
+        "RatingClaimDto",
+        "MetadataProjectedFieldDto",
+        "EnrichmentPolicyDto",
+        "MetadataCacheKeyDto",
+        "MetadataCacheInvalidationDto",
+        "MetadataCacheEntryDto",
+        "MetadataAttributionDto",
+        "RefreshMetadataClaimsResponse",
+        "MetadataProjectionResponse",
+        "MetadataProjectionQueryParameters",
+        "MetadataOverrideMutationDto",
+        "ConfigureMetadataProjectionRequest",
+        "MetadataProjectionConfigurationResponse",
     ] {
         let schema = schemas
             .get(name)
             .with_context(|| format!("production OpenAPI omits {name}"))?;
-        output.push_str(&render_interface(name, schema)?);
+        output.push_str(
+            &render_interface(name, schema)
+                .with_context(|| format!("failed to render production runtime DTO {name}"))?,
+        );
         output.push('\n');
     }
 
@@ -2447,6 +2766,26 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
             "ProviderCapabilityResponse",
         ),
         ("parseProviderHealthResponse", "ProviderHealthResponse"),
+        (
+            "parseRefreshMetadataClaimsRequest",
+            "RefreshMetadataClaimsRequest",
+        ),
+        (
+            "parseRefreshMetadataClaimsResponse",
+            "RefreshMetadataClaimsResponse",
+        ),
+        (
+            "parseMetadataProjectionResponse",
+            "MetadataProjectionResponse",
+        ),
+        (
+            "parseConfigureMetadataProjectionRequest",
+            "ConfigureMetadataProjectionRequest",
+        ),
+        (
+            "parseMetadataProjectionConfigurationResponse",
+            "MetadataProjectionConfigurationResponse",
+        ),
     ] {
         writeln!(
             output,
@@ -3414,6 +3753,16 @@ fn render_interface_with_overrides(
     schema: &Value,
     overrides: &[(&str, &str)],
 ) -> anyhow::Result<String> {
+    if schema.get("oneOf").is_some() {
+        ensure!(
+            overrides.is_empty(),
+            "{name} union cannot use field overrides"
+        );
+        return Ok(format!(
+            "// prettier-ignore\nexport type {name} = {};\n",
+            typescript_type(schema)?
+        ));
+    }
     ensure!(
         schema.get("additionalProperties").and_then(Value::as_bool) == Some(false),
         "{name} must reject unknown fields before SDK generation"
@@ -3506,6 +3855,19 @@ fn typescript_type(schema: &Value) -> anyhow::Result<String> {
                 typescript_type(value_at(schema, "/items")?)?
             )),
             "object" => {
+                if schema.get("additionalProperties").and_then(Value::as_bool) == Some(false) {
+                    let properties = object_at(schema, "/properties")?;
+                    let required = required_names(schema)?;
+                    let mut fields = Vec::with_capacity(properties.len());
+                    for (name, property_schema) in properties {
+                        let optional = if required.contains(name) { "" } else { "?" };
+                        fields.push(format!(
+                            "readonly {name}{optional}: {}",
+                            typescript_type(property_schema)?
+                        ));
+                    }
+                    return Ok(format!("{{ {} }}", fields.join("; ")));
+                }
                 let additional = value_at(schema, "/additionalProperties")?;
                 ensure!(
                     !additional.is_boolean(),
@@ -3737,6 +4099,10 @@ mod tests {
             Path::new(PROVIDER_MANIFEST_SCHEMA_PATH),
             Path::new(PORTABILITY_V2_SCHEMA_PATH),
             Path::new(PORTABILITY_V2_EXAMPLE_PATH),
+            Path::new(PORTABILITY_V3_SCHEMA_PATH),
+            Path::new(PORTABILITY_V3_EXAMPLE_PATH),
+            Path::new(PORTABILITY_V4_SCHEMA_PATH),
+            Path::new(PORTABILITY_V4_EXAMPLE_PATH),
             Path::new(SDK_GENERATED_PATH),
             Path::new(RUST_CAPABILITY_IDS_PATH),
         ]
@@ -3751,6 +4117,44 @@ mod tests {
         let second = build(workspace_root()).expect("second generation succeeds");
         assert_eq!(first, second);
         assert!(first.values().all(|artifact| artifact.ends_with(b"\n")));
+    }
+
+    #[test]
+    fn archive_v2_entity_enum_is_the_frozen_v2_prefix() {
+        let schema = portability_v2_schema().expect("archive-v2 schema");
+        let actual = schema
+            .pointer("/$defs/WorkspaceExportEntityDto/enum")
+            .and_then(Value::as_array)
+            .expect("archive-v2 entity enum");
+        let expected = WorkspaceExportEntity::V2
+            .iter()
+            .map(|entity| Value::String(entity.as_str().to_owned()))
+            .collect::<Vec<_>>();
+        assert_eq!(actual, &expected);
+    }
+
+    #[test]
+    fn archive_v3_and_v4_entity_enums_preserve_their_frozen_prefixes() {
+        for (schema, entities) in [
+            (
+                portability_v3_schema().expect("archive-v3 schema"),
+                WorkspaceExportEntity::V3.as_slice(),
+            ),
+            (
+                portability_v4_schema().expect("archive-v4 schema"),
+                WorkspaceExportEntity::ALL.as_slice(),
+            ),
+        ] {
+            let actual = schema
+                .pointer("/$defs/WorkspaceExportEntityDto/enum")
+                .and_then(Value::as_array)
+                .expect("archive entity enum");
+            let expected = entities
+                .iter()
+                .map(|entity| Value::String(entity.as_str().to_owned()))
+                .collect::<Vec<_>>();
+            assert_eq!(actual, &expected);
+        }
     }
 
     #[cfg(unix)]

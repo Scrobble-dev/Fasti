@@ -1,17 +1,26 @@
-import { connectionEndpoint, FastiClient } from "@fasti/sdk";
+import {
+  connectionEndpoint,
+  FastiClient,
+  type CredentialProvider,
+} from "@fasti/sdk";
 import type {
   AttachIdentifierInput,
   AttachIdentifierResult,
+  ConfigureMetadataProjectionRequest,
   CreateRecordResult,
   EndpointConnectionStatus,
   IntegrationRuntimeStatus,
   IntegrationStatusHost,
   IntegrationStatusResponse,
   NetworkConfiguration,
+  MetadataProjectionConfigurationResponse,
+  MetadataProjectionResponse,
   NuvioCollectionsDocument,
   NuvioCollectionsState,
   ProviderCredentialStatus,
   ProviderSearchCandidate,
+  RefreshMetadataClaimsRequest,
+  RefreshMetadataClaimsResponse,
   RecordPage,
   RecordSummary,
   RegisterNamespaceInput,
@@ -193,13 +202,38 @@ export async function fetchIntegrationStatus(
 
 export function createWebHost(
   defaultApiUrl: string,
+  credential?: CredentialProvider,
 ): WorkbenchHost & IntegrationStatusHost {
   const createClient = (baseUrl: string): FastiClient =>
     new FastiClient({
       baseUrl,
+      credential,
     });
   let network = loadNetworkConfiguration(defaultApiUrl);
   let client = createClient(network.connection.service_url.value);
+
+  const metadataHost: Partial<WorkbenchHost> = credential
+    ? {
+        async readMetadataProjection(
+          recordId: string,
+          offline = false,
+        ): Promise<MetadataProjectionResponse> {
+          return client.readMetadataProjection(recordId, { offline });
+        },
+
+        async configureMetadataProjection(
+          request: ConfigureMetadataProjectionRequest,
+        ): Promise<MetadataProjectionConfigurationResponse> {
+          return client.configureMetadataProjection(request);
+        },
+
+        async refreshMetadataClaims(
+          request: RefreshMetadataClaimsRequest,
+        ): Promise<RefreshMetadataClaimsResponse> {
+          return client.refreshMetadataClaims(request);
+        },
+      }
+    : {};
 
   return {
     networkConfigurationScope: "client",
@@ -367,5 +401,7 @@ export function createWebHost(
     async clearNuvioCollections(): Promise<NuvioCollectionsState> {
       return client.clearNuvioCollections();
     },
+
+    ...metadataHost,
   };
 }

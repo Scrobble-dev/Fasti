@@ -273,6 +273,14 @@
         replaceNuvioCollections: (document) =>
           invoke("replace_nuvio_collections", { document }),
         clearNuvioCollections: () => invoke("clear_nuvio_collections"),
+        readMetadataProjection: (recordId, offline = false) =>
+          invoke("read_metadata_projection", {
+            input: { record_id: recordId, offline },
+          }),
+        configureMetadataProjection: (input) =>
+          invoke("configure_metadata_projection", { input }),
+        refreshMetadataClaims: (input) =>
+          invoke("refresh_metadata_claims", { input }),
       };
       try {
         applySetupStatus(await invoke<SetupStatus>("setup_status"));

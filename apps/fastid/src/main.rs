@@ -1,10 +1,12 @@
 use anyhow::{Context, Result};
 use fasti_api::{
-    api_router, health_router, integration_router, provider_api_router, remote_api_router,
-    with_static_fallback,
+    api_router, health_router, integration_router, metadata_api_router, provider_api_router,
+    remote_api_router, with_static_fallback,
 };
+use fasti_application::OutboundAccessPolicy;
 use fasti_provider_runtime::{
-    PlatformCredentialVault, ProviderRuntime, PLATFORM_CREDENTIAL_SERVICE,
+    PlatformCredentialVault, ProviderMetadataRefreshService, ProviderRuntime,
+    PLATFORM_CREDENTIAL_SERVICE,
 };
 use fasti_store::SqliteKernel;
 use sha2::{Digest, Sha256};
@@ -205,6 +207,31 @@ fn provider_runtime(kernel: &SqliteKernel) -> Result<Arc<ProviderRuntime>> {
     ))))
 }
 
+fn metadata_and_provider_router(
+    kernel: Arc<SqliteKernel>,
+    providers: Arc<ProviderRuntime>,
+) -> axum::Router {
+    let refresh = Arc::new(ProviderMetadataRefreshService::new(
+        providers.clone(),
+        kernel.clone(),
+        kernel.clone(),
+        OutboundAccessPolicy::default(),
+    ));
+    let provider_operation_locks = fasti_api::ProviderOperationLocks::new(&providers);
+    provider_api_router(
+        kernel.clone(),
+        kernel.clone(),
+        providers,
+        provider_operation_locks.clone(),
+    )
+    .merge(metadata_api_router(
+        kernel.clone(),
+        refresh,
+        kernel,
+        provider_operation_locks,
+    ))
+}
+
 /// `FASTI_STATIC_DIR` reuses the same "unset -> None, empty -> error" shape
 /// as `FASTI_DATA_ROOT` -- see `parse_data_root`. It names a pre-built web
 /// UI bundle (e.g. `apps/web`'s `vite build` output) for fastid to serve
@@ -298,11 +325,8 @@ async fn main() -> Result<()> {
                     "Fasti durable remote listener starting behind the trusted HTTPS proxy on http://{} with data root {:?}",
                     addr, data_root
                 );
-                remote_api_router(kernel.clone(), addr, data_root).merge(provider_api_router(
-                    kernel.clone(),
-                    kernel.clone(),
-                    providers,
-                ))
+                remote_api_router(kernel.clone(), addr, data_root)
+                    .merge(metadata_and_provider_router(kernel.clone(), providers))
             } else {
                 info!(
                     "Fasti durable local listener starting on http://{} with data root {:?}",
@@ -313,11 +337,7 @@ async fn main() -> Result<()> {
                     local_api_addr.expect("configured durable local routes require local exposure"),
                     data_root,
                 )
-                .merge(provider_api_router(
-                    kernel.clone(),
-                    kernel.clone(),
-                    providers,
-                ))
+                .merge(metadata_and_provider_router(kernel.clone(), providers))
             }
         }
         _ => {

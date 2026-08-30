@@ -326,6 +326,14 @@ define_problem_catalog!(
         default_next_action: ("correct_json", "Correct the JSON syntax and retry"),
         param_policy: ProblemParamPolicy::None
     },
+    MetadataClaimStale => "metadata_claim_stale" {
+        title: "Metadata claim stale", status: 409,
+        detail: ProblemDetail::Static("the provider refresh did not produce a fresh claim; the last-known-good claim remains active"),
+        documentation_path: "v1/problems/metadata-claim-stale", safe_state: PriorStateRetained,
+        retryability: RetrySafe,
+        default_next_action: ("retry_metadata_refresh", "Retry the metadata refresh or use the labelled last-known-good value"),
+        param_policy: ProblemParamPolicy::None
+    },
     OperationCanceled => "operation_canceled" {
         title: "Restore canceled", status: 409,
         detail: ProblemDetail::Static("the clean restore ended before an active data root was published"),
@@ -536,6 +544,7 @@ impl ProblemCode {
             | Self::ProviderRateLimited
             | Self::ProviderResponseInvalid
             | Self::ProviderRouteUnavailable => CapabilityBody::M1,
+            Self::MetadataClaimStale => CapabilityBody::M2,
             Self::DataRootLocked
             | Self::ExportCanceled
             | Self::OperationCanceled
@@ -560,7 +569,7 @@ impl ProblemCode {
             | Self::StorageUnavailable => ContractState::Finalized,
             _ => match self.introduced_in() {
                 CapabilityBody::B0 | CapabilityBody::B1 => ContractState::Finalized,
-                CapabilityBody::M1 => ContractState::Finalized,
+                CapabilityBody::M1 | CapabilityBody::M2 => ContractState::Finalized,
                 CapabilityBody::B2 | CapabilityBody::B3 | CapabilityBody::C1 => {
                     ContractState::Reserved
                 }
@@ -1057,6 +1066,13 @@ mod tests {
             assert_eq!(code.contract().safe_state(), SafeState::PriorStateRetained);
         }
 
+        {
+            let code = ProblemCode::MetadataClaimStale;
+            assert_eq!(code.introduced_in(), CapabilityBody::M2);
+            assert_eq!(code.contract_state(), ContractState::Finalized);
+            assert_eq!(code.contract().safe_state(), SafeState::PriorStateRetained);
+        }
+
         for code in [
             ProblemCode::CursorExpired,
             ProblemCode::EvidenceNotFound,
@@ -1136,6 +1152,20 @@ mod tests {
         );
         assert_eq!(problem.safe_state(), SafeState::PriorStateRetained);
         assert_eq!(problem.param(), Some("/operation_id"));
+    }
+
+    #[test]
+    fn metadata_refresh_problem_preserves_last_known_good_state() {
+        let correlation_id = RequestCorrelationId::new_v7();
+        let stale = FastiProblem::from_code(
+            ProblemCode::MetadataClaimStale,
+            CapabilityKey::RefreshMetadataClaims,
+            correlation_id,
+        );
+        assert_eq!(stale.status(), 409);
+        assert_eq!(stale.safe_state(), SafeState::PriorStateRetained);
+        assert_eq!(stale.retryability(), Retryability::RetrySafe);
+        assert_eq!(stale.next_actions()[0].id(), "retry_metadata_refresh");
     }
 
     #[test]

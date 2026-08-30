@@ -10,6 +10,7 @@ pub enum CapabilityBody {
     B3,
     C1,
     M1,
+    M2,
 }
 
 impl CapabilityBody {
@@ -21,6 +22,7 @@ impl CapabilityBody {
             Self::B3 => "B3",
             Self::C1 => "C1",
             Self::M1 => "M1",
+            Self::M2 => "M2",
         }
     }
 }
@@ -860,6 +862,74 @@ define_capabilities!(
         ],
         []
     ),
+    (
+        RefreshMetadataClaims,
+        M2,
+        M2,
+        Finalized,
+        Implemented,
+        Scoped,
+        [MetadataClaimRefresh],
+        [
+            AuthenticationFailed,
+            Forbidden,
+            IdempotencyConflict,
+            IntegrityFailed,
+            MalformedJson,
+            MetadataClaimStale,
+            PayloadTooLarge,
+            ProviderCredentialExpired,
+            ProviderCredentialInvalid,
+            ProviderCredentialMissing,
+            ProviderRateLimited,
+            ProviderResponseInvalid,
+            ProviderRouteUnavailable,
+            ProviderUnavailable,
+            RecordNotFound,
+            StorageUnavailable,
+            UnsupportedMediaType,
+            ValidationFailed
+        ],
+        []
+    ),
+    (
+        ReadMetadataProjection,
+        M2,
+        M2,
+        Finalized,
+        Implemented,
+        Scoped,
+        [MetadataProjectionRead],
+        [
+            AuthenticationFailed,
+            Forbidden,
+            IntegrityFailed,
+            RecordNotFound,
+            StorageUnavailable,
+            ValidationFailed
+        ],
+        []
+    ),
+    (
+        ConfigureMetadataProjection,
+        M2,
+        M2,
+        Finalized,
+        Implemented,
+        Scoped,
+        [MetadataProjectionConfigure],
+        [
+            AuthenticationFailed,
+            Forbidden,
+            IntegrityFailed,
+            MalformedJson,
+            PayloadTooLarge,
+            StorageUnavailable,
+            UnsupportedMediaType,
+            ValidationFailed
+        ],
+        []
+    ),
 );
 
 #[cfg(test)]
@@ -975,6 +1045,29 @@ mod tests {
                 capability.required_scopes(),
                 &[ScopeKey::ProviderCredentialManage]
             );
+            assert!(capability.is_production_executable());
+        }
+    }
+
+    #[test]
+    fn m2_metadata_capabilities_keep_refresh_read_and_configuration_separate() {
+        for (capability, scope) in [
+            (
+                CapabilityKey::RefreshMetadataClaims,
+                ScopeKey::MetadataClaimRefresh,
+            ),
+            (
+                CapabilityKey::ReadMetadataProjection,
+                ScopeKey::MetadataProjectionRead,
+            ),
+            (
+                CapabilityKey::ConfigureMetadataProjection,
+                ScopeKey::MetadataProjectionConfigure,
+            ),
+        ] {
+            assert_eq!(capability.contract_body(), CapabilityBody::M2);
+            assert_eq!(capability.runtime_body(), CapabilityBody::M2);
+            assert_eq!(capability.required_scopes(), &[scope]);
             assert!(capability.is_production_executable());
         }
     }

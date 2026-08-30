@@ -9,7 +9,7 @@ use std::fs;
 use std::path::Path;
 
 const REGISTRY_PATH: &str = "contracts/registry/v1/capabilities.yaml";
-const EXPECTED_PROFILES: [&str; 13] = [
+const EXPECTED_PROFILES: [&str; 14] = [
     "b1_durable_bootstrap",
     "b1_http_fixture",
     "b1_integration_status",
@@ -23,6 +23,7 @@ const EXPECTED_PROFILES: [&str; 13] = [
     "later_b2",
     "later_b3",
     "m1_providers",
+    "m2_metadata",
 ];
 
 #[derive(Debug)]
@@ -205,7 +206,7 @@ pub(crate) struct RequiredBinding {
     pub binding: String,
 }
 
-pub(crate) fn finalized_b1_m1_required_bindings(
+pub(crate) fn finalized_required_bindings(
     workspace_root: &Path,
 ) -> anyhow::Result<Vec<RequiredBinding>> {
     let registry = load_validated(workspace_root)?;
@@ -213,7 +214,7 @@ pub(crate) fn finalized_b1_m1_required_bindings(
     for capability in registry.capabilities {
         if !matches!(
             capability.contract_body,
-            CapabilityBody::B1 | CapabilityBody::M1
+            CapabilityBody::B1 | CapabilityBody::M1 | CapabilityBody::M2
         ) || capability.lifecycle.contract_state != ContractState::Finalized
         {
             continue;
@@ -637,6 +638,9 @@ const fn expected_surface_profile(key: CapabilityKey) -> &'static str {
         | CapabilityKey::ConfigureProviderCredential
         | CapabilityKey::TestProviderCredential
         | CapabilityKey::ReadProviderHealth => "m1_providers",
+        CapabilityKey::RefreshMetadataClaims
+        | CapabilityKey::ReadMetadataProjection
+        | CapabilityKey::ConfigureMetadataProjection => "m2_metadata",
         _ => match key.contract_body() {
             CapabilityBody::B1 => "b1_http_fixture",
             CapabilityBody::B2 => "later_b2",
@@ -644,6 +648,7 @@ const fn expected_surface_profile(key: CapabilityKey) -> &'static str {
             CapabilityBody::B0 => "health",
             CapabilityBody::C1 => "c1_browser_session_foundation",
             CapabilityBody::M1 => "m1_providers",
+            CapabilityBody::M2 => "m2_metadata",
         },
     }
 }
@@ -656,6 +661,7 @@ const fn body_rank(body: CapabilityBody) -> u8 {
         CapabilityBody::B3 => 3,
         CapabilityBody::C1 => 4,
         CapabilityBody::M1 => 5,
+        CapabilityBody::M2 => 6,
     }
 }
 

@@ -2,11 +2,12 @@ use crate::{
     access::{V11_NODE_OWNER_SCOPE_BACKFILL, V8_NODE_OWNER_SCOPE_BACKFILL},
     kernel::scope_storage_key,
 };
-use fasti_domain::{Grain, MAX_EXTERNAL_IDENTIFIER_BYTES};
+use fasti_application::ScopeKey;
+use fasti_domain::{Grain, MetadataClaimId, MAX_EXTERNAL_IDENTIFIER_BYTES};
 use rusqlite::{Connection, Result, Transaction, TransactionBehavior};
 use std::fmt::Write as _;
 
-pub(crate) const SCHEMA_VERSION: i64 = 11;
+pub(crate) const SCHEMA_VERSION: i64 = 13;
 
 pub(crate) fn migrate(connection: &Connection) -> Result<()> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -62,6 +63,16 @@ pub(crate) fn migrate(connection: &Connection) -> Result<()> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if version == 10 {
         migrate_v11(connection)?;
+    }
+
+    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version == 11 {
+        migrate_v12(connection)?;
+    }
+
+    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version == 12 {
+        migrate_v13(connection)?;
     }
 
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -1083,6 +1094,894 @@ fn migrate_v11(connection: &Connection) -> Result<()> {
     transaction.commit()
 }
 
+fn migrate_v12(connection: &Connection) -> Result<()> {
+    let transaction = Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+
+    // Repair legacy provider coordinates before companion rows take a foreign
+    // key to the frozen v6 claim identity.
+    repair_legacy_provider_coordinates_v1(&transaction)?;
+    transaction.execute_batch(
+        r#"
+        CREATE TABLE metadata_claims (
+            claim_id TEXT PRIMARY KEY
+                CHECK (
+                    length(claim_id) = 36
+                    AND substr(claim_id, 1, 4) = 'mcl_'
+                    AND substr(claim_id, 5) NOT GLOB '*[^0-9a-f]*'
+                ),
+            workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id),
+            record_id TEXT NOT NULL REFERENCES records(record_id),
+            claim_kind TEXT NOT NULL CHECK (claim_kind IN ('field', 'rating')),
+            created_at TEXT NOT NULL
+        ) STRICT, WITHOUT ROWID;
+        CREATE INDEX metadata_claims_record_idx
+            ON metadata_claims(workspace_id, record_id, claim_kind, claim_id);
+
+        CREATE TRIGGER metadata_claims_scope_insert
+        BEFORE INSERT ON metadata_claims
+        WHEN NOT EXISTS (
+            SELECT 1 FROM records
+            WHERE record_id = NEW.record_id AND workspace_id = NEW.workspace_id
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'metadata claim crosses a workspace boundary');
+        END;
+
+        CREATE TRIGGER metadata_claims_scope_update
+        BEFORE UPDATE ON metadata_claims
+        WHEN NOT EXISTS (
+            SELECT 1 FROM records
+            WHERE record_id = NEW.record_id AND workspace_id = NEW.workspace_id
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'metadata claim crosses a workspace boundary');
+        END;
+
+        CREATE TRIGGER metadata_claims_immutable_update
+        BEFORE UPDATE ON metadata_claims
+        BEGIN
+            SELECT RAISE(ABORT, 'metadata claims are immutable');
+        END;
+
+        CREATE TRIGGER metadata_claims_immutable_delete
+        BEFORE DELETE ON metadata_claims
+        BEGIN
+            SELECT RAISE(ABORT, 'metadata claims are immutable');
+        END;
+
+        CREATE TRIGGER metadata_field_claims_immutable_update
+        BEFORE UPDATE ON metadata_field_claims
+        WHEN EXISTS (
+            SELECT 1 FROM metadata_claim_provenance provenance
+            WHERE provenance.record_id = OLD.record_id
+              AND provenance.field_key = OLD.field_key
+              AND provenance.source = OLD.source
+              AND provenance.fetched_at = OLD.fetched_at
+        ) OR NOT (
+            (
+                (OLD.source = 'google-books' AND NEW.source = 'googlebooks.volume')
+                OR (OLD.source = 'tmdb' AND NEW.source IN ('tmdb.movie', 'tmdb.tv'))
+            )
+            AND NEW.workspace_id IS OLD.workspace_id
+            AND NEW.record_id IS OLD.record_id
+            AND NEW.field_key IS OLD.field_key
+            AND NEW.value IS OLD.value
+            AND NEW.locale IS OLD.locale
+            AND NEW.fetched_at IS OLD.fetched_at
+            AND NEW.expires_at IS OLD.expires_at
+            AND NEW.created_at IS OLD.created_at
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'metadata field claims are immutable');
+        END;
+
+        CREATE TRIGGER metadata_field_claims_immutable_delete
+        BEFORE DELETE ON metadata_field_claims
+        BEGIN
+            SELECT RAISE(ABORT, 'metadata field claims are immutable');
+        END;
+
+        CREATE TABLE metadata_claim_provenance (
+            claim_id TEXT PRIMARY KEY REFERENCES metadata_claims(claim_id),
+            workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id),
+            record_id TEXT NOT NULL,
+            field_key TEXT NOT NULL,
+            source TEXT NOT NULL,
+            fetched_at TEXT NOT NULL,
+            provider_id TEXT CHECK (
+                provider_id IS NULL OR length(provider_id) BETWEEN 1 AND 128
+            ),
+            source_record_id TEXT CHECK (
+                source_record_id IS NULL OR length(source_record_id) BETWEEN 1 AND 512
+            ),
+            region TEXT CHECK (region IS NULL OR length(region) BETWEEN 2 AND 8),
+            source_version TEXT CHECK (
+                source_version IS NULL OR length(source_version) BETWEEN 1 AND 128
+            ),
+            evidence_digest TEXT CHECK (
+                evidence_digest IS NULL OR (
+                    length(evidence_digest) = 71
+                    AND substr(evidence_digest, 1, 7) = 'sha256:'
+                    AND substr(evidence_digest, 8) NOT GLOB '*[^0-9a-f]*'
+                )
+            ),
+            classification TEXT NOT NULL DEFAULT 'internal'
+                CHECK (classification IN ('public', 'internal', 'confidential', 'restricted')),
+            terms_revision TEXT CHECK (
+                terms_revision IS NULL OR length(terms_revision) BETWEEN 1 AND 128
+            ),
+            provenance_state TEXT NOT NULL
+                CHECK (provenance_state IN ('complete', 'legacy_incomplete')),
+            initial_status TEXT NOT NULL CHECK (initial_status IN (
+                'fresh', 'stale', 'invalid', 'revoked', 'superseded', 'unavailable'
+            )),
+            created_at TEXT NOT NULL,
+            UNIQUE(record_id, field_key, source, fetched_at),
+            FOREIGN KEY(record_id, field_key, source, fetched_at)
+                REFERENCES metadata_field_claims(record_id, field_key, source, fetched_at)
+                ON UPDATE CASCADE ON DELETE RESTRICT,
+            CHECK (
+                (provenance_state = 'complete'
+                    AND provider_id IS NOT NULL
+                    AND source_record_id IS NOT NULL
+                    AND evidence_digest IS NOT NULL)
+                OR
+                (provenance_state = 'legacy_incomplete'
+                    AND provider_id IS NULL
+                    AND source_record_id IS NULL
+                    AND evidence_digest IS NULL)
+            )
+        ) STRICT, WITHOUT ROWID;
+        CREATE INDEX metadata_claim_provenance_record_field_idx
+            ON metadata_claim_provenance(workspace_id, record_id, field_key, fetched_at DESC);
+
+        CREATE TRIGGER metadata_claim_provenance_scope_insert
+        BEFORE INSERT ON metadata_claim_provenance
+        WHEN NOT EXISTS (
+            SELECT 1 FROM metadata_claims registered
+            WHERE registered.claim_id = NEW.claim_id
+              AND registered.workspace_id = NEW.workspace_id
+              AND registered.record_id = NEW.record_id
+              AND registered.claim_kind = 'field'
+        ) OR NOT EXISTS (
+            SELECT 1 FROM metadata_field_claims claim
+            WHERE claim.workspace_id = NEW.workspace_id
+              AND claim.record_id = NEW.record_id
+              AND claim.field_key = NEW.field_key
+              AND claim.source = NEW.source
+              AND claim.fetched_at = NEW.fetched_at
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'metadata claim provenance crosses a workspace boundary');
+        END;
+
+        CREATE TRIGGER metadata_claim_provenance_immutable_update
+        BEFORE UPDATE ON metadata_claim_provenance
+        BEGIN
+            SELECT RAISE(ABORT, 'metadata claim provenance is immutable');
+        END;
+
+        CREATE TRIGGER metadata_claim_provenance_immutable_delete
+        BEFORE DELETE ON metadata_claim_provenance
+        BEGIN
+            SELECT RAISE(ABORT, 'metadata claim provenance is immutable');
+        END;
+
+        CREATE TRIGGER metadata_claim_provenance_scope_update
+        BEFORE UPDATE ON metadata_claim_provenance
+        WHEN NOT EXISTS (
+            SELECT 1 FROM metadata_claims registered
+            WHERE registered.claim_id = NEW.claim_id
+              AND registered.workspace_id = NEW.workspace_id
+              AND registered.record_id = NEW.record_id
+              AND registered.claim_kind = 'field'
+        ) OR NOT EXISTS (
+            SELECT 1 FROM metadata_field_claims claim
+            WHERE claim.workspace_id = NEW.workspace_id
+              AND claim.record_id = NEW.record_id
+              AND claim.field_key = NEW.field_key
+              AND claim.source = NEW.source
+              AND claim.fetched_at = NEW.fetched_at
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'metadata claim provenance crosses a workspace boundary');
+        END;
+
+        CREATE TABLE metadata_rating_claims (
+            claim_id TEXT PRIMARY KEY REFERENCES metadata_claims(claim_id),
+            workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id),
+            record_id TEXT NOT NULL REFERENCES records(record_id),
+            value_millis INTEGER NOT NULL CHECK (value_millis BETWEEN 0 AND 1000000),
+            scale_minimum_millis INTEGER NOT NULL
+                CHECK (scale_minimum_millis BETWEEN 0 AND 999999),
+            scale_maximum_millis INTEGER NOT NULL
+                CHECK (scale_maximum_millis BETWEEN 1 AND 1000000),
+            provider_id TEXT NOT NULL CHECK (length(provider_id) BETWEEN 1 AND 128),
+            source TEXT NOT NULL,
+            source_record_id TEXT NOT NULL CHECK (length(source_record_id) BETWEEN 1 AND 512),
+            locale TEXT CHECK (locale IS NULL OR length(locale) BETWEEN 2 AND 16),
+            region TEXT CHECK (region IS NULL OR length(region) BETWEEN 2 AND 8),
+            source_version TEXT CHECK (
+                source_version IS NULL OR length(source_version) BETWEEN 1 AND 128
+            ),
+            evidence_digest TEXT NOT NULL CHECK (
+                length(evidence_digest) = 71
+                AND substr(evidence_digest, 1, 7) = 'sha256:'
+                AND substr(evidence_digest, 8) NOT GLOB '*[^0-9a-f]*'
+            ),
+            classification TEXT NOT NULL DEFAULT 'internal'
+                CHECK (classification IN ('public', 'internal', 'confidential', 'restricted')),
+            terms_revision TEXT CHECK (
+                terms_revision IS NULL OR length(terms_revision) BETWEEN 1 AND 128
+            ),
+            fetched_at TEXT NOT NULL,
+            expires_at TEXT,
+            initial_status TEXT NOT NULL CHECK (initial_status IN (
+                'fresh', 'stale', 'invalid', 'revoked', 'superseded', 'unavailable'
+            )),
+            created_at TEXT NOT NULL,
+            CHECK (scale_minimum_millis < scale_maximum_millis),
+            CHECK (value_millis BETWEEN scale_minimum_millis AND scale_maximum_millis),
+            UNIQUE(record_id, provider_id, source_record_id, fetched_at)
+        ) STRICT, WITHOUT ROWID;
+        CREATE INDEX metadata_rating_claims_record_idx
+            ON metadata_rating_claims(workspace_id, record_id, fetched_at DESC, claim_id);
+
+        CREATE TRIGGER metadata_rating_claims_scope_insert
+        BEFORE INSERT ON metadata_rating_claims
+        WHEN NOT EXISTS (
+            SELECT 1 FROM metadata_claims registered
+            WHERE registered.claim_id = NEW.claim_id
+              AND registered.workspace_id = NEW.workspace_id
+              AND registered.record_id = NEW.record_id
+              AND registered.claim_kind = 'rating'
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'metadata rating claim crosses a workspace boundary');
+        END;
+
+        CREATE TRIGGER metadata_rating_claims_scope_update
+        BEFORE UPDATE ON metadata_rating_claims
+        WHEN NOT EXISTS (
+            SELECT 1 FROM metadata_claims registered
+            WHERE registered.claim_id = NEW.claim_id
+              AND registered.workspace_id = NEW.workspace_id
+              AND registered.record_id = NEW.record_id
+              AND registered.claim_kind = 'rating'
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'metadata rating claim crosses a workspace boundary');
+        END;
+
+        CREATE TRIGGER metadata_rating_claims_immutable_update
+        BEFORE UPDATE ON metadata_rating_claims
+        BEGIN
+            SELECT RAISE(ABORT, 'metadata rating claims are immutable');
+        END;
+
+        CREATE TRIGGER metadata_rating_claims_immutable_delete
+        BEFORE DELETE ON metadata_rating_claims
+        BEGIN
+            SELECT RAISE(ABORT, 'metadata rating claims are immutable');
+        END;
+
+        CREATE TABLE metadata_claim_lifecycle_events (
+            claim_id TEXT NOT NULL REFERENCES metadata_claims(claim_id),
+            sequence INTEGER NOT NULL CHECK (sequence >= 1),
+            workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id),
+            previous_status TEXT NOT NULL CHECK (previous_status IN (
+                'fresh', 'stale', 'invalid', 'revoked', 'superseded', 'unavailable'
+            )),
+            status TEXT NOT NULL CHECK (status IN (
+                'fresh', 'stale', 'invalid', 'revoked', 'superseded', 'unavailable'
+            )),
+            occurred_at TEXT NOT NULL,
+            evidence_digest TEXT CHECK (
+                evidence_digest IS NULL OR (
+                    length(evidence_digest) = 71
+                    AND substr(evidence_digest, 1, 7) = 'sha256:'
+                    AND substr(evidence_digest, 8) NOT GLOB '*[^0-9a-f]*'
+                )
+            ),
+            PRIMARY KEY (claim_id, sequence)
+        ) STRICT, WITHOUT ROWID;
+        CREATE INDEX metadata_claim_lifecycle_workspace_idx
+            ON metadata_claim_lifecycle_events(workspace_id, claim_id, sequence DESC);
+
+        CREATE TRIGGER metadata_claim_lifecycle_scope_insert
+        BEFORE INSERT ON metadata_claim_lifecycle_events
+        WHEN NOT EXISTS (
+            SELECT 1 FROM metadata_claims registered
+            WHERE registered.claim_id = NEW.claim_id
+              AND registered.workspace_id = NEW.workspace_id
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'metadata claim lifecycle crosses a workspace boundary');
+        END;
+
+        CREATE TRIGGER metadata_claim_lifecycle_append_only_update
+        BEFORE UPDATE ON metadata_claim_lifecycle_events
+        BEGIN
+            SELECT RAISE(ABORT, 'metadata claim lifecycle is append-only');
+        END;
+
+        CREATE TRIGGER metadata_claim_lifecycle_append_only_delete
+        BEFORE DELETE ON metadata_claim_lifecycle_events
+        BEGIN
+            SELECT RAISE(ABORT, 'metadata claim lifecycle is append-only');
+        END;
+
+        CREATE TABLE metadata_projection_policies (
+            workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id),
+            profile_id TEXT NOT NULL REFERENCES profiles(profile_id),
+            preferred_provider_id TEXT CHECK (
+                preferred_provider_id IS NULL OR length(preferred_provider_id) BETWEEN 1 AND 128
+            ),
+            preferred_locale TEXT CHECK (
+                preferred_locale IS NULL OR length(preferred_locale) BETWEEN 2 AND 16
+            ),
+            original_locale TEXT CHECK (
+                original_locale IS NULL OR length(original_locale) BETWEEN 2 AND 16
+            ),
+            region TEXT CHECK (region IS NULL OR length(region) BETWEEN 2 AND 8),
+            enabled_field_groups TEXT NOT NULL DEFAULT '[]'
+                CHECK (length(enabled_field_groups) BETWEEN 2 AND 1024),
+            allow_english_fallback INTEGER NOT NULL
+                CHECK (allow_english_fallback IN (0, 1)),
+            last_known_good_policy TEXT NOT NULL CHECK (
+                last_known_good_policy IN ('allow', 'deny')
+            ),
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (workspace_id, profile_id)
+        ) STRICT, WITHOUT ROWID;
+        CREATE INDEX metadata_projection_policies_profile_idx
+            ON metadata_projection_policies(workspace_id, profile_id);
+
+        CREATE TRIGGER metadata_projection_policies_scope_insert
+        BEFORE INSERT ON metadata_projection_policies
+        WHEN NOT EXISTS (
+            SELECT 1 FROM profiles
+            WHERE profile_id = NEW.profile_id AND workspace_id = NEW.workspace_id
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'metadata projection policy crosses a workspace boundary');
+        END;
+
+        CREATE TRIGGER metadata_projection_policies_scope_update
+        BEFORE UPDATE ON metadata_projection_policies
+        WHEN NOT EXISTS (
+            SELECT 1 FROM profiles
+            WHERE profile_id = NEW.profile_id AND workspace_id = NEW.workspace_id
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'metadata projection policy crosses a workspace boundary');
+        END;
+
+        CREATE TABLE metadata_profile_field_overrides (
+            workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id),
+            profile_id TEXT NOT NULL REFERENCES profiles(profile_id),
+            record_id TEXT NOT NULL REFERENCES records(record_id),
+            field_key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            origin TEXT NOT NULL CHECK (origin IN ('user', 'legacy_migration')),
+            PRIMARY KEY (workspace_id, profile_id, record_id, field_key)
+        ) STRICT, WITHOUT ROWID;
+        CREATE INDEX metadata_profile_field_overrides_record_idx
+            ON metadata_profile_field_overrides(workspace_id, profile_id, record_id, field_key);
+
+        CREATE TRIGGER metadata_profile_field_overrides_scope_insert
+        BEFORE INSERT ON metadata_profile_field_overrides
+        WHEN NOT EXISTS (
+            SELECT 1 FROM profiles
+            WHERE profile_id = NEW.profile_id AND workspace_id = NEW.workspace_id
+        ) OR NOT EXISTS (
+            SELECT 1 FROM records
+            WHERE record_id = NEW.record_id AND workspace_id = NEW.workspace_id
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'profile metadata override crosses a workspace boundary');
+        END;
+
+        CREATE TRIGGER metadata_profile_field_overrides_scope_update
+        BEFORE UPDATE ON metadata_profile_field_overrides
+        WHEN NOT EXISTS (
+            SELECT 1 FROM profiles
+            WHERE profile_id = NEW.profile_id AND workspace_id = NEW.workspace_id
+        ) OR NOT EXISTS (
+            SELECT 1 FROM records
+            WHERE record_id = NEW.record_id AND workspace_id = NEW.workspace_id
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'profile metadata override crosses a workspace boundary');
+        END;
+
+        -- The v6 table remains byte-for-byte intact for archive-v2. These
+        -- rows record whether its owner was unambiguous; they never copy an
+        -- override to multiple profiles or choose one arbitrarily.
+        CREATE TABLE metadata_legacy_override_ownership (
+            workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id),
+            record_id TEXT NOT NULL,
+            field_key TEXT NOT NULL,
+            owner_profile_id TEXT REFERENCES profiles(profile_id),
+            state TEXT NOT NULL CHECK (state IN ('migrated', 'review_required')),
+            review_reason TEXT CHECK (
+                review_reason IS NULL OR review_reason IN ('zero_profiles', 'multiple_profiles')
+            ),
+            recorded_at TEXT NOT NULL,
+            PRIMARY KEY (workspace_id, record_id, field_key),
+            FOREIGN KEY(record_id, field_key)
+                REFERENCES metadata_field_overrides(record_id, field_key) ON DELETE RESTRICT,
+            CHECK (
+                (state = 'migrated' AND owner_profile_id IS NOT NULL AND review_reason IS NULL)
+                OR
+                (state = 'review_required' AND owner_profile_id IS NULL AND review_reason IS NOT NULL)
+            )
+        ) STRICT, WITHOUT ROWID;
+
+        CREATE TABLE metadata_override_migration_receipts (
+            receipt_id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id),
+            record_id TEXT NOT NULL,
+            field_key TEXT NOT NULL,
+            profile_id TEXT NOT NULL REFERENCES profiles(profile_id),
+            source_created_at TEXT NOT NULL,
+            migrated_at TEXT NOT NULL,
+            UNIQUE(workspace_id, record_id, field_key),
+            FOREIGN KEY(workspace_id, profile_id, record_id, field_key)
+                REFERENCES metadata_profile_field_overrides(
+                    workspace_id, profile_id, record_id, field_key
+                ) ON DELETE RESTRICT
+        ) STRICT, WITHOUT ROWID;
+
+        CREATE TABLE metadata_projections (
+            workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id),
+            profile_id TEXT NOT NULL REFERENCES profiles(profile_id),
+            record_id TEXT NOT NULL REFERENCES records(record_id),
+            field_key TEXT NOT NULL,
+            resolution_tier TEXT NOT NULL CHECK (resolution_tier IN (
+                'user_override', 'preferred_provider_claim',
+                'fallback_provider_claim', 'last_known_good', 'empty'
+            )),
+            value TEXT,
+            claim_id TEXT REFERENCES metadata_claims(claim_id),
+            is_stale INTEGER NOT NULL CHECK (is_stale IN (0, 1)),
+            projected_at TEXT NOT NULL,
+            PRIMARY KEY (workspace_id, profile_id, record_id, field_key),
+            CHECK (
+                (resolution_tier = 'empty' AND value IS NULL AND claim_id IS NULL)
+                OR
+                (resolution_tier = 'user_override' AND value IS NOT NULL AND claim_id IS NULL)
+                OR
+                (resolution_tier NOT IN ('empty', 'user_override')
+                    AND value IS NOT NULL AND claim_id IS NOT NULL)
+            )
+        ) STRICT, WITHOUT ROWID;
+        CREATE INDEX metadata_projections_profile_idx
+            ON metadata_projections(workspace_id, profile_id, record_id, field_key);
+
+        CREATE TRIGGER metadata_projections_scope_insert
+        BEFORE INSERT ON metadata_projections
+        WHEN NOT EXISTS (
+            SELECT 1 FROM profiles
+            WHERE profile_id = NEW.profile_id AND workspace_id = NEW.workspace_id
+        ) OR NOT EXISTS (
+            SELECT 1 FROM records
+            WHERE record_id = NEW.record_id AND workspace_id = NEW.workspace_id
+        ) OR (NEW.claim_id IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM metadata_claims
+            WHERE claim_id = NEW.claim_id
+              AND record_id = NEW.record_id
+              AND workspace_id = NEW.workspace_id
+        ))
+        BEGIN
+            SELECT RAISE(ABORT, 'metadata projection crosses a workspace boundary');
+        END;
+
+        CREATE TRIGGER metadata_projections_scope_update
+        BEFORE UPDATE ON metadata_projections
+        WHEN NOT EXISTS (
+            SELECT 1 FROM profiles
+            WHERE profile_id = NEW.profile_id AND workspace_id = NEW.workspace_id
+        ) OR NOT EXISTS (
+            SELECT 1 FROM records
+            WHERE record_id = NEW.record_id AND workspace_id = NEW.workspace_id
+        ) OR (NEW.claim_id IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM metadata_claims
+            WHERE claim_id = NEW.claim_id
+              AND record_id = NEW.record_id
+              AND workspace_id = NEW.workspace_id
+        ))
+        BEGIN
+            SELECT RAISE(ABORT, 'metadata projection crosses a workspace boundary');
+        END;
+
+        CREATE TABLE metadata_attributions (
+            workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id),
+            provider_id TEXT NOT NULL CHECK (length(provider_id) BETWEEN 1 AND 128),
+            attribution_text TEXT NOT NULL CHECK (length(attribution_text) BETWEEN 1 AND 256),
+            documentation_url TEXT NOT NULL CHECK (
+                length(documentation_url) BETWEEN 9 AND 2048
+                AND substr(documentation_url, 1, 8) = 'https://'
+            ),
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (workspace_id, provider_id)
+        ) STRICT, WITHOUT ROWID;
+
+        CREATE TABLE metadata_cache_entries (
+            cache_key TEXT PRIMARY KEY CHECK (
+                length(cache_key) = 64 AND cache_key NOT GLOB '*[^0-9a-f]*'
+            ),
+            workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id),
+            provider_id TEXT NOT NULL CHECK (length(provider_id) BETWEEN 1 AND 128),
+            settings_fingerprint TEXT NOT NULL CHECK (
+                length(settings_fingerprint) = 71
+                AND substr(settings_fingerprint, 1, 7) = 'sha256:'
+                AND substr(settings_fingerprint, 8) NOT GLOB '*[^0-9a-f]*'
+            ),
+            configuration_digest TEXT NOT NULL CHECK (
+                length(configuration_digest) = 71
+                AND substr(configuration_digest, 1, 7) = 'sha256:'
+                AND substr(configuration_digest, 8) NOT GLOB '*[^0-9a-f]*'
+            ),
+            credential_reference_version INTEGER
+                CHECK (credential_reference_version IS NULL OR credential_reference_version >= 1),
+            record_id TEXT NOT NULL REFERENCES records(record_id),
+            route TEXT NOT NULL CHECK (length(route) BETWEEN 1 AND 512),
+            grain TEXT NOT NULL CHECK (length(grain) BETWEEN 1 AND 32),
+            identifier_namespace TEXT NOT NULL
+                CHECK (length(identifier_namespace) BETWEEN 1 AND 128),
+            identifier_value TEXT NOT NULL
+                CHECK (length(identifier_value) BETWEEN 1 AND 512),
+            locale TEXT CHECK (locale IS NULL OR length(locale) BETWEEN 2 AND 16),
+            region TEXT CHECK (region IS NULL OR length(region) BETWEEN 2 AND 8),
+            field_group TEXT NOT NULL CHECK (length(field_group) BETWEEN 1 AND 64),
+            schema_version INTEGER NOT NULL CHECK (schema_version >= 1),
+            purpose TEXT NOT NULL CHECK (length(purpose) BETWEEN 1 AND 64),
+            terms_revision TEXT NOT NULL CHECK (length(terms_revision) BETWEEN 1 AND 128),
+            classification TEXT NOT NULL DEFAULT 'internal'
+                CHECK (classification IN ('public', 'internal', 'confidential', 'restricted')),
+            invalidation_reason TEXT CHECK (invalidation_reason IS NULL OR invalidation_reason IN (
+                'provider_configuration_changed', 'credential_rotated',
+                'projection_policy_changed', 'terms_changed', 'explicit_retraction'
+            )),
+            invalidated_at TEXT,
+            fresh_until TEXT NOT NULL,
+            stale_while_refreshing_until TEXT NOT NULL,
+            stale_on_error_until TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            CHECK (fresh_until >= created_at),
+            CHECK (stale_while_refreshing_until >= fresh_until),
+            CHECK (stale_on_error_until >= stale_while_refreshing_until),
+            CHECK (
+                (invalidation_reason IS NULL AND invalidated_at IS NULL)
+                OR (invalidation_reason IS NOT NULL AND invalidated_at IS NOT NULL)
+            ),
+            UNIQUE (
+                workspace_id, provider_id, settings_fingerprint, configuration_digest,
+                credential_reference_version, record_id, route, grain,
+                identifier_namespace, identifier_value, locale, region,
+                field_group, schema_version, purpose, terms_revision,
+                classification
+            )
+        ) STRICT, WITHOUT ROWID;
+        CREATE INDEX metadata_cache_entries_expiry_idx
+            ON metadata_cache_entries(workspace_id, provider_id, stale_on_error_until, cache_key);
+
+        CREATE TABLE metadata_cache_claims (
+            cache_key TEXT NOT NULL REFERENCES metadata_cache_entries(cache_key) ON DELETE CASCADE,
+            workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id),
+            ordinal INTEGER NOT NULL CHECK (ordinal BETWEEN 0 AND 255),
+            claim_id TEXT NOT NULL REFERENCES metadata_claims(claim_id),
+            PRIMARY KEY (cache_key, ordinal),
+            UNIQUE(cache_key, claim_id)
+        ) STRICT, WITHOUT ROWID;
+
+        CREATE TRIGGER metadata_cache_claims_scope_insert
+        BEFORE INSERT ON metadata_cache_claims
+        WHEN NOT EXISTS (
+            SELECT 1 FROM metadata_cache_entries cache
+            WHERE cache.cache_key = NEW.cache_key
+              AND cache.workspace_id = NEW.workspace_id
+        ) OR NOT EXISTS (
+            SELECT 1 FROM metadata_claims claim
+            JOIN metadata_cache_entries cache
+              ON cache.cache_key = NEW.cache_key
+            WHERE claim.claim_id = NEW.claim_id
+              AND claim.workspace_id = NEW.workspace_id
+              AND claim.record_id = cache.record_id
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'metadata cache claim crosses a workspace boundary');
+        END;
+
+        CREATE TRIGGER metadata_cache_claims_scope_update
+        BEFORE UPDATE ON metadata_cache_claims
+        BEGIN
+            SELECT RAISE(ABORT, 'metadata cache claim references are immutable');
+        END;
+
+        CREATE TRIGGER metadata_cache_entries_scope_insert
+        BEFORE INSERT ON metadata_cache_entries
+        WHEN NOT EXISTS (
+            SELECT 1 FROM records
+            WHERE record_id = NEW.record_id AND workspace_id = NEW.workspace_id
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'metadata cache entry crosses a workspace boundary');
+        END;
+
+        CREATE TRIGGER metadata_cache_entries_scope_update
+        BEFORE UPDATE ON metadata_cache_entries
+        WHEN NOT EXISTS (
+            SELECT 1 FROM records
+            WHERE record_id = NEW.record_id AND workspace_id = NEW.workspace_id
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'metadata cache entry crosses a workspace boundary');
+        END;
+        "#,
+    )?;
+
+    migrate_imported_legacy_metadata_v12(&transaction)?;
+
+    let mut revision_sql = String::new();
+    // Disposable projections and cache partitions are intentionally absent:
+    // their authoritative inputs are revisioned and portable, while these
+    // derived rows are rebuilt after restore.
+    for table in [
+        "metadata_claims",
+        "metadata_claim_provenance",
+        "metadata_rating_claims",
+        "metadata_claim_lifecycle_events",
+        "metadata_projection_policies",
+        "metadata_profile_field_overrides",
+        "metadata_legacy_override_ownership",
+        "metadata_override_migration_receipts",
+        "metadata_attributions",
+    ] {
+        append_revision_triggers(
+            &mut revision_sql,
+            &RevisionSource {
+                table,
+                new_workspace: "NEW.workspace_id",
+                old_workspace: "OLD.workspace_id",
+            },
+        );
+    }
+    transaction.execute_batch(&revision_sql)?;
+    for scope in [
+        ScopeKey::MetadataClaimRefresh,
+        ScopeKey::MetadataProjectionRead,
+        ScopeKey::MetadataProjectionConfigure,
+    ] {
+        transaction.execute(
+            r#"
+            INSERT OR IGNORE INTO grant_scopes(grant_id, scope_key)
+            SELECT pg.grant_id, ?1
+            FROM profile_grants pg
+            JOIN node_state ns
+              ON ns.singleton = 1
+             AND ns.client_id = pg.client_id
+             AND ns.profile_id = pg.profile_id
+            WHERE pg.status = 'active'
+            "#,
+            [scope_storage_key(scope)],
+        )?;
+    }
+    transaction.pragma_update(None, "user_version", 12)?;
+    transaction.commit()
+}
+
+fn migrate_v13(connection: &Connection) -> Result<()> {
+    let transaction = Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+    transaction.execute_batch(
+        r#"
+        CREATE TABLE metadata_refresh_receipts (
+            workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id),
+            profile_id TEXT NOT NULL REFERENCES profiles(profile_id),
+            client_id TEXT NOT NULL REFERENCES clients(client_id),
+            operation_id TEXT NOT NULL CHECK (
+                length(operation_id) = 35
+                AND substr(operation_id, 1, 3) = 'op_'
+                AND substr(operation_id, 4) NOT GLOB '*[^0-9a-f]*'
+                AND substr(operation_id, 16, 1) = '7'
+                AND substr(operation_id, 20, 1) GLOB '[89ab]'
+            ),
+            semantic_digest TEXT NOT NULL CHECK (
+                length(semantic_digest) = 71
+                AND substr(semantic_digest, 1, 7) = 'sha256:'
+                AND substr(semantic_digest, 8) NOT GLOB '*[^0-9a-f]*'
+            ),
+            record_id TEXT NOT NULL REFERENCES records(record_id),
+            provider_id TEXT NOT NULL CHECK (
+                length(provider_id) BETWEEN 1 AND 128
+                AND provider_id = trim(provider_id)
+                AND provider_id = lower(provider_id)
+                AND provider_id NOT GLOB '*[^a-z0-9._:/-]*'
+            ),
+            response_json TEXT NOT NULL CHECK (
+                length(response_json) BETWEEN 2 AND 1048576
+                AND json_valid(response_json)
+            ),
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (workspace_id, client_id, operation_id)
+        ) STRICT, WITHOUT ROWID;
+
+        CREATE TRIGGER metadata_refresh_receipts_scope_insert
+        BEFORE INSERT ON metadata_refresh_receipts
+        WHEN NOT EXISTS (
+            SELECT 1 FROM clients
+            WHERE client_id = NEW.client_id AND workspace_id = NEW.workspace_id
+        ) OR NOT EXISTS (
+            SELECT 1 FROM profiles
+            WHERE profile_id = NEW.profile_id AND workspace_id = NEW.workspace_id
+        ) OR NOT EXISTS (
+            SELECT 1 FROM records
+            WHERE record_id = NEW.record_id AND workspace_id = NEW.workspace_id
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'metadata refresh receipt crosses a workspace boundary');
+        END;
+
+        CREATE TRIGGER metadata_refresh_receipts_immutable_update
+        BEFORE UPDATE ON metadata_refresh_receipts
+        BEGIN
+            SELECT RAISE(ABORT, 'metadata refresh receipts are immutable');
+        END;
+
+        CREATE TRIGGER metadata_refresh_receipts_immutable_delete
+        BEFORE DELETE ON metadata_refresh_receipts
+        BEGIN
+            SELECT RAISE(ABORT, 'metadata refresh receipts are immutable');
+        END;
+        "#,
+    )?;
+    let mut revision_sql = String::new();
+    append_revision_triggers(
+        &mut revision_sql,
+        &RevisionSource {
+            table: "metadata_refresh_receipts",
+            new_workspace: "NEW.workspace_id",
+            old_workspace: "OLD.workspace_id",
+        },
+    );
+    transaction.execute_batch(&revision_sql)?;
+    transaction.pragma_update(None, "user_version", 13)?;
+    transaction.commit()
+}
+
+/// Materialize v12 companions for rows restored from archive-v2 after the
+/// archive's frozen legacy tables have been imported and coordinate-repaired.
+/// Every insert is retry-safe and the archive-owned rows remain untouched.
+pub(crate) fn migrate_imported_legacy_metadata_v12(connection: &Connection) -> Result<()> {
+    let legacy_claims = {
+        let mut statement = connection.prepare(
+            r#"
+            SELECT legacy.workspace_id, legacy.record_id, legacy.field_key,
+                   legacy.source, legacy.fetched_at, legacy.created_at
+            FROM metadata_field_claims legacy
+            LEFT JOIN metadata_claim_provenance provenance
+              ON provenance.record_id = legacy.record_id
+             AND provenance.field_key = legacy.field_key
+             AND provenance.source = legacy.source
+             AND provenance.fetched_at = legacy.fetched_at
+            WHERE provenance.claim_id IS NULL
+            ORDER BY legacy.workspace_id, legacy.record_id, legacy.field_key,
+                     legacy.source, legacy.fetched_at
+            "#,
+        )?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>>>()?;
+        rows
+    };
+    for (workspace_id, record_id, field_key, source, fetched_at, created_at) in legacy_claims {
+        let claim_id = MetadataClaimId::new_v7().to_string();
+        connection.execute(
+            r#"
+            INSERT INTO metadata_claims(
+                claim_id, workspace_id, record_id, claim_kind, created_at
+            ) VALUES (?1, ?2, ?3, 'field', ?4)
+            "#,
+            rusqlite::params![claim_id, workspace_id, record_id, created_at],
+        )?;
+        connection.execute(
+            r#"
+            INSERT INTO metadata_claim_provenance(
+                claim_id, workspace_id, record_id, field_key, source, fetched_at,
+                provider_id, classification, provenance_state, initial_status, created_at
+            ) VALUES (
+                ?1, ?2, ?3, ?4, ?5, ?6, NULL, 'internal',
+                'legacy_incomplete', 'fresh', ?7
+            )
+            "#,
+            rusqlite::params![
+                claim_id,
+                workspace_id,
+                record_id,
+                field_key,
+                source,
+                fetched_at,
+                created_at
+            ],
+        )?;
+    }
+    connection.execute_batch(
+        r#"
+        INSERT OR IGNORE INTO metadata_legacy_override_ownership(
+            workspace_id, record_id, field_key, owner_profile_id, state,
+            review_reason, recorded_at
+        )
+        SELECT legacy.workspace_id, legacy.record_id, legacy.field_key,
+               CASE WHEN (
+                   SELECT COUNT(*) FROM profiles profile
+                   WHERE profile.workspace_id = legacy.workspace_id
+               ) = 1 THEN (
+                   SELECT profile_id FROM profiles profile
+                   WHERE profile.workspace_id = legacy.workspace_id
+                   ORDER BY profile_id LIMIT 1
+               ) ELSE NULL END,
+               CASE WHEN (
+                   SELECT COUNT(*) FROM profiles profile
+                   WHERE profile.workspace_id = legacy.workspace_id
+               ) = 1 THEN 'migrated' ELSE 'review_required' END,
+               CASE WHEN (
+                   SELECT COUNT(*) FROM profiles profile
+                   WHERE profile.workspace_id = legacy.workspace_id
+               ) = 0 THEN 'zero_profiles'
+               WHEN (
+                   SELECT COUNT(*) FROM profiles profile
+                   WHERE profile.workspace_id = legacy.workspace_id
+               ) > 1 THEN 'multiple_profiles'
+               ELSE NULL END,
+               legacy.created_at
+        FROM metadata_field_overrides legacy;
+
+        INSERT OR IGNORE INTO metadata_profile_field_overrides(
+            workspace_id, profile_id, record_id, field_key, value,
+            created_at, updated_at, origin
+        )
+        SELECT legacy.workspace_id, ownership.owner_profile_id, legacy.record_id,
+               legacy.field_key, legacy.value, legacy.created_at,
+               legacy.created_at, 'legacy_migration'
+        FROM metadata_field_overrides legacy
+        JOIN metadata_legacy_override_ownership ownership
+          ON ownership.workspace_id = legacy.workspace_id
+         AND ownership.record_id = legacy.record_id
+         AND ownership.field_key = legacy.field_key
+        WHERE ownership.state = 'migrated';
+
+        INSERT OR IGNORE INTO metadata_override_migration_receipts(
+            receipt_id, workspace_id, record_id, field_key, profile_id,
+            source_created_at, migrated_at
+        )
+        SELECT 'legacy_override:' || hex(
+                   legacy.workspace_id || char(0) || legacy.record_id || char(0) || legacy.field_key
+               ),
+               legacy.workspace_id, legacy.record_id, legacy.field_key,
+               ownership.owner_profile_id, legacy.created_at, legacy.created_at
+        FROM metadata_field_overrides legacy
+        JOIN metadata_legacy_override_ownership ownership
+          ON ownership.workspace_id = legacy.workspace_id
+         AND ownership.record_id = legacy.record_id
+         AND ownership.field_key = legacy.field_key
+        WHERE ownership.state = 'migrated';
+        "#,
+    )
+}
+
 fn migration_conflict(message: &str) -> rusqlite::Error {
     rusqlite::Error::SqliteFailure(
         rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CONSTRAINT),
@@ -1292,6 +2191,41 @@ fn validate_legacy_provider_values(
     Ok(())
 }
 
+fn suspend_metadata_coordinate_guards(transaction: &Transaction<'_>) -> Result<Vec<String>> {
+    let mut statement = transaction.prepare(
+        r#"
+        SELECT sql FROM sqlite_schema
+        WHERE type = 'trigger'
+          AND name IN (
+            'metadata_field_claims_immutable_update',
+            'metadata_claim_provenance_immutable_update'
+          )
+        ORDER BY name
+        "#,
+    )?;
+    let definitions = statement
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>>>()?;
+    drop(statement);
+    transaction.execute_batch(
+        r#"
+        DROP TRIGGER IF EXISTS metadata_field_claims_immutable_update;
+        DROP TRIGGER IF EXISTS metadata_claim_provenance_immutable_update;
+        "#,
+    )?;
+    Ok(definitions)
+}
+
+fn restore_metadata_coordinate_guards(
+    transaction: &Transaction<'_>,
+    definitions: &[String],
+) -> Result<()> {
+    for definition in definitions {
+        transaction.execute_batch(definition)?;
+    }
+    Ok(())
+}
+
 pub(crate) fn repair_legacy_provider_coordinates_v1(transaction: &Transaction<'_>) -> Result<()> {
     let books = GOOGLE_BOOKS_REPAIR_V1;
 
@@ -1447,6 +2381,7 @@ pub(crate) fn repair_legacy_provider_coordinates_v1(transaction: &Transaction<'_
         }
     }
 
+    let metadata_coordinate_guards = suspend_metadata_coordinate_guards(transaction)?;
     transaction.execute(
         r#"
         UPDATE records SET grain = ?1
@@ -1523,6 +2458,7 @@ pub(crate) fn repair_legacy_provider_coordinates_v1(transaction: &Transaction<'_
             ],
         )?;
     }
+    restore_metadata_coordinate_guards(transaction, &metadata_coordinate_guards)?;
     Ok(())
 }
 
@@ -1577,6 +2513,46 @@ mod tests {
     fn migrate_to_version_ten(connection: &Connection) {
         migrate_to_version_nine(connection);
         migrate_v10(connection).expect("version ten");
+    }
+
+    fn migrate_to_version_eleven(connection: &Connection) {
+        migrate_to_version_ten(connection);
+        migrate_v11(connection).expect("version eleven");
+    }
+
+    fn migrate_to_version_twelve(connection: &Connection) {
+        migrate_to_version_eleven(connection);
+        migrate_v12(connection).expect("version twelve");
+    }
+
+    fn seed_legacy_override_root(connection: &Connection, profile_count: usize) {
+        connection
+            .execute_batch(
+                r#"
+                INSERT INTO workspaces(workspace_id, created_at)
+                    VALUES ('wsp_legacy_override', '2026-08-24T00:00:00Z');
+                INSERT INTO records(record_id, workspace_id, grain, status, created_at)
+                    VALUES (
+                        'rec_legacy_override', 'wsp_legacy_override', 'film', 'active',
+                        '2026-08-24T00:00:01Z'
+                    );
+                INSERT INTO metadata_field_overrides(
+                    workspace_id, record_id, field_key, value, created_at
+                ) VALUES (
+                    'wsp_legacy_override', 'rec_legacy_override', 'core.title',
+                    'The retained title', '2026-08-24T00:00:02Z'
+                );
+                "#,
+            )
+            .expect("seed legacy override");
+        for index in 0..profile_count {
+            connection
+                .execute(
+                    "INSERT INTO profiles(profile_id, workspace_id, created_at) VALUES (?1, 'wsp_legacy_override', ?2)",
+                    params![format!("prf_legacy_override_{index}"), CREATED_AT],
+                )
+                .expect("seed profile");
+        }
     }
 
     fn seed_version_nine_browser_state(connection: &Connection) {
@@ -1783,13 +2759,191 @@ mod tests {
         // +3 for namespace_definitions (migrate_v4), +6 for the two metadata
         // field tables (migrate_v6), +3 for profile tracking disposition
         // (migrate_v7), +3 for profile Nuvio Collections (migrate_v9), and
-        // +3 for provider capability state (migrate_v11),
+        // +3 for provider capability state (migrate_v11), +27 for the nine
+        // authoritative metadata tables (migrate_v12), and +3 for immutable
+        // metadata refresh receipts (migrate_v13). Disposable
+        // projection and cache tables do not advance the workspace revision,
         // none of which are in the
         // original REVISION_SOURCES list built for the v3 schema snapshot.
         assert_eq!(
             trigger_count,
-            (REVISION_SOURCES.len() * 3 + 3 + 6 + 3 + 3 + 3) as i64
+            (REVISION_SOURCES.len() * 3 + 3 + 6 + 3 + 3 + 3 + 27 + 3) as i64
         );
+    }
+
+    #[test]
+    fn version_twelve_upgrades_to_append_only_refresh_receipts() {
+        let connection = Connection::open_in_memory().expect("in-memory SQLite");
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .expect("enable foreign keys");
+        migrate_to_version_twelve(&connection);
+
+        let before: i64 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .expect("read v12");
+        let receipts_before: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'metadata_refresh_receipts'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("inspect v12 tables");
+        assert_eq!((before, receipts_before), (12, 0));
+
+        migrate(&connection).expect("upgrade v12 to v13");
+
+        let after: i64 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .expect("read v13");
+        let columns = connection
+            .prepare("PRAGMA table_info(metadata_refresh_receipts)")
+            .expect("receipt columns")
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("query receipt columns")
+            .collect::<Result<Vec<_>>>()
+            .expect("collect receipt columns");
+        let triggers: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'metadata_refresh_receipts'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count receipt triggers");
+        assert_eq!(after, SCHEMA_VERSION);
+        assert_eq!(
+            columns,
+            [
+                "workspace_id",
+                "profile_id",
+                "client_id",
+                "operation_id",
+                "semantic_digest",
+                "record_id",
+                "provider_id",
+                "response_json",
+                "created_at",
+            ]
+        );
+        assert_eq!(triggers, 6);
+    }
+
+    #[test]
+    fn metadata_override_migration_retains_zero_profile_rows_for_review() {
+        let connection = Connection::open_in_memory().expect("in-memory SQLite");
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .expect("enable foreign keys");
+        migrate_to_version_eleven(&connection);
+        seed_legacy_override_root(&connection, 0);
+
+        migrate(&connection).expect("upgrade metadata schema");
+
+        let ownership: (String, Option<String>, String) = connection
+            .query_row(
+                "SELECT state, owner_profile_id, review_reason FROM metadata_legacy_override_ownership",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("migration review row");
+        assert_eq!(
+            ownership,
+            (
+                "review_required".to_owned(),
+                None,
+                "zero_profiles".to_owned()
+            )
+        );
+        assert_eq!(legacy_override_counts(&connection), (1, 0, 0));
+    }
+
+    #[test]
+    fn metadata_override_migration_moves_one_unambiguous_owner_once() {
+        let connection = Connection::open_in_memory().expect("in-memory SQLite");
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .expect("enable foreign keys");
+        migrate_to_version_eleven(&connection);
+        seed_legacy_override_root(&connection, 1);
+
+        migrate(&connection).expect("upgrade metadata schema");
+        migrate(&connection).expect("retry is a no-op");
+
+        let ownership: (String, Option<String>, Option<String>) = connection
+            .query_row(
+                "SELECT state, owner_profile_id, review_reason FROM metadata_legacy_override_ownership",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("migration ownership");
+        assert_eq!(
+            ownership,
+            (
+                "migrated".to_owned(),
+                Some("prf_legacy_override_0".to_owned()),
+                None
+            )
+        );
+        assert_eq!(legacy_override_counts(&connection), (1, 1, 1));
+        let migrated: (String, String, String) = connection
+            .query_row(
+                "SELECT value, created_at, origin FROM metadata_profile_field_overrides",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("migrated override");
+        assert_eq!(
+            migrated,
+            (
+                "The retained title".to_owned(),
+                "2026-08-24T00:00:02Z".to_owned(),
+                "legacy_migration".to_owned()
+            )
+        );
+    }
+
+    #[test]
+    fn metadata_override_migration_never_chooses_between_profiles() {
+        let connection = Connection::open_in_memory().expect("in-memory SQLite");
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .expect("enable foreign keys");
+        migrate_to_version_eleven(&connection);
+        seed_legacy_override_root(&connection, 2);
+
+        migrate(&connection).expect("upgrade metadata schema");
+
+        let ownership: (String, Option<String>, String) = connection
+            .query_row(
+                "SELECT state, owner_profile_id, review_reason FROM metadata_legacy_override_ownership",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("migration review row");
+        assert_eq!(
+            ownership,
+            (
+                "review_required".to_owned(),
+                None,
+                "multiple_profiles".to_owned()
+            )
+        );
+        assert_eq!(legacy_override_counts(&connection), (1, 0, 0));
+    }
+
+    fn legacy_override_counts(connection: &Connection) -> (i64, i64, i64) {
+        connection
+            .query_row(
+                r#"
+                SELECT
+                    (SELECT COUNT(*) FROM metadata_field_overrides),
+                    (SELECT COUNT(*) FROM metadata_profile_field_overrides),
+                    (SELECT COUNT(*) FROM metadata_override_migration_receipts)
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("metadata override counts")
     }
 
     #[test]
@@ -1864,6 +3018,51 @@ mod tests {
                     |row| row.get(0),
                 )
                 .expect("query backfilled provider scope");
+            assert_eq!(count, 1);
+        }
+    }
+
+    #[test]
+    fn metadata_migration_backfills_node_owner_metadata_scopes() {
+        let connection = Connection::open_in_memory().expect("in-memory SQLite");
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .expect("enable foreign keys");
+        migrate_to_version_eleven(&connection);
+        seed_version_one_rows(&connection);
+        connection
+            .execute_batch(
+                r#"
+                INSERT INTO profile_grants(
+                    grant_id, workspace_id, profile_id, client_id, status, created_at
+                ) VALUES (
+                    'grt_seed', 'wsp_seed', 'prf_seed', 'cli_seed', 'active',
+                    '2026-08-24T00:00:05Z'
+                );
+                INSERT INTO node_state(
+                    singleton, initialized, workspace_id, profile_id, client_id, created_at
+                ) VALUES (
+                    1, 1, 'wsp_seed', 'prf_seed', 'cli_seed',
+                    '2026-08-24T00:00:06Z'
+                );
+                "#,
+            )
+            .expect("seed enrolled version-eleven node");
+
+        migrate(&connection).expect("upgrade version-eleven database");
+
+        for scope in [
+            ScopeKey::MetadataClaimRefresh,
+            ScopeKey::MetadataProjectionRead,
+            ScopeKey::MetadataProjectionConfigure,
+        ] {
+            let count: i64 = connection
+                .query_row(
+                    "SELECT COUNT(*) FROM grant_scopes WHERE grant_id = 'grt_seed' AND scope_key = ?1",
+                    [scope_storage_key(scope)],
+                    |row| row.get(0),
+                )
+                .expect("query backfilled metadata scope");
             assert_eq!(count, 1);
         }
     }
@@ -2039,7 +3238,7 @@ mod tests {
         let version: i64 = connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .expect("schema version");
-        assert_eq!(version, SCHEMA_VERSION);
+        assert_eq!(version, 11, "the failed v12 transaction must retain v11");
         let legacy: String = connection
             .query_row(
                 "SELECT namespace FROM external_identifiers WHERE external_identifier_id = 'xid_movie'",
@@ -2072,7 +3271,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .expect("rollback state");
-        assert_eq!(state, (SCHEMA_VERSION, "tmdb".to_owned(), 1));
+        assert_eq!(state, (11, "tmdb".to_owned(), 1));
     }
 
     #[test]
@@ -2103,12 +3302,7 @@ mod tests {
             .expect("rollback state");
         assert_eq!(
             state,
-            (
-                SCHEMA_VERSION,
-                "chapter".to_owned(),
-                "google-books".to_owned(),
-                0
-            )
+            (11, "chapter".to_owned(), "google-books".to_owned(), 0)
         );
     }
 
@@ -2134,7 +3328,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .expect("rollback state");
-        assert_eq!(state, (SCHEMA_VERSION, "tmdb".to_owned(), 2, 0));
+        assert_eq!(state, (11, "tmdb".to_owned(), 2, 0));
     }
 
     #[test]
@@ -2156,7 +3350,7 @@ mod tests {
             let version: i64 = connection
                 .query_row("PRAGMA user_version", [], |row| row.get(0))
                 .expect("schema version");
-            assert_eq!(version, SCHEMA_VERSION);
+            assert_eq!(version, 11, "the failed v12 transaction must retain v11");
             let legacy: (String, String) = connection
                 .query_row(
                     "SELECT namespace, value FROM external_identifiers WHERE external_identifier_id = 'xid_movie'",
@@ -2201,7 +3395,7 @@ mod tests {
         assert_eq!(
             state,
             (
-                SCHEMA_VERSION,
+                11,
                 "series".to_owned(),
                 "tmdb".to_owned(),
                 "film".to_owned()
@@ -2660,6 +3854,19 @@ mod tests {
                 "fasti_browser_session_grants".to_owned(),
                 "fasti_browser_sessions".to_owned(),
                 "provider_capability_states".to_owned(),
+                "metadata_claims".to_owned(),
+                "metadata_claim_provenance".to_owned(),
+                "metadata_rating_claims".to_owned(),
+                "metadata_claim_lifecycle_events".to_owned(),
+                "metadata_projection_policies".to_owned(),
+                "metadata_profile_field_overrides".to_owned(),
+                "metadata_legacy_override_ownership".to_owned(),
+                "metadata_override_migration_receipts".to_owned(),
+                "metadata_projections".to_owned(),
+                "metadata_attributions".to_owned(),
+                "metadata_cache_entries".to_owned(),
+                "metadata_cache_claims".to_owned(),
+                "metadata_refresh_receipts".to_owned(),
             ])
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()
@@ -2793,6 +4000,25 @@ mod tests {
             workspace_revision(&connection, WORKSPACE).expect("replacement revision"),
             seeded + 5
         );
+    }
+
+    #[test]
+    fn derived_metadata_tables_do_not_advance_the_authoritative_revision() {
+        let connection = migrated_connection();
+        for table in [
+            "metadata_projections",
+            "metadata_cache_entries",
+            "metadata_cache_claims",
+        ] {
+            let triggers: i64 = connection
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_schema WHERE type = 'trigger' AND name LIKE ?1",
+                    [format!("workspace_revision_{table}_%")],
+                    |row| row.get(0),
+                )
+                .expect("count derived revision triggers");
+            assert_eq!(triggers, 0, "{table} is disposable derived state");
+        }
     }
 
     #[test]

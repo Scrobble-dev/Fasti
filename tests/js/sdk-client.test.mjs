@@ -19,6 +19,8 @@ import {
   parseAcceptObservationRequest,
   parseHealthResponse,
   parseListRecordsResponse,
+  parseConfigureMetadataProjectionRequest,
+  parseRefreshMetadataClaimsRequest,
   parseReceiptCommittedEvent,
   PUBLIC_CAPABILITY_REGISTRY,
   RECEIPT_STREAM_CONTRACT,
@@ -48,6 +50,27 @@ const contractIds = {
   evidence: v7("evd", "7"),
   record: v7("rec", "8"),
 };
+
+test("metadata refresh parser enforces canonical operation IDs", () => {
+  const request = {
+    operation_id: contractIds.operation,
+    record_id: contractIds.record,
+    provider_id: "tmdb",
+    field_groups: ["basic_info"],
+    locale: "en-ie",
+    region: "IE",
+    mode: "prefer_cache",
+  };
+  assert.deepEqual(parseRefreshMetadataClaimsRequest(request), request);
+  assert.throws(
+    () =>
+      parseRefreshMetadataClaimsRequest({
+        ...request,
+        operation_id: "x".repeat(35),
+      }),
+    FastiContractParseError,
+  );
+});
 
 test("browser authentication SDK methods are absent until C1", () => {
   const client = new FastiClient({
@@ -496,6 +519,7 @@ test("credentials are header-only on authenticated surfaces and no offline queue
           "attachIdentifier",
           "clearNuvioCollections",
           "configureListener",
+          "configureMetadataProjection",
           "configureProviderCredential",
           "constructor",
           "createRecord",
@@ -510,8 +534,10 @@ test("credentials are header-only on authenticated surfaces and no offline queue
           "listProviders",
           "listRecords",
           "listTrackingDispositions",
+          "readMetadataProjection",
           "readProviderHealth",
           "receiptEvents",
+          "refreshMetadataClaims",
           "registerNamespace",
           "removeProviderCredential",
           "replaceNuvioCollections",
@@ -817,10 +843,10 @@ test("connection endpoints reject unsafe origins", () => {
   }
 });
 test("generated public metadata preserves complete registry and surface dispositions", () => {
-  assert.equal(PUBLIC_CAPABILITY_REGISTRY.capabilities.length, 43);
+  assert.equal(PUBLIC_CAPABILITY_REGISTRY.capabilities.length, 46);
   assert.equal(
     Object.keys(PUBLIC_CAPABILITY_REGISTRY.surface_profiles).length,
-    13,
+    14,
   );
   const stream = PUBLIC_CAPABILITY_REGISTRY.capabilities.find(
     (capability) => capability.id === "receipt.stream",
@@ -1215,6 +1241,112 @@ test("mutation retries require stable idempotency and preserve exact serialized 
   );
 });
 
+test("metadata retries require a stable operation ID", async (context) => {
+  for (const [name, method, path, attempts, invoke] of [
+    [
+      "claim refresh",
+      "POST",
+      "/api/v1/metadata/claims/refresh",
+      3,
+      (client) =>
+        client.refreshMetadataClaims({
+          operation_id: "op_018f0e0e7f7b70008000000000000004",
+          record_id: contractIds.record,
+          provider_id: "tmdb",
+          field_groups: ["basic_info"],
+          locale: "en-IE",
+          region: "IE",
+          mode: "revalidate",
+        }),
+    ],
+    [
+      "projection configuration",
+      "PUT",
+      "/api/v1/profile/metadata-projection",
+      1,
+      (client) =>
+        client.configureMetadataProjection({
+          preferred_provider_id: "tmdb",
+          preferred_locale: "en-IE",
+          original_locale: null,
+          allow_english_fallback: true,
+          last_known_good: "allow",
+          region: "IE",
+          enabled_field_groups: ["basic_info"],
+          overrides: [],
+        }),
+    ],
+  ]) {
+    await context.test(name, async () => {
+      let requests = 0;
+      const bodies = [];
+      const client = new FastiClient({
+        baseUrl: "http://127.0.0.1:8420",
+        credential: "metadata-writer",
+        retryPolicy: { maxAttempts: 3, baseDelayMs: 0, maxDelayMs: 0 },
+        fetch: async (url, init) => {
+          requests += 1;
+          bodies.push(init?.body);
+          assert.equal(init?.method, method);
+          assert.equal(new URL(url).pathname, path);
+          return new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.error(new Error("simulated response socket reset"));
+              },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        },
+      });
+
+      await assert.rejects(invoke(client), FastiTransportError);
+      assert.equal(requests, attempts);
+      assert.equal(new Set(bodies).size, 1);
+    });
+  }
+});
+
+test("metadata override parser rejects mismatched discriminated operations", () => {
+  const base = {
+    preferred_provider_id: "tmdb",
+    preferred_locale: "en-IE",
+    original_locale: null,
+    allow_english_fallback: true,
+    last_known_good: "allow",
+    region: "IE",
+    enabled_field_groups: ["basic_info"],
+  };
+  for (const override of [
+    {
+      operation: "set",
+      record_id: contractIds.record,
+      field_key: "core.title",
+    },
+    {
+      operation: "clear",
+      record_id: contractIds.record,
+      field_key: "core.title",
+      value: "must not be accepted",
+    },
+    {
+      operation: "set",
+      record_id: contractIds.record,
+      field_key: "Core Title",
+      value: "Replacement",
+    },
+  ]) {
+    assert.throws(
+      () =>
+        parseConfigureMetadataProjectionRequest({
+          ...base,
+          overrides: [override],
+        }),
+      FastiContractParseError,
+    );
+  }
+});
+
 test("all implemented contract routes complete against the loopback Rust fixture", async () => {
   await withRustFixture(async (baseUrl) => {
     const bootstrap = new FastiClient({ baseUrl });
@@ -1248,7 +1380,7 @@ test("all implemented contract routes complete against the loopback Rust fixture
       discovery.surface_profiles,
       PUBLIC_CAPABILITY_REGISTRY.surface_profiles,
     );
-    assert.equal(discovery.capabilities.length, 43);
+    assert.equal(discovery.capabilities.length, 46);
     assert.ok(
       discovery.capabilities.some(
         (capability) =>

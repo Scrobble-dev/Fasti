@@ -5,6 +5,7 @@
 mod api_clients;
 mod artwork;
 mod endpoint;
+mod metadata;
 mod network_config;
 mod nuvio_collections;
 mod providers;
@@ -45,6 +46,8 @@ struct DesktopState {
     network: NetworkConfigStore,
     artwork: artwork::ArtworkCache,
     provider_runtime: Mutex<Option<Arc<fasti_provider_runtime::ProviderRuntime>>>,
+    // ponytail: one provider gate prevents credential races; split by provider if contention appears.
+    provider_operation_gate: tokio::sync::Mutex<()>,
 }
 
 #[cfg(feature = "desktop-runtime")]
@@ -175,47 +178,71 @@ async fn test_endpoint_connection(
 }
 
 #[cfg(feature = "desktop-runtime")]
-#[tauri::command(async)]
-fn provider_credential_status(
-    state: tauri::State<'_, DesktopState>,
-) -> Result<Vec<ProviderCredentialStatusView>, DesktopProblem> {
-    let kernel = state.kernel()?;
-    let access = records::require_access(
-        &kernel,
-        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
-    )?;
-    let runtime = state.provider_runtime(&kernel)?;
-    providers::credential_statuses(&runtime, &kernel, access.workspace_id())
+async fn run_blocking_provider_operation<T, F>(
+    gate: &tokio::sync::Mutex<()>,
+    operation: F,
+) -> Result<T, DesktopProblem>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, DesktopProblem> + Send + 'static,
+{
+    let _provider_guard = gate.lock().await;
+    tokio::task::spawn_blocking(operation)
+        .await
+        .map_err(|_| DesktopProblem::storage("The provider operation task did not complete."))?
 }
 
 #[cfg(feature = "desktop-runtime")]
-#[tauri::command(async)]
-fn save_provider_credential(
+#[tauri::command]
+async fn provider_credential_status(
+    state: tauri::State<'_, DesktopState>,
+) -> Result<Vec<ProviderCredentialStatusView>, DesktopProblem> {
+    let kernel = state.kernel()?;
+    let runtime = state.provider_runtime(&kernel)?;
+    run_blocking_provider_operation(&state.provider_operation_gate, move || {
+        let access = records::require_access(
+            &kernel,
+            &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+        )?;
+        providers::credential_statuses(&runtime, &kernel, access.workspace_id())
+    })
+    .await
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command]
+async fn save_provider_credential(
     state: tauri::State<'_, DesktopState>,
     input: SaveProviderCredentialInput,
 ) -> Result<Vec<ProviderCredentialStatusView>, DesktopProblem> {
     let kernel = state.kernel()?;
-    let access = records::require_access(
-        &kernel,
-        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
-    )?;
     let runtime = state.provider_runtime(&kernel)?;
-    providers::save_credential(&runtime, &kernel, access.workspace_id(), input)
+    run_blocking_provider_operation(&state.provider_operation_gate, move || {
+        let access = records::require_access(
+            &kernel,
+            &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+        )?;
+        providers::save_credential(&runtime, &kernel, access.workspace_id(), input)
+    })
+    .await
 }
 
 #[cfg(feature = "desktop-runtime")]
-#[tauri::command(async)]
-fn delete_provider_credential(
+#[tauri::command]
+async fn delete_provider_credential(
     state: tauri::State<'_, DesktopState>,
     input: DeleteProviderCredentialInput,
 ) -> Result<Vec<ProviderCredentialStatusView>, DesktopProblem> {
     let kernel = state.kernel()?;
-    let access = records::require_access(
-        &kernel,
-        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
-    )?;
     let runtime = state.provider_runtime(&kernel)?;
-    providers::delete_credential(&runtime, &kernel, access.workspace_id(), input)
+    run_blocking_provider_operation(&state.provider_operation_gate, move || {
+        let access = records::require_access(
+            &kernel,
+            &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+        )?;
+        providers::delete_credential(&runtime, &kernel, access.workspace_id(), input)
+    })
+    .await
 }
 
 #[cfg(feature = "desktop-runtime")]
@@ -224,6 +251,7 @@ async fn test_provider_credential(
     state: tauri::State<'_, DesktopState>,
     input: ProviderCapabilityInput,
 ) -> Result<Vec<ProviderCredentialStatusView>, DesktopProblem> {
+    let _provider_guard = state.provider_operation_gate.lock().await;
     let kernel = state.kernel()?;
     let access = records::require_access(
         &kernel,
@@ -247,6 +275,7 @@ async fn read_provider_health(
     state: tauri::State<'_, DesktopState>,
     input: ProviderInput,
 ) -> Result<Vec<ProviderCredentialStatusView>, DesktopProblem> {
+    let _provider_guard = state.provider_operation_gate.lock().await;
     let kernel = state.kernel()?;
     let access = records::require_access(
         &kernel,
@@ -270,6 +299,7 @@ async fn search_provider(
     state: tauri::State<'_, DesktopState>,
     input: ProviderSearchInput,
 ) -> Result<Vec<ProviderCandidate>, DesktopProblem> {
+    let _provider_guard = state.provider_operation_gate.lock().await;
     let kernel = state.kernel()?;
     let access = records::require_access(
         &kernel,
@@ -293,6 +323,7 @@ async fn track_provider_candidate(
     state: tauri::State<'_, DesktopState>,
     input: ProviderSelectionInput,
 ) -> Result<records::CreateRecordView, DesktopProblem> {
+    let _provider_guard = state.provider_operation_gate.lock().await;
     let kernel = state.kernel()?;
     let store = KeyringSetupSecretStore::new(kernel.data_root_identity());
     let access = records::require_access(&kernel, &store)?;
@@ -331,6 +362,7 @@ async fn apply_provider_metadata(
     state: tauri::State<'_, DesktopState>,
     input: ApplyProviderMetadataInput,
 ) -> Result<(), DesktopProblem> {
+    let _provider_guard = state.provider_operation_gate.lock().await;
     let kernel = state.kernel()?;
     let store = KeyringSetupSecretStore::new(kernel.data_root_identity());
     let access = records::require_access(&kernel, &store)?;
@@ -357,6 +389,51 @@ async fn apply_provider_metadata(
         )
         .await?;
     records::apply_provider_metadata(&kernel, access, record_id, candidate)
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command]
+async fn refresh_metadata_claims(
+    state: tauri::State<'_, DesktopState>,
+    input: fasti_contracts::RefreshMetadataClaimsRequest,
+) -> Result<fasti_contracts::RefreshMetadataClaimsResponse, DesktopProblem> {
+    let _provider_guard = state.provider_operation_gate.lock().await;
+    let kernel = state.kernel()?;
+    let access = records::require_access(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+    )?;
+    let runtime = state.provider_runtime(&kernel)?;
+    let policy = state.network.load()?.outbound_policy().clone();
+    metadata::refresh(kernel, runtime, policy, access, input).await
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command(async)]
+fn read_metadata_projection(
+    state: tauri::State<'_, DesktopState>,
+    input: metadata::ReadMetadataProjectionInput,
+) -> Result<fasti_contracts::MetadataProjectionResponse, DesktopProblem> {
+    let kernel = state.kernel()?;
+    let access = records::require_access(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+    )?;
+    metadata::read(&kernel, access, input)
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command(async)]
+fn configure_metadata_projection(
+    state: tauri::State<'_, DesktopState>,
+    input: fasti_contracts::ConfigureMetadataProjectionRequest,
+) -> Result<fasti_contracts::MetadataProjectionConfigurationResponse, DesktopProblem> {
+    let kernel = state.kernel()?;
+    let access = records::require_access(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+    )?;
+    metadata::configure(&kernel, access, input)
 }
 
 #[cfg(feature = "desktop-runtime")]
@@ -578,6 +655,9 @@ pub fn run() {
                 network: NetworkConfigStore::new(&config_root),
                 artwork,
                 provider_runtime: Mutex::new(None),
+                // ponytail: serialize provider vault mutation and metadata claim
+                // refresh; use per-provider gates only if measured throughput needs it.
+                provider_operation_gate: tokio::sync::Mutex::new(()),
             });
             Ok(())
         })
@@ -598,6 +678,9 @@ pub fn run() {
             search_provider,
             track_provider_candidate,
             apply_provider_metadata,
+            refresh_metadata_claims,
+            read_metadata_projection,
+            configure_metadata_projection,
             list_records,
             create_record,
             attach_identifier,
@@ -617,6 +700,9 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::time::Duration;
 
     #[test]
     fn desktop_requires_an_explicit_non_empty_data_root() {
@@ -647,5 +733,30 @@ mod tests {
                 .expect("platform sandbox"),
             PathBuf::from("/sandbox/fasti")
         );
+    }
+
+    #[cfg(feature = "desktop-runtime")]
+    #[tokio::test]
+    async fn blocking_provider_operations_wait_for_the_shared_gate() {
+        let gate = tokio::sync::Mutex::new(());
+        let held = gate.lock().await;
+        let started = Arc::new(AtomicBool::new(false));
+        let operation_started = Arc::clone(&started);
+        let operation = run_blocking_provider_operation(&gate, move || {
+            operation_started.store(true, Ordering::SeqCst);
+            Ok(())
+        });
+        tokio::pin!(operation);
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), &mut operation)
+                .await
+                .is_err()
+        );
+        assert!(!started.load(Ordering::SeqCst));
+
+        drop(held);
+        operation.await.expect("serialized provider operation");
+        assert!(started.load(Ordering::SeqCst));
     }
 }

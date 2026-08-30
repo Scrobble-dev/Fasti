@@ -127,7 +127,9 @@ pub struct ConfigureProviderCredentialRequest {
 #[serde(deny_unknown_fields)]
 pub struct ProviderCapabilityResponse {
     pub provider_id: String,
-    pub capability: ProviderCapabilityDto,
+    #[schemars(length(min = 1, max = 32))]
+    #[schema(min_items = 1, max_items = 32)]
+    pub capabilities: Vec<ProviderCapabilityDto>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]

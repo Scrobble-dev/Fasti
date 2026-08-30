@@ -26,6 +26,9 @@ identifiers:
   - provider.credential.configure
   - provider.credential.test
   - provider.health.read
+  - metadata.claim.refresh
+  - metadata.projection.read
+  - metadata.projection.configure
 authorization_postures:
   - unauthenticated
   - bootstrap_only
@@ -51,6 +54,9 @@ authorization_assignments:
   provider.credential.configure: scoped
   provider.credential.test: scoped
   provider.health.read: scoped
+  metadata.claim.refresh: scoped
+  metadata.projection.read: scoped
+  metadata.projection.configure: scoped
 sources:
   - id: fasti-capability-registry
     resource: ../../registry/v1/capabilities.yaml
@@ -86,6 +92,9 @@ not automatically an implemented runtime. Read each entry together with the
 | `provider.credential.configure` | `connections.providers`     | `scoped`          | Implemented in M1                            |
 | `provider.credential.test`      | `connections.providers`     | `scoped`          | Implemented in M1                            |
 | `provider.health.read`          | `connections.providers`     | `scoped`          | Implemented in M1                            |
+| `metadata.claim.refresh`        | `metadata.claims`           | `scoped`          | Implemented in M2                            |
+| `metadata.projection.read`      | `metadata.projection`       | `scoped`          | Implemented in M2                            |
+| `metadata.projection.configure` | `metadata.projection`       | `scoped`          | Implemented in M2                            |
 
 Only `scoped` capabilities use identifiers from the [scope catalogue](scopes.md).
 `unauthenticated` capabilities require no authorization facts, while

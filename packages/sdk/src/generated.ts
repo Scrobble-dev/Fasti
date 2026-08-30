@@ -159,6 +159,62 @@ const PRODUCTION_SCHEMAS = {
     ],
     "type": "object"
   },
+  "ConfigureMetadataProjectionRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "allow_english_fallback": {
+        "type": "boolean"
+      },
+      "enabled_field_groups": {
+        "items": {
+          "$ref": "#/components/schemas/MetadataFieldGroupDto"
+        },
+        "maxItems": 32,
+        "type": "array"
+      },
+      "last_known_good": {
+        "$ref": "#/components/schemas/LastKnownGoodPolicyDto"
+      },
+      "original_locale": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "overrides": {
+        "items": {
+          "$ref": "#/components/schemas/MetadataOverrideMutationDto"
+        },
+        "maxItems": 64,
+        "type": "array"
+      },
+      "preferred_locale": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "preferred_provider_id": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "region": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "allow_english_fallback",
+      "last_known_good",
+      "enabled_field_groups",
+      "overrides"
+    ],
+    "type": "object"
+  },
   "ConfigureProviderCredentialRequest": {
     "additionalProperties": false,
     "properties": {
@@ -223,6 +279,58 @@ const PRODUCTION_SCHEMAS = {
       "Bearer"
     ],
     "type": "string"
+  },
+  "EnrichmentPolicyDto": {
+    "additionalProperties": false,
+    "properties": {
+      "allow_english_fallback": {
+        "type": "boolean"
+      },
+      "enabled_field_groups": {
+        "items": {
+          "$ref": "#/components/schemas/MetadataFieldGroupDto"
+        },
+        "maxItems": 32,
+        "type": "array"
+      },
+      "last_known_good": {
+        "$ref": "#/components/schemas/LastKnownGoodPolicyDto"
+      },
+      "original_locale": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "preferred_locale": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "preferred_provider_id": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "profile_id": {
+        "type": "string"
+      },
+      "region": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "profile_id",
+      "allow_english_fallback",
+      "last_known_good",
+      "enabled_field_groups"
+    ],
+    "type": "object"
   },
   "EnrollFirstClientRequest": {
     "additionalProperties": false,
@@ -444,6 +552,13 @@ const PRODUCTION_SCHEMAS = {
     ],
     "type": "object"
   },
+  "LastKnownGoodPolicyDto": {
+    "enum": [
+      "allow",
+      "deny"
+    ],
+    "type": "string"
+  },
   "ListProvidersResponse": {
     "additionalProperties": false,
     "properties": {
@@ -497,6 +612,570 @@ const PRODUCTION_SCHEMAS = {
       "truncated"
     ],
     "type": "object"
+  },
+  "MetadataAttributionDto": {
+    "additionalProperties": false,
+    "properties": {
+      "documentation_url": {
+        "type": "string"
+      },
+      "provider_id": {
+        "type": "string"
+      },
+      "text": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "provider_id",
+      "text",
+      "documentation_url"
+    ],
+    "type": "object"
+  },
+  "MetadataCacheEntryDto": {
+    "additionalProperties": false,
+    "properties": {
+      "claim_ids": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "created_at": {
+        "type": "string"
+      },
+      "fresh_until": {
+        "type": "string"
+      },
+      "invalidation": {
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "$ref": "#/components/schemas/MetadataCacheInvalidationDto"
+          }
+        ]
+      },
+      "key": {
+        "$ref": "#/components/schemas/MetadataCacheKeyDto"
+      },
+      "read_state": {
+        "$ref": "#/components/schemas/MetadataCacheReadStateDto"
+      },
+      "stale_on_error_until": {
+        "type": "string"
+      },
+      "stale_while_refreshing_until": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "key",
+      "claim_ids",
+      "created_at",
+      "fresh_until",
+      "stale_while_refreshing_until",
+      "stale_on_error_until",
+      "read_state"
+    ],
+    "type": "object"
+  },
+  "MetadataCacheInvalidationDto": {
+    "additionalProperties": false,
+    "properties": {
+      "invalidated_at": {
+        "type": "string"
+      },
+      "reason": {
+        "$ref": "#/components/schemas/MetadataCacheInvalidationReasonDto"
+      }
+    },
+    "required": [
+      "reason",
+      "invalidated_at"
+    ],
+    "type": "object"
+  },
+  "MetadataCacheInvalidationReasonDto": {
+    "enum": [
+      "provider_configuration_changed",
+      "credential_rotated",
+      "projection_policy_changed",
+      "terms_changed",
+      "explicit_retraction"
+    ],
+    "type": "string"
+  },
+  "MetadataCacheKeyDto": {
+    "additionalProperties": false,
+    "properties": {
+      "classification": {
+        "$ref": "#/components/schemas/MetadataDataClassificationDto"
+      },
+      "configuration_digest": {
+        "pattern": "^sha256:[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "credential_reference_version": {
+        "format": "int64",
+        "minimum": 0,
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "field_group": {
+        "$ref": "#/components/schemas/MetadataFieldGroupDto"
+      },
+      "grain": {
+        "type": "string"
+      },
+      "locale": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "provider_id": {
+        "type": "string"
+      },
+      "purpose": {
+        "$ref": "#/components/schemas/MetadataCachePurposeDto"
+      },
+      "record_id": {
+        "type": "string"
+      },
+      "region": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "resolved_provider_route": {
+        "type": "string"
+      },
+      "schema_version": {
+        "format": "int32",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "settings_fingerprint": {
+        "pattern": "^sha256:[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "source_identifier": {
+        "type": "string"
+      },
+      "source_namespace": {
+        "type": "string"
+      },
+      "terms_revision": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "provider_id",
+      "record_id",
+      "resolved_provider_route",
+      "grain",
+      "source_namespace",
+      "source_identifier",
+      "field_group",
+      "settings_fingerprint",
+      "configuration_digest",
+      "schema_version",
+      "purpose",
+      "terms_revision",
+      "classification"
+    ],
+    "type": "object"
+  },
+  "MetadataCachePurposeDto": {
+    "enum": [
+      "metadata_enrichment",
+      "display_projection",
+      "rating_lookup",
+      "offline_read"
+    ],
+    "type": "string"
+  },
+  "MetadataCacheReadStateDto": {
+    "enum": [
+      "fresh",
+      "stale_while_refreshing",
+      "stale_on_error",
+      "expired",
+      "invalidated",
+      "partition_denied"
+    ],
+    "type": "string"
+  },
+  "MetadataClaimDto": {
+    "additionalProperties": false,
+    "properties": {
+      "claim_id": {
+        "type": "string"
+      },
+      "field_key": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "provenance": {
+        "$ref": "#/components/schemas/MetadataClaimProvenanceDto"
+      },
+      "record_id": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "value": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "claim_id",
+      "value",
+      "provenance"
+    ],
+    "type": "object"
+  },
+  "MetadataClaimProvenanceDto": {
+    "additionalProperties": false,
+    "properties": {
+      "claim_id": {
+        "type": "string"
+      },
+      "evidence_digest": {
+        "pattern": "^sha256:[0-9a-f]{64}$",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "expires_at": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "fetched_at": {
+        "type": "string"
+      },
+      "field_key": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "locale": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "provider_id": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "record_id": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "region": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "source_identifier": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "source_namespace": {
+        "type": "string"
+      },
+      "source_version": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "status": {
+        "$ref": "#/components/schemas/MetadataClaimStatusDto"
+      }
+    },
+    "required": [
+      "claim_id",
+      "source_namespace",
+      "fetched_at",
+      "status"
+    ],
+    "type": "object"
+  },
+  "MetadataClaimStatusDto": {
+    "enum": [
+      "fresh",
+      "stale",
+      "invalid",
+      "revoked",
+      "superseded",
+      "unavailable"
+    ],
+    "type": "string"
+  },
+  "MetadataDataClassificationDto": {
+    "enum": [
+      "public",
+      "internal",
+      "confidential",
+      "restricted"
+    ],
+    "type": "string"
+  },
+  "MetadataFieldGroupDto": {
+    "enum": [
+      "artwork",
+      "basic_info",
+      "details",
+      "release_dates",
+      "credits",
+      "production_companies",
+      "networks",
+      "episodes",
+      "season_artwork",
+      "recommendations",
+      "collections",
+      "trailers",
+      "watch_providers"
+    ],
+    "type": "string"
+  },
+  "MetadataOverrideMutationDto": {
+    "oneOf": [
+      {
+        "additionalProperties": false,
+        "properties": {
+          "field_key": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$",
+            "type": "string"
+          },
+          "operation": {
+            "enum": [
+              "set"
+            ],
+            "type": "string"
+          },
+          "record_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          },
+          "value": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "record_id",
+          "field_key",
+          "value",
+          "operation"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "field_key": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$",
+            "type": "string"
+          },
+          "operation": {
+            "enum": [
+              "clear"
+            ],
+            "type": "string"
+          },
+          "record_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "record_id",
+          "field_key",
+          "operation"
+        ],
+        "type": "object"
+      }
+    ]
+  },
+  "MetadataProjectedFieldDto": {
+    "additionalProperties": false,
+    "properties": {
+      "field_key": {
+        "type": "string"
+      },
+      "is_stale": {
+        "type": "boolean"
+      },
+      "profile_id": {
+        "type": "string"
+      },
+      "projected_at": {
+        "type": "string"
+      },
+      "provenance": {
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "$ref": "#/components/schemas/MetadataClaimProvenanceDto"
+          }
+        ]
+      },
+      "record_id": {
+        "type": "string"
+      },
+      "source_namespace": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "tier": {
+        "$ref": "#/components/schemas/MetadataProjectionTierDto"
+      },
+      "value": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "profile_id",
+      "record_id",
+      "field_key",
+      "tier",
+      "is_stale",
+      "projected_at"
+    ],
+    "type": "object"
+  },
+  "MetadataProjectionConfigurationResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "invalidated_cache_entries": {
+        "format": "int32",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "policy": {
+        "$ref": "#/components/schemas/EnrichmentPolicyDto"
+      }
+    },
+    "required": [
+      "policy",
+      "invalidated_cache_entries"
+    ],
+    "type": "object"
+  },
+  "MetadataProjectionQueryParameters": {
+    "additionalProperties": false,
+    "properties": {
+      "offline": {
+        "description": "Permit a policy-bounded stale-on-error cache partition when the host is\nexplicitly operating offline. This never permits an expired,\ninvalidated, or classification-denied partition.",
+        "type": "boolean"
+      }
+    },
+    "type": "object"
+  },
+  "MetadataProjectionResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "attributions": {
+        "items": {
+          "$ref": "#/components/schemas/MetadataAttributionDto"
+        },
+        "type": "array"
+      },
+      "cache_entries": {
+        "items": {
+          "$ref": "#/components/schemas/MetadataCacheEntryDto"
+        },
+        "type": "array"
+      },
+      "fields": {
+        "items": {
+          "$ref": "#/components/schemas/MetadataProjectedFieldDto"
+        },
+        "type": "array"
+      },
+      "policy": {
+        "$ref": "#/components/schemas/EnrichmentPolicyDto"
+      },
+      "profile_id": {
+        "type": "string"
+      },
+      "ratings": {
+        "items": {
+          "$ref": "#/components/schemas/RatingClaimDto"
+        },
+        "type": "array"
+      },
+      "record_id": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "profile_id",
+      "record_id",
+      "policy",
+      "fields",
+      "ratings",
+      "cache_entries",
+      "attributions"
+    ],
+    "type": "object"
+  },
+  "MetadataProjectionTierDto": {
+    "enum": [
+      "user_override",
+      "preferred_provider_claim",
+      "fallback_provider_claim",
+      "last_known_good",
+      "empty"
+    ],
+    "type": "string"
+  },
+  "MetadataRefreshModeDto": {
+    "enum": [
+      "prefer_cache",
+      "revalidate"
+    ],
+    "type": "string"
   },
   "NodeInitializationResponse": {
     "additionalProperties": false,
@@ -923,8 +1602,13 @@ const PRODUCTION_SCHEMAS = {
   "ProviderCapabilityResponse": {
     "additionalProperties": false,
     "properties": {
-      "capability": {
-        "$ref": "#/components/schemas/ProviderCapabilityDto"
+      "capabilities": {
+        "items": {
+          "$ref": "#/components/schemas/ProviderCapabilityDto"
+        },
+        "maxItems": 32,
+        "minItems": 1,
+        "type": "array"
       },
       "provider_id": {
         "type": "string"
@@ -932,7 +1616,7 @@ const PRODUCTION_SCHEMAS = {
     },
     "required": [
       "provider_id",
-      "capability"
+      "capabilities"
     ],
     "type": "object"
   },
@@ -1095,6 +1779,56 @@ const PRODUCTION_SCHEMAS = {
     ],
     "type": "string"
   },
+  "RatingClaimDto": {
+    "additionalProperties": false,
+    "properties": {
+      "claim_id": {
+        "type": "string"
+      },
+      "provenance": {
+        "$ref": "#/components/schemas/MetadataClaimProvenanceDto"
+      },
+      "record_id": {
+        "type": "string"
+      },
+      "scale": {
+        "$ref": "#/components/schemas/RatingScaleDto"
+      },
+      "value_millis": {
+        "format": "int32",
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "claim_id",
+      "record_id",
+      "value_millis",
+      "scale",
+      "provenance"
+    ],
+    "type": "object"
+  },
+  "RatingScaleDto": {
+    "additionalProperties": false,
+    "properties": {
+      "maximum_millis": {
+        "format": "int32",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "minimum_millis": {
+        "format": "int32",
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "minimum_millis",
+      "maximum_millis"
+    ],
+    "type": "object"
+  },
   "RecordActivityDto": {
     "additionalProperties": false,
     "properties": {
@@ -1209,6 +1943,114 @@ const PRODUCTION_SCHEMAS = {
       "status",
       "title",
       "poster"
+    ],
+    "type": "object"
+  },
+  "RefreshMetadataClaimsRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "field_groups": {
+        "items": {
+          "$ref": "#/components/schemas/MetadataFieldGroupDto"
+        },
+        "maxItems": 32,
+        "minItems": 1,
+        "type": "array"
+      },
+      "locale": {
+        "maxLength": 16,
+        "minLength": 2,
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "mode": {
+        "$ref": "#/components/schemas/MetadataRefreshModeDto"
+      },
+      "operation_id": {
+        "format": "fasti-operation-id",
+        "maxLength": 35,
+        "minLength": 35,
+        "pattern": "^op_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      },
+      "provider_id": {
+        "maxLength": 64,
+        "minLength": 1,
+        "type": "string"
+      },
+      "record_id": {
+        "maxLength": 64,
+        "minLength": 1,
+        "type": "string"
+      },
+      "region": {
+        "maxLength": 8,
+        "minLength": 2,
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "operation_id",
+      "record_id",
+      "provider_id",
+      "field_groups",
+      "mode"
+    ],
+    "type": "object"
+  },
+  "RefreshMetadataClaimsResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "attributions": {
+        "items": {
+          "$ref": "#/components/schemas/MetadataAttributionDto"
+        },
+        "type": "array"
+      },
+      "cache_entries": {
+        "items": {
+          "$ref": "#/components/schemas/MetadataCacheEntryDto"
+        },
+        "type": "array"
+      },
+      "claims": {
+        "items": {
+          "$ref": "#/components/schemas/MetadataClaimDto"
+        },
+        "type": "array"
+      },
+      "projections": {
+        "items": {
+          "$ref": "#/components/schemas/MetadataProjectedFieldDto"
+        },
+        "type": "array"
+      },
+      "provider_id": {
+        "type": "string"
+      },
+      "ratings": {
+        "items": {
+          "$ref": "#/components/schemas/RatingClaimDto"
+        },
+        "type": "array"
+      },
+      "record_id": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "record_id",
+      "provider_id",
+      "claims",
+      "ratings",
+      "projections",
+      "cache_entries",
+      "attributions"
     ],
     "type": "object"
   },
@@ -1595,6 +2437,33 @@ export type ProviderCapabilityStateDto = "available" | "degraded" | "disabled" |
 // prettier-ignore
 export type ProviderCheckStateDto = "failed" | "never_run" | "passed" | "unavailable";
 
+// prettier-ignore
+export type MetadataFieldGroupDto = "artwork" | "basic_info" | "collections" | "credits" | "details" | "episodes" | "networks" | "production_companies" | "recommendations" | "release_dates" | "season_artwork" | "trailers" | "watch_providers";
+
+// prettier-ignore
+export type MetadataRefreshModeDto = "prefer_cache" | "revalidate";
+
+// prettier-ignore
+export type MetadataClaimStatusDto = "fresh" | "invalid" | "revoked" | "stale" | "superseded" | "unavailable";
+
+// prettier-ignore
+export type MetadataProjectionTierDto = "empty" | "fallback_provider_claim" | "last_known_good" | "preferred_provider_claim" | "user_override";
+
+// prettier-ignore
+export type LastKnownGoodPolicyDto = "allow" | "deny";
+
+// prettier-ignore
+export type MetadataCachePurposeDto = "display_projection" | "metadata_enrichment" | "offline_read" | "rating_lookup";
+
+// prettier-ignore
+export type MetadataDataClassificationDto = "confidential" | "internal" | "public" | "restricted";
+
+// prettier-ignore
+export type MetadataCacheInvalidationReasonDto = "credential_rotated" | "explicit_retraction" | "projection_policy_changed" | "provider_configuration_changed" | "terms_changed";
+
+// prettier-ignore
+export type MetadataCacheReadStateDto = "expired" | "fresh" | "invalidated" | "partition_denied" | "stale_on_error" | "stale_while_refreshing";
+
 // The Nuvio wire document intentionally preserves extension fields.
 export type NuvioCollectionsDocumentDto = ReadonlyArray<Record<string, unknown>>;
 
@@ -1770,13 +2639,167 @@ export interface ConfigureProviderCredentialRequest {
 }
 
 export interface ProviderCapabilityResponse {
-  readonly capability: ProviderCapabilityDto;
+  readonly capabilities: ReadonlyArray<ProviderCapabilityDto>;
   readonly provider_id: string;
 }
 
 export interface ProviderHealthResponse {
   readonly capabilities: ReadonlyArray<ProviderCapabilityDto>;
   readonly provider_id: string;
+}
+
+export interface RefreshMetadataClaimsRequest {
+  readonly field_groups: ReadonlyArray<MetadataFieldGroupDto>;
+  readonly locale?: null | string;
+  readonly mode: MetadataRefreshModeDto;
+  readonly operation_id: string;
+  readonly provider_id: string;
+  readonly record_id: string;
+  readonly region?: null | string;
+}
+
+export interface MetadataClaimProvenanceDto {
+  readonly claim_id: string;
+  readonly evidence_digest?: null | string;
+  readonly expires_at?: null | string;
+  readonly fetched_at: string;
+  readonly field_key?: null | string;
+  readonly locale?: null | string;
+  readonly provider_id?: null | string;
+  readonly record_id?: null | string;
+  readonly region?: null | string;
+  readonly source_identifier?: null | string;
+  readonly source_namespace: string;
+  readonly source_version?: null | string;
+  readonly status: MetadataClaimStatusDto;
+}
+
+export interface MetadataClaimDto {
+  readonly claim_id: string;
+  readonly field_key?: null | string;
+  readonly provenance: MetadataClaimProvenanceDto;
+  readonly record_id?: null | string;
+  readonly value: string;
+}
+
+export interface RatingScaleDto {
+  readonly maximum_millis: number;
+  readonly minimum_millis: number;
+}
+
+export interface RatingClaimDto {
+  readonly claim_id: string;
+  readonly provenance: MetadataClaimProvenanceDto;
+  readonly record_id: string;
+  readonly scale: RatingScaleDto;
+  readonly value_millis: number;
+}
+
+export interface MetadataProjectedFieldDto {
+  readonly field_key: string;
+  readonly is_stale: boolean;
+  readonly profile_id: string;
+  readonly projected_at: string;
+  readonly provenance?: MetadataClaimProvenanceDto | null;
+  readonly record_id: string;
+  readonly source_namespace?: null | string;
+  readonly tier: MetadataProjectionTierDto;
+  readonly value?: null | string;
+}
+
+export interface EnrichmentPolicyDto {
+  readonly allow_english_fallback: boolean;
+  readonly enabled_field_groups: ReadonlyArray<MetadataFieldGroupDto>;
+  readonly last_known_good: LastKnownGoodPolicyDto;
+  readonly original_locale?: null | string;
+  readonly preferred_locale?: null | string;
+  readonly preferred_provider_id?: null | string;
+  readonly profile_id: string;
+  readonly region?: null | string;
+}
+
+export interface MetadataCacheKeyDto {
+  readonly classification: MetadataDataClassificationDto;
+  readonly configuration_digest: string;
+  readonly credential_reference_version?: null | number;
+  readonly field_group: MetadataFieldGroupDto;
+  readonly grain: string;
+  readonly locale?: null | string;
+  readonly provider_id: string;
+  readonly purpose: MetadataCachePurposeDto;
+  readonly record_id: string;
+  readonly region?: null | string;
+  readonly resolved_provider_route: string;
+  readonly schema_version: number;
+  readonly settings_fingerprint: string;
+  readonly source_identifier: string;
+  readonly source_namespace: string;
+  readonly terms_revision: string;
+}
+
+export interface MetadataCacheInvalidationDto {
+  readonly invalidated_at: string;
+  readonly reason: MetadataCacheInvalidationReasonDto;
+}
+
+export interface MetadataCacheEntryDto {
+  readonly claim_ids: ReadonlyArray<string>;
+  readonly created_at: string;
+  readonly fresh_until: string;
+  readonly invalidation?: MetadataCacheInvalidationDto | null;
+  readonly key: MetadataCacheKeyDto;
+  readonly read_state: MetadataCacheReadStateDto;
+  readonly stale_on_error_until: string;
+  readonly stale_while_refreshing_until: string;
+}
+
+export interface MetadataAttributionDto {
+  readonly documentation_url: string;
+  readonly provider_id: string;
+  readonly text: string;
+}
+
+export interface RefreshMetadataClaimsResponse {
+  readonly attributions: ReadonlyArray<MetadataAttributionDto>;
+  readonly cache_entries: ReadonlyArray<MetadataCacheEntryDto>;
+  readonly claims: ReadonlyArray<MetadataClaimDto>;
+  readonly projections: ReadonlyArray<MetadataProjectedFieldDto>;
+  readonly provider_id: string;
+  readonly ratings: ReadonlyArray<RatingClaimDto>;
+  readonly record_id: string;
+}
+
+export interface MetadataProjectionResponse {
+  readonly attributions: ReadonlyArray<MetadataAttributionDto>;
+  readonly cache_entries: ReadonlyArray<MetadataCacheEntryDto>;
+  readonly fields: ReadonlyArray<MetadataProjectedFieldDto>;
+  readonly policy: EnrichmentPolicyDto;
+  readonly profile_id: string;
+  readonly ratings: ReadonlyArray<RatingClaimDto>;
+  readonly record_id: string;
+}
+
+export interface MetadataProjectionQueryParameters {
+  readonly offline?: boolean;
+}
+
+// prettier-ignore
+export type MetadataOverrideMutationDto = { readonly field_key: string; readonly operation: "clear"; readonly record_id: string } | { readonly field_key: string; readonly operation: "set"; readonly record_id: string; readonly value: string };
+
+export interface ConfigureMetadataProjectionRequest {
+  readonly allow_english_fallback: boolean;
+  readonly enabled_field_groups: ReadonlyArray<MetadataFieldGroupDto>;
+  readonly last_known_good: LastKnownGoodPolicyDto;
+  readonly original_locale?: null | string;
+  readonly overrides: ReadonlyArray<MetadataOverrideMutationDto>;
+  readonly preferred_locale?: null | string;
+  readonly preferred_provider_id?: null | string;
+  readonly region?: null | string;
+}
+
+export interface MetadataProjectionConfigurationResponse {
+  readonly invalidated_cache_entries: number;
+  readonly policy: EnrichmentPolicyDto;
 }
 
 // prettier-ignore
@@ -1801,6 +2824,9 @@ export const LOCAL_RUNTIME_OPERATIONS = {
   removeProviderCredential: { operationId: "remove_provider_credential", method: "DELETE", path: "/api/v1/providers/{provider_id}/credentials/{capability_id}", capabilityId: "provider.credential.configure", authorization: "scoped", requiredScopes: ["provider_credential_manage"], problemCodes: ["authentication_failed","forbidden","integrity_failed","malformed_json","payload_too_large","provider_credential_invalid","provider_unavailable","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["provider.credential.configure.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: null, responseSchema: "ProviderCapabilityResponse" },
   testProviderCredential: { operationId: "test_provider_credential", method: "POST", path: "/api/v1/providers/{provider_id}/credentials/{capability_id}/tests", capabilityId: "provider.credential.test", authorization: "scoped", requiredScopes: ["provider_credential_manage"], problemCodes: ["authentication_failed","forbidden","integrity_failed","provider_credential_expired","provider_credential_invalid","provider_credential_missing","provider_rate_limited","provider_response_invalid","provider_route_unavailable","provider_unavailable","storage_unavailable"], exampleIds: ["provider.credential.test.provider_credential_missing"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: null, responseSchema: "ProviderCapabilityResponse" },
   readProviderHealth: { operationId: "read_provider_health", method: "GET", path: "/api/v1/providers/{provider_id}/health", capabilityId: "provider.health.read", authorization: "scoped", requiredScopes: ["provider_read"], problemCodes: ["authentication_failed","forbidden","integrity_failed","provider_rate_limited","provider_response_invalid","provider_route_unavailable","provider_unavailable","storage_unavailable"], exampleIds: ["provider.health.read.provider_unavailable"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ProviderHealthResponse" },
+  refreshMetadataClaims: { operationId: "refresh_metadata_claims", method: "POST", path: "/api/v1/metadata/claims/refresh", capabilityId: "metadata.claim.refresh", authorization: "scoped", requiredScopes: ["metadata_claim_refresh"], problemCodes: ["authentication_failed","forbidden","idempotency_conflict","integrity_failed","malformed_json","metadata_claim_stale","payload_too_large","provider_credential_expired","provider_credential_invalid","provider_credential_missing","provider_rate_limited","provider_response_invalid","provider_route_unavailable","provider_unavailable","record_not_found","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["metadata.claim.refresh.metadata_claim_stale"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: "RefreshMetadataClaimsRequest", responseSchema: "RefreshMetadataClaimsResponse" },
+  readMetadataProjection: { operationId: "read_metadata_projection", method: "GET", path: "/api/v1/records/{record_id}/metadata-projection", capabilityId: "metadata.projection.read", authorization: "scoped", requiredScopes: ["metadata_projection_read"], problemCodes: ["authentication_failed","forbidden","integrity_failed","record_not_found","storage_unavailable","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "MetadataProjectionResponse" },
+  configureMetadataProjection: { operationId: "configure_metadata_projection", method: "PUT", path: "/api/v1/profile/metadata-projection", capabilityId: "metadata.projection.configure", authorization: "scoped", requiredScopes: ["metadata_projection_configure"], problemCodes: ["authentication_failed","forbidden","integrity_failed","malformed_json","payload_too_large","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["metadata.projection.configure.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "ConfigureMetadataProjectionRequest", responseSchema: "MetadataProjectionConfigurationResponse" },
 } as const;
 
 // prettier-ignore
@@ -1893,6 +2919,31 @@ export function parseProviderHealthResponse(value: unknown): ProviderHealthRespo
   return parseProductionDto("ProviderHealthResponse", value);
 }
 
+// prettier-ignore
+export function parseRefreshMetadataClaimsRequest(value: unknown): RefreshMetadataClaimsRequest {
+  return parseProductionDto("RefreshMetadataClaimsRequest", value);
+}
+
+// prettier-ignore
+export function parseRefreshMetadataClaimsResponse(value: unknown): RefreshMetadataClaimsResponse {
+  return parseProductionDto("RefreshMetadataClaimsResponse", value);
+}
+
+// prettier-ignore
+export function parseMetadataProjectionResponse(value: unknown): MetadataProjectionResponse {
+  return parseProductionDto("MetadataProjectionResponse", value);
+}
+
+// prettier-ignore
+export function parseConfigureMetadataProjectionRequest(value: unknown): ConfigureMetadataProjectionRequest {
+  return parseProductionDto("ConfigureMetadataProjectionRequest", value);
+}
+
+// prettier-ignore
+export function parseMetadataProjectionConfigurationResponse(value: unknown): MetadataProjectionConfigurationResponse {
+  return parseProductionDto("MetadataProjectionConfigurationResponse", value);
+}
+
 export interface AcceptObservationRequest {
   readonly evidence: EvidenceReferenceDto;
   readonly observed_at: ObservedTimeDto;
@@ -1909,14 +2960,14 @@ export interface AcceptObservationResponse {
 export interface CapabilityDescriptorDto {
   readonly authorization: "bootstrap_only" | "browser_session" | "local_operator" | "scoped" | "unauthenticated";
   readonly bounded_context: string;
-  readonly contract_body: "b1" | "b2" | "b3" | "c1" | "m1";
-  readonly examples: ReadonlyArray<"client.enroll.forbidden" | "credential.revoke.capability_unavailable" | "credential.rotate.capability_unavailable" | "identity.identifier.attach.validation_failed" | "identity.namespace.register.validation_failed" | "identity.record.create.validation_failed" | "identity.record.list.forbidden" | "integration.status.success" | "listener.configure.capability_unavailable" | "node.initialize.validation_failed" | "observation.accept.capacity_exceeded" | "observation.accept.receipt" | "observation.accept.validation_failed" | "profile.record.tracking_disposition.list.forbidden" | "profile.record.tracking_disposition.set.validation_failed" | "profile.select.capability_unavailable" | "provider.credential.configure.validation_failed" | "provider.credential.test.provider_credential_missing" | "provider.health.read.provider_unavailable" | "provider.list.forbidden" | "receipt.replay.receipt_not_found" | "receipt.stream.event" | "receipt.stream.receipt_not_found" | "system.capabilities.forbidden" | "system.capabilities.success" | "system.health.success">;
-  readonly id: "browser.session.create" | "browser.session.end" | "browser.session.profile.select" | "browser.session.read" | "browser.session.revoke" | "browser.session.rotate" | "browser.sessions.list" | "browser.sessions.revoke_all" | "browser.sessions.revoke_others" | "client.enroll" | "correction.chain.append" | "correction.chain.inspect" | "credential.revoke" | "credential.rotate" | "identity.identifier.attach" | "identity.namespace.register" | "identity.record.create" | "identity.record.list" | "identity.review.defer" | "identity.review.inspect" | "identity.review.resolve" | "identity.review.resume" | "integration.status" | "listener.configure" | "node.initialize" | "observation.accept" | "portability.workspace.export" | "portability.workspace.restore" | "portability.workspace.verify" | "profile.nuvio_collections.clear" | "profile.nuvio_collections.get" | "profile.nuvio_collections.replace" | "profile.record.tracking_disposition.list" | "profile.record.tracking_disposition.set" | "profile.select" | "provider.credential.configure" | "provider.credential.test" | "provider.health.read" | "provider.list" | "receipt.replay" | "receipt.stream" | "system.capabilities.discover" | "system.health";
+  readonly contract_body: "b1" | "b2" | "b3" | "c1" | "m1" | "m2";
+  readonly examples: ReadonlyArray<"client.enroll.forbidden" | "credential.revoke.capability_unavailable" | "credential.rotate.capability_unavailable" | "identity.identifier.attach.validation_failed" | "identity.namespace.register.validation_failed" | "identity.record.create.validation_failed" | "identity.record.list.forbidden" | "integration.status.success" | "listener.configure.capability_unavailable" | "metadata.claim.refresh.metadata_claim_stale" | "metadata.projection.configure.validation_failed" | "node.initialize.validation_failed" | "observation.accept.capacity_exceeded" | "observation.accept.receipt" | "observation.accept.validation_failed" | "profile.record.tracking_disposition.list.forbidden" | "profile.record.tracking_disposition.set.validation_failed" | "profile.select.capability_unavailable" | "provider.credential.configure.validation_failed" | "provider.credential.test.provider_credential_missing" | "provider.health.read.provider_unavailable" | "provider.list.forbidden" | "receipt.replay.receipt_not_found" | "receipt.stream.event" | "receipt.stream.receipt_not_found" | "system.capabilities.forbidden" | "system.capabilities.success" | "system.health.success">;
+  readonly id: "browser.session.create" | "browser.session.end" | "browser.session.profile.select" | "browser.session.read" | "browser.session.revoke" | "browser.session.rotate" | "browser.sessions.list" | "browser.sessions.revoke_all" | "browser.sessions.revoke_others" | "client.enroll" | "correction.chain.append" | "correction.chain.inspect" | "credential.revoke" | "credential.rotate" | "identity.identifier.attach" | "identity.namespace.register" | "identity.record.create" | "identity.record.list" | "identity.review.defer" | "identity.review.inspect" | "identity.review.resolve" | "identity.review.resume" | "integration.status" | "listener.configure" | "metadata.claim.refresh" | "metadata.projection.configure" | "metadata.projection.read" | "node.initialize" | "observation.accept" | "portability.workspace.export" | "portability.workspace.restore" | "portability.workspace.verify" | "profile.nuvio_collections.clear" | "profile.nuvio_collections.get" | "profile.nuvio_collections.replace" | "profile.record.tracking_disposition.list" | "profile.record.tracking_disposition.set" | "profile.select" | "provider.credential.configure" | "provider.credential.test" | "provider.health.read" | "provider.list" | "receipt.replay" | "receipt.stream" | "system.capabilities.discover" | "system.health";
   readonly lifecycle: CapabilityLifecycleDto;
-  readonly problems: ReadonlyArray<"already_initialized" | "authentication_failed" | "bootstrap_closed" | "browser_session_expired" | "browser_session_revoked" | "capability_unavailable" | "capacity_exceeded" | "forbidden" | "idempotency_conflict" | "identity_conflict" | "integrity_failed" | "invalid_identifier" | "invalid_observation" | "malformed_json" | "payload_too_large" | "provider_credential_expired" | "provider_credential_invalid" | "provider_credential_missing" | "provider_rate_limited" | "provider_response_invalid" | "provider_route_unavailable" | "provider_unavailable" | "receipt_not_found" | "record_not_found" | "session_policy_changed" | "storage_unavailable" | "unsupported_media_type" | "validation_failed">;
-  readonly runtime_body: "b0" | "b1" | "b2" | "b3" | "c1" | "m1";
-  readonly scopes: ReadonlyArray<"capability_read" | "client_enroll" | "correction_read" | "correction_write" | "credential_manage" | "identity_read" | "identity_write" | "listener_configure" | "observation_accept" | "profile_select" | "profile_state_read" | "profile_state_write" | "provider_credential_manage" | "provider_read" | "receipt_read" | "review_read" | "review_write" | "workspace_export" | "workspace_verify">;
-  readonly surface_profile: "b1_durable_bootstrap" | "b1_http_fixture" | "b1_integration_status" | "b1_observation_accept" | "b1_receipt_replay" | "b1_receipt_stream" | "b1_records" | "b2_profile_state" | "c1_browser_session_foundation" | "health" | "later_b2" | "later_b3" | "m1_providers";
+  readonly problems: ReadonlyArray<"already_initialized" | "authentication_failed" | "bootstrap_closed" | "browser_session_expired" | "browser_session_revoked" | "capability_unavailable" | "capacity_exceeded" | "forbidden" | "idempotency_conflict" | "identity_conflict" | "integrity_failed" | "invalid_identifier" | "invalid_observation" | "malformed_json" | "metadata_claim_stale" | "payload_too_large" | "provider_credential_expired" | "provider_credential_invalid" | "provider_credential_missing" | "provider_rate_limited" | "provider_response_invalid" | "provider_route_unavailable" | "provider_unavailable" | "receipt_not_found" | "record_not_found" | "session_policy_changed" | "storage_unavailable" | "unsupported_media_type" | "validation_failed">;
+  readonly runtime_body: "b0" | "b1" | "b2" | "b3" | "c1" | "m1" | "m2";
+  readonly scopes: ReadonlyArray<"capability_read" | "client_enroll" | "correction_read" | "correction_write" | "credential_manage" | "identity_read" | "identity_write" | "listener_configure" | "metadata_claim_refresh" | "metadata_projection_configure" | "metadata_projection_read" | "observation_accept" | "profile_select" | "profile_state_read" | "profile_state_write" | "provider_credential_manage" | "provider_read" | "receipt_read" | "review_read" | "review_write" | "workspace_export" | "workspace_verify">;
+  readonly surface_profile: "b1_durable_bootstrap" | "b1_http_fixture" | "b1_integration_status" | "b1_observation_accept" | "b1_receipt_replay" | "b1_receipt_stream" | "b1_records" | "b2_profile_state" | "c1_browser_session_foundation" | "health" | "later_b2" | "later_b3" | "m1_providers" | "m2_metadata";
   readonly uat: ReadonlyArray<CapabilityUatDto>;
 }
 
@@ -1930,21 +2981,21 @@ export interface CapabilityDiscoveryResponse {
 
 export interface CapabilityLifecycleDto {
   readonly contract_state: "finalized" | "reserved";
-  readonly introduced_in: "b0" | "b1" | "b2" | "c1" | "m1";
+  readonly introduced_in: "b0" | "b1" | "b2" | "c1" | "m1" | "m2";
   readonly runtime_availability: "fixture_only" | "guarded" | "implemented" | "later_body";
 }
 
 export interface CapabilitySurfaceDispositionDto {
   readonly binding?: null | string;
   readonly binding_visibility?: "internal" | "public";
-  readonly body?: "b0" | "b1" | "b2" | "b3" | "c1";
+  readonly body?: "b0" | "b1" | "b2" | "b3" | "c1" | "m1" | "m2";
   readonly reason?: null | string;
   readonly state: "later_body" | "not_applicable" | "required";
 }
 
 export interface CapabilityUatDto {
   readonly id: string;
-  readonly owner_body: "b1" | "b2" | "b3" | "c1";
+  readonly owner_body: "b1" | "b2" | "b3" | "c1" | "m1" | "m2";
   readonly reason: string;
   readonly relationship: "deferred" | "direct" | "split";
 }
@@ -2123,7 +3174,8 @@ const B1_CONFORMANCE_SCHEMAS = {
           "b2",
           "b3",
           "c1",
-          "m1"
+          "m1",
+          "m2"
         ],
         "type": "string"
       },
@@ -2139,6 +3191,8 @@ const B1_CONFORMANCE_SCHEMAS = {
             "identity.record.list.forbidden",
             "integration.status.success",
             "listener.configure.capability_unavailable",
+            "metadata.claim.refresh.metadata_claim_stale",
+            "metadata.projection.configure.validation_failed",
             "node.initialize.validation_failed",
             "observation.accept.capacity_exceeded",
             "observation.accept.receipt",
@@ -2188,6 +3242,9 @@ const B1_CONFORMANCE_SCHEMAS = {
           "identity.review.resume",
           "integration.status",
           "listener.configure",
+          "metadata.claim.refresh",
+          "metadata.projection.configure",
+          "metadata.projection.read",
           "node.initialize",
           "observation.accept",
           "portability.workspace.export",
@@ -2231,6 +3288,7 @@ const B1_CONFORMANCE_SCHEMAS = {
             "invalid_identifier",
             "invalid_observation",
             "malformed_json",
+            "metadata_claim_stale",
             "payload_too_large",
             "provider_credential_expired",
             "provider_credential_invalid",
@@ -2258,7 +3316,8 @@ const B1_CONFORMANCE_SCHEMAS = {
           "b2",
           "b3",
           "c1",
-          "m1"
+          "m1",
+          "m2"
         ],
         "type": "string"
       },
@@ -2273,6 +3332,9 @@ const B1_CONFORMANCE_SCHEMAS = {
             "identity_read",
             "identity_write",
             "listener_configure",
+            "metadata_claim_refresh",
+            "metadata_projection_configure",
+            "metadata_projection_read",
             "observation_accept",
             "profile_select",
             "profile_state_read",
@@ -2304,7 +3366,8 @@ const B1_CONFORMANCE_SCHEMAS = {
           "health",
           "later_b2",
           "later_b3",
-          "m1_providers"
+          "m1_providers",
+          "m2_metadata"
         ],
         "type": "string"
       },
@@ -2337,8 +3400,8 @@ const B1_CONFORMANCE_SCHEMAS = {
         "items": {
           "$ref": "#/components/schemas/CapabilityDescriptorDto"
         },
-        "maxItems": 43,
-        "minItems": 43,
+        "maxItems": 46,
+        "minItems": 46,
         "type": "array",
         "uniqueItems": true
       },
@@ -2376,8 +3439,8 @@ const B1_CONFORMANCE_SCHEMAS = {
           },
           "type": "object"
         },
-        "maxProperties": 13,
-        "minProperties": 13,
+        "maxProperties": 14,
+        "minProperties": 14,
         "propertyNames": {
           "enum": [
             "b1_durable_bootstrap",
@@ -2392,7 +3455,8 @@ const B1_CONFORMANCE_SCHEMAS = {
             "health",
             "later_b2",
             "later_b3",
-            "m1_providers"
+            "m1_providers",
+            "m2_metadata"
           ],
           "type": "string"
         },
@@ -2424,7 +3488,8 @@ const B1_CONFORMANCE_SCHEMAS = {
           "b1",
           "b2",
           "c1",
-          "m1"
+          "m1",
+          "m2"
         ],
         "type": "string"
       },
@@ -2470,7 +3535,9 @@ const B1_CONFORMANCE_SCHEMAS = {
           "b1",
           "b2",
           "b3",
-          "c1"
+          "c1",
+          "m1",
+          "m2"
         ],
         "type": [
           "string",
@@ -2509,7 +3576,9 @@ const B1_CONFORMANCE_SCHEMAS = {
           "b1",
           "b2",
           "b3",
-          "c1"
+          "c1",
+          "m1",
+          "m2"
         ],
         "type": "string"
       },
@@ -3256,6 +4325,9 @@ export type CapabilityId =
   | "identity.review.resume"
   | "integration.status"
   | "listener.configure"
+  | "metadata.claim.refresh"
+  | "metadata.projection.configure"
+  | "metadata.projection.read"
   | "node.initialize"
   | "observation.accept"
   | "portability.workspace.export"
@@ -3283,7 +4355,8 @@ export type CapabilityBody =
   | "b2"
   | "b3"
   | "c1"
-  | "m1";
+  | "m1"
+  | "m2";
 
 // prettier-ignore
 export type ContractState =
@@ -3313,6 +4386,7 @@ export type ProblemCode =
   | "invalid_identifier"
   | "invalid_observation"
   | "malformed_json"
+  | "metadata_claim_stale"
   | "payload_too_large"
   | "provider_credential_expired"
   | "provider_credential_invalid"
@@ -3937,6 +5011,102 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "listener_configure"
       ],
       "surface_profile": "b1_http_fixture",
+      "uat": []
+    },
+    {
+      "authorization": "scoped",
+      "bounded_context": "metadata.claims",
+      "contract_body": "m2",
+      "examples": [
+        "metadata.claim.refresh.metadata_claim_stale"
+      ],
+      "id": "metadata.claim.refresh",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "m2",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "forbidden",
+        "idempotency_conflict",
+        "integrity_failed",
+        "malformed_json",
+        "metadata_claim_stale",
+        "payload_too_large",
+        "provider_credential_expired",
+        "provider_credential_invalid",
+        "provider_credential_missing",
+        "provider_rate_limited",
+        "provider_response_invalid",
+        "provider_route_unavailable",
+        "provider_unavailable",
+        "record_not_found",
+        "storage_unavailable",
+        "unsupported_media_type",
+        "validation_failed"
+      ],
+      "runtime_body": "m2",
+      "scopes": [
+        "metadata_claim_refresh"
+      ],
+      "surface_profile": "m2_metadata",
+      "uat": []
+    },
+    {
+      "authorization": "scoped",
+      "bounded_context": "metadata.projection",
+      "contract_body": "m2",
+      "examples": [
+        "metadata.projection.configure.validation_failed"
+      ],
+      "id": "metadata.projection.configure",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "m2",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "forbidden",
+        "integrity_failed",
+        "malformed_json",
+        "payload_too_large",
+        "storage_unavailable",
+        "unsupported_media_type",
+        "validation_failed"
+      ],
+      "runtime_body": "m2",
+      "scopes": [
+        "metadata_projection_configure"
+      ],
+      "surface_profile": "m2_metadata",
+      "uat": []
+    },
+    {
+      "authorization": "scoped",
+      "bounded_context": "metadata.projection",
+      "contract_body": "m2",
+      "examples": [],
+      "id": "metadata.projection.read",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "m2",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "forbidden",
+        "integrity_failed",
+        "record_not_found",
+        "storage_unavailable",
+        "validation_failed"
+      ],
+      "runtime_body": "m2",
+      "scopes": [
+        "metadata_projection_read"
+      ],
+      "surface_profile": "m2_metadata",
       "uat": []
     },
     {
@@ -5195,6 +6365,60 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       },
       "ui": {
         "binding": "ui:provider-settings",
+        "binding_visibility": "public",
+        "state": "required"
+      }
+    },
+    "m2_metadata": {
+      "cli": {
+        "binding": "cli:capability-discovery",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "domain_application": {
+        "binding_visibility": "internal",
+        "state": "required"
+      },
+      "http_openapi": {
+        "binding": "openapi:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "json_ld": {
+        "reason": "Profile projection policy and refresh control are private operational state rather than public linked data.",
+        "state": "not_applicable"
+      },
+      "json_schema": {
+        "binding": "schema:production-openapi-operation:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "knowledge": {
+        "binding": "knowledge:problem-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "okf": {
+        "binding": "okf:capability-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "package_smoke": {
+        "binding": "package-smoke:production-metadata",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "sdk": {
+        "binding": "sdk:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "sse_asyncapi": {
+        "reason": "Metadata refresh and profile projection operations are finite requests; no durable event transport exists in M2.",
+        "state": "not_applicable"
+      },
+      "ui": {
+        "binding": "ui:metadata-provenance",
         "binding_visibility": "public",
         "state": "required"
       }
@@ -7566,6 +8790,582 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
     },
     {
+      "capability_id": "metadata.claim.refresh",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "metadata.claim.refresh",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "metadata.claim.refresh",
+      "code": "idempotency_conflict",
+      "detail": "operation ID was already used with different request semantics",
+      "next_actions": [
+        {
+          "id": "use_new_operation_id",
+          "label": "Use a new operation ID for a distinct observation"
+        }
+      ],
+      "param": "/operation_id",
+      "param_policy": "fixed",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 409,
+      "title": "Idempotency conflict",
+      "type": "https://fasti.scrobble.dev/v1/problems/idempotency-conflict"
+    },
+    {
+      "capability_id": "metadata.claim.refresh",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "metadata.claim.refresh",
+      "code": "malformed_json",
+      "detail": "request JSON is malformed",
+      "next_actions": [
+        {
+          "id": "correct_json",
+          "label": "Correct the JSON syntax and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 400,
+      "title": "Malformed JSON",
+      "type": "https://fasti.scrobble.dev/v1/problems/malformed-json"
+    },
+    {
+      "capability_id": "metadata.claim.refresh",
+      "code": "metadata_claim_stale",
+      "detail": "the provider refresh did not produce a fresh claim; the last-known-good claim remains active",
+      "next_actions": [
+        {
+          "id": "retry_metadata_refresh",
+          "label": "Retry the metadata refresh or use the labelled last-known-good value"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "prior_state_retained",
+      "status": 409,
+      "title": "Metadata claim stale",
+      "type": "https://fasti.scrobble.dev/v1/problems/metadata-claim-stale"
+    },
+    {
+      "capability_id": "metadata.claim.refresh",
+      "code": "payload_too_large",
+      "detail": "request body exceeds the bounded transport limit",
+      "next_actions": [
+        {
+          "id": "reduce_request_body",
+          "label": "Reduce the request body and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 413,
+      "title": "Payload too large",
+      "type": "https://fasti.scrobble.dev/v1/problems/payload-too-large"
+    },
+    {
+      "capability_id": "metadata.claim.refresh",
+      "code": "provider_credential_expired",
+      "detail": "the configured provider credential has expired",
+      "next_actions": [
+        {
+          "id": "reauthorize_provider",
+          "label": "Reauthorize the provider connection"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 401,
+      "title": "Provider credential expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/provider-credential-expired"
+    },
+    {
+      "capability_id": "metadata.claim.refresh",
+      "code": "provider_credential_invalid",
+      "detail": "the provider rejected the configured credential",
+      "next_actions": [
+        {
+          "id": "replace_provider_credential",
+          "label": "Replace the provider credential and test it again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 401,
+      "title": "Provider credential invalid",
+      "type": "https://fasti.scrobble.dev/v1/problems/provider-credential-invalid"
+    },
+    {
+      "capability_id": "metadata.claim.refresh",
+      "code": "provider_credential_missing",
+      "detail": "this provider capability requires a stored credential",
+      "next_actions": [
+        {
+          "id": "configure_provider_credential",
+          "label": "Configure the required provider credential"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 409,
+      "title": "Provider credential missing",
+      "type": "https://fasti.scrobble.dev/v1/problems/provider-credential-missing"
+    },
+    {
+      "capability_id": "metadata.claim.refresh",
+      "code": "provider_rate_limited",
+      "detail": "the provider request budget is temporarily exhausted",
+      "next_actions": [
+        {
+          "id": "retry_after_provider_limit",
+          "label": "Retry after the provider limit resets"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "prior_state_retained",
+      "status": 429,
+      "title": "Provider rate limited",
+      "type": "https://fasti.scrobble.dev/v1/problems/provider-rate-limited"
+    },
+    {
+      "capability_id": "metadata.claim.refresh",
+      "code": "provider_response_invalid",
+      "detail": "the provider response did not satisfy the bounded response contract",
+      "next_actions": [
+        {
+          "id": "inspect_provider_health",
+          "label": "Inspect provider health before retrying"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "prior_state_retained",
+      "status": 502,
+      "title": "Provider response invalid",
+      "type": "https://fasti.scrobble.dev/v1/problems/provider-response-invalid"
+    },
+    {
+      "capability_id": "metadata.claim.refresh",
+      "code": "provider_route_unavailable",
+      "detail": "no verified provider route is available for this capability",
+      "next_actions": [
+        {
+          "id": "review_provider_route",
+          "label": "Review the provider capability and identity route"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 422,
+      "title": "Provider route unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/provider-route-unavailable"
+    },
+    {
+      "capability_id": "metadata.claim.refresh",
+      "code": "provider_unavailable",
+      "detail": "the provider is unavailable within the bounded request policy",
+      "next_actions": [
+        {
+          "id": "retry_provider",
+          "label": "Retry after checking provider and network status"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "prior_state_retained",
+      "status": 503,
+      "title": "Provider unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/provider-unavailable"
+    },
+    {
+      "capability_id": "metadata.claim.refresh",
+      "code": "record_not_found",
+      "detail": "no active Record is available for the requested identifier",
+      "next_actions": [
+        {
+          "id": "verify_record_id",
+          "label": "Verify the Record ID or create a new Record"
+        }
+      ],
+      "param": "/record_id",
+      "param_policy": "fixed",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 404,
+      "title": "Record not found",
+      "type": "https://fasti.scrobble.dev/v1/problems/record-not-found"
+    },
+    {
+      "capability_id": "metadata.claim.refresh",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "metadata.claim.refresh",
+      "code": "unsupported_media_type",
+      "detail": "request media type is unsupported",
+      "next_actions": [
+        {
+          "id": "use_supported_media_type",
+          "label": "Use the documented media type and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 415,
+      "title": "Unsupported media type",
+      "type": "https://fasti.scrobble.dev/v1/problems/unsupported-media-type"
+    },
+    {
+      "capability_id": "metadata.claim.refresh",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
+      "capability_id": "metadata.projection.configure",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "metadata.projection.configure",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "metadata.projection.configure",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "metadata.projection.configure",
+      "code": "malformed_json",
+      "detail": "request JSON is malformed",
+      "next_actions": [
+        {
+          "id": "correct_json",
+          "label": "Correct the JSON syntax and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 400,
+      "title": "Malformed JSON",
+      "type": "https://fasti.scrobble.dev/v1/problems/malformed-json"
+    },
+    {
+      "capability_id": "metadata.projection.configure",
+      "code": "payload_too_large",
+      "detail": "request body exceeds the bounded transport limit",
+      "next_actions": [
+        {
+          "id": "reduce_request_body",
+          "label": "Reduce the request body and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 413,
+      "title": "Payload too large",
+      "type": "https://fasti.scrobble.dev/v1/problems/payload-too-large"
+    },
+    {
+      "capability_id": "metadata.projection.configure",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "metadata.projection.configure",
+      "code": "unsupported_media_type",
+      "detail": "request media type is unsupported",
+      "next_actions": [
+        {
+          "id": "use_supported_media_type",
+          "label": "Use the documented media type and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 415,
+      "title": "Unsupported media type",
+      "type": "https://fasti.scrobble.dev/v1/problems/unsupported-media-type"
+    },
+    {
+      "capability_id": "metadata.projection.configure",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
+      "capability_id": "metadata.projection.read",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "metadata.projection.read",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "metadata.projection.read",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "metadata.projection.read",
+      "code": "record_not_found",
+      "detail": "no active Record is available for the requested identifier",
+      "next_actions": [
+        {
+          "id": "verify_record_id",
+          "label": "Verify the Record ID or create a new Record"
+        }
+      ],
+      "param": "/record_id",
+      "param_policy": "fixed",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 404,
+      "title": "Record not found",
+      "type": "https://fasti.scrobble.dev/v1/problems/record-not-found"
+    },
+    {
+      "capability_id": "metadata.projection.read",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "metadata.projection.read",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
       "capability_id": "node.initialize",
       "code": "already_initialized",
       "detail": "the local node has already completed its one-time initialization",
@@ -9418,9 +11218,9 @@ type JsonObject = Record<string, unknown>;
 const HEALTH_ALLOWED = ["status", "version"] as const;
 const HEALTH_REQUIRED = ["status", "version"] as const;
 // prettier-ignore
-const CAPABILITY_IDS = ["browser.session.create", "browser.session.end", "browser.session.profile.select", "browser.session.read", "browser.session.revoke", "browser.session.rotate", "browser.sessions.list", "browser.sessions.revoke_all", "browser.sessions.revoke_others", "client.enroll", "correction.chain.append", "correction.chain.inspect", "credential.revoke", "credential.rotate", "identity.identifier.attach", "identity.namespace.register", "identity.record.create", "identity.record.list", "identity.review.defer", "identity.review.inspect", "identity.review.resolve", "identity.review.resume", "integration.status", "listener.configure", "node.initialize", "observation.accept", "portability.workspace.export", "portability.workspace.restore", "portability.workspace.verify", "profile.nuvio_collections.clear", "profile.nuvio_collections.get", "profile.nuvio_collections.replace", "profile.record.tracking_disposition.list", "profile.record.tracking_disposition.set", "profile.select", "provider.credential.configure", "provider.credential.test", "provider.health.read", "provider.list", "receipt.replay", "receipt.stream", "system.capabilities.discover", "system.health"] as const;
+const CAPABILITY_IDS = ["browser.session.create", "browser.session.end", "browser.session.profile.select", "browser.session.read", "browser.session.revoke", "browser.session.rotate", "browser.sessions.list", "browser.sessions.revoke_all", "browser.sessions.revoke_others", "client.enroll", "correction.chain.append", "correction.chain.inspect", "credential.revoke", "credential.rotate", "identity.identifier.attach", "identity.namespace.register", "identity.record.create", "identity.record.list", "identity.review.defer", "identity.review.inspect", "identity.review.resolve", "identity.review.resume", "integration.status", "listener.configure", "metadata.claim.refresh", "metadata.projection.configure", "metadata.projection.read", "node.initialize", "observation.accept", "portability.workspace.export", "portability.workspace.restore", "portability.workspace.verify", "profile.nuvio_collections.clear", "profile.nuvio_collections.get", "profile.nuvio_collections.replace", "profile.record.tracking_disposition.list", "profile.record.tracking_disposition.set", "profile.select", "provider.credential.configure", "provider.credential.test", "provider.health.read", "provider.list", "receipt.replay", "receipt.stream", "system.capabilities.discover", "system.health"] as const;
 // prettier-ignore
-const PROBLEM_CODES = ["already_initialized", "authentication_failed", "bootstrap_closed", "browser_session_expired", "browser_session_revoked", "capability_unavailable", "capacity_exceeded", "forbidden", "idempotency_conflict", "identity_conflict", "integrity_failed", "invalid_identifier", "invalid_observation", "malformed_json", "payload_too_large", "provider_credential_expired", "provider_credential_invalid", "provider_credential_missing", "provider_rate_limited", "provider_response_invalid", "provider_route_unavailable", "provider_unavailable", "receipt_not_found", "record_not_found", "session_policy_changed", "storage_unavailable", "unsupported_media_type", "validation_failed"] as const;
+const PROBLEM_CODES = ["already_initialized", "authentication_failed", "bootstrap_closed", "browser_session_expired", "browser_session_revoked", "capability_unavailable", "capacity_exceeded", "forbidden", "idempotency_conflict", "identity_conflict", "integrity_failed", "invalid_identifier", "invalid_observation", "malformed_json", "metadata_claim_stale", "payload_too_large", "provider_credential_expired", "provider_credential_invalid", "provider_credential_missing", "provider_rate_limited", "provider_response_invalid", "provider_route_unavailable", "provider_unavailable", "receipt_not_found", "record_not_found", "session_policy_changed", "storage_unavailable", "unsupported_media_type", "validation_failed"] as const;
 // prettier-ignore
 const PROBLEM_ALLOWED = ["actual", "capability_id", "code", "correlation_id", "detail", "next_actions", "param", "retryability", "safe_state", "status", "title", "type", "violations"] as const;
 // prettier-ignore

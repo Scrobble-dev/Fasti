@@ -111,6 +111,7 @@ const ALLOWED_BODIES = new Set([
   "b8",
   "post-b8",
   "m1",
+  "m2",
 ]);
 
 /**
@@ -448,7 +449,7 @@ async function validateOkf(registry) {
 
   const finalizedCatalog = registry.capabilities.filter(
     ({ contract_body: contractBody, lifecycle }) =>
-      ["b1", "m1"].includes(contractBody) &&
+      ["b1", "m1", "m2"].includes(contractBody) &&
       lifecycle.contract_state === "finalized",
   );
   const catalogueDefinitions = [
@@ -688,7 +689,7 @@ async function validateUat(registry) {
     previewCapabilities.every(isDottedIdentifier),
     "programme capability IDs must use the governed dotted identifier shape",
   );
-  assert.equal(preview.stable_problems.length, 35);
+  assert.equal(preview.stable_problems.length, 34);
   assert.equal(
     new Set(preview.stable_problems).size,
     preview.stable_problems.length,

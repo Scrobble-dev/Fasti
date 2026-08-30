@@ -12,6 +12,9 @@ identifiers:
   - identity_read
   - identity_write
   - listener_configure
+  - metadata_claim_refresh
+  - metadata_projection_configure
+  - metadata_projection_read
   - observation_accept
   - profile_select
   - provider_credential_manage
@@ -40,6 +43,9 @@ does not authorize a request. `system.health` is `unauthenticated`, and
 | `identity_read`              | List records visible to the authenticated workspace.           |
 | `identity_write`             | Create records, attach identifier claims, register namespaces. |
 | `listener_configure`         | Configure the observation listener.                            |
+| `metadata_claim_refresh`     | Refresh provider claims for an authorized workspace record.    |
+| `metadata_projection_read`   | Read the selected profile projection and field provenance.     |
+| `metadata_projection_configure` | Configure the current profile policy and field overrides.   |
 | `observation_accept`         | Submit an observation for governed acceptance.                 |
 | `profile_select`             | Select a profile explicitly.                                   |
 | `provider_credential_manage` | Store, replace, remove, or test a provider credential.         |

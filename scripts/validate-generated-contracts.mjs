@@ -88,9 +88,11 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     "/api/v1/integrations/nuvio/webhook",
     "/api/v1/integrations/plex/webhook",
     "/api/v1/integrations/tautulli/webhook",
+    "/api/v1/metadata/claims/refresh",
     "/api/v1/namespaces",
     "/api/v1/node/initialization",
     "/api/v1/observations",
+    "/api/v1/profile/metadata-projection",
     "/api/v1/profile/nuvio-collections",
     "/api/v1/profile/record-tracking-dispositions",
     "/api/v1/profile/record-tracking-dispositions/{record_id}",
@@ -100,6 +102,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     "/api/v1/providers/{provider_id}/health",
     "/api/v1/records",
     "/api/v1/records/identifiers",
+    "/api/v1/records/{record_id}/metadata-projection",
   ]);
   assert.deepEqual(Object.keys(openapi.components.securitySchemes), [
     "bootstrap_bearer",
@@ -170,7 +173,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
 
   assert.equal(registry.contract_version, "1.0.0");
   assert.equal(registry.capability_base_uri.endsWith("/v1/"), true);
-  assert.equal(registry.capabilities.length, 43);
+  assert.equal(registry.capabilities.length, 46);
   const capabilityIds = registry.capabilities.map(({ id }) => id);
   assert.equal(new Set(capabilityIds).size, capabilityIds.length);
   assert.deepEqual(capabilityIds, [...capabilityIds].sort());
@@ -193,6 +196,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
       return "c1_browser_session_foundation";
     }
     if (capability.id.startsWith("provider.")) return "m1_providers";
+    if (capability.id.startsWith("metadata.")) return "m2_metadata";
     if (
       capability.id.startsWith("profile.record.tracking_disposition.") ||
       capability.id.startsWith("profile.nuvio_collections.")
@@ -468,9 +472,11 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
               ? "package-smoke:production-health"
               : capability.id.startsWith("provider.")
                 ? "package-smoke:production-providers"
-                : ["client.enroll", "node.initialize"].includes(capability.id)
-                  ? "package-smoke:production-bootstrap"
-                  : "package-smoke:b1-conformance-fixture",
+                : capability.id.startsWith("metadata.")
+                  ? "package-smoke:production-metadata"
+                  : ["client.enroll", "node.initialize"].includes(capability.id)
+                    ? "package-smoke:production-bootstrap"
+                    : "package-smoke:b1-conformance-fixture",
           );
           break;
         case "ui":
@@ -478,7 +484,9 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
             binding,
             capability.id.startsWith("provider.")
               ? "ui:provider-settings"
-              : `ui:${capability.id}`,
+              : capability.id.startsWith("metadata.")
+                ? "ui:metadata-provenance"
+                : `ui:${capability.id}`,
           );
           break;
         default:

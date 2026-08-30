@@ -1,5 +1,5 @@
 use crate::kernel::{authorize_transaction, map_sql, now, timestamp, SqliteKernel};
-use crate::metadata::{load_field_claims, load_field_override};
+use crate::metadata::load_record_list_metadata;
 use fasti_application::{
     ApplicationResult, AttachIdentifierCommand, AttachIdentifierOutcome, CapabilityKey,
     CreateRecordCommand, CreateRecordOutcome, FastiProblem, IdentityPort, ListRecordsQuery,
@@ -7,13 +7,12 @@ use fasti_application::{
     RegisterNamespaceDefinitionCommand, RegisterNamespaceDefinitionOutcome,
 };
 use fasti_domain::{
-    resolve_field, ExternalIdentifierClaim, ExternalIdentifierId, FieldKey, Grain,
-    InterpretationState, NamespaceKey, OccurredAt, RecordId, RecordStatus, WorkspaceId,
-    ORIGINAL_TITLE_FIELD_KEY, OVERVIEW_FIELD_KEY, POSTER_FIELD_KEY, RELEASE_YEAR_FIELD_KEY,
-    TITLE_FIELD_KEY,
+    ExternalIdentifierClaim, ExternalIdentifierId, FieldKey, Grain, InterpretationState,
+    NamespaceKey, OccurredAt, RecordId, RecordStatus, WorkspaceId, ORIGINAL_TITLE_FIELD_KEY,
+    OVERVIEW_FIELD_KEY, POSTER_FIELD_KEY, RELEASE_YEAR_FIELD_KEY, TITLE_FIELD_KEY,
 };
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 /// Bound on one `list_records` page. Mirrors `review.rs`'s `MAX_REVIEW_PAGE`
 /// pattern: no cursor yet, just a hard cap, matching the size a single local
@@ -192,6 +191,7 @@ impl IdentityPort for SqliteKernel {
         authorize_transaction(&transaction, capability, query.access(), correlation_id)?;
 
         let workspace_id = query.access().workspace_id();
+        let profile_id = query.access().profile_id();
         let mut statement = map_sql(
             transaction.prepare(
                 r#"
@@ -228,111 +228,56 @@ impl IdentityPort for SqliteKernel {
         let truncated = records.len() > MAX_RECORDS_PAGE as usize;
         records.truncate(MAX_RECORDS_PAGE as usize);
 
+        let field_keys = [
+            FieldKey::try_new(TITLE_FIELD_KEY).expect("canonical record summary field key"),
+            FieldKey::try_new(POSTER_FIELD_KEY).expect("canonical record summary field key"),
+            FieldKey::try_new(ORIGINAL_TITLE_FIELD_KEY)
+                .expect("canonical record summary field key"),
+            FieldKey::try_new(OVERVIEW_FIELD_KEY).expect("canonical record summary field key"),
+            FieldKey::try_new(RELEASE_YEAR_FIELD_KEY).expect("canonical record summary field key"),
+        ];
+        let metadata = load_record_list_metadata(
+            &transaction,
+            workspace_id,
+            profile_id,
+            MAX_RECORDS_PAGE,
+            &field_keys,
+            capability,
+            correlation_id,
+        )?;
+        let mut identifiers = load_record_identifiers_page(
+            &transaction,
+            workspace_id,
+            MAX_RECORDS_PAGE,
+            capability,
+            correlation_id,
+        )?;
+        let mut activities = load_latest_activities_page(
+            &transaction,
+            workspace_id,
+            MAX_RECORDS_PAGE,
+            capability,
+            correlation_id,
+        )?;
+
         let mut summaries = Vec::with_capacity(records.len());
         for (record_id, grain) in records {
-            summaries.push(load_record_summary(
-                &transaction,
-                workspace_id,
+            summaries.push(RecordSummary::new(
                 record_id,
                 grain,
-                capability,
-                correlation_id,
-            )?);
+                RecordStatus::Active,
+                metadata.resolve(record_id, &field_keys[0], capability, correlation_id)?,
+                metadata.resolve(record_id, &field_keys[1], capability, correlation_id)?,
+                metadata.resolve(record_id, &field_keys[2], capability, correlation_id)?,
+                metadata.resolve(record_id, &field_keys[3], capability, correlation_id)?,
+                metadata.resolve(record_id, &field_keys[4], capability, correlation_id)?,
+                identifiers.remove(&record_id).unwrap_or_default(),
+                activities.remove(&record_id),
+            ));
         }
         map_sql(transaction.commit(), capability, correlation_id)?;
         Ok(RecordListView::new(summaries, truncated))
     }
-}
-
-fn resolved_field(
-    connection: &Connection,
-    workspace_id: WorkspaceId,
-    record_id: RecordId,
-    field_key: &FieldKey,
-    capability: CapabilityKey,
-    correlation_id: fasti_domain::RequestCorrelationId,
-) -> ApplicationResult<fasti_domain::ResolvedField> {
-    let claims = load_field_claims(
-        connection,
-        workspace_id,
-        record_id,
-        field_key,
-        capability,
-        correlation_id,
-    )?;
-    let override_ = load_field_override(
-        connection,
-        workspace_id,
-        record_id,
-        field_key,
-        capability,
-        correlation_id,
-    )?;
-    // No preferred-provider configuration exists yet (that is a profile
-    // preference this task does not build); resolve_field degrades cleanly
-    // to fallback/last-known-good/empty tiers without one.
-    Ok(resolve_field(
-        override_.as_ref(),
-        &claims,
-        None,
-        None,
-        now(),
-    ))
-}
-
-fn load_latest_activity(
-    connection: &Connection,
-    workspace_id: WorkspaceId,
-    record_id: RecordId,
-    capability: CapabilityKey,
-    correlation_id: fasti_domain::RequestCorrelationId,
-) -> ApplicationResult<Option<RecordActivity>> {
-    let occurrence = map_sql(
-        connection
-            .query_row(
-                r#"
-                SELECT occurrence_id, occurred_at_json FROM occurrences
-                WHERE workspace_id = ?1 AND record_id = ?2
-                ORDER BY created_at DESC, occurrence_id DESC
-                LIMIT 1
-                "#,
-                params![workspace_id.to_string(), record_id.to_string()],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
-            )
-            .optional(),
-        capability,
-        correlation_id,
-    )?;
-    let Some((occurrence_id, occurred_at_json)) = occurrence else {
-        return Ok(None);
-    };
-    let occurred_at = occurred_at_json
-        .map(|value| {
-            serde_json::from_str::<OccurredAt>(&value)
-                .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))
-        })
-        .transpose()?;
-    let state = map_sql(
-        connection
-            .query_row(
-                r#"
-                SELECT state FROM interpretations
-                WHERE occurrence_id = ?1
-                ORDER BY created_at DESC, interpretation_id DESC
-                LIMIT 1
-                "#,
-                [occurrence_id.as_str()],
-                |row| row.get::<_, String>(0),
-            )
-            .optional(),
-        capability,
-        correlation_id,
-    )?;
-    let interpretation_state = match state {
-        Some(value) => parse_interpretation_state(&value, capability, correlation_id)?,
-        None => return Ok(None),
-    };
-    Ok(Some(RecordActivity::new(occurred_at, interpretation_state)))
 }
 
 fn parse_interpretation_state(
@@ -351,135 +296,152 @@ fn parse_interpretation_state(
     }
 }
 
-fn load_record_summary(
+fn load_record_identifiers_page(
     connection: &Connection,
     workspace_id: WorkspaceId,
-    record_id: RecordId,
-    grain: Grain,
+    page_limit: i64,
     capability: CapabilityKey,
     correlation_id: fasti_domain::RequestCorrelationId,
-) -> ApplicationResult<RecordSummary> {
-    let title_key = FieldKey::try_new(TITLE_FIELD_KEY)
-        .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
-    let poster_key = FieldKey::try_new(POSTER_FIELD_KEY)
-        .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
-    let original_title_key = FieldKey::try_new(ORIGINAL_TITLE_FIELD_KEY)
-        .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
-    let overview_key = FieldKey::try_new(OVERVIEW_FIELD_KEY)
-        .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
-    let release_year_key = FieldKey::try_new(RELEASE_YEAR_FIELD_KEY)
-        .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
-    let title = resolved_field(
-        connection,
-        workspace_id,
-        record_id,
-        &title_key,
-        capability,
-        correlation_id,
-    )?;
-    let poster = resolved_field(
-        connection,
-        workspace_id,
-        record_id,
-        &poster_key,
-        capability,
-        correlation_id,
-    )?;
-    let original_title = resolved_field(
-        connection,
-        workspace_id,
-        record_id,
-        &original_title_key,
-        capability,
-        correlation_id,
-    )?;
-    let overview = resolved_field(
-        connection,
-        workspace_id,
-        record_id,
-        &overview_key,
-        capability,
-        correlation_id,
-    )?;
-    let release_year = resolved_field(
-        connection,
-        workspace_id,
-        record_id,
-        &release_year_key,
-        capability,
-        correlation_id,
-    )?;
-    let identifiers = load_record_identifiers(
-        connection,
-        workspace_id,
-        record_id,
-        capability,
-        correlation_id,
-    )?;
-    let latest_activity = load_latest_activity(
-        connection,
-        workspace_id,
-        record_id,
-        capability,
-        correlation_id,
-    )?;
-    Ok(RecordSummary::new(
-        record_id,
-        grain,
-        RecordStatus::Active,
-        title,
-        poster,
-        original_title,
-        overview,
-        release_year,
-        identifiers,
-        latest_activity,
-    ))
-}
-
-fn load_record_identifiers(
-    connection: &Connection,
-    workspace_id: WorkspaceId,
-    record_id: RecordId,
-    capability: CapabilityKey,
-    correlation_id: fasti_domain::RequestCorrelationId,
-) -> ApplicationResult<Vec<RecordIdentifier>> {
+) -> ApplicationResult<HashMap<RecordId, Vec<RecordIdentifier>>> {
     let mut statement = map_sql(
         connection.prepare(
             r#"
-            SELECT namespace, grain, value FROM external_identifiers
-            WHERE workspace_id = ?1 AND record_id = ?2
-            ORDER BY namespace, grain, value
+            WITH page_records AS (
+                SELECT record_id FROM records
+                WHERE workspace_id = ?1 AND status = 'active'
+                ORDER BY record_id
+                LIMIT ?2
+            )
+            SELECT identifier.record_id, identifier.namespace,
+                   identifier.grain, identifier.value
+            FROM external_identifiers identifier
+            JOIN page_records page ON page.record_id = identifier.record_id
+            WHERE identifier.workspace_id = ?1
+            ORDER BY identifier.record_id, identifier.namespace,
+                     identifier.grain, identifier.value
             "#,
         ),
         capability,
         correlation_id,
     )?;
     let rows = map_sql(
-        statement.query_map(
-            params![workspace_id.to_string(), record_id.to_string()],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            },
-        ),
+        statement.query_map(params![workspace_id.to_string(), page_limit], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        }),
         capability,
         correlation_id,
     )?;
-    let mut identifiers = Vec::new();
+    let mut identifiers: HashMap<RecordId, Vec<RecordIdentifier>> = HashMap::new();
     for row in rows {
-        let (namespace, grain, value) = map_sql(row, capability, correlation_id)?;
+        let (record_id, namespace, grain, value) = map_sql(row, capability, correlation_id)?;
+        let record_id = record_id
+            .parse::<RecordId>()
+            .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
         let namespace = NamespaceKey::try_new(namespace)
             .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
         let grain = grain
             .parse::<Grain>()
             .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
-        identifiers.push(RecordIdentifier::new(namespace, grain, value));
+        identifiers
+            .entry(record_id)
+            .or_default()
+            .push(RecordIdentifier::new(namespace, grain, value));
     }
     Ok(identifiers)
+}
+
+fn load_latest_activities_page(
+    connection: &Connection,
+    workspace_id: WorkspaceId,
+    page_limit: i64,
+    capability: CapabilityKey,
+    correlation_id: fasti_domain::RequestCorrelationId,
+) -> ApplicationResult<HashMap<RecordId, RecordActivity>> {
+    let mut statement = map_sql(
+        connection.prepare(
+            r#"
+            WITH page_records AS (
+                SELECT record_id FROM records
+                WHERE workspace_id = ?1 AND status = 'active'
+                ORDER BY record_id
+                LIMIT ?2
+            ), latest_occurrences AS (
+                SELECT occurrence.record_id, occurrence.occurrence_id,
+                       occurrence.occurred_at_json,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY occurrence.record_id
+                           ORDER BY occurrence.created_at DESC,
+                                    occurrence.occurrence_id DESC
+                       ) AS occurrence_rank
+                FROM occurrences occurrence
+                JOIN page_records page ON page.record_id = occurrence.record_id
+                WHERE occurrence.workspace_id = ?1
+            ), latest_interpretations AS (
+                SELECT interpretation.occurrence_id, interpretation.state,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY interpretation.occurrence_id
+                           ORDER BY interpretation.created_at DESC,
+                                    interpretation.interpretation_id DESC
+                       ) AS interpretation_rank
+                FROM interpretations interpretation
+                JOIN latest_occurrences occurrence
+                  ON occurrence.occurrence_id = interpretation.occurrence_id
+                 AND occurrence.occurrence_rank = 1
+            )
+            SELECT occurrence.record_id, occurrence.occurred_at_json,
+                   interpretation.state
+            FROM latest_occurrences occurrence
+            JOIN latest_interpretations interpretation
+              ON interpretation.occurrence_id = occurrence.occurrence_id
+             AND interpretation.interpretation_rank = 1
+            WHERE occurrence.occurrence_rank = 1
+            ORDER BY occurrence.record_id
+            "#,
+        ),
+        capability,
+        correlation_id,
+    )?;
+    let rows = map_sql(
+        statement.query_map(params![workspace_id.to_string(), page_limit], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        }),
+        capability,
+        correlation_id,
+    )?;
+    let mut activities = HashMap::new();
+    for row in rows {
+        let (record_id, occurred_at, state) = map_sql(row, capability, correlation_id)?;
+        let record_id = record_id
+            .parse::<RecordId>()
+            .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
+        let occurred_at = occurred_at
+            .map(|value| {
+                serde_json::from_str::<OccurredAt>(&value).map_err(|_| {
+                    Box::new(FastiProblem::integrity_failed(capability, correlation_id))
+                })
+            })
+            .transpose()?;
+        let activity = RecordActivity::new(
+            occurred_at,
+            parse_interpretation_state(&state, capability, correlation_id)?,
+        );
+        if activities.insert(record_id, activity).is_some() {
+            return Err(Box::new(FastiProblem::integrity_failed(
+                capability,
+                correlation_id,
+            )));
+        }
+    }
+    Ok(activities)
 }
 
 pub(crate) fn insert_record(
@@ -724,6 +686,10 @@ mod tests {
         NamespaceLicencePosture, ObservationResolution, ObservedAt, OperationId, ReceivedAt,
         RequestCorrelationId, TITLE_FIELD_KEY,
     };
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
 
     fn definition(namespace: &str, grains: impl IntoIterator<Item = Grain>) -> NamespaceDefinition {
         NamespaceDefinition::try_new(
@@ -874,6 +840,47 @@ mod tests {
             .expect("list records");
         assert!(page.truncated());
         assert_eq!(page.into_records().len(), MAX_RECORDS_PAGE as usize);
+    }
+
+    #[test]
+    fn record_page_uses_a_constant_number_of_selects() {
+        let node = TestNode::new();
+        let mut connection =
+            rusqlite::Connection::open(node.kernel.database_path()).expect("open test database");
+        let transaction = connection.transaction().expect("start seed transaction");
+        for _ in 0..MAX_RECORDS_PAGE {
+            transaction
+                .execute(
+                    "INSERT INTO records(record_id, workspace_id, grain, status, created_at) VALUES (?1, ?2, 'film', 'active', '2026-08-28T00:00:00Z')",
+                    params![RecordId::new_v7().to_string(), node.access.workspace_id().to_string()],
+                )
+                .expect("seed record");
+        }
+        transaction.commit().expect("commit seed transaction");
+
+        let selects = Arc::new(AtomicUsize::new(0));
+        {
+            let counter = Arc::clone(&selects);
+            node.kernel
+                .inner
+                .connection
+                .lock()
+                .expect("kernel connection")
+                .authorizer(Some(move |context: rusqlite::hooks::AuthContext<'_>| {
+                    if matches!(context.action, rusqlite::hooks::AuthAction::Select) {
+                        counter.fetch_add(1, Ordering::Relaxed);
+                    }
+                    rusqlite::hooks::Authorization::Allow
+                }))
+                .expect("install select counter");
+        }
+
+        assert_eq!(list(&node).len(), MAX_RECORDS_PAGE as usize);
+        let select_count = selects.load(Ordering::Relaxed);
+        assert!(
+            select_count <= 40,
+            "record listing regressed to per-record queries: {select_count} SELECTs"
+        );
     }
 
     fn ns(value: &str) -> NamespaceKey {

@@ -1621,6 +1621,108 @@ const EXPORT_SECTIONS: &[ExportSection] = &[
         count_sql: "SELECT COUNT(*) FROM profile_record_tracking_dispositions WHERE workspace_id = ?1",
         cursor_columns: &[CursorColumn::Text(1), CursorColumn::Text(2)],
     },
+    ExportSection {
+        entity: WorkspaceExportEntity::MetadataClaims,
+        sql: "SELECT claim_id, workspace_id, record_id, claim_kind, created_at \
+              FROM metadata_claims \
+              WHERE workspace_id = ?1 AND claim_id > ?2 \
+              ORDER BY claim_id LIMIT ?3",
+        count_sql: "SELECT COUNT(*) FROM metadata_claims WHERE workspace_id = ?1",
+        cursor_columns: &[CursorColumn::Text(0)],
+    },
+    ExportSection {
+        entity: WorkspaceExportEntity::MetadataClaimProvenance,
+        sql: "SELECT claim_id, workspace_id, record_id, field_key, source, fetched_at, \
+                     provider_id, source_record_id, region, source_version, evidence_digest, \
+                     classification, terms_revision, provenance_state, initial_status, created_at \
+              FROM metadata_claim_provenance \
+              WHERE workspace_id = ?1 AND claim_id > ?2 \
+              ORDER BY claim_id LIMIT ?3",
+        count_sql: "SELECT COUNT(*) FROM metadata_claim_provenance WHERE workspace_id = ?1",
+        cursor_columns: &[CursorColumn::Text(0)],
+    },
+    ExportSection {
+        entity: WorkspaceExportEntity::MetadataRatingClaims,
+        sql: "SELECT claim_id, workspace_id, record_id, value_millis, scale_minimum_millis, \
+                     scale_maximum_millis, provider_id, source, source_record_id, locale, region, \
+                     source_version, evidence_digest, classification, terms_revision, fetched_at, \
+                     expires_at, initial_status, created_at \
+              FROM metadata_rating_claims \
+              WHERE workspace_id = ?1 AND claim_id > ?2 \
+              ORDER BY claim_id LIMIT ?3",
+        count_sql: "SELECT COUNT(*) FROM metadata_rating_claims WHERE workspace_id = ?1",
+        cursor_columns: &[CursorColumn::Text(0)],
+    },
+    ExportSection {
+        entity: WorkspaceExportEntity::MetadataClaimLifecycleEvents,
+        sql: "SELECT claim_id, sequence, workspace_id, previous_status, status, occurred_at, \
+                     evidence_digest \
+              FROM metadata_claim_lifecycle_events \
+              WHERE workspace_id = ?1 AND (claim_id, sequence) > (?2, ?3) \
+              ORDER BY claim_id, sequence LIMIT ?4",
+        count_sql: "SELECT COUNT(*) FROM metadata_claim_lifecycle_events WHERE workspace_id = ?1",
+        cursor_columns: &[CursorColumn::Text(0), CursorColumn::NonNegativeInteger(1)],
+    },
+    ExportSection {
+        entity: WorkspaceExportEntity::MetadataProjectionPolicies,
+        sql: "SELECT workspace_id, profile_id, preferred_provider_id, preferred_locale, \
+                     original_locale, region, enabled_field_groups, allow_english_fallback, \
+                     last_known_good_policy, updated_at \
+              FROM metadata_projection_policies \
+              WHERE workspace_id = ?1 AND profile_id > ?2 \
+              ORDER BY profile_id LIMIT ?3",
+        count_sql: "SELECT COUNT(*) FROM metadata_projection_policies WHERE workspace_id = ?1",
+        cursor_columns: &[CursorColumn::Text(1)],
+    },
+    ExportSection {
+        entity: WorkspaceExportEntity::MetadataProfileFieldOverrides,
+        sql: "SELECT workspace_id, profile_id, record_id, field_key, value, created_at, \
+                     updated_at, origin \
+              FROM metadata_profile_field_overrides \
+              WHERE workspace_id = ?1 AND (profile_id, record_id, field_key) > (?2, ?3, ?4) \
+              ORDER BY profile_id, record_id, field_key LIMIT ?5",
+        count_sql: "SELECT COUNT(*) FROM metadata_profile_field_overrides WHERE workspace_id = ?1",
+        cursor_columns: &[CursorColumn::Text(1), CursorColumn::Text(2), CursorColumn::Text(3)],
+    },
+    ExportSection {
+        entity: WorkspaceExportEntity::MetadataLegacyOverrideOwnership,
+        sql: "SELECT workspace_id, record_id, field_key, owner_profile_id, state, review_reason, \
+                     recorded_at \
+              FROM metadata_legacy_override_ownership \
+              WHERE workspace_id = ?1 AND (record_id, field_key) > (?2, ?3) \
+              ORDER BY record_id, field_key LIMIT ?4",
+        count_sql: "SELECT COUNT(*) FROM metadata_legacy_override_ownership WHERE workspace_id = ?1",
+        cursor_columns: &[CursorColumn::Text(1), CursorColumn::Text(2)],
+    },
+    ExportSection {
+        entity: WorkspaceExportEntity::MetadataOverrideMigrationReceipts,
+        sql: "SELECT receipt_id, workspace_id, record_id, field_key, profile_id, \
+                     source_created_at, migrated_at \
+              FROM metadata_override_migration_receipts \
+              WHERE workspace_id = ?1 AND receipt_id > ?2 \
+              ORDER BY receipt_id LIMIT ?3",
+        count_sql: "SELECT COUNT(*) FROM metadata_override_migration_receipts WHERE workspace_id = ?1",
+        cursor_columns: &[CursorColumn::Text(0)],
+    },
+    ExportSection {
+        entity: WorkspaceExportEntity::MetadataAttributions,
+        sql: "SELECT workspace_id, provider_id, attribution_text, documentation_url, updated_at \
+              FROM metadata_attributions \
+              WHERE workspace_id = ?1 AND provider_id > ?2 \
+              ORDER BY provider_id LIMIT ?3",
+        count_sql: "SELECT COUNT(*) FROM metadata_attributions WHERE workspace_id = ?1",
+        cursor_columns: &[CursorColumn::Text(1)],
+    },
+    ExportSection {
+        entity: WorkspaceExportEntity::MetadataRefreshReceipts,
+        sql: "SELECT workspace_id, profile_id, client_id, operation_id, semantic_digest, \
+                     record_id, provider_id, response_json, created_at \
+              FROM metadata_refresh_receipts \
+              WHERE workspace_id = ?1 AND (client_id, operation_id) > (?2, ?3) \
+              ORDER BY client_id, operation_id LIMIT ?4",
+        count_sql: "SELECT COUNT(*) FROM metadata_refresh_receipts WHERE workspace_id = ?1",
+        cursor_columns: &[CursorColumn::Text(2), CursorColumn::Text(3)],
+    },
 ];
 
 /// The migration version and a digest of the actual SQLite schema in a frozen

@@ -307,6 +307,33 @@ surface_profiles:
       { state: required, binding: "package-smoke:production-providers" }
     ui: { state: required, binding: "ui:provider-settings" }
 
+  m2_metadata:
+    domain_application:
+      { state: required, binding: "application:{application_key}" }
+    http_openapi: { state: required, binding: "openapi:{capability_id}" }
+    sse_asyncapi:
+      {
+        state: not_applicable,
+        reason: Metadata refresh and profile projection operations are finite requests; no durable event transport exists in M2.,
+      }
+    cli: { state: required, binding: "cli:capability-discovery" }
+    json_schema:
+      {
+        state: required,
+        binding: "schema:production-openapi-operation:{capability_id}",
+      }
+    json_ld:
+      {
+        state: not_applicable,
+        reason: Profile projection policy and refresh control are private operational state rather than public linked data.,
+      }
+    okf: { state: required, binding: "okf:capability-catalog" }
+    sdk: { state: required, binding: "sdk:{capability_id}" }
+    knowledge: { state: required, binding: "knowledge:problem-catalog" }
+    package_smoke:
+      { state: required, binding: "package-smoke:production-metadata" }
+    ui: { state: required, binding: "ui:metadata-provenance" }
+
   c1_browser_session_foundation:
     domain_application:
       { state: required, binding: "application:{application_key}" }
@@ -1520,4 +1547,96 @@ capabilities:
         storage_unavailable,
       ]
     examples: [provider.health.read.provider_unavailable]
+    uat: []
+
+  - application_key: refresh_metadata_claims
+    id: metadata.claim.refresh
+    bounded_context: metadata.claims
+    contract_body: m2
+    runtime_body: m2
+    authorization: scoped
+    lifecycle:
+      {
+        introduced_in: m2,
+        contract_state: finalized,
+        runtime_availability: implemented,
+      }
+    surface_profile: m2_metadata
+    scopes: [metadata_claim_refresh]
+    problems:
+      [
+        authentication_failed,
+        forbidden,
+        idempotency_conflict,
+        integrity_failed,
+        malformed_json,
+        metadata_claim_stale,
+        payload_too_large,
+        provider_credential_expired,
+        provider_credential_invalid,
+        provider_credential_missing,
+        provider_rate_limited,
+        provider_response_invalid,
+        provider_route_unavailable,
+        provider_unavailable,
+        record_not_found,
+        storage_unavailable,
+        unsupported_media_type,
+        validation_failed,
+      ]
+    examples: [metadata.claim.refresh.metadata_claim_stale]
+    uat: []
+
+  - application_key: read_metadata_projection
+    id: metadata.projection.read
+    bounded_context: metadata.projection
+    contract_body: m2
+    runtime_body: m2
+    authorization: scoped
+    lifecycle:
+      {
+        introduced_in: m2,
+        contract_state: finalized,
+        runtime_availability: implemented,
+      }
+    surface_profile: m2_metadata
+    scopes: [metadata_projection_read]
+    problems:
+      [
+        authentication_failed,
+        forbidden,
+        integrity_failed,
+        record_not_found,
+        storage_unavailable,
+        validation_failed,
+      ]
+    examples: []
+    uat: []
+
+  - application_key: configure_metadata_projection
+    id: metadata.projection.configure
+    bounded_context: metadata.projection
+    contract_body: m2
+    runtime_body: m2
+    authorization: scoped
+    lifecycle:
+      {
+        introduced_in: m2,
+        contract_state: finalized,
+        runtime_availability: implemented,
+      }
+    surface_profile: m2_metadata
+    scopes: [metadata_projection_configure]
+    problems:
+      [
+        authentication_failed,
+        forbidden,
+        integrity_failed,
+        malformed_json,
+        payload_too_large,
+        storage_unavailable,
+        unsupported_media_type,
+        validation_failed,
+      ]
+    examples: [metadata.projection.configure.validation_failed]
     uat: []
