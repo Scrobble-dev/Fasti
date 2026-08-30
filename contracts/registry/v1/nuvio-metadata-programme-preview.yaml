@@ -1,0 +1,196 @@
+# M0 planning artifact. It is not loaded by the runtime capability registry.
+preview_version: 1
+programme: fasti-metadata-discovery-library-collections-nuvio
+status: approved_for_implementation
+planning_base:
+  commit: adbdef3038786b0efb2ec615bce080e3eaa9361f
+  tree: a7a1f661ae1b0ef4470ba736d65942f54793d1b0
+source_plan: docs/plans/nuvio-metadata-discovery-library-collections.md
+
+invariants:
+  - Fasti records; players play.
+  - Record identity is provider-neutral.
+  - Search candidates do not become Records without an explicit governed action.
+  - Metadata is field-level evidence; refresh failure does not erase last-known-good state.
+  - Library, watched, progress, ratings, notes, and Collection membership are separate profile state.
+  - Provider credentials stay in the vault and authorization header; never URLs.
+  - Empty provider pages never imply deletion.
+  - Public Stremio projections are read-only and field-allowlisted.
+  - Nuvio Cloud and the Fasti provider contract are independent lanes over shared application rules.
+  - Every write is revisioned, idempotent, acknowledged, and restore-generation bound.
+
+data_classes:
+  restricted:
+    [passwords, provider_tokens, refresh_tokens, api_keys, recovery_material]
+  confidential:
+    [
+      library,
+      watched,
+      progress,
+      ratings,
+      notes,
+      history,
+      account_responses,
+      raw_envelopes,
+      journals,
+      receipts,
+      share_membership,
+      private_collections,
+    ]
+  internal:
+    [
+      external_identifiers,
+      safe_provider_configuration,
+      compatibility_revisions,
+      redacted_diagnostics,
+      provenance_digests,
+    ]
+  public: [provider_public_metadata, explicitly_published_catalog_fields]
+
+capability_groups:
+  M1:
+    owner: provider_runtime
+    ids:
+      - provider.list
+      - provider.credential.configure
+      - provider.credential.test
+      - provider.health.read
+  M2:
+    owner: metadata
+    ids:
+      - metadata.claim.refresh
+      - metadata.projection.read
+      - metadata.projection.configure
+  M4:
+    owner: search
+    ids:
+      - metadata.search
+  M5:
+    owner: library
+    ids:
+      - library.query
+  M6:
+    owner: discover
+    ids:
+      - catalog.source.preview
+      - catalog.source.refresh
+      - discover.rail.list
+  M7:
+    owner: collections
+    ids:
+      - collection.create
+      - collection.update
+      - collection.source.bind
+      - collection.pack.preview
+      - collection.pack.install
+      - collection.export
+      - collection.import
+  M9:
+    owner: mdblist_connection
+    ids:
+      - rating.read
+      - mdblist.rating.pull
+      - mdblist.rating.push
+      - mdblist.watchlist.pull
+      - mdblist.watchlist.push
+      - mdblist.watched.pull
+      - mdblist.watched.push
+      - mdblist.collection.pull
+      - mdblist.collection.push
+      - mdblist.dropped.pull
+      - mdblist.dropped.push
+      - mdblist.scrobble.push
+  M10:
+    owner: public_catalog_projection
+    ids:
+      - nuvio.catalog.publish
+      - nuvio.collection.project
+  M11:
+    owner: synchronization
+    ids:
+      - connection.test
+      - connection.health.read
+      - nuvio.cloud.connect
+      - nuvio.cloud.profile.list
+      - nuvio.cloud.snapshot.pull
+      - nuvio.cloud.delta.pull
+      - nuvio.cloud.state.push
+      - nuvio.cloud.state.delete
+      - nuvio.provider.snapshot.read
+      - nuvio.provider.delta.read
+      - nuvio.provider.state.mutate
+      - nuvio.provider.state.delete
+      - nuvio.provider.acknowledge
+      - nuvio.provider.reconcile
+  M13:
+    owner: local_shared_workspace
+    ids:
+      - workspace.local.share.configure
+      - workspace.local.discovery.read
+      - workspace.local.member.grant
+      - workspace.local.projection.read
+
+transport_disposition:
+  http_openapi: required_for_finite_operations
+  sse_asyncapi: required_only_for_ordered_delta_and_status_events
+  json_schema: required_for_every_request_response_and_event
+  json_ld: required_for_portable_domain_evidence_or_reasoned_not_applicable
+  sdk: generated_typescript_for_fasti_http_contract
+  native_nuvio_clients: plain_openapi_and_fixtures_using_existing_http_serialization_stacks
+  cli: existing_capability_discovery_plus_focused_integration_check
+  okf: required_for_portable_knowledge_and_conformance
+  knowledge: required_for_user_and_operator_semantics
+  package_smoke: required_for_native_and_oci_activation
+  ui: required_for_user_visible_capabilities
+
+events:
+  - provider.health.changed
+  - metadata.claim.updated
+  - metadata.projection.changed
+  - rating.claim.updated
+  - catalog.refresh.completed
+  - discover.rail.updated
+  - collection.changed
+  - connection.health.changed
+
+stable_problems:
+  - provider_unavailable
+  - provider_credential_missing
+  - provider_credential_invalid
+  - provider_credential_expired
+  - provider_rate_limited
+  - provider_response_invalid
+  - provider_route_unavailable
+  - metadata_claim_stale
+  - metadata_projection_unavailable
+  - identity_route_ambiguous
+  - identity_route_missing
+  - search_source_unavailable
+  - search_query_invalid
+  - catalog_source_invalid
+  - catalog_source_dependency_missing
+  - catalog_refresh_failed
+  - collection_pack_invalid
+  - collection_pack_dependency_missing
+  - collection_pack_conflict
+  - collection_source_quarantined
+  - nuvio_compatibility_mismatch
+  - connection_reauthorization_required
+  - nuvio_refresh_token_spent
+  - nuvio_cursor_expired
+  - nuvio_revision_conflict
+  - nuvio_idempotency_conflict
+  - nuvio_remote_contract_changed
+  - nuvio_partial_batch_failed
+  - sync_storage_quota_exhausted
+  - stream_authority_expired
+  - restore_generation_stale
+  - workspace_share_not_enabled
+  - workspace_share_grant_denied
+  - workspace_share_discovery_invalid
+  - workspace_share_projection_private
+
+implementation_rule:
+  runtime_registry: contracts/registry/v1/capabilities.yaml
+  activation: Each owning milestone must promote its IDs into the runtime registry only with generated contracts, authorization, typed problems, conformance, documentation, and exact-head evidence.
+  no_runtime_claim: This preview reserves ownership and names only; it does not claim any listed capability is implemented.

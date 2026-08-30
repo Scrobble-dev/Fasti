@@ -79,3 +79,63 @@ ID-077,Backup,Clean restore,"IDs, hashes, counts, links and unresolved state mat
 ID-078,Knowledge,Known identity error,local/public KCS and OKF explain recovery,Beta/1.0,P1,E2E/contract
 ID-079,DX,Build simple provider from template,passes reference conformance without domain change,Beta/1.0,P1,E2E/contract
 ID-080,User success,Non-technical provider switch,"predictable impact, zero history movement, rollback without support",Beta/1.0,P1,E2E/contract
+MDN-001,TMDB anime route,MAL primary with valid IMDb alias,TMDB enrichment uses the verified IMDb route and retains MAL evidence,M3/M8,P0,E2E/contract
+MDN-002,TMDB anime route,Kitsu primary with valid IMDb alias,TMDB enrichment uses the verified IMDb route and retains Kitsu evidence,M3/M8,P0,E2E/contract
+MDN-003,Library identity,Record has no provider identifier,Record remains usable and visible in Library,M5,P0,E2E
+MDN-004,Search offline,TMDB unavailable,local Record result remains available with partial-source status,M4,P0,E2E
+MDN-005,Search source,Add-on-only title,direct governed add-on search returns candidate without TMDB,M4,P1,E2E/contract
+MDN-006,Metadata override,Provider refresh succeeds,user title override remains selected and provenance stays visible,M2,P0,E2E/contract
+MDN-007,Metadata projection,Preferred fresh compatible claim exists,preferred claim wins without replacing Record identity,M2,P0,Unit/contract
+MDN-008,Metadata stale,Provider refresh fails,last-known-good claim remains visible and marked stale,M2,P0,E2E/contract
+MDN-009,MDBList secret,Credentialed request runs,API key is absent from URLs logs errors metrics diagnostics receipts and cache keys,M9,P0,Security/E2E
+MDN-010,Collection validation,Duplicate Collection ID,document is rejected before persistence,M7,P0,Contract
+MDN-011,Collection validation,Duplicate Folder ID,document is rejected before persistence,M7,P0,Contract
+MDN-012,Nuvio round trip,Unknown Nuvio fields,fields survive import and export without becoming executable configuration,M7,P0,Contract
+MDN-013,Trakt source,Trakt binding lacks list ID,only that source is rejected with an exact path and remedy,M7,P1,Contract
+MDN-014,Kaptain degraded,Kaptain pack references unavailable Trakt,exact source is disabled while the rest of the Collection remains usable,M7,P0,E2E/contract
+MDN-015,Collection refresh,Provider source is absent,local Collection and membership are retained,M7,P0,Contract
+MDN-016,Metadata refresh,Provider returns empty response,no metadata deletion occurs without explicit retraction evidence,M2,P0,Contract
+MDN-017,Cache partition,Two add-on configurations request same route,no response crosses configuration digest or purpose partition,M6,P0,Security/contract
+MDN-018,Anime preference,Profile changes grouping/export preference,projection changes while Record ID and Chronicle remain unchanged,M3,P0,E2E/contract
+MDN-019,Nuvio version,Client and server ranges do not overlap,connection fails closed with both ranges and an exact upgrade action,M11,P0,Contract
+MDN-020,Collection authorization,Profile requests another profile Collection,request is denied before lookup and no receipt is disclosed,M7,P0,Security/E2E
+MDN-021,Pack network,Imported pack contains unsafe source URL,no fetch occurs and activation is denied,M7,P0,Security/contract
+MDN-022,Pack bounds,Pack exceeds byte node depth or string cap,streaming parser rejects before unbounded allocation,M7,P0,Security/performance
+MDN-023,Library paging,Rows change around keyset boundary,stable pagination has no duplicate or skipped retained row,M5,P0,Integration
+MDN-024,Discover stale,Provider refresh fails,last-known-good rail remains visible with persistent degraded status,M6,P1,E2E
+MDN-025,Browser credential,Provider credential is configured,browser storage and read APIs never contain stored secret,M1,P0,Security/E2E
+MDN-026,Nuvio token,Refresh succeeds then later RPC fails,new token generation is durable before subsequent use,M11,P0,Fault injection
+MDN-027,Nuvio token race,Two operations share one connection,only one operation redeems a refresh-token generation,M11,P0,Concurrency
+MDN-028,Nuvio snapshot,Library watched and progress snapshots arrive,unrelated local profile state is preserved,M11,P0,E2E/contract
+MDN-029,Nuvio delta,Delta and cursor are replayed,each ordered operation applies once,M11,P0,E2E/contract
+MDN-030,Nuvio deletion,Explicit remote delete and empty page occur,tombstone is created only for explicit delete,M11,P0,E2E/contract
+MDN-031,Nuvio reflection,Push batch returns to origin,stable origin-client ID suppresses reflected change without suppressing genuine remote edits,M11,P0,E2E/contract
+MDN-032,Nuvio recovery,Cursor expires,named snapshot reconciles state and local journal replays exactly once,M11,P0,E2E/contract
+MDN-033,Fasti provider write,Mutation revision is stale,current state is retained and conflict receipt contains both evidence sides,M11,P0,Contract
+MDN-034,Fasti provider revoke,Client credential is revoked,reads writes acknowledgements and prior receipt disclosure are denied,M11,P0,Security/E2E
+MDN-035,Search route,Any returned candidate is opened,canonical candidate details route works without creating a Record,M4,P0,E2E
+MDN-036,Details slug,Canonical title slug changes,old slug redirects without changing Record or candidate identity,M4/M5,P1,E2E
+MDN-037,MDBList grants,One account capability is enabled,no ratings watchlist watched collection dropped or scrobble grant authorizes another,M9,P0,Security/contract
+MDN-038,MDBList delete,Explicit removal and absent page are replayed,removal is idempotent and absence deletes nothing,M9,P0,E2E/contract
+MDN-039,Workspace discovery,Service advertises locally,payload contains only rotating hint and no profile title history credential or stable personal identifier,M13,P0,Security/E2E
+MDN-040,Workspace privacy,Member reads shared workspace,only explicitly shared projection is visible and private Library state is denied,M13,P0,Security/E2E
+MDN-041,Nuvio token faults,Failure occurs at every refresh durability boundary,retry recovery or reauthorization state is exact and no blind second refresh occurs,M11,P0,Fault injection
+MDN-042,Nuvio reconciliation,Each lane exercises all three-way states,divergent edits and explicit resets are preserved in conflict receipts,M11,P0,E2E/contract
+MDN-043,Stremio publication,Public descriptor is active,only approved fields are anonymous and revocation purges cache then returns unavailable,M10,P0,Security/E2E
+MDN-044,Delta retention,Feed compacts and cursor expires,recoverable snapshot durable evidence and unacknowledged client journal remain,M11,P0,Integration
+MDN-045,Kaptain provenance,CI checks pinned user-supplied source,only digest count and classification receipt persist and source content never enters Git artifacts or logs,M7,P0,Supply-chain
+MDN-046,Interop licensing,Provider contract subtree is checked,SPDX scope provenance lineage symlink and path-escape gates pass without copied implementation,M11,P0,Contract/supply-chain
+MDN-047,Integration DX,Documented commands links and SDK operations build,all commands execute links resolve and public methods are fully typed,M1/M11,P1,DX/contract
+MDN-048,Live providers,Operator runs credentialed TMDB MDBList and Nuvio Cloud acceptance,redacted exact-source receipts confirm real transport and deterministic semantics,M8/M9/M11,P0,Live E2E
+MDN-049,Native clients,Pinned Nuvio Desktop and TV connect to one real Fasti node,native clients pass exact-revision flows without a Fasti-only test double,M11,P0,Native E2E
+MDN-050,Browser system,Programme browser suite starts,disposable real fastid SQLite account session and loopback providers prove durable flows,M12,P0,E2E
+MDN-051,Query plans,Library and Collection sizes are 0 100 and 10000,compound indexes bound query count and prevent full scan or per-row provider lookup,M5/M7,P0,Performance/integration
+MDN-052,Memory envelope,Idle normal heavy and absolute workloads repeat,fastid process tree stays within 64 96 160 and 192 MiB and invalid sampling fails,M12,P0,Performance
+MDN-053,Query credential,Provider supports only query-string key,capability is unavailable and planted secret or digest reaches no URI or evidence surface,M1,P0,Security
+MDN-054,Imported URL,Pack contains userinfo fragment secret query non-HTTPS or unsafe origin,value is rejected or inert until fresh authorization and unknown fields never execute,M7,P0,Security/contract
+MDN-055,Stream authority,Session role grant credential restore generation or client authority changes,stream closes before next event and mismatched resume fails without URL token,M13,P0,Security/E2E
+MDN-056,Receipt authority,Idempotency key is replayed under any changed scope,replay is denied without disclosing prior receipt,M11,P0,Security/contract
+MDN-057,Sync quota,Client reaches row or byte admission quota,new mutation is rejected before commit while existing state remains writable and recoverable,M11,P0,Security/integration
+MDN-058,Archive crypto,Archive v3-v7 runs before and after C3-CRYPTO,pre-gate operation is blocked and restore advances generation with all remote effects quarantined,M2/M13,P0,Security/restore
+MDN-059,Workspace transport,Non-loopback share lacks trusted HTTPS configuration,connection fails and QR or discovery never contains a bearer or private identifier,M13,P0,Security/E2E
+MDN-060,Data classification,Every data class is projected and cached,no class crosses to a lower partition except allowlisted Public fields in an active descriptor,M2/M10/M13,P0,Security/contract
