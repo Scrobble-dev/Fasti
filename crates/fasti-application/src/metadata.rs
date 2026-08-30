@@ -309,36 +309,47 @@ fn route_priority(
             Grain::Release,
             IdentityRouteEvidenceKind::Direct,
         ) => Some((0, IdentityRouteKind::ProviderNative)),
-        (
-            ResolutionIntent::NuvioExport,
-            "nuvio",
-            _,
-            Grain::Release,
-            IdentityRouteEvidenceKind::Direct,
-        ) => {
-            let priority = match (anime_preference, namespace) {
-                (
-                    AnimeGroupingPreference::GroupByTvWork | AnimeGroupingPreference::Automatic,
-                    "imdb.title" | "tmdb.tv" | "tvdb.series",
-                )
-                | (AnimeGroupingPreference::KeepMalReleasesSeparate, "mal.anime")
-                | (AnimeGroupingPreference::KeepKitsuReleasesSeparate, "kitsu.anime") => 0,
-                (
-                    AnimeGroupingPreference::GroupByTvWork | AnimeGroupingPreference::Automatic,
-                    "mal.anime",
-                )
-                | (AnimeGroupingPreference::KeepMalReleasesSeparate, "kitsu.anime")
-                | (AnimeGroupingPreference::KeepKitsuReleasesSeparate, "mal.anime") => 1,
-                (
-                    AnimeGroupingPreference::GroupByTvWork | AnimeGroupingPreference::Automatic,
-                    "kitsu.anime",
-                )
-                | (
-                    AnimeGroupingPreference::KeepMalReleasesSeparate
-                    | AnimeGroupingPreference::KeepKitsuReleasesSeparate,
-                    "imdb.title" | "tmdb.tv" | "tvdb.series",
-                ) => 2,
-                _ => return None,
+        (ResolutionIntent::NuvioExport, "nuvio", _, _, IdentityRouteEvidenceKind::Direct) => {
+            let tv_work = matches!(
+                (namespace, grain),
+                ("imdb.title", Grain::Film | Grain::Series | Grain::Release)
+                    | ("tmdb.tv" | "tvdb.series", Grain::Series | Grain::Release)
+            );
+            let release = |expected| namespace == expected && grain == Grain::Release;
+            let priority = match anime_preference {
+                AnimeGroupingPreference::GroupByTvWork | AnimeGroupingPreference::Automatic => {
+                    if tv_work {
+                        0
+                    } else if release("mal.anime") {
+                        1
+                    } else if release("kitsu.anime") {
+                        2
+                    } else {
+                        return None;
+                    }
+                }
+                AnimeGroupingPreference::KeepMalReleasesSeparate => {
+                    if release("mal.anime") {
+                        0
+                    } else if release("kitsu.anime") {
+                        1
+                    } else if tv_work {
+                        2
+                    } else {
+                        return None;
+                    }
+                }
+                AnimeGroupingPreference::KeepKitsuReleasesSeparate => {
+                    if release("kitsu.anime") {
+                        0
+                    } else if release("mal.anime") {
+                        1
+                    } else if tv_work {
+                        2
+                    } else {
+                        return None;
+                    }
+                }
             };
             Some((priority, IdentityRouteKind::ProviderNative))
         }
@@ -1790,6 +1801,23 @@ mod tests {
                 .iter()
                 .all(|identifier| plan.known_identifiers().contains(identifier)));
         }
+    }
+
+    #[test]
+    fn tv_work_grouping_accepts_a_series_grained_coordinate() {
+        let plan = plan_purpose_identity_route(
+            ResolutionIntent::NuvioExport,
+            ProviderId::try_new("nuvio").expect("Nuvio provider"),
+            AnimeGroupingPreference::GroupByTvWork,
+            &[
+                identity_claim("mal.anime", "49894"),
+                identity_claim_at("tmdb.tv", Grain::Series, "1399"),
+            ],
+        );
+
+        let route = plan.selected_route().expect("series grouping route");
+        assert_eq!(route.identifier().namespace(), "tmdb.tv");
+        assert_eq!(route.identifier().grain(), Grain::Series);
     }
 
     #[test]
