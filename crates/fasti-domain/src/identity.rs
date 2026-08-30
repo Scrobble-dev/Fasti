@@ -374,6 +374,92 @@ pub enum IdentityResolution {
     Conflicted(Vec<RecordId>),
 }
 
+/// The operation for which an external identifier may be used.
+///
+/// Route permission is purpose-specific: an alias accepted for a metadata
+/// read is not automatically safe for a tracker write.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResolutionIntent {
+    MetadataLookup,
+    MetadataSearch,
+    TrackerRead,
+    TrackerWrite,
+    PlayHandoff,
+    SegmentTranslation,
+    Deduplication,
+    ImportAttachment,
+    ExportProjection,
+    CalendarSchedule,
+    DisplayProjection,
+}
+
+impl ResolutionIntent {
+    pub const ALL: &'static [Self] = &[
+        Self::MetadataLookup,
+        Self::MetadataSearch,
+        Self::TrackerRead,
+        Self::TrackerWrite,
+        Self::PlayHandoff,
+        Self::SegmentTranslation,
+        Self::Deduplication,
+        Self::ImportAttachment,
+        Self::ExportProjection,
+        Self::CalendarSchedule,
+        Self::DisplayProjection,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::MetadataLookup => "metadata_lookup",
+            Self::MetadataSearch => "metadata_search",
+            Self::TrackerRead => "tracker_read",
+            Self::TrackerWrite => "tracker_write",
+            Self::PlayHandoff => "play_handoff",
+            Self::SegmentTranslation => "segment_translation",
+            Self::Deduplication => "deduplication",
+            Self::ImportAttachment => "import_attachment",
+            Self::ExportProjection => "export_projection",
+            Self::CalendarSchedule => "calendar_schedule",
+            Self::DisplayProjection => "display_projection",
+        }
+    }
+
+    pub const fn requires_provider_native_route(self) -> bool {
+        matches!(self, Self::TrackerWrite)
+    }
+}
+
+/// How an operation reached the selected provider coordinate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IdentityRouteKind {
+    ProviderNative,
+    VerifiedAlias,
+}
+
+/// A profile's anime grouping and export preference.
+///
+/// This value selects an outward projection only. It never identifies or
+/// re-keys a Fasti Record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnimeIdPreference {
+    Imdb,
+    Mal,
+    Kitsu,
+}
+
+impl AnimeIdPreference {
+    pub const fn namespace(self) -> &'static str {
+        match self {
+            Self::Imdb => "imdb.title",
+            Self::Mal => "mal.anime",
+            Self::Kitsu => "kitsu.anime",
+        }
+    }
+}
+
 impl IdentityResolution {
     pub fn conflicted(candidates: impl IntoIterator<Item = RecordId>) -> Self {
         let mut values = candidates.into_iter().collect::<Vec<_>>();
@@ -476,5 +562,23 @@ mod tests {
             identifier.record_id().to_string(),
             identifier.claim().value()
         );
+    }
+
+    #[test]
+    fn resolution_intents_keep_read_aliases_out_of_tracker_writes() {
+        assert_eq!(ResolutionIntent::ALL.len(), 11);
+        assert!(ResolutionIntent::TrackerWrite.requires_provider_native_route());
+        assert!(!ResolutionIntent::MetadataLookup.requires_provider_native_route());
+        assert_eq!(
+            ResolutionIntent::ExportProjection.as_str(),
+            "export_projection"
+        );
+    }
+
+    #[test]
+    fn anime_preference_namespaces_are_projection_coordinates() {
+        assert_eq!(AnimeIdPreference::Imdb.namespace(), "imdb.title");
+        assert_eq!(AnimeIdPreference::Mal.namespace(), "mal.anime");
+        assert_eq!(AnimeIdPreference::Kitsu.namespace(), "kitsu.anime");
     }
 }

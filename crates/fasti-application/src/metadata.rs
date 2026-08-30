@@ -4,16 +4,17 @@
 //! claims to this port. The provider coordinate remains evidence attached to a
 //! Fasti Record; it never becomes the Record identity.
 
-use crate::ProviderCapabilityState;
 use crate::{ApplicationResult, RequestAccessContext};
+use crate::{ProviderCapabilityState, ProviderId};
 use fasti_domain::{
-    EnrichmentPolicy, ExternalIdentifierClaim, ExternalIdentifierError, FieldClaim,
-    FieldClaimStatus, FieldKey, Grain, MetadataAttribution, MetadataCacheEntry,
-    MetadataCacheReadState, MetadataFieldGroup, MetadataLocale, MetadataProjection,
-    MetadataProjectionPolicy, MetadataProviderId, MetadataRegion, NamespaceDefinition,
-    NamespaceDefinitionError, NamespaceLicencePosture, ProfileId, RatingClaim, RecordId,
-    RequestCorrelationId, MAX_EXTERNAL_IDENTIFIER_BYTES, ORIGINAL_TITLE_FIELD_KEY,
-    OVERVIEW_FIELD_KEY, POSTER_FIELD_KEY, RELEASE_YEAR_FIELD_KEY, TITLE_FIELD_KEY,
+    AnimeIdPreference, EnrichmentPolicy, ExternalIdentifierClaim, ExternalIdentifierError,
+    FieldClaim, FieldClaimStatus, FieldKey, Grain, IdentityRouteKind, MetadataAttribution,
+    MetadataCacheEntry, MetadataCacheReadState, MetadataFieldGroup, MetadataLocale,
+    MetadataProjection, MetadataProjectionPolicy, MetadataProviderId, MetadataRegion,
+    NamespaceDefinition, NamespaceDefinitionError, NamespaceLicencePosture, ProfileId, RatingClaim,
+    RecordId, RequestCorrelationId, ResolutionIntent, MAX_EXTERNAL_IDENTIFIER_BYTES,
+    ORIGINAL_TITLE_FIELD_KEY, OVERVIEW_FIELD_KEY, POSTER_FIELD_KEY, RELEASE_YEAR_FIELD_KEY,
+    TITLE_FIELD_KEY,
 };
 use std::{future::Future, pin::Pin};
 
@@ -145,6 +146,209 @@ pub fn provider_identity_mapping_for_grain(
         .iter()
         .copied()
         .find(|mapping| mapping.provider == provider && mapping.grain == grain)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PurposeIdentityRoute {
+    identifier: ExternalIdentifierClaim,
+    kind: IdentityRouteKind,
+}
+
+impl PurposeIdentityRoute {
+    pub const fn identifier(&self) -> &ExternalIdentifierClaim {
+        &self.identifier
+    }
+
+    pub const fn kind(&self) -> IdentityRouteKind {
+        self.kind
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PurposeIdentityRouteStatus {
+    Selected,
+    Missing,
+    Ambiguous,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PurposeIdentityRoutePlan {
+    intent: ResolutionIntent,
+    target_provider: ProviderId,
+    status: PurposeIdentityRouteStatus,
+    known_identifiers: Vec<ExternalIdentifierClaim>,
+    candidate_routes: Vec<PurposeIdentityRoute>,
+    selected_route: Option<PurposeIdentityRoute>,
+}
+
+impl PurposeIdentityRoutePlan {
+    pub const fn intent(&self) -> ResolutionIntent {
+        self.intent
+    }
+
+    pub const fn target_provider(&self) -> &ProviderId {
+        &self.target_provider
+    }
+
+    pub const fn status(&self) -> PurposeIdentityRouteStatus {
+        self.status
+    }
+
+    pub fn known_identifiers(&self) -> &[ExternalIdentifierClaim] {
+        &self.known_identifiers
+    }
+
+    pub fn candidate_routes(&self) -> &[PurposeIdentityRoute] {
+        &self.candidate_routes
+    }
+
+    pub const fn selected_route(&self) -> Option<&PurposeIdentityRoute> {
+        self.selected_route.as_ref()
+    }
+}
+
+fn route_priority(
+    intent: ResolutionIntent,
+    target_provider: &str,
+    anime_preference: AnimeIdPreference,
+    identifier: &ExternalIdentifierClaim,
+) -> Option<(u8, IdentityRouteKind)> {
+    let namespace = identifier.namespace();
+    let grain = identifier.grain();
+    match (intent, target_provider, namespace, grain) {
+        (
+            ResolutionIntent::MetadataLookup | ResolutionIntent::DisplayProjection,
+            "tmdb",
+            "tmdb.movie",
+            Grain::Film,
+        )
+        | (
+            ResolutionIntent::MetadataLookup | ResolutionIntent::DisplayProjection,
+            "tmdb",
+            "tmdb.tv",
+            Grain::Series,
+        ) => Some((0, IdentityRouteKind::ProviderNative)),
+        (
+            ResolutionIntent::MetadataLookup | ResolutionIntent::DisplayProjection,
+            "tmdb",
+            "imdb.title",
+            Grain::Film | Grain::Series | Grain::Release,
+        ) => Some((1, IdentityRouteKind::VerifiedAlias)),
+        (
+            ResolutionIntent::MetadataLookup | ResolutionIntent::DisplayProjection,
+            "google-books",
+            "googlebooks.volume",
+            Grain::Edition,
+        )
+        | (
+            ResolutionIntent::TrackerRead | ResolutionIntent::TrackerWrite,
+            "mal",
+            "mal.anime",
+            Grain::Release,
+        )
+        | (
+            ResolutionIntent::TrackerRead | ResolutionIntent::TrackerWrite,
+            "kitsu",
+            "kitsu.anime",
+            Grain::Release,
+        ) => Some((0, IdentityRouteKind::ProviderNative)),
+        (ResolutionIntent::ExportProjection, "nuvio", _, Grain::Release) => {
+            let priority = match (anime_preference, namespace) {
+                (AnimeIdPreference::Imdb, "imdb.title")
+                | (AnimeIdPreference::Mal, "mal.anime")
+                | (AnimeIdPreference::Kitsu, "kitsu.anime") => 0,
+                (AnimeIdPreference::Imdb, "mal.anime")
+                | (AnimeIdPreference::Mal, "kitsu.anime")
+                | (AnimeIdPreference::Kitsu, "mal.anime") => 1,
+                (AnimeIdPreference::Imdb, "kitsu.anime")
+                | (AnimeIdPreference::Mal | AnimeIdPreference::Kitsu, "imdb.title") => 2,
+                _ => return None,
+            };
+            Some((priority, IdentityRouteKind::ProviderNative))
+        }
+        _ => None,
+    }
+}
+
+/// Plan one provider route without changing a Record or Chronicle history.
+///
+/// Unsupported identifiers remain visible in `known_identifiers`. Multiple
+/// identifiers at the best accepted priority fail closed as ambiguous.
+pub fn plan_purpose_identity_route(
+    intent: ResolutionIntent,
+    target_provider: ProviderId,
+    anime_preference: AnimeIdPreference,
+    identifiers: &[ExternalIdentifierClaim],
+) -> PurposeIdentityRoutePlan {
+    let mut known_identifiers = identifiers.to_vec();
+    known_identifiers.sort_by(|left, right| {
+        (left.namespace(), left.grain(), left.value()).cmp(&(
+            right.namespace(),
+            right.grain(),
+            right.value(),
+        ))
+    });
+    known_identifiers.dedup();
+
+    let mut candidates = known_identifiers
+        .iter()
+        .filter_map(|identifier| {
+            route_priority(
+                intent,
+                target_provider.as_str(),
+                anime_preference,
+                identifier,
+            )
+            .map(|(priority, kind)| {
+                (
+                    priority,
+                    PurposeIdentityRoute {
+                        identifier: identifier.clone(),
+                        kind,
+                    },
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by(|(left_priority, left), (right_priority, right)| {
+        (
+            left_priority,
+            left.identifier.namespace(),
+            left.identifier.grain(),
+            left.identifier.value(),
+        )
+            .cmp(&(
+                right_priority,
+                right.identifier.namespace(),
+                right.identifier.grain(),
+                right.identifier.value(),
+            ))
+    });
+    candidates.dedup();
+
+    let best_priority = candidates.first().map(|(priority, _)| *priority);
+    let best = candidates
+        .iter()
+        .filter(|(priority, _)| Some(*priority) == best_priority)
+        .map(|(_, route)| route)
+        .collect::<Vec<_>>();
+    let (status, selected_route) = match best.as_slice() {
+        [] => (PurposeIdentityRouteStatus::Missing, None),
+        [selected] => (
+            PurposeIdentityRouteStatus::Selected,
+            Some((*selected).clone()),
+        ),
+        _ => (PurposeIdentityRouteStatus::Ambiguous, None),
+    };
+
+    PurposeIdentityRoutePlan {
+        intent,
+        target_provider,
+        status,
+        known_identifiers,
+        candidate_routes: candidates.into_iter().map(|(_, route)| route).collect(),
+        selected_route,
+    }
 }
 
 pub fn metadata_field_group(field_key: &FieldKey) -> Option<MetadataFieldGroup> {
@@ -1223,6 +1427,103 @@ mod tests {
             .expect("Google Books mapping")
             .identifier("bad/value")
             .is_err());
+    }
+
+    fn identity_claim(namespace: &str, value: &str) -> ExternalIdentifierClaim {
+        ExternalIdentifierClaim::try_new(namespace, Grain::Release, value)
+            .expect("identity fixture")
+    }
+
+    #[test]
+    fn tmdb_metadata_uses_the_pinned_nuvio_imdb_alias_without_rekeying() {
+        let identifiers = vec![
+            identity_claim("mal.anime", "49894"),
+            identity_claim("imdb.title", "tt28254942"),
+        ];
+        let plan = plan_purpose_identity_route(
+            ResolutionIntent::MetadataLookup,
+            ProviderId::try_new("tmdb").expect("TMDB provider"),
+            AnimeIdPreference::Mal,
+            &identifiers,
+        );
+
+        assert_eq!(plan.status(), PurposeIdentityRouteStatus::Selected);
+        assert_eq!(plan.known_identifiers().len(), identifiers.len());
+        assert!(identifiers
+            .iter()
+            .all(|identifier| plan.known_identifiers().contains(identifier)));
+        let route = plan.selected_route().expect("IMDb alias route");
+        assert_eq!(route.identifier().namespace(), "imdb.title");
+        assert_eq!(route.identifier().value(), "tt28254942");
+        assert_eq!(route.kind(), IdentityRouteKind::VerifiedAlias);
+    }
+
+    #[test]
+    fn tracker_write_uses_only_the_target_provider_native_identifier() {
+        let plan = plan_purpose_identity_route(
+            ResolutionIntent::TrackerWrite,
+            ProviderId::try_new("kitsu").expect("Kitsu provider"),
+            AnimeIdPreference::Imdb,
+            &[
+                identity_claim("imdb.title", "tt28254942"),
+                identity_claim("mal.anime", "49894"),
+                identity_claim("kitsu.anime", "7442"),
+            ],
+        );
+
+        let route = plan.selected_route().expect("Kitsu write route");
+        assert_eq!(route.identifier().namespace(), "kitsu.anime");
+        assert_eq!(route.kind(), IdentityRouteKind::ProviderNative);
+        assert_eq!(plan.candidate_routes().len(), 1);
+    }
+
+    #[test]
+    fn equally_ranked_aliases_fail_closed_as_ambiguous() {
+        let plan = plan_purpose_identity_route(
+            ResolutionIntent::MetadataLookup,
+            ProviderId::try_new("tmdb").expect("TMDB provider"),
+            AnimeIdPreference::Imdb,
+            &[
+                identity_claim("imdb.title", "tt0000001"),
+                identity_claim("imdb.title", "tt0000002"),
+            ],
+        );
+
+        assert_eq!(plan.status(), PurposeIdentityRouteStatus::Ambiguous);
+        assert!(plan.selected_route().is_none());
+        assert_eq!(plan.candidate_routes().len(), 2);
+    }
+
+    #[test]
+    fn anime_export_preference_changes_only_the_selected_projection() {
+        let identifiers = [
+            identity_claim("imdb.title", "tt28254942"),
+            identity_claim("mal.anime", "49894"),
+            identity_claim("kitsu.anime", "7442"),
+        ];
+        for (preference, namespace) in [
+            (AnimeIdPreference::Imdb, "imdb.title"),
+            (AnimeIdPreference::Mal, "mal.anime"),
+            (AnimeIdPreference::Kitsu, "kitsu.anime"),
+        ] {
+            let plan = plan_purpose_identity_route(
+                ResolutionIntent::ExportProjection,
+                ProviderId::try_new("nuvio").expect("Nuvio provider"),
+                preference,
+                &identifiers,
+            );
+            assert_eq!(
+                plan.selected_route()
+                    .expect("selected anime export route")
+                    .identifier()
+                    .namespace(),
+                namespace
+            );
+            assert_eq!(plan.known_identifiers().len(), identifiers.len());
+            assert!(identifiers
+                .iter()
+                .all(|identifier| plan.known_identifiers().contains(identifier)));
+        }
     }
 
     #[test]
