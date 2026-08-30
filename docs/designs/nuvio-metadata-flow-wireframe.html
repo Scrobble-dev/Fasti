@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fasti metadata programme wireframe</title>
+  <style>
+    :root { --archive: #f2efe6; --paper: #fffdf8; --ink: #181716; --muted: #625e56; --action: #1e4fa3; --attention: #8c5a12; --verified: #2e6f63; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 16px/1.45 "Atkinson Hyperlegible", sans-serif; color: var(--ink); background: var(--archive); }
+    header { border-bottom: 1px solid #777; padding: 16px 24px; background: #fff; }
+    header strong { margin-right: 24px; }
+    nav { display: inline-flex; flex-wrap: wrap; gap: 8px 18px; }
+    nav a { display: inline-flex; align-items: center; min-height: 44px; color: var(--action); }
+    main { max-width: 1180px; margin: 0 auto; padding: 24px; }
+    h1, h2 { margin: 0 0 12px; font-family: "Newsreader", Georgia, serif; font-weight: 500; }
+    .note { border-left: 4px solid #555; padding: 8px 12px; background: #fff; }
+    .flow { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 22px; }
+    section { min-width: 0; border: 1px solid #777; background: #fff; padding: 16px; }
+    label { display: block; margin: 12px 0 6px; font-weight: 650; }
+    input, select, button { min-height: 44px; width: 100%; padding: 9px; font: inherit; }
+    button { margin-top: 10px; background: #eee; border: 1px solid #555; }
+    ul { padding-left: 22px; }
+    li { margin: 9px 0; }
+    .status { border: 1px dashed #777; padding: 10px; margin-top: 12px; }
+    .evidence { font-family: "IBM Plex Mono", monospace; font-size: 13px; }
+    .secondary-flow { grid-template-columns: repeat(3, 1fr); }
+    .artifact-label { color: var(--muted); font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+    .status[data-state="attention"] { border-color: var(--attention); }
+    .status[data-state="verified"] { border-color: var(--verified); }
+    :is(a, input, select, button):focus-visible { outline: 3px solid var(--action); outline-offset: 2px; }
+    @media (max-width: 780px) { header { padding: 12px 16px; } header strong { display: block; margin: 0 0 8px; } .flow { grid-template-columns: 1fr; } main { padding: 16px; } }
+  </style>
+</head>
+<body>
+  <header><strong>Fasti</strong><nav aria-label="Primary"><a href="#search">Search</a><a href="#discover">Discover</a><a href="#library">Library</a><a href="#collections">Collections</a></nav></header>
+  <main>
+    <p class="artifact-label">Flow only, not production layout</p>
+    <h1>Metadata and library flow</h1>
+    <p class="note">Stable Fasti Records remain unchanged when metadata sources or export identifiers change.</p>
+    <div class="flow">
+      <!-- State 1: candidate finding does not mutate the Library. -->
+      <section id="search">
+        <h2>1. Find candidates</h2>
+        <label for="query">Title, person, or identifier</label>
+        <input id="query" value="Frieren" aria-describedby="search-status">
+        <label for="sources">Sources</label>
+        <select id="sources"><option>All configured metadata sources</option></select>
+        <button type="button">Search</button>
+        <div class="status" id="search-status" role="status" aria-live="polite">3 source results. One likely match. No Library changes yet.</div>
+      </section>
+      <!-- State 2: evidence and projection choices are explicit before save. -->
+      <section id="discover">
+        <h2>2. Review evidence</h2>
+        <strong>Frieren: Beyond Journey's End</strong>
+        <ul>
+          <li>TMDB TV 209867</li>
+          <li>MAL 52991</li>
+          <li>Kitsu 46001</li>
+        </ul>
+        <p class="evidence">Projection: English title · TMDB artwork · MAL export preference</p>
+        <button type="button">Create Fasti record</button>
+        <button type="button">Attach to existing record</button>
+        <button type="button">Resolve later</button>
+      </section>
+      <!-- State 3: local state and collection membership are separate from metadata. -->
+      <section id="library">
+        <h2>3. Own local state</h2>
+        <p><strong>Record:</strong> Created · tracking and saved state did not change</p>
+        <p><strong>Saved:</strong> No</p>
+        <p><strong>Collections:</strong> None</p>
+        <p><strong>Nuvio export:</strong> MAL grouping enabled</p>
+        <div class="status">MDBList ratings unavailable: permission not configured. Existing metadata remains usable.</div>
+        <button type="button">Save to Library</button>
+        <button type="button">See metadata sources and sync</button>
+      </section>
+    </div>
+    <div class="flow secondary-flow">
+      <!-- State 4: Nuvio grants and sync health remain explicit and revocable. -->
+      <section id="connections">
+        <h2>4. Sync with Nuvio Cloud</h2>
+        <p><strong>Profile:</strong> Ryan</p>
+        <p><strong>Direction:</strong> Merge Library, watched state, and progress</p>
+        <p><strong>Not enabled:</strong> Ratings and Collection writes</p>
+        <div class="status" data-state="attention" role="status">Progress sync is paused. The refresh token rotated on another device. Local changes remain queued.</div>
+        <button type="button">Reauthorize and resume</button>
+        <button type="button">Review queued changes</button>
+      </section>
+      <!-- State 5: Nuvio can pair to Fasti without sharing the Cloud connection. -->
+      <section id="nuvio-provider">
+        <h2>5. Connect Nuvio to Fasti</h2>
+        <p><strong>Client:</strong> Living-room NuvioTV</p>
+        <p><strong>Can read:</strong> Library and two Collections</p>
+        <p><strong>Can update:</strong> Watched state and progress</p>
+        <div class="status" data-state="verified" role="status">Paired with this Fasti server. Last sync completed 1 minute ago.</div>
+        <button type="button">Review access and sync</button>
+        <button type="button">Revoke this client</button>
+      </section>
+      <!-- State 6: local sharing exposes chosen views, never the vault. -->
+      <section id="collections">
+        <h2>6. Share a local workspace</h2>
+        <p><strong>Shared:</strong> Library projection and two Collections</p>
+        <p><strong>Private:</strong> Credentials, notes, ratings, and provider evidence</p>
+        <p><strong>Members:</strong> 2 active · 1 revoked</p>
+        <div class="status" data-state="verified" role="status">Local sharing is active. Last verified 2 minutes ago.</div>
+        <button type="button">Choose what members can see</button>
+        <button type="button">View audit history</button>
+      </section>
+    </div>
+  </main>
+</body>
+</html>
