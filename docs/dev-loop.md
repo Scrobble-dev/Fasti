@@ -72,6 +72,20 @@ Other commands:
 ./scripts/dev.sh --self-test # verify the launcher's own process handling
 ```
 
+TrailBase is explicit and does not start with the default loop:
+
+```bash
+./scripts/dev.sh --prepare-offline
+./scripts/dev.sh trailbase initialize
+./scripts/dev.sh trailbase start
+./scripts/dev.sh trailbase status
+./scripts/dev.sh trailbase stop
+```
+
+Initialization must run in the owning terminal because it prints the rotated
+administrator password once. See the [TrailBase runbook](operations/trailbase.md)
+for native/OCI boundaries, backup, restore, and conformance.
+
 Useful environment variables: `FASTI_PORT` (preferred port, default 8420),
 `FASTI_LISTEN` (full bind address), `FASTI_PORT_FALLBACK` (`auto` or `fail`
 -- `fail` refuses to start rather than picking a different port),

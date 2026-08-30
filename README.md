@@ -64,7 +64,7 @@ This runs `fastid`, the Fasti daemon, on your machine. It takes about 2 minutes 
 - Set `FASTI_PORT_FALLBACK=auto` and run step 2 again. `fastid` then picks a free port (check logs for the port number to use in step 3).
 - Find and stop the other process: `ss -ltnp 'sport = :8420'` shows it; `kill <pid>` stops it.
 
-For the full day-to-day dev loop -- hot rebuilds, Podman/Docker, and the web QA harness -- see [docs/dev-loop.md](docs/dev-loop.md).
+For the full day-to-day dev loop -- hot rebuilds, Podman/Docker, and the web QA harness -- see [docs/dev-loop.md](docs/dev-loop.md). The separate pinned human-account service has its own [TrailBase development runbook](docs/operations/trailbase.md).
 
 ### Quick start: one container, no Rust toolchain
 
@@ -135,7 +135,8 @@ The production daemon deliberately exposes only behavior it can prove:
 | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `GET /api/v1/health`                                                                                | Implemented in `fastid` and described by the production OpenAPI document                                                                                            |
 | One-time node initialization/enrollment                                                             | Durable production routes require `FASTI_DATA_ROOT` and direct loopback or an explicit loopback-only container port forward; one-time secrets remain in JSON bodies |
-| Human accounts and browser sessions                                                                 | Dormant PR A foundation only; production sign-in, issuance, inventory, and revocation are unavailable until C1                                                      |
+| TrailBase human-account service                                                                     | Exact v0.33.5 native and OCI loopback development package; remote account/OAuth exposure is unavailable because the pinned release accepts unsafe redirects         |
+| Fasti browser sessions                                                                              | Dormant PR A foundation only; production exchange, issuance, inventory, and revocation are unavailable until C1                                                     |
 | B1 conformance HTTP and SSE                                                                         | Executable only in the feature-gated, loopback-only conformance server; all fixture successes declare `fixture_only` availability and `none` durability             |
 | `POST /api/v1/observations`                                                                         | Durable production route authorized by a scoped bearer client credential                                                                                            |
 | Records, identifiers, namespaces, profile tracking disposition, and Nuvio Collections configuration | Durable production routes authorized by scoped bearer client credentials                                                                                            |

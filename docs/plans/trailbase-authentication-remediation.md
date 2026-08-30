@@ -119,7 +119,37 @@ PR A source-gap gate, recorded 2026-08-29:
 - Dependency result: no external dependency blocks PR A. TrailBase runtime and protocol work remain in B and C and must not be simulated here.
 - Implementation order: remove false surfaces; restore migration history and add a forward migration; define the final dormant session model and policy; implement store invariants; add request-boundary checks; regenerate contracts and SDK; apply the persistent Gate 10 A+C unavailable state; add focused tests; correct documentation and executable truth gates.
 
-### 2.2 Primary source registry
+### 2.2 PR B implementation checkpoint
+
+Recorded: 2026-08-29
+
+| Item                    | Exact evidence                                                                                                                                                                                                                                        | State                                     |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| Gate 10 approval        | `approved.json` records `A+C`; SHA-256 values for variant A, variant C, the 1440 board, design HTML, CSS, and Gate 10 review match the current files                                                                                                  | `VERIFIED`                                |
+| Canonical plan          | This file has SHA-256 `34df49d0a458ea1b2bb08500880acc6736bd38cf42f3b6e9bcab82ea5aa1e890`, equal to the approved PR #93 planning copy                                                                                                                  | `VERIFIED` before this checkpoint edit    |
+| PR A delivery           | PR #93 merged to `dev` as `adbdef3038786b0efb2ec615bce080e3eaa9361f`; tree `a7a1f661ae1b0ef4470ba736d65942f54793d1b0`                                                                                                                                 | `COMPLETE_WITH_EVIDENCE`                  |
+| PR B worktree           | `/home/ryan/code/fasti/.claude/worktrees/fasti-trailbase-runtime-b`; branch `codex/fasti-trailbase-runtime-b`                                                                                                                                         | `IN_PROGRESS`                             |
+| PR B base               | Local `HEAD` and `origin/dev` are both `adbdef3038786b0efb2ec615bce080e3eaa9361f` with tree `a7a1f661ae1b0ef4470ba736d65942f54793d1b0` after `git fetch --all --prune`                                                                                | `VERIFIED`                                |
+| Release boundary        | The only open pull request is PR #89 from `dev` to `release`; PR B does not modify, merge, or promote it                                                                                                                                              | `OUT_OF_SCOPE`                            |
+| TrailBase release       | `v0.33.5`; tag commit `b4c85d5152d4e5f472e0b5da5303f7c938e3a083`; exact native archives and executables, OCI index/platform graph, and reviewed licence digest are enforced by `third_party/trailbase/release.json`                                   | `VERIFIED` runtime inputs                 |
+| Implementation boundary | Extend existing launcher, verification, packaging, contract, and documentation owners. Do not add a second supervisor, application framework, authentication platform, or Fasti session exchange in PR B.                                             | `IN_PROGRESS`                             |
+| Prepared-machine gate   | `cargo xtask test milestone --body B` at `7d5f5265bae9b4bba92a000ddee8eb935dbc48d6`; source tree `10b18c720d697ad569d153906f72668c6876d215`; all eight gates and 39 account, social, recovery, security-boundary, upgrade, and rollback checks passed | `VERIFIED` before this checkpoint update  |
+| Resource boundary       | The combined Fasti and TrailBase startup-smoke peaked at 110 MiB under the unchanged 192 MiB aggregate ceiling with zero extra swap and one CPU                                                                                                       | `VERIFIED`; startup-smoke, not idle/soak  |
+| Upgrade and rollback    | Exact test-only v0.33.4 artifacts; stopped digest-bound full-depot backup; isolated v0.33.5 activation/restart; old binary starts only against a fresh restore of the untouched old backup; schemas are identical                                     | `VERIFIED`; no database migration claimed |
+| Runtime limits          | Social callbacks do not prove TOTP; refresh does not rotate; tokens omit `iss`, `aud`, `kid`, and `jti`; remote redirect-taking routes and isolated-admin MFA are unavailable; no passkeys, recovery codes, or documented per-account disable         | `VERIFIED`; keep unavailable or bounded   |
+| Architecture evidence   | Native and OCI lifecycle executed on Linux x86_64; exact Linux arm64 native artifact and OCI platform graph are locked, but runtime execution requires a native arm64 runner                                                                          | `PARTIAL`; do not claim arm64 execution   |
+| Competitor baseline     | [Ryot v10.5.0, Cinephage v0.16.0, and Yamtrack v0.26.3 exact-release comparison](../reviews/2026-08-30-access-competitor-comparison.md)                                                                                                               | `VERIFIED`; refresh at MVP close          |
+
+PR B file ownership during source audit:
+
+| Owner                     | Paths or state                                                                                                                         | Rule                                                                      |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Commander                 | Canonical plan, integration branch, Git and GitHub state, implementation commits, exact-head evidence, PR creation, and merge decision | Sole writer until the source audit freezes disjoint implementation lanes. |
+| `pr93_dev_reset`          | Existing Fasti launcher, package, OCI, backup, restore, and supervision patterns                                                       | Read-only audit.                                                          |
+| `pr93_session_review`     | Exact TrailBase `v0.33.5` source, routes, configuration, lifecycle, account flows, and limitations                                     | Read-only audit.                                                          |
+| `pr93_contract_ui_review` | Contract, documentation, verifier, licence, artifact-pin, and negative-control matrix                                                  | Read-only audit.                                                          |
+
+### 2.3 Primary source registry
 
 Use exact versions and current primary sources:
 
@@ -132,7 +162,7 @@ Use exact versions and current primary sources:
 - OAuth and OIDC: [RFC 6749](https://www.rfc-editor.org/rfc/rfc6749), [RFC 7009](https://www.rfc-editor.org/rfc/rfc7009), [RFC 7591](https://www.rfc-editor.org/rfc/rfc7591), [RFC 7636](https://www.rfc-editor.org/rfc/rfc7636), [RFC 7662](https://www.rfc-editor.org/rfc/rfc7662), [RFC 8414](https://www.rfc-editor.org/rfc/rfc8414), [RFC 8628](https://www.rfc-editor.org/rfc/rfc8628), [RFC 9207](https://www.rfc-editor.org/rfc/rfc9207), [RFC 9700](https://www.rfc-editor.org/rfc/rfc9700), [OIDC Core](https://openid.net/specs/openid-connect-core-1_0.html), [Discovery](https://openid.net/specs/openid-connect-discovery-1_0.html), [RP logout](https://openid.net/specs/openid-connect-rpinitiated-1_0.html), [front-channel logout](https://openid.net/specs/openid-connect-frontchannel-1_0.html), and [back-channel logout](https://openid.net/specs/openid-connect-backchannel-1_0.html).
 - Providers: [Open Library](https://openlibrary.org/developers/api), [Kitsu](https://hummingbird-me.github.io/api-docs/), [AniList](https://docs.anilist.co/), [MusicBrainz](https://musicbrainz.org/doc/MusicBrainz_API), [TMDB](https://developer.themoviedb.org/docs/authentication-application), [TVDB v4](https://thetvdb.github.io/v4-api/), [Google Books](https://developers.google.com/books/docs/v1/using), [MyAnimeList v2](https://myanimelist.net/apiconfig/references/api/v2), [RAWG](https://rawg.io/apidocs), [IGDB](https://api-docs.igdb.com/), [ComicVine](https://comicvine.gamespot.com/api/), and [Podcast Index docs](https://github.com/Podcastindex-org/docs-api).
 - Nuvio: [NuvioTV](https://github.com/NuvioMedia/NuvioTV), [issue 2484](https://github.com/NuvioMedia/NuvioTV/issues/2484), [issue 2935](https://github.com/NuvioMedia/NuvioTV/issues/2935), and [issue 2967](https://github.com/NuvioMedia/NuvioTV/issues/2967).
-- Competitor evidence: [Ryot authentication](https://docs.ryot.io/guides/authentication), [Cinephage authentication schema](https://docs.cinephage.net/reference/database/schema-overview#authentication-better-auth), and [Yamtrack social authentication](https://github.com/FuzzyGrim/Yamtrack/wiki/Social-Authentication-in-Yamtrack).
+- Competitor evidence: [dated exact-release comparison](../reviews/2026-08-30-access-competitor-comparison.md), [Ryot authentication](https://docs.ryot.io/guides/authentication), [Cinephage authentication schema](https://docs.cinephage.net/reference/database/schema-overview#authentication-better-auth), and [Yamtrack social authentication](https://github.com/FuzzyGrim/Yamtrack/wiki/Social-Authentication-in-Yamtrack).
 
 ## 3. Final decisions
 
@@ -1192,6 +1222,10 @@ Explicit limits:
 - refresh does not rotate;
 - token has no `iss`, `aud`, `kid`, or `jti`;
 - `mfa` means enrolled, not current assurance;
+- the shared redirect validator accepts protocol-relative values, so remote
+  account and OAuth route exposure is unavailable;
+- the isolated admin listener does not expose the second-factor login route,
+  so administrator TOTP on that listener is unavailable;
 - no passkeys or recovery codes;
 - service is alpha.
 

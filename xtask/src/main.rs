@@ -92,6 +92,8 @@ enum TestCommand {
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum BodyArg {
+    #[value(name = "B")]
+    AccessB,
     B0,
     B1,
     B2,
@@ -327,6 +329,7 @@ fn run_milestone(
     manifest: Option<PathBuf>,
 ) -> anyhow::Result<()> {
     match body {
+        BodyArg::AccessB => orchestration::run_access_b(root),
         BodyArg::B1 => {
             run_deep(root)?;
             let manifest = manifest

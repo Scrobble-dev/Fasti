@@ -48,13 +48,13 @@ The Workbench keeps the planned methods visible so future work does not erase
 the approved interface. Each unavailable control states its owning package and
 next action. It does not generate or store placeholder security state.
 
-| Method | Owner and activation gate |
-| --- | --- |
-| TrailBase password, registration, verification, reset, social sign-in, and supported TOTP | TrailBase in B, then Fasti exchange in C1. Fasti does not store the human password or TOTP secret. |
-| Fasti browser session | Fasti Access. Dormant in A; production issuance, inventory, rotation, and revocation activate only after C1. |
-| Passkey and Fasti recovery code | Fasti Access in D, linked to `AuthSubject` with a verified WebAuthn ceremony and active TrailBase-anchor check. |
-| Generic OpenID Connect and Authentik sign-in | Identity Integration in E1/E3. Require discovery, state, nonce, S256 Proof Key for Code Exchange, exact issuer and subject, token validation, linking policy, and logout evidence. |
-| Fasti OAuth and Nuvio or command-line device approval | Fasti Access in E2. Require approved clients, scopes, profile consent, bounded codes, polling, rotation, revocation, and replay tests. |
+| Method                                                                                    | Owner and activation gate                                                                                                                                                          |
+| ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| TrailBase password, registration, verification, reset, social sign-in, and supported TOTP | TrailBase in B, then Fasti exchange in C1. Fasti does not store the human password or TOTP secret.                                                                                 |
+| Fasti browser session                                                                     | Fasti Access. Dormant in A; production issuance, inventory, rotation, and revocation activate only after C1.                                                                       |
+| Passkey and Fasti recovery code                                                           | Fasti Access in D, linked to `AuthSubject` with a verified WebAuthn ceremony and active TrailBase-anchor check.                                                                    |
+| Generic OpenID Connect and Authentik sign-in                                              | Identity Integration in E1/E3. Require discovery, state, nonce, S256 Proof Key for Code Exchange, exact issuer and subject, token validation, linking policy, and logout evidence. |
+| Fasti OAuth and Nuvio or command-line device approval                                     | Fasti Access in E2. Require approved clients, scopes, profile consent, bounded codes, polling, rotation, revocation, and replay tests.                                             |
 
 These methods are approved MVP work. A method becomes active only
 when its backend capability, host adapter, typed problem recovery, generated
@@ -99,6 +99,12 @@ unavailable states until their approved owner passes its package gate.
   `AsyncAPI: N/A — synchronous dormant state with no event channel`.
 - PR A adds no public command-line authentication operation.
   `Public CLI: N/A — direct deterministic fixtures only; activation belongs to C1`.
+- PR B exposes TrailBase operator lifecycle only through `scripts/dev.sh trailbase`.
+  The exact vendor OpenAPI is digest-bound in conformance evidence;
+  Fasti adds no identity-exchange OpenAPI or SDK method before C1.
+- PR B adds no Fasti asynchronous authentication event or public linked-data
+  entity. `AsyncAPI: N/A — synchronous vendor account lifecycle` and
+  `JSON-LD: N/A — private human credential and session state`.
 - Tauri administrator and provider-secret commands are local IPC. They do not
   create an undocumented HTTP or AsyncAPI surface.
 - C1 and later packages must update each applicable OpenAPI, SDK, permission,

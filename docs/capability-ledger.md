@@ -19,6 +19,7 @@ Those commands report contract state. They do not activate later-body runtime be
 | `system.health`                                                                                              | Implemented by the production daemon and its production OpenAPI document                                                                                                  |
 | `system.node.initialize` and `access.client.enroll`                                                          | Durable production routes with `FASTI_DATA_ROOT` and direct loopback or an explicit loopback-only port forward; also covered by the nondurable fixture                    |
 | PR A browser-session foundation                                                                              | Dormant domain, application, and store model only. Production identity, sign-in, session issuance, inventory, and revocation are `Unavailable until C1`                   |
+| TrailBase account lifecycle                                                                                  | Exact v0.33.5 separate service; native/OCI operations and prepared-machine account, social OIDC/PKCE, TOTP, deletion, backup, and restore conformance pass. No Fasti session exchange exists until C1. |
 | `observation.accept`                                                                                         | Durable production HTTP route (`POST /api/v1/observations`), authorized by a scoped bearer client credential                                                              |
 | Other B1 administration, receipt, and `receipt.stream` capabilities                                          | Executable only in the feature-gated loopback conformance fixture; state is bounded, in-memory, and nondurable                                                            |
 | Identity records, identifiers, namespaces, profile tracking disposition, and Nuvio Collections configuration | Durable local and authenticated remote HTTP routes, covered by `cargo xtask contract verify`                                                                              |
@@ -46,6 +47,18 @@ PR A records these authentication contract dispositions:
 
 Reserved or dormant authentication identifiers do not authorize a route,
 session, fixture listener, success response, or UI success state.
+
+PR B records these TrailBase contract dispositions:
+
+| Surface               | Disposition                                                                                                                                      |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Vendor OpenAPI        | The exact runtime `openapi print` output is captured by SHA-256 in the account-conformance receipt. Fasti does not copy or rename vendor routes. |
+| Fasti OpenAPI and SDK | No TrailBase exchange or Fasti browser-session route. C1 owns the adapter contract.                                                              |
+| AsyncAPI              | `N/A — the PR B operator and account lifecycle has no Fasti asynchronous event surface.`                                                         |
+| JSON-LD               | `N/A — human credentials, sessions, TOTP state, and provider links are private security state.`                                                  |
+| CLI                   | `scripts/dev.sh trailbase` is the sole operator entry point. It does not issue a Fasti credential.                                               |
+| Remote account routes | `Unavailable — TrailBase v0.33.5 accepts protocol-relative redirects. Keep the account and OAuth listener on loopback.`                          |
+| Upgrade and rollback  | Exact test-only v0.33.4 to v0.33.5 adjacent artifact replacement and old full-depot rollback; no schema migration is claimed.                    |
 
 The trusted Tauri host can persist non-secret network preferences, test a
 configured Fasti service, store Google Books and TMDB credentials in the
