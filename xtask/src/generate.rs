@@ -3640,20 +3640,12 @@ fn write(output_root: &Path, artifacts: &Artifacts) -> anyhow::Result<()> {
 fn verify_inventory(output_root: &Path, expected: &Artifacts) -> anyhow::Result<()> {
     let mut actual = BTreeSet::new();
     for relative_directory in GENERATED_ONLY_DIRECTORIES.map(PathBuf::from) {
-        let directory = output_root.join(&relative_directory);
-        for entry in fs::read_dir(&directory)
-            .with_context(|| format!("failed to inspect {}", directory.display()))?
-        {
-            let entry = entry?;
-            let file_type = entry.file_type()?;
-            ensure!(
-                file_type.is_file(),
-                "generated artifact directory {} contains non-file {}",
-                relative_directory.display(),
-                entry.path().display()
-            );
-            actual.insert(relative_directory.join(entry.file_name()));
-        }
+        collect_generated_files(
+            output_root,
+            &relative_directory,
+            &output_root.join(&relative_directory),
+            &mut actual,
+        )?;
     }
     let generated_only_directories: BTreeSet<_> = GENERATED_ONLY_DIRECTORIES
         .into_iter()
@@ -3662,8 +3654,9 @@ fn verify_inventory(output_root: &Path, expected: &Artifacts) -> anyhow::Result<
     let expected_paths: BTreeSet<_> = expected
         .keys()
         .filter(|path| {
-            path.parent()
-                .is_some_and(|parent| generated_only_directories.contains(parent))
+            generated_only_directories
+                .iter()
+                .any(|directory| path.starts_with(directory))
         })
         .cloned()
         .collect();
@@ -3673,6 +3666,46 @@ fn verify_inventory(output_root: &Path, expected: &Artifacts) -> anyhow::Result<
         expected_paths.difference(&actual).collect::<Vec<_>>(),
         actual.difference(&expected_paths).collect::<Vec<_>>()
     );
+    Ok(())
+}
+
+fn collect_generated_files(
+    output_root: &Path,
+    generated_root: &Path,
+    directory: &Path,
+    files: &mut BTreeSet<PathBuf>,
+) -> anyhow::Result<()> {
+    for entry in fs::read_dir(directory)
+        .with_context(|| format!("failed to inspect {}", directory.display()))?
+    {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        ensure!(
+            !file_type.is_symlink(),
+            "generated artifact directory {} contains symlink {}",
+            generated_root.display(),
+            entry.path().display()
+        );
+        if file_type.is_dir() {
+            collect_generated_files(output_root, generated_root, &entry.path(), files)?;
+        } else {
+            ensure!(
+                file_type.is_file(),
+                "generated artifact directory {} contains non-file {}",
+                generated_root.display(),
+                entry.path().display()
+            );
+            let path = entry.path();
+            let relative = path.strip_prefix(output_root).with_context(|| {
+                format!(
+                    "generated artifact {} escaped {}",
+                    path.display(),
+                    output_root.display()
+                )
+            })?;
+            files.insert(relative.to_path_buf());
+        }
+    }
     Ok(())
 }
 
