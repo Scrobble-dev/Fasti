@@ -8,15 +8,15 @@ an accessibility conformance claim, or production identity proof.
 
 ## Product truth
 
-| Capability | PR A state | Required evidence before activation |
-| --- | --- | --- |
-| Human sign-in | Unavailable until PR C1 | TrailBase proof exchange, stable subject resolution, membership and role checks, and administrator continuity. |
-| Fasti browser session | Dormant foundation only; unavailable on production routes until PR C1 | Direct deterministic domain, application, and store tests in PR A. Route, cookie, CSRF, inventory, and revocation evidence belongs to PR C1. |
-| Session location and device | Not recorded | The product must say `Not recorded` until a governed collection contract exists. |
-| Profile switching | Unavailable | PR C1 or a later package must prove session-local authorization. |
-| TrailBase password and TOTP | Unavailable until the TrailBase package proves support | Current official TrailBase documentation, source, and integration tests. |
-| Passkeys and recovery codes | Unavailable until PR D | Server-owned credential lifecycle and recovery evidence. |
-| Generic OIDC, Authentik, OAuth, and device authorization | Unavailable until the relevant PR E package | Protocol, management, consent, token, device, and revocation evidence for each named capability. |
+| Capability                                               | PR A state                                                                | Required evidence before activation                                                                                                          |
+| -------------------------------------------------------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Human sign-in                                            | Unavailable until PR C1                                                   | TrailBase proof exchange, stable subject resolution, membership and role checks, and administrator continuity.                               |
+| Fasti browser session                                    | Dormant foundation only; unavailable on production routes until PR C1     | Direct deterministic domain, application, and store tests in PR A. Route, cookie, CSRF, inventory, and revocation evidence belongs to PR C1. |
+| Session location and device                              | Not recorded                                                              | The product must say `Not recorded` until a governed collection contract exists.                                                             |
+| Profile switching                                        | Unavailable                                                               | PR C1 or a later package must prove session-local authorization.                                                                             |
+| TrailBase password, social OIDC/PKCE, and TOTP           | Service conformance passes in PR B; Fasti UI remains unavailable until C1 | Exact v0.33.5 source plus the prepared-machine account, collision, outage, and assurance fixture.                                            |
+| Passkeys and recovery codes                              | Unavailable until PR D                                                    | Server-owned credential lifecycle and recovery evidence.                                                                                     |
+| Generic OIDC, Authentik, OAuth, and device authorization | Unavailable until the relevant PR E package                               | Protocol, management, consent, token, device, and revocation evidence for each named capability.                                             |
 
 PR A must not expose a production `BrowserUser`, local password account,
 development account, custom TOTP, simulated passkey, backup-code, or fabricated
@@ -41,18 +41,18 @@ checks when their owning package implements them.
 
 ### Nielsen's ten heuristics
 
-| Heuristic | Required evidence |
-| --- | --- |
-| Visibility of system status | Loading, pending, current, verified, unavailable, failed, and recovery states are visible and announced where needed. |
-| Match with the real world | Copy uses account, credential, session, device, provider, revoke, and `Not recorded` accurately. |
-| User control and freedom | Close, cancel, back, retry, scoped revoke, and safe exit paths work. |
-| Consistency and standards | Tabler and established Workbench patterns are used before custom controls. |
-| Error prevention | Bounded input, repeat-action locks, clear targets, and explicit confirmation protect state. |
-| Recognition rather than recall | Current account, session, expiry, activity, evidence, and available actions remain visible. |
-| Flexibility and efficiency | Keyboard operation and an efficient repeat-user path work without cluttering first-run setup. |
-| Aesthetic and minimalist design | Each view contains only the information and actions needed for its task. |
-| Error recognition and recovery | Plain errors state what happened, what stayed safe, and the next valid action. |
-| Help and documentation | Nearby help explains the boundary and the reason for every unavailable state. |
+| Heuristic                       | Required evidence                                                                                                     |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Visibility of system status     | Loading, pending, current, verified, unavailable, failed, and recovery states are visible and announced where needed. |
+| Match with the real world       | Copy uses account, credential, session, device, provider, revoke, and `Not recorded` accurately.                      |
+| User control and freedom        | Close, cancel, back, retry, scoped revoke, and safe exit paths work.                                                  |
+| Consistency and standards       | Tabler and established Workbench patterns are used before custom controls.                                            |
+| Error prevention                | Bounded input, repeat-action locks, clear targets, and explicit confirmation protect state.                           |
+| Recognition rather than recall  | Current account, session, expiry, activity, evidence, and available actions remain visible.                           |
+| Flexibility and efficiency      | Keyboard operation and an efficient repeat-user path work without cluttering first-run setup.                         |
+| Aesthetic and minimalist design | Each view contains only the information and actions needed for its task.                                              |
+| Error recognition and recovery  | Plain errors state what happened, what stayed safe, and the next valid action.                                        |
+| Help and documentation          | Nearby help explains the boundary and the reason for every unavailable state.                                         |
 
 Relevant IxDF lenses are cognitive load, Hick's law, Fitts's law, error
 prevention and recovery, recognition over recall, visual hierarchy,
@@ -62,32 +62,32 @@ progressive disclosure, and inclusive design.
 
 No criterion below has an exact-head pass result in this record.
 
-| Success criterion | PR A result | Required evidence |
-| --- | --- | --- |
-| 1.3.1 Info and Relationships | Pending | Semantic headings, labels, groups, tabs, lists, and dialog relationships. |
-| 1.3.2 Meaningful Sequence | Pending | DOM, reading, and focus order match. |
-| 1.3.3 Sensory Characteristics | Pending | Instructions do not depend on position, shape, or color. |
-| 1.4.3 Contrast (Minimum) | Pending | Measured text contrast in every supported theme and state. |
-| 1.4.10 Reflow | Pending | Narrow viewport and 200 percent zoom proof with no loss of action or content. |
-| 1.4.11 Non-text Contrast | Pending | Measured control, focus, border, and state contrast. |
-| 1.4.12 Text Spacing | Pending | Required text-spacing overrides do not clip or obscure content. |
-| 2.1.1 Keyboard | Pending | Keyboard-only completion of every available task. |
-| 2.1.2 No Keyboard Trap | Pending | Focus can enter, move through, and leave each surface. |
-| 2.4.3 Focus Order | Pending | Focus follows the task and returns reliably. |
-| 2.4.6 Headings and Labels | Pending | Headings and labels state purpose and action. |
-| 2.4.7 Focus Visible | Pending | Focus remains visible in every theme and state. |
-| 2.4.11 Focus Not Obscured (Minimum) | Pending | Focus is not hidden by overlays or scrolling regions. |
-| 2.5.3 Label in Name | Pending | Visible control text is part of the accessible name. |
-| 2.5.7 Dragging Movements | Not applicable | The planned flow has no drag-only action. Reassess if the interaction changes. |
-| 2.5.8 Target Size (Minimum) | Pending | Measured targets meet the project 44 CSS-pixel requirement. |
-| 3.2.1 On Focus | Pending | Focus does not submit, revoke, switch, or close. |
-| 3.2.2 On Input | Pending | Input does not cause an unexpected context change. |
-| 3.3.1 Error Identification | Pending | Text identifies the failed operation. |
-| 3.3.2 Labels or Instructions | Pending | Visible instructions cover inputs and destructive actions. |
-| 3.3.3 Error Suggestion | Pending | Safe, useful correction guidance is present. |
-| 3.3.4 Error Prevention | Pending | Destructive account-data changes are reviewable and reversible where possible. |
-| 4.1.2 Name, Role, Value | Pending | Accessibility-tree inspection covers every interactive state. |
-| 4.1.3 Status Messages | Pending | Status is announced without an unexpected focus move. |
+| Success criterion                   | PR A result    | Required evidence                                                              |
+| ----------------------------------- | -------------- | ------------------------------------------------------------------------------ |
+| 1.3.1 Info and Relationships        | Pending        | Semantic headings, labels, groups, tabs, lists, and dialog relationships.      |
+| 1.3.2 Meaningful Sequence           | Pending        | DOM, reading, and focus order match.                                           |
+| 1.3.3 Sensory Characteristics       | Pending        | Instructions do not depend on position, shape, or color.                       |
+| 1.4.3 Contrast (Minimum)            | Pending        | Measured text contrast in every supported theme and state.                     |
+| 1.4.10 Reflow                       | Pending        | Narrow viewport and 200 percent zoom proof with no loss of action or content.  |
+| 1.4.11 Non-text Contrast            | Pending        | Measured control, focus, border, and state contrast.                           |
+| 1.4.12 Text Spacing                 | Pending        | Required text-spacing overrides do not clip or obscure content.                |
+| 2.1.1 Keyboard                      | Pending        | Keyboard-only completion of every available task.                              |
+| 2.1.2 No Keyboard Trap              | Pending        | Focus can enter, move through, and leave each surface.                         |
+| 2.4.3 Focus Order                   | Pending        | Focus follows the task and returns reliably.                                   |
+| 2.4.6 Headings and Labels           | Pending        | Headings and labels state purpose and action.                                  |
+| 2.4.7 Focus Visible                 | Pending        | Focus remains visible in every theme and state.                                |
+| 2.4.11 Focus Not Obscured (Minimum) | Pending        | Focus is not hidden by overlays or scrolling regions.                          |
+| 2.5.3 Label in Name                 | Pending        | Visible control text is part of the accessible name.                           |
+| 2.5.7 Dragging Movements            | Not applicable | The planned flow has no drag-only action. Reassess if the interaction changes. |
+| 2.5.8 Target Size (Minimum)         | Pending        | Measured targets meet the project 44 CSS-pixel requirement.                    |
+| 3.2.1 On Focus                      | Pending        | Focus does not submit, revoke, switch, or close.                               |
+| 3.2.2 On Input                      | Pending        | Input does not cause an unexpected context change.                             |
+| 3.3.1 Error Identification          | Pending        | Text identifies the failed operation.                                          |
+| 3.3.2 Labels or Instructions        | Pending        | Visible instructions cover inputs and destructive actions.                     |
+| 3.3.3 Error Suggestion              | Pending        | Safe, useful correction guidance is present.                                   |
+| 3.3.4 Error Prevention              | Pending        | Destructive account-data changes are reviewable and reversible where possible. |
+| 4.1.2 Name, Role, Value             | Pending        | Accessibility-tree inspection covers every interactive state.                  |
+| 4.1.3 Status Messages               | Pending        | Status is announced without an unexpected focus move.                          |
 
 ## EN 301 549 evidence map
 

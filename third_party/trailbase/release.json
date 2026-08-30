@@ -1,0 +1,141 @@
+{
+  "schema_version": "fasti.trailbase-release.v1",
+  "version": "0.33.5",
+  "tag": "v0.33.5",
+  "tag_commit": "b4c85d5152d4e5f472e0b5da5303f7c938e3a083",
+  "release_url": "https://github.com/trailbaseio/trailbase/releases/tag/v0.33.5",
+  "source_url": "https://github.com/trailbaseio/trailbase/tree/v0.33.5",
+  "license": {
+    "spdx": "OSL-3.0",
+    "file_sha256": "be4741d827008446e5e8bf9ee42f9e57b57245b6aed260fbdaf00ffebe958fb7",
+    "source_url": "https://github.com/trailbaseio/trailbase/blob/v0.33.5/LICENSE",
+    "integration": "separate-unmodified-process"
+  },
+  "expected_version_line": "trail v0.33.5-0-gb4c85d51 (2026-08-27)",
+  "upgrade_fixture": {
+    "version": "0.33.4",
+    "tag": "v0.33.4",
+    "tag_commit": "e00b2df30c3cc403f1b42fdd1af21755dd98f504",
+    "release_url": "https://github.com/trailbaseio/trailbase/releases/tag/v0.33.4",
+    "source_url": "https://github.com/trailbaseio/trailbase/tree/v0.33.4",
+    "expected_version_line": "trail v0.33.4-0-ge00b2df3 (2026-08-26)",
+    "native": {
+      "linux-aarch64": {
+        "url": "https://github.com/trailbaseio/trailbase/releases/download/v0.33.4/trailbase_v0.33.4_arm64_linux.zip",
+        "bytes": 27446419,
+        "sha256": "1eff45f799258e5ff25b768b51c28dd57eea8a19a877ec15e700323fd3e65234",
+        "executable_sha256": "0f289c835464f5d9731873e55a2004364f412ea24d63e5ce028e49dc7d134779",
+        "executable": "trail"
+      },
+      "linux-x86_64": {
+        "url": "https://github.com/trailbaseio/trailbase/releases/download/v0.33.4/trailbase_v0.33.4_x86_64_linux.zip",
+        "bytes": 29955162,
+        "sha256": "110faa92f7e4eec0ae05e664a53fd1a088572f0a3501ad5580c538f1782fd274",
+        "executable_sha256": "7aedd43bc3388fe7441033a3244d2e3055ed5e0daef7306a8ddd19d147cd3c1d",
+        "executable": "trail"
+      }
+    }
+  },
+  "native": {
+    "linux-aarch64": {
+      "url": "https://github.com/trailbaseio/trailbase/releases/download/v0.33.5/trailbase_v0.33.5_arm64_linux.zip",
+      "bytes": 27429045,
+      "sha256": "846733ac61e40d6972fd2e02303730022f7f946cb825656d48efa6821d5dbfd9",
+      "executable_sha256": "e8d86d361682e697d78fa159fb9c706f30ebdcc886a3015daa78d75eb9d7c199",
+      "executable": "trail"
+    },
+    "linux-x86_64": {
+      "url": "https://github.com/trailbaseio/trailbase/releases/download/v0.33.5/trailbase_v0.33.5_x86_64_linux.zip",
+      "bytes": 29930125,
+      "sha256": "30ee948182a2b05698767b3b2bfb2d57ef0e92b0546fd0f1dc6ca03949b34db6",
+      "executable_sha256": "550c053355bdc68222c94fe84ecc0e23ef983cfb7232863a7c51ff9b84bce18e",
+      "executable": "trail"
+    }
+  },
+  "oci": {
+    "repository": "docker.io/trailbase/trailbase",
+    "index_digest": "sha256:43677ebfb5493a2bdb85212570d970ef6c7bdb5392f9295f37683a2f2de149e6",
+    "attestation_manifests": {
+      "linux-amd64": "sha256:8c15c55d83bc0972bde77775a013d266c2c440b56f1d0bc2cabe2b15fc01a28d",
+      "linux-arm64": "sha256:97851d5be4a3b007d5bc320ea6c72166c7bd92b04b5cf49b8fc8377b71044b9f"
+    },
+    "platform_manifests": {
+      "linux-amd64": {
+        "manifest_digest": "sha256:5f9536433a4497b20c73099269c22691264e259a7ba711bf41807c195cb0a0b0",
+        "config_digest": "sha256:a9f72f8e530d05cd07a605b077a04775d302aab4a3421c93e87984011791d279",
+        "layers": [
+          {
+            "digest": "sha256:e6f31ffc071e5560b82a8685fba8214954e5721e3e49269d00958316edbe89fe",
+            "bytes": 3844421
+          },
+          {
+            "digest": "sha256:e86fbc45253bd623843137da4ab0d5a954bf46a3638f2251ea028350780fbe09",
+            "bytes": 2472220
+          },
+          {
+            "digest": "sha256:8dad59aeb2dd3489edd72574f0a73435d9b4b75b54048c1e15c7b74fa03a0336",
+            "bytes": 137
+          },
+          {
+            "digest": "sha256:092a2043557bb41f933a897cd77d566ea2b19116262e55e3a5e40672cd64dad5",
+            "bytes": 39093425
+          },
+          {
+            "digest": "sha256:70309d92c73beaeab3ff57d4b1ddfdde095249fc43bb8db10886f49e35ff4d70",
+            "bytes": 820179
+          },
+          {
+            "digest": "sha256:54629a294e6ed642b5b9817e04037bed8e79cd555492173f301ef8ba13475a7a",
+            "bytes": 942
+          },
+          {
+            "digest": "sha256:5c4e70907ad63956daffe3a82cb5b9951ace110f241a58a2763f06c2a3ca8425",
+            "bytes": 129
+          },
+          {
+            "digest": "sha256:4f4fb700ef54461cfa02571ae0db9a0dc1e0cdb5577484a6d75e68dc38e8acc1",
+            "bytes": 32
+          }
+        ]
+      },
+      "linux-arm64": {
+        "manifest_digest": "sha256:5e59de20ffa436f3caab44c07764dc98b0999a10fcf9cac8da8c593a24815052",
+        "config_digest": "sha256:dc942e8e3d12212f3399ad2a9868eadce2e25123687ef7a36a5eea44a47484c2",
+        "layers": [
+          {
+            "digest": "sha256:14a4754c352fba4c6c0da8e4f01bb990463c19f7ff63e090073c385bd2bc5046",
+            "bytes": 4181860
+          },
+          {
+            "digest": "sha256:761c01e6853c7bb1d4a9737304fe65663be341582b27552d928d8aed077556f7",
+            "bytes": 2474682
+          },
+          {
+            "digest": "sha256:17a2e246145b17f456dbd59fb862d8fb3e6b85f93c1c4aac2ecf8e73db5e7657",
+            "bytes": 137
+          },
+          {
+            "digest": "sha256:0c093e0f8fc639f9aec7f8b109dc527d746903ef4643d946ed09d6545785a8c7",
+            "bytes": 37297700
+          },
+          {
+            "digest": "sha256:7707aad176bd62bfbe3923e079b63501f695a9ce2e257083b986a1965ea9a1f3",
+            "bytes": 821144
+          },
+          {
+            "digest": "sha256:b061aeae400ce65f8b314dca7953e79d134e2d49bb7bb5d87212751a650418d1",
+            "bytes": 941
+          },
+          {
+            "digest": "sha256:19f2cc9844cd7876f8ba5748b4e31b9424185c343474cf82147c5d196b624827",
+            "bytes": 130
+          },
+          {
+            "digest": "sha256:4f4fb700ef54461cfa02571ae0db9a0dc1e0cdb5577484a6d75e68dc38e8acc1",
+            "bytes": 32
+          }
+        ]
+      }
+    }
+  }
+}

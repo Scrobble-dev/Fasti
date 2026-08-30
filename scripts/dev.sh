@@ -57,6 +57,11 @@ FASTI_PUBLIC_URL="${FASTI_PUBLIC_URL%/}"
 DEV_SCOPE="${FASTI_DEV_SCOPE:-$(basename "$PROJECT_ROOT")}"
 DEV_SCOPE="${DEV_SCOPE//[^A-Za-z0-9_.-]/-}"
 CONTAINER_NAME="fasti-dev-$DEV_SCOPE"
+TRAILBASE_ROOT="$PROJECT_ROOT/.dev-trailbase"
+TRAILBASE_PUBLIC_ADDR="127.0.0.1:4000"
+TRAILBASE_ADMIN_ADDR="127.0.0.1:4001"
+TRAILBASE_PUBLIC_URL="http://$TRAILBASE_PUBLIC_ADDR"
+TRAILBASE_CONTAINER_NAME="trailbase-dev-$DEV_SCOPE"
 
 _validate_port() {
   if [[ "$2" =~ ^[0-9]+$ && ${#2} -le 5 ]] && ((10#$2 >= 1 && 10#$2 <= 65535)); then
@@ -331,7 +336,334 @@ _stop_processes() {
   _stop_pidfile daemon
   _stop_pidfile web
   _stop_pidfile reset-daemon
+  _stop_pidfile trailbase
   rm -f "$BOUND_ADDR_FILE"
+}
+
+_trailbase_health() {
+  [[ "$(curl --connect-timeout 2 --max-time 5 --silent --fail "$TRAILBASE_PUBLIC_URL/api/healthcheck" 2>/dev/null)" == Ok ]]
+}
+
+_trailbase_route_boundary() {
+  local mode="${1:-native}"
+  local main_admin=""
+  local main_records=""
+  local private_health=""
+  main_admin="$(curl --connect-timeout 2 --max-time 5 --silent --output /dev/null --write-out '%{http_code}' "$TRAILBASE_PUBLIC_URL/api/_admin/info" || true)"
+  main_records="$(curl --connect-timeout 2 --max-time 5 --silent --output /dev/null --write-out '%{http_code}' "$TRAILBASE_PUBLIC_URL/api/records/v1" || true)"
+  [[ "$main_admin" == 404 && "$main_records" == 404 ]] || return 1
+  if [[ "$mode" == native ]]; then
+    private_health="$(curl --connect-timeout 2 --max-time 5 --silent --output /dev/null --write-out '%{http_code}' "http://$TRAILBASE_ADMIN_ADDR/api/healthcheck" || true)"
+    [[ "$private_health" == 404 ]]
+  fi
+}
+
+_trailbase_ports_are_free() {
+  local port=""
+  local status=0
+  for port in 4000 4001; do
+    _port_in_use "$port" || status=$?
+    if ((status == 2)); then
+      echo "Cannot verify TrailBase port $port availability (ss probe unavailable)" >&2
+      return 1
+    elif ((status == 0)); then
+      echo "TrailBase port $port is already in use" >&2
+      return 1
+    fi
+    status=0
+  done
+}
+
+_trailbase_container_runtime() {
+  local runtime=""
+  for runtime in podman docker; do
+    command -v "$runtime" >/dev/null 2>&1 || continue
+    if [[ "$("$runtime" inspect "$TRAILBASE_CONTAINER_NAME" --format '{{.State.Running}}' 2>/dev/null || true)" == true ]]; then
+      printf '%s\n' "$runtime"
+      return 0
+    fi
+  done
+  return 1
+}
+
+_trailbase_initialize() {
+  if [[ -f "$TRAILBASE_ROOT/bootstrap.json" ]]; then
+    echo "TrailBase is already initialized for this worktree." >&2
+    return 1
+  fi
+  _trailbase_ports_are_free
+  _configure_native_scope
+  "${NATIVE_SCOPE_RUNNER[@]}" python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" \
+    bootstrap-native "$TRAILBASE_ROOT" \
+    --public-url "$TRAILBASE_PUBLIC_URL" \
+    --address "$TRAILBASE_PUBLIC_ADDR" \
+    --admin-address "$TRAILBASE_ADMIN_ADDR" \
+    --cors-origin "$TRAILBASE_PUBLIC_URL"
+}
+
+_trailbase_start_native() {
+  local pid=""
+  local container_runtime=""
+  if container_runtime="$(_trailbase_container_runtime 2>/dev/null)"; then
+    echo "Stop the running TrailBase $container_runtime container before starting native mode." >&2
+    return 1
+  fi
+  if pid="$(_tracked_pid trailbase 2>/dev/null)"; then
+    echo "TrailBase is already running (PID: $pid)."
+    return 0
+  fi
+  if [[ ! -f "$TRAILBASE_ROOT/bootstrap.json" ]]; then
+    echo "TrailBase is not initialized. Run './scripts/dev.sh trailbase initialize' from the owning terminal." >&2
+    return 1
+  fi
+  python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" verify-root "$TRAILBASE_ROOT" >/dev/null
+  _trailbase_ports_are_free
+  _configure_native_scope
+  (umask 077; mkdir -p "$LOGDIR" "$RUNDIR")
+  set -m
+  (
+    umask 077
+    exec "${NATIVE_SCOPE_RUNNER[@]}" python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" \
+      run-native "$TRAILBASE_ROOT" \
+      --public-url "$TRAILBASE_PUBLIC_URL" \
+      --address "$TRAILBASE_PUBLIC_ADDR" \
+      --admin-address "$TRAILBASE_ADMIN_ADDR" \
+      --cors-origin "$TRAILBASE_PUBLIC_URL" >"$LOGDIR/trailbase.log" 2>&1
+  ) &
+  pid=$!
+  set +m
+  _write_pidfile trailbase "$pid"
+  for _ in {1..50}; do
+    kill -0 "$pid" 2>/dev/null || break
+    _trailbase_health && break
+    sleep 0.1
+  done
+  if ! kill -0 "$pid" 2>/dev/null || ! _trailbase_health || ! _trailbase_route_boundary; then
+    _stop_pidfile trailbase
+    echo "TrailBase failed its liveness or private-route boundary; see .dev-logs/trailbase.log" >&2
+    return 1
+  fi
+  echo "TrailBase v0.33.5 is running on $TRAILBASE_PUBLIC_URL (private admin: http://$TRAILBASE_ADMIN_ADDR)."
+  echo "Fasti session exchange remains unavailable until Package C1."
+}
+
+_trailbase_start_container() {
+  local runtime="$1"
+  local existing_runtime=""
+  local reference=""
+  local user_id=""
+  local group_id=""
+  local user_args=()
+  local pid=""
+  local container_id=""
+  if pid="$(_tracked_pid trailbase 2>/dev/null)"; then
+    echo "Stop the running native TrailBase process before starting container mode (PID: $pid)." >&2
+    return 1
+  fi
+  if existing_runtime="$(_trailbase_container_runtime 2>/dev/null)"; then
+    python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" verify-oci-container \
+      "$TRAILBASE_ROOT" --runtime "$existing_runtime" --name "$TRAILBASE_CONTAINER_NAME" >/dev/null
+    echo "TrailBase container $TRAILBASE_CONTAINER_NAME is already running."
+    return 0
+  fi
+  if [[ ! -f "$TRAILBASE_ROOT/bootstrap.json" ]]; then
+    echo "TrailBase is not initialized. Run './scripts/dev.sh trailbase initialize' first." >&2
+    return 1
+  fi
+  python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" verify-root "$TRAILBASE_ROOT" >/dev/null
+  reference="$(python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" prepare-oci "$TRAILBASE_ROOT" --runtime "$runtime" --offline)"
+  local port_probe_result=0
+  _port_in_use 4000 || port_probe_result=$?
+  if ((port_probe_result == 2)); then
+    echo "Cannot verify TrailBase port 4000 availability (ss probe unavailable)" >&2
+    return 1
+  elif ((port_probe_result == 0)); then
+    echo "TrailBase port 4000 is already in use" >&2
+    return 1
+  fi
+  user_id="$(id -u)"
+  group_id="$(id -g)"
+  if [[ "$user_id" == 0 ]]; then
+    echo "Container mode refuses to run TrailBase as root" >&2
+    return 1
+  fi
+  user_args=(--user "$user_id:$group_id")
+  if [[ "$runtime" == podman ]]; then
+    user_args=(--userns keep-id --user "$user_id:$group_id")
+  fi
+  container_id="$("$runtime" run -d --name "$TRAILBASE_CONTAINER_NAME" --rm --pull never \
+    --log-driver none \
+    "${user_args[@]}" \
+    --memory 192m --memory-swap 192m --cpus 1 --pids-limit 128 \
+    --read-only --security-opt no-new-privileges --cap-drop ALL \
+    --publish 127.0.0.1:4000:4000 \
+    --volume "$TRAILBASE_ROOT:/app/trailroot:Z" \
+    --entrypoint /usr/bin/flock \
+    "$reference" \
+    /app/trailroot/runtime.lock \
+    /app/trail \
+    --depot /app/trailroot/depot \
+    --public-url "$TRAILBASE_PUBLIC_URL" \
+    run \
+    --address 0.0.0.0:4000 \
+    --admin-address 127.0.0.1:4001 \
+    --cors-allowed-origins "$TRAILBASE_PUBLIC_URL" \
+    --runtime-threads 1 \
+    --stderr-logging)"
+  for _ in {1..50}; do
+    [[ "$("$runtime" inspect "$TRAILBASE_CONTAINER_NAME" --format '{{.State.Running}}' 2>/dev/null || true)" == true ]] || break
+    _trailbase_health && break
+    sleep 0.1
+  done
+  if ! _trailbase_health || ! _trailbase_route_boundary oci; then
+    "$runtime" stop "$container_id" >/dev/null 2>&1 || true
+    echo "TrailBase $runtime container failed its liveness or public-route boundary." >&2
+    return 1
+  fi
+  if ! python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" verify-oci-container \
+    "$TRAILBASE_ROOT" --runtime "$runtime" --name "$container_id" >/dev/null; then
+    "$runtime" stop "$container_id" >/dev/null 2>&1 || true
+    echo "TrailBase $runtime container identity differs from the release lock." >&2
+    return 1
+  fi
+  if [[ "$("$runtime" exec "$container_id" /app/trail --version | head -1)" != "trail v0.33.5-0-gb4c85d51 (2026-08-27)" ]]; then
+    "$runtime" stop "$container_id" >/dev/null 2>&1 || true
+    echo "TrailBase $runtime container executable version differs from the release lock." >&2
+    return 1
+  fi
+  echo "TrailBase v0.33.5 is running from the exact $runtime OCI digest on $TRAILBASE_PUBLIC_URL."
+  echo "Container ID: $container_id"
+  echo "The admin listener remains inside the container and is not host-published."
+  echo "Fasti session exchange remains unavailable until Package C1."
+}
+
+_trailbase_start() {
+  case "${1:-native}" in
+    native) _trailbase_start_native ;;
+    --podman) _trailbase_start_container podman ;;
+    --docker) _trailbase_start_container docker ;;
+    *) echo "Usage: ./scripts/dev.sh trailbase start [--podman|--docker]" >&2; return 1 ;;
+  esac
+}
+
+_trailbase_stop() {
+  local runtime=""
+  _stop_pidfile trailbase
+  for runtime in podman docker; do
+    command -v "$runtime" >/dev/null 2>&1 || continue
+    "$runtime" stop "$TRAILBASE_CONTAINER_NAME" >/dev/null 2>&1 || true
+  done
+  echo "Stopped TrailBase for Fasti dev scope $DEV_SCOPE."
+}
+
+_trailbase_backup() {
+  python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" \
+    backup-depot "$TRAILBASE_ROOT" "$PROJECT_ROOT/.dev-trailbase-backups"
+}
+
+_trailbase_restore() {
+  if (($# != 2)); then
+    echo "Usage: ./scripts/dev.sh trailbase restore BACKUP ISOLATED_TARGET" >&2
+    return 1
+  fi
+  python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" restore-depot "$1" "$2"
+}
+
+_trailbase_status() {
+  local pid=""
+  local container_runtime=""
+  python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" verify-release >/dev/null
+  echo "=== TrailBase Dev Status ($DEV_SCOPE) ==="
+  echo "  Release: v0.33.5 (exact lock verified at command time)"
+  echo "  Root: $TRAILBASE_ROOT"
+  echo "  Account URL: $TRAILBASE_PUBLIC_URL"
+  echo "  Admin URL: http://$TRAILBASE_ADMIN_ADDR (loopback only)"
+  if [[ ! -f "$TRAILBASE_ROOT/bootstrap.json" ]]; then
+    echo "  State: NOT INITIALIZED"
+    echo "  Next action: ./scripts/dev.sh trailbase initialize"
+    echo "  Fasti session exchange: UNAVAILABLE UNTIL PACKAGE C1"
+    return 0
+  fi
+  if ! python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" verify-root "$TRAILBASE_ROOT" >/dev/null; then
+    echo "  State: NEEDS ATTENTION (private root or bootstrap receipt failed verification)"
+    return 1
+  fi
+  if pid="$(_tracked_pid trailbase 2>/dev/null)"; then
+    echo "  Process: RUNNING (PID: $pid)"
+    if _trailbase_health && _trailbase_route_boundary; then
+      echo "  Evidence: liveness healthy; admin absent from account listener; no Record API configured"
+    else
+      echo "  Evidence: NEEDS ATTENTION (liveness or route boundary failed)"
+      return 1
+    fi
+  elif container_runtime="$(_trailbase_container_runtime 2>/dev/null)"; then
+    echo "  Process: RUNNING ($container_runtime container: $TRAILBASE_CONTAINER_NAME)"
+    if ! python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" verify-oci-container \
+      "$TRAILBASE_ROOT" --runtime "$container_runtime" --name "$TRAILBASE_CONTAINER_NAME" >/dev/null; then
+      echo "  Evidence: NEEDS ATTENTION (running OCI identity or isolation policy failed verification)"
+      return 1
+    fi
+    if _trailbase_health && _trailbase_route_boundary oci; then
+      echo "  Evidence: exact OCI identity; liveness healthy; admin not published; no Record API configured"
+    else
+      echo "  Evidence: NEEDS ATTENTION (OCI identity, liveness, or route boundary failed)"
+      return 1
+    fi
+  else
+    rm -f "$RUNDIR/trailbase.pid"
+    echo "  Process: STOPPED"
+    echo "  Next action: ./scripts/dev.sh trailbase start"
+  fi
+  echo "  Fasti session exchange: UNAVAILABLE UNTIL PACKAGE C1"
+}
+
+_trailbase_help() {
+  cat <<'EOF'
+Usage: ./scripts/dev.sh trailbase {initialize|start|status|stop|backup|restore|help}
+
+Prepare first: ./scripts/dev.sh --prepare-offline
+Initialize once from the owning terminal: ./scripts/dev.sh trailbase initialize
+Start native: ./scripts/dev.sh trailbase start
+Start OCI: ./scripts/dev.sh trailbase start --podman|--docker
+Restore: ./scripts/dev.sh trailbase restore BACKUP ISOLATED_TARGET
+
+Requires Linux, Python 3, curl, and ss. Native resource limits require user
+systemd with cgroup v2. OCI mode requires an installed Podman or Docker runtime.
+EOF
+}
+
+_trailbase_command() {
+  local command="${1:-}"
+  shift 1 2>/dev/null || true
+  if [[ "$command" == start ]] && (($# > 1)); then
+    echo "TrailBase start accepts at most one --podman or --docker argument" >&2
+    return 1
+  elif [[ "$command" != restore && "$command" != start ]] && (($#)); then
+    echo "TrailBase command '$command' does not accept additional arguments" >&2
+    return 1
+  fi
+  case "$command" in
+    help|--help|-h) _trailbase_help ;;
+    initialize) _trailbase_initialize ;;
+    start) _trailbase_start "${1:-native}" ;;
+    status) _trailbase_status ;;
+    stop) _trailbase_stop ;;
+    backup) _trailbase_backup ;;
+    restore) _trailbase_restore "$@" ;;
+    *) _trailbase_help >&2; return 1 ;;
+  esac
+}
+
+_prepare_offline() {
+  echo "=== Preparing locked Fasti and TrailBase inputs for offline use ==="
+  cargo fetch --locked
+  if _has_web; then
+    pnpm fetch --frozen-lockfile
+  fi
+  python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" prepare-native "$TRAILBASE_ROOT" >/dev/null
+  python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" prepare-upgrade-fixture "$TRAILBASE_ROOT" >/dev/null
+  python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" prepare-oci "$TRAILBASE_ROOT" --runtime "$FASTI_CONTAINER_RUNTIME" >/dev/null
+  echo "Prepared locked Rust, pnpm, exact TrailBase v0.33.5 native/OCI, and v0.33.4 upgrade inputs."
 }
 
 # Re-reads FASTI_API_URL from the bound-address file if the daemon picked a
@@ -475,7 +807,7 @@ _update() {
       pnpm install --frozen-lockfile
       pnpm run build
     fi
-    echo "=== Fasti is up to date. Run './scripts/dev.sh' or 'fasti' to launch. ==="
+    echo "=== Fasti is up to date. Run './scripts/dev.sh' to launch. ==="
   )
 }
 
@@ -486,6 +818,7 @@ _stop() {
   for runtime in podman docker; do
     command -v "$runtime" >/dev/null 2>&1 || continue
     "$runtime" stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
+    "$runtime" stop "$TRAILBASE_CONTAINER_NAME" >/dev/null 2>&1 || true
   done
   rm -f "$BOUND_ADDR_FILE"
   echo "Stopped Fasti dev scope $DEV_SCOPE."
@@ -615,10 +948,10 @@ _reset_access() {
   root="$(_validated_reset_root "$DATADIR")" || return 1
   echo "=== Fasti Access Development Reset ($DEV_SCOPE) ==="
   echo "  Fasti development root: $root"
-  echo "  TrailBase development root: UNAVAILABLE (PR A has no TrailBase runtime)"
+  echo "  TrailBase development root: $TRAILBASE_ROOT (separate and retained)"
 
   if [[ "$selection" != --full-dev-root ]]; then
-    echo "Access-only reset is unavailable in PR A because no public Access reset service is mounted." >&2
+    echo "Access-only reset is unavailable because no public Access reset service is mounted." >&2
     echo "No data changed. Use --full-dev-root only when Chronicle data may also be reset." >&2
     return 2
   fi
@@ -657,7 +990,7 @@ _reset_access() {
     return 1
   fi
   echo "Fasti development root rebuilt through normal forward migrations and public service probes."
-  echo "TrailBase reset remains unavailable until its pinned runtime is implemented."
+  echo "TrailBase development data was retained unchanged; use its backup and isolated restore commands."
   trap - EXIT INT TERM
 }
 
@@ -1122,6 +1455,8 @@ PY
   help_output="$(bash "$0" --help)"
   [[ "$help_output" == *"Fasti Local Development Launcher"* ]]
   [[ "$help_output" == *"--desktop"* ]]
+  [[ "$help_output" != *$'\n  fasti '* ]]
+  [[ "$(bash "$0" trailbase --help)" == *"Prepare first: ./scripts/dev.sh --prepare-offline"* ]]
   rmdir "$RUNDIR/desktop-data"
   rm -f "$desktop_calls"
   rm -f "$leader_file" "$exec_ready" "$exec_go"
@@ -1137,7 +1472,6 @@ Fasti Local Development Launcher
 
 Usage:
   ./scripts/dev.sh [OPTIONS]
-  fasti [COMMAND] [ARGS]
 
 Commands / Options:
   (no args), start      Start the native Fasti daemon and web workbench
@@ -1147,6 +1481,15 @@ Commands / Options:
   --stop, stop          Stop running daemon, web, and container processes
   --reset-access [--full-dev-root]
                         Validate and reset this worktree's development Access root
+  --prepare-offline     Fetch locked Rust, pnpm, and exact TrailBase runtime/test inputs
+  trailbase initialize  Initialize TrailBase and rotate its first administrator secret
+  trailbase start [--podman|--docker]
+                        Start the pinned private native or OCI TrailBase process
+  trailbase status      Verify TrailBase process, root, and route boundaries
+  trailbase stop        Stop the tracked TrailBase process
+  trailbase backup      Create a stopped, complete, digest-bound depot backup
+  trailbase restore BACKUP ISOLATED_TARGET
+                        Verify and restore a backup without replacing current data
   --podman              Start Fasti in a scoped Podman container
   --docker              Start Fasti in a scoped Docker container
   --container           Start Fasti in a container using the configured runtime
@@ -1164,23 +1507,29 @@ Environment Variables:
   FASTI_PUBLIC_URL          Public reverse-proxy HTTPS URL (optional)
 
 Examples:
-  fasti                   # Build & launch Fasti daemon + web UI
-  fasti open              # Open default Web UI (http://127.0.0.1:5173)
-  fasti open 5173         # Open custom port on localhost
-  fasti open fasti.local  # Open custom domain
-  fasti update            # Pull latest dev and rebuild workspace
-  fasti status            # Check running services and health probe
-  fasti stop              # Cleanly stop all Fasti background processes
-  fasti --reset-access    # Report PR A's unavailable Access-only reset safely
-  fasti --reset-access --full-dev-root
+  ./scripts/dev.sh                   # Build and launch daemon and web UI
+  ./scripts/dev.sh open              # Open http://127.0.0.1:5173
+  ./scripts/dev.sh open 5173         # Open a custom localhost port
+  ./scripts/dev.sh open fasti.local  # Open a custom domain
+  ./scripts/dev.sh update            # Pull dev and rebuild the workspace
+  ./scripts/dev.sh status            # Check services and health
+  ./scripts/dev.sh stop              # Stop this worktree's services
+  ./scripts/dev.sh --reset-access    # Report the unavailable Access-only reset
+  ./scripts/dev.sh --reset-access --full-dev-root
                           # Confirm a full .dev-data reset, including Chronicle
-  FASTI_DATA_ROOT=/private/path fasti desktop
+  ./scripts/dev.sh --prepare-offline # Prepare locked inputs before network denial
+  ./scripts/dev.sh trailbase initialize
+                          # One-time terminal-only administrator bootstrap
+  ./scripts/dev.sh trailbase start   # Start private TrailBase without session exchange
+  FASTI_DATA_ROOT=/private/path ./scripts/dev.sh desktop
 EOF
 }
 
 case "${1:-}" in
   --help|-h|help) _help ;;
   --update|update) _update ;;
+  --prepare-offline|prepare-offline) _prepare_offline ;;
+  trailbase) shift; _trailbase_command "$@" ;;
   --stop|stop) _stop ;;
   --reset-access|reset-access)
     shift

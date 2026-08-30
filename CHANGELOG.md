@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Review-candidate web and desktop presentation surfaces backed by the retained contract SDK and explicit host capabilities.
 - B8b non-publishing release-readiness evidence: per-architecture checksums, CycloneDX SBOM (Rust and npm), an in-toto/SLSA-shaped provenance statement, a `cargo-deny` final security review, a manual rollback runbook, and mechanical release-notes extraction, gated behind a fail-closed `cargo xtask test milestone --body B8b`.
 - `cargo-deny` (`deny.toml`) license, advisory, and source policy for the main workspace and the isolated Tauri benchmark shell.
+- Exact TrailBase `v0.33.5` native and OCI development packaging, private lifecycle operations, full-depot backup and restore, hermetic account/social/TOTP conformance, combined resource enforcement, and a test-only `v0.33.4` adjacent upgrade and rollback fixture.
 
 ### Changed
 
@@ -40,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated repository status and security documentation to distinguish implemented B2 review code from production activation and milestone completion.
 - Replaced hypothetical physical-device B1 qualification with same-attempt x86_64 and aarch64 cgroup-v2 envelope evidence while preserving the governed memory, CPU, and timing budgets.
 - Made unavailable workbench actions fail closed and removed sample media state from product surfaces.
+- Kept TrailBase account and OAuth routes loopback-only because the pinned release accepts unsafe protocol-relative redirects; the exact limitation and recovery action are part of Access B conformance evidence.
 
 ### Fixed
 

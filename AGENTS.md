@@ -41,6 +41,7 @@ Provider identifiers are evidence, not canonical identity.
 - Adapters must not redefine business rules.
 - Reuse existing ownership before creating new abstractions.
 - Before adding a framework, service, database, queue, or authentication library, read [`docs/architecture/adr-0005-framework-and-auth-adoption.md`](docs/architecture/adr-0005-framework-and-auth-adoption.md) and the approved [TrailBase authentication programme](docs/plans/trailbase-authentication-remediation.md). ADR-0005 records the earlier evaluation; its optional TrailBase and django-allauth conclusions are superseded. TrailBase is the selected separate human-account service. Loco remains a developer-experience reference, not a Fasti runtime dependency. TrailBase cannot own Fasti state, sessions, scopes, grants, profiles, or object authorization. A later change requires an updated ADR, migration and rollback proof, and the applicable repository guard change in the same pull request.
+- TrailBase runtime work must use [`third_party/trailbase/release.json`](third_party/trailbase/release.json), [`scripts/dev.sh`](scripts/dev.sh), and the [TrailBase runbook](docs/operations/trailbase.md). Keep the exact release, licence text, separate process, owner-only depot, loopback/private admin boundary, and one launcher. Do not use a floating tag, direct TrailBase database access, or TrailBase Record APIs for Fasti data. Run `cargo xtask test milestone --body B` on a prepared machine after any change to this boundary.
 - Keep provider integrations modular.
 - Keep wire provider IDs separate from external identifier namespaces. Reuse
   `fasti_application::provider_identity_mapping` for Google Books and TMDB
@@ -164,7 +165,9 @@ setting, or desktop surface.
 Read [`brand/DESIGN.md`](brand/DESIGN.md) before making any visual or UI decision.
 
 ### UI Invariants & Requirements:
+
 <!-- FASTI_TABLER_POLICY_START -->
+
 - **Tabler-First Policy**: Always use upstream Tabler (`@tabler/core` and `@tabler/icons`) layout, grid, typography, cards, tables, forms, modals, and badge classes first.
 - **Component Decision Hierarchy**:
   1. Tabler Core Component (direct usage)

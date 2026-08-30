@@ -52,9 +52,21 @@ real human identities. Rehearse it only on a development root:
 The store tests rehearse a populated v9 root, an injected failed-forward
 transaction and retry, a v10 restart, and restoration of a closed v9 copy. The
 v10 migration preserves unrelated Fasti rows but deliberately removes the
-unreleased simulated browser credentials and sessions. A production Access
-backup, TrailBase depot backup, activation generation, clone fencing, and joint
-rollback remain blocked until their owning packages implement them.
+unreleased simulated browser credentials and sessions. TrailBase has a separate
+complete stopped-depot backup. A joint Fasti Access backup, activation
+generation, clone fencing, and joint rollback remain blocked until their owning
+packages implement them.
+
+## TrailBase rollback
+
+Keep the old code revision, exact runtime cache, and pre-upgrade TrailBase
+backup together. Restore the backup to a new private root with the old code,
+verify the root, and run `cargo xtask test milestone --body B` before switching
+the service. Never run an older TrailBase executable against a depot opened by
+a newer release. The Access B gate proves adjacent `v0.33.4` to `v0.33.5`
+artifact replacement and rollback from an untouched old full-depot backup. The
+two releases have identical migrations, so this is not database-migration or
+downgrade proof. See the [TrailBase runbook](trailbase.md).
 
 ## Verification
 
