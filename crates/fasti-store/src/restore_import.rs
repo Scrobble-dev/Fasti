@@ -32,8 +32,9 @@ use crate::schema::{
 use chrono::{DateTime, Utc};
 use fasti_application::{
     CancellationSignal, CapabilityKey, FastiProblem, PortabilityLimits, ReadSeek,
-    WorkspaceExportEntity, MAX_CORRECTION_REASON_BYTES, WORKSPACE_ARCHIVE_V1_FORMAT_VERSION,
-    WORKSPACE_ARCHIVE_V2_FORMAT_VERSION, WORKSPACE_ARCHIVE_V3_FORMAT_VERSION,
+    WorkspaceExportEntity, MAX_CORRECTION_REASON_BYTES, WORKSPACE_ARCHIVE_FORMAT_VERSION,
+    WORKSPACE_ARCHIVE_V1_FORMAT_VERSION, WORKSPACE_ARCHIVE_V2_FORMAT_VERSION,
+    WORKSPACE_ARCHIVE_V3_FORMAT_VERSION,
 };
 use fasti_contracts::VerifiedInboundWorkspaceManifest;
 use fasti_domain::{
@@ -822,6 +823,7 @@ fn accepted_archive_schema(
     if (format_version == WORKSPACE_ARCHIVE_V1_FORMAT_VERSION && version <= 11)
         || (format_version == WORKSPACE_ARCHIVE_V2_FORMAT_VERSION && (7..=11).contains(&version))
         || (format_version == WORKSPACE_ARCHIVE_V3_FORMAT_VERSION && version == 12)
+        || (format_version == WORKSPACE_ARCHIVE_FORMAT_VERSION && version == 13)
     {
         // Continue to the exact historical fingerprint match below.
     } else if version == u32::try_from(SCHEMA_VERSION).unwrap_or(u32::MAX) {
@@ -843,6 +845,7 @@ fn accepted_archive_schema(
             10 => "sha256:7c7c93de4419d8a56db8fd2dfb5c239fd3ffa994218b2ec583ec371c463726dd",
             11 => "sha256:c833fb634b64d0b9680e4734b22684e8eab36710fca5c95d4315f3141491687a",
             12 => "sha256:eea7d899b8c257b7bafa359a540bd25ba2cdc4d9ddb7f50ce0ec8f80e251cfb9",
+            13 => "sha256:e470f2e8ae2972aa05fecd5b39642b79ef739de89eda204c37bf1d3e48f892c3",
             _ => return false,
         }
 }
@@ -1028,18 +1031,26 @@ fn verify_evidence_inventory(
     Ok(())
 }
 
+const NODE_LOCAL_STATE_COUNT_SQL: &str = r#"
+    SELECT (SELECT COUNT(*) FROM node_state)
+         + (SELECT COUNT(*) FROM credentials)
+         + (SELECT COUNT(*) FROM profile_grants)
+         + (SELECT COUNT(*) FROM grant_scopes)
+         + (SELECT COUNT(*) FROM auth_subjects)
+         + (SELECT COUNT(*) FROM auth_subject_profile_grants)
+         + (SELECT COUNT(*) FROM fasti_browser_sessions)
+         + (SELECT COUNT(*) FROM fasti_browser_session_grants)
+         + (SELECT COUNT(*) FROM trailbase_installation)
+         + (SELECT COUNT(*) FROM trailbase_auth_anchors)
+         + (SELECT COUNT(*) FROM workspace_memberships)
+         + (SELECT COUNT(*) FROM auth_ceremonies)
+         + (SELECT COUNT(*) FROM fasti_browser_session_authentication)
+         + (SELECT COUNT(*) FROM access_audit_events)
+"#;
+
 fn verify_node_local_state_absent(transaction: &Transaction<'_>) -> Result<(), RestoreImportError> {
     let count: i64 = transaction
-        .query_row(
-            r#"
-            SELECT (SELECT COUNT(*) FROM node_state)
-                 + (SELECT COUNT(*) FROM credentials)
-                 + (SELECT COUNT(*) FROM profile_grants)
-                 + (SELECT COUNT(*) FROM grant_scopes)
-            "#,
-            [],
-            |row| row.get(0),
-        )
+        .query_row(NODE_LOCAL_STATE_COUNT_SQL, [], |row| row.get(0))
         .map_err(RestoreImportError::Sqlite)?;
     if count != 0 {
         return Err(RestoreImportError::NodeLocalStatePresent);
@@ -4197,11 +4208,7 @@ mod tests {
             assert_eq!(count, expected, "{table}");
         }
         let local_rows: i64 = database
-            .query_row(
-                "SELECT (SELECT COUNT(*) FROM node_state) + (SELECT COUNT(*) FROM credentials) + (SELECT COUNT(*) FROM profile_grants) + (SELECT COUNT(*) FROM grant_scopes)",
-                [],
-                |row| row.get(0),
-            )
+            .query_row(NODE_LOCAL_STATE_COUNT_SQL, [], |row| row.get(0))
             .expect("node-local row count");
         assert_eq!(local_rows, 0);
         drop(database);
@@ -4535,6 +4542,65 @@ mod tests {
             staged.cleanup().expect("remove staged attempt");
             assert_attempt_removed(restore_root.path(), attempt_id);
         }
+    }
+
+    #[test]
+    fn historical_v13_archive_v4_restores_without_local_access_authority() {
+        let fixture = full_fixture();
+        let archive = rewrite_manifest_schema(
+            &fixture.archive,
+            13,
+            "sha256:e470f2e8ae2972aa05fecd5b39642b79ef739de89eda204c37bf1d3e48f892c3",
+        );
+        let restore_root = tempfile::tempdir().expect("restore root");
+        let lock = LockedDataRoot::acquire(restore_root.path()).expect("exclusive restore root");
+        let attempt_id = RestoreAttemptId::new_v7();
+        let staged = stage_workspace_archive_pass_two(
+            &lock,
+            &mut Cursor::new(archive),
+            attempt_id,
+            RequestCorrelationId::new_v7(),
+            limits(),
+            &CancellationSignal::new(),
+        )
+        .expect("historical archive-v4/schema-v13 restores");
+        let database = Connection::open_with_flags(
+            staged.database_path(),
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .expect("open staged database");
+        let local_rows: i64 = database
+            .query_row(NODE_LOCAL_STATE_COUNT_SQL, [], |row| row.get(0))
+            .expect("node-local state");
+        assert_eq!(local_rows, 0);
+        drop(database);
+        staged.cleanup().expect("remove staged attempt");
+        assert_attempt_removed(restore_root.path(), attempt_id);
+    }
+
+    #[test]
+    fn archive_v4_rejects_a_forged_v13_schema_fingerprint() {
+        let fixture = full_fixture();
+        let archive = rewrite_manifest_schema(
+            &fixture.archive,
+            13,
+            "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        );
+        let restore_root = tempfile::tempdir().expect("restore root");
+        let lock = LockedDataRoot::acquire(restore_root.path()).expect("exclusive restore root");
+        let attempt_id = RestoreAttemptId::new_v7();
+        let error = stage_workspace_archive_pass_two(
+            &lock,
+            &mut Cursor::new(archive),
+            attempt_id,
+            RequestCorrelationId::new_v7(),
+            limits(),
+            &CancellationSignal::new(),
+        )
+        .err()
+        .expect("forged schema fingerprint is rejected");
+        assert!(matches!(error, RestoreImportError::SchemaMismatch));
+        assert_attempt_removed(restore_root.path(), attempt_id);
     }
 
     #[test]
@@ -4932,11 +4998,7 @@ mod tests {
             )
             .expect("restored workspace");
         let local_rows: i64 = connection
-            .query_row(
-                "SELECT (SELECT COUNT(*) FROM node_state) + (SELECT COUNT(*) FROM credentials) + (SELECT COUNT(*) FROM profile_grants) + (SELECT COUNT(*) FROM grant_scopes)",
-                [],
-                |row| row.get(0),
-            )
+            .query_row(NODE_LOCAL_STATE_COUNT_SQL, [], |row| row.get(0))
             .expect("node-local state");
         assert_eq!(workspace_rows, 1);
         assert_eq!(local_rows, 0);

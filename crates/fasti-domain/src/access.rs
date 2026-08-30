@@ -1302,6 +1302,7 @@ pub enum AccessAuditEventKind {
     CeremonyCompleted,
     CeremonyFailed,
     BrowserSessionIssued,
+    BrowserSessionRevoked,
 }
 
 impl AccessAuditEventKind {
@@ -1319,6 +1320,7 @@ impl AccessAuditEventKind {
             Self::CeremonyCompleted => "ceremony_completed",
             Self::CeremonyFailed => "ceremony_failed",
             Self::BrowserSessionIssued => "browser_session_issued",
+            Self::BrowserSessionRevoked => "browser_session_revoked",
         }
     }
 
@@ -1336,6 +1338,7 @@ impl AccessAuditEventKind {
             "ceremony_completed" => Some(Self::CeremonyCompleted),
             "ceremony_failed" => Some(Self::CeremonyFailed),
             "browser_session_issued" => Some(Self::BrowserSessionIssued),
+            "browser_session_revoked" => Some(Self::BrowserSessionRevoked),
             _ => None,
         }
     }
@@ -1831,6 +1834,7 @@ mod tests {
             AccessAuditEventKind::CeremonyCompleted,
             AccessAuditEventKind::CeremonyFailed,
             AccessAuditEventKind::BrowserSessionIssued,
+            AccessAuditEventKind::BrowserSessionRevoked,
         ] {
             assert_eq!(
                 AccessAuditEventKind::from_storage(value.as_str()),
