@@ -6,19 +6,24 @@ import { fileURLToPath } from "node:url";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const expectedWorkspaces = new Map([
   ["apps/web", "@fasti/web"],
+  ["apps/docs", "@fasti/docs"],
   ["packages/sdk", "@fasti/sdk"],
+  ["packages/deploy-plan", "@fasti/deploy-plan"],
   ["packages/schemas", "@fasti/schemas"],
   ["packages/tokens", "@fasti/tokens"],
   ["packages/ui", "@fasti/ui"],
 ]);
 const buildableWorkspaces = new Set([
   "apps/web",
+  "apps/docs",
   "packages/sdk",
+  "packages/deploy-plan",
   "packages/tokens",
   "packages/ui",
 ]);
 const entrypointWorkspaces = new Set([
   "packages/sdk",
+  "packages/deploy-plan",
   "packages/tokens",
   "packages/ui",
 ]);

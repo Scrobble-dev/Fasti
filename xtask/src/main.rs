@@ -1,3 +1,4 @@
+mod docs;
 mod evidence;
 mod generate;
 mod integration;
@@ -20,6 +21,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Public documentation generation, verification, and packaging
+    Docs {
+        #[command(subcommand)]
+        command: DocsCommand,
+    },
     /// Contract generation and verification tasks
     Contract {
         #[command(subcommand)]
@@ -49,6 +55,22 @@ enum IntegrationCommand {
         path: PathBuf,
         #[arg(long, value_enum, default_value = "human")]
         output: integration::OutputFormat,
+    },
+}
+
+#[derive(Subcommand)]
+enum DocsCommand {
+    /// Generate the deterministic public site projection under target/docs-site
+    Generate,
+    /// Verify governed sources and repeat the projection to prove determinism
+    Verify {
+        #[arg(long)]
+        locked: bool,
+    },
+    /// Verify, generate, and build the static Docusaurus artifact
+    Package {
+        #[arg(long)]
+        locked: bool,
     },
 }
 
@@ -183,6 +205,15 @@ fn write_result(rendered: &str, stderr: bool) -> std::io::Result<()> {
 
 fn run_existing(command: Command, root: &std::path::Path) -> anyhow::Result<()> {
     match command {
+        Command::Docs {
+            command: DocsCommand::Generate,
+        } => docs::generate(root).map(|_| ()),
+        Command::Docs {
+            command: DocsCommand::Verify { locked },
+        } => docs::verify(root, locked),
+        Command::Docs {
+            command: DocsCommand::Package { locked },
+        } => docs::package(root, locked),
         Command::Contract {
             command: ContractCommand::ValidateRegistry,
         } => {
@@ -242,6 +273,7 @@ fn run_existing(command: Command, root: &std::path::Path) -> anyhow::Result<()> 
 /// ```
 fn run_pr(root: &std::path::Path) -> anyhow::Result<()> {
     verify_contracts(root, true)?;
+    docs::verify(root, false)?;
     orchestration::run_portable_b1(root)?;
     println!("PASS: canonical B1 pull-request gate");
     Ok(())

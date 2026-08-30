@@ -79,7 +79,7 @@ export const cssVariables = `
   --fasti-focus: var(--fasti-state-attention);
 }
 
-[data-bs-theme="dark"] {
+:is([data-bs-theme="dark"], [data-theme="dark"]) {
   --fasti-background: var(--fasti-surface-night);
   --fasti-panel: color-mix(in srgb, var(--fasti-surface-night) 88%, var(--fasti-surface-paper));
   /* These aliases mix toward the literal near-white paper hex, not
@@ -115,7 +115,7 @@ export const cssVariables = `
   --fasti-verified-contrast: var(--fasti-surface-night);
 }
 
-[data-bs-theme="dark"][data-fasti-theme="night"] {
+:is([data-bs-theme="dark"], [data-theme="dark"])[data-fasti-theme="night"] {
   --fasti-background: color-mix(in srgb, var(--fasti-surface-night) 88%, black);
   --fasti-panel: color-mix(in srgb, var(--fasti-surface-night) 94%, ${colors.surface.paper});
   --fasti-surface-archive: color-mix(in srgb, var(--fasti-surface-night) 88%, black);

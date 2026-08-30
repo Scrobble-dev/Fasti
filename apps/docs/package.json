@@ -1,0 +1,51 @@
+{
+  "name": "@fasti/docs",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Static Fasti documentation portal",
+  "scripts": {
+    "build": "docusaurus build && pagefind --site build",
+    "serve": "docusaurus serve --host 127.0.0.1",
+    "start": "docusaurus start --host 127.0.0.1",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@docusaurus/core": "3.10.2",
+    "@docusaurus/plugin-content-docs": "3.10.2",
+    "@docusaurus/preset-classic": "3.10.2",
+    "@docusaurus/theme-classic": "3.10.2",
+    "@fasti/deploy-plan": "workspace:*",
+    "@fasti/tokens": "workspace:*",
+    "@mdx-js/react": "3.1.1",
+    "@tabler/core": "1.4.0",
+    "clsx": "2.1.1",
+    "prism-react-renderer": "2.4.1",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@docusaurus/module-type-aliases": "3.10.2",
+    "@docusaurus/tsconfig": "3.10.2",
+    "@docusaurus/types": "3.10.2",
+    "@types/node": "26.4.0",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.5",
+    "pagefind": "1.5.2",
+    "typescript": "^7.0.2"
+  },
+  "browserslist": {
+    "production": [
+      ">0.5%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 3 chrome version",
+      "last 3 firefox version",
+      "last 5 safari version"
+    ]
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

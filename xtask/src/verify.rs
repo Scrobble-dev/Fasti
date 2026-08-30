@@ -454,9 +454,10 @@ fn command_gates(locked: bool) -> Vec<CommandGate> {
                 "tests/js/authored-contracts.test.mjs",
                 "tests/js/examples.test.mjs",
                 "tests/js/generated-contracts.test.mjs",
+                "tests/js/patched-dependencies.test.mjs",
                 "tests/js/sdk-client.test.mjs",
             ],
-            "fix the failing mutation sentinel or black-box SDK behavior",
+            "fix the failing mutation sentinel, dependency patch, or black-box SDK behavior",
         ),
         CommandGate::new(
             "rust.format",

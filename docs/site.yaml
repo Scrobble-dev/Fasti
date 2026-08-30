@@ -1,0 +1,147 @@
+version: 1
+canonical_url: https://fasti.scrobble.dev
+content_license: AGPL-3.0-or-later
+sections:
+  - { id: start, label: Start, order: 10 }
+  - { id: use, label: Use, order: 20 }
+  - { id: operate, label: Operate, order: 30 }
+  - { id: integrate, label: Integrate, order: 40 }
+  - { id: extend, label: Extend, order: 50 }
+  - { id: contribute, label: Contribute, order: 60 }
+  - { id: reference, label: Reference, order: 70 }
+pages:
+  - id: start.what_fasti_is
+    source: docs/start/what-fasti-is.md
+    route: /start/what-fasti-is/
+    section: start
+    order: 10
+    audiences: [use, operate, integrate, extend, contribute]
+    status: published
+    ste_review: draft
+    description: Understand what Fasti records and what remains outside its boundary.
+  - id: start.current_status
+    source: docs/start/current-status.md
+    route: /start/current-status/
+    section: start
+    order: 20
+    audiences: [use, operate, integrate, extend, contribute]
+    status: published
+    ste_review: draft
+    description: Read contract, implementation, runtime, and support states separately.
+  - id: start.choose_path
+    source: docs/start/choose-a-path.md
+    route: /start/choose-a-path/
+    section: start
+    order: 30
+    audiences: [use, operate, integrate, extend, contribute]
+    status: published
+    ste_review: draft
+    description: Choose the shortest public task path for the intended outcome.
+  - id: use.keep_local_record
+    source: docs/use/keep-a-local-record.md
+    route: /use/keep-a-local-record/
+    section: use
+    order: 10
+    audiences: [use]
+    status: published
+    ste_review: draft
+    description: Understand stable Fasti Records and provider identifiers.
+  - id: operate.local_review
+    source: docs/operate/local-review.md
+    route: /operate/local-review/
+    section: operate
+    order: 10
+    audiences: [operate, contribute]
+    status: published
+    ste_review: draft
+    description: Start Fasti on loopback and verify health and durable-route state.
+  - id: operate.deployment_planner
+    source: docs/operate/deployment-planner.md
+    route: /operate/deployment-planner/
+    section: operate
+    order: 20
+    audiences: [operate]
+    status: published
+    ste_review: draft
+    description: Use the experimental planner for bounded local review modes.
+  - id: integrate.first_observation
+    source: docs/integrate/first-observation.md
+    route: /integrate/first-observation/
+    section: integrate
+    order: 10
+    audiences: [integrate]
+    status: published
+    ste_review: draft
+    description: Trace the safe path to a governed observation request.
+  - id: integrate.problems
+    source: docs/integrate/problems.md
+    route: /integrate/problems/
+    section: integrate
+    order: 20
+    audiences: [integrate, operate, extend]
+    status: published
+    ste_review: draft
+    description: Read Fasti problem details and choose a safe recovery action.
+  - id: extend.first_provider
+    source: docs/extend/first-provider.md
+    route: /extend/first-provider/
+    section: extend
+    order: 10
+    audiences: [extend]
+    status: published
+    ste_review: draft
+    description: Understand the provider boundary before proposing an adapter.
+  - id: contribute.first_change
+    source: docs/contribute/first-change.md
+    route: /contribute/first-change/
+    section: contribute
+    order: 10
+    audiences: [contribute]
+    status: published
+    ste_review: draft
+    description: Make one bounded change and run the canonical pull-request gate.
+  - id: reference.capabilities
+    source: docs/reference/capabilities.md
+    route: /reference/capabilities/
+    section: reference
+    order: 10
+    audiences: [operate, integrate, extend, contribute]
+    status: published
+    ste_review: draft
+    description: Read the generated capability and support-state projection.
+  - id: reference.contracts
+    source: docs/reference/contracts.md
+    route: /reference/contracts/
+    section: reference
+    order: 20
+    audiences: [integrate, extend, contribute]
+    status: published
+    ste_review: draft
+    description: Find the governed raw OpenAPI, AsyncAPI, schema, JSON-LD, OKF, and SDK artifacts.
+  - id: reference.glossary
+    source: docs/glossary.md
+    route: /reference/glossary/
+    section: reference
+    order: 30
+    audiences: [use, operate, integrate, extend, contribute]
+    status: published
+    ste_review: draft
+    description: Use the canonical Fasti terms without collapsing domain concepts.
+  - id: accessibility.overview
+    source: docs/accessibility/index.md
+    route: /accessibility/
+    section: reference
+    order: 40
+    audiences: [use, operate, integrate, extend, contribute]
+    status: published
+    ste_review: draft
+    description: Read the accessibility target, evidence boundary, and feedback path.
+  - id: security.overview
+    source: docs/security/index.md
+    route: /security/
+    section: reference
+    order: 50
+    audiences: [operate, integrate, extend, contribute]
+    status: published
+    ste_review: draft
+    description: Keep credentials, listeners, providers, and reports inside their trust boundaries.
