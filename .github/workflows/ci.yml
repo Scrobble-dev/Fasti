@@ -143,6 +143,10 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+        with:
+          version: 11.22.0
+      - run: pnpm install --frozen-lockfile
       - run: bash scripts/check-repository-truth.sh
       - run: bash scripts/check-no-publish.sh
       - run: bash scripts/test-no-publish-policy.sh
