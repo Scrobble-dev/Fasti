@@ -237,6 +237,26 @@ function assertStringList(value, label) {
   }
 }
 
+/** Returns true for a lower-case dotted identifier without regular-expression backtracking. */
+function isDottedIdentifier(value) {
+  const segments = value.split(".");
+  return (
+    segments.length > 1 &&
+    segments.every(
+      (segment) =>
+        segment.length > 0 &&
+        segment[0] >= "a" &&
+        segment[0] <= "z" &&
+        [...segment].every(
+          (character) =>
+            (character >= "a" && character <= "z") ||
+            (character >= "0" && character <= "9") ||
+            character === "_",
+        ),
+    )
+  );
+}
+
 /**
  * Validates the OKF catalogue against repository structure and finalized B1 registry data.
  * @param {object} registry - Capability registry used to verify catalogue identifiers and authorization metadata.
@@ -561,9 +581,7 @@ async function validateUat(registry) {
   assert.equal(previewCapabilities.length, 51);
   assert.equal(new Set(previewCapabilities).size, previewCapabilities.length);
   assert.ok(
-    previewCapabilities.every((id) =>
-      /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/u.test(id),
-    ),
+    previewCapabilities.every(isDottedIdentifier),
     "programme capability IDs must use the governed dotted identifier shape",
   );
   assert.equal(preview.stable_problems.length, 35);
