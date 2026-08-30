@@ -3,6 +3,19 @@ name: Dev and Nightly Readiness (Non-Publishing)
 on:
   push:
     branches: ["dev"]
+    paths-ignore:
+      - ".github/workflows/docs-pages.yml"
+      - "apps/docs/**"
+      - "diagrams/documentation-publication.svg"
+      - "docs/**"
+      - "*.md"
+      - "**/*.md"
+      - "packages/deploy-plan/**"
+      - "scripts/validate-docs.mjs"
+      - "scripts/validate-docs-build.mjs"
+      - "tests/js/deploy-plan.test.mjs"
+      - "tests/js/docs-*.test.mjs"
+      - "xtask/src/docs.rs"
   schedule:
     - cron: "0 2 * * *"
   workflow_dispatch:

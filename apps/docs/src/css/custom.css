@@ -70,13 +70,21 @@ input:focus-visible {
   max-width: 100%;
   object-fit: contain;
 }
-.navbar__toggle,
+.navbar__toggle {
+  min-width: var(--fasti-touch-target-min);
+  min-height: var(--fasti-touch-target-min);
+}
 .navbar-sidebar__close,
 .navbar-sidebar__back,
 .navbar__items--right .clean-btn,
 .navbar button[aria-label*="dark and light mode"] {
   min-width: var(--fasti-touch-target-min);
   min-height: var(--fasti-touch-target-min);
+}
+.navbar-sidebar__close,
+.navbar-sidebar__back,
+.navbar__items--right .clean-btn,
+.navbar button[aria-label*="dark and light mode"] {
   display: inline-flex;
   align-items: center;
   justify-content: center;

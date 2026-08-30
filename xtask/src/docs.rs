@@ -6,6 +6,13 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
+const PUBLISHED_CONTRACT_VALIDATORS: [&str; 4] = [
+    "scripts/validate-authored-contracts.mjs",
+    "scripts/validate-generated-contracts.mjs",
+    "scripts/validate-integration-contracts.mjs",
+    "scripts/validate-okf-uat.mjs",
+];
+
 #[derive(Deserialize)]
 struct Site {
     canonical_url: String,
@@ -79,7 +86,10 @@ pub(crate) fn package(root: &Path, locked: bool) -> anyhow::Result<()> {
     if locked {
         run(root, "pnpm", &["install", "--frozen-lockfile"])?;
     }
-    crate::verify_contracts(root, locked)?;
+    run_published_contract_validators(|validator| run(root, "node", &[validator]))?;
+    let generated_directory = tempfile::tempdir().context("generate contract artifacts")?;
+    let generated = crate::generate::generate_to(root, generated_directory.path())?;
+    crate::generate::verify_checked_in(root, &generated)?;
     verify(root, false)?;
     generate(root)?;
     run(root, "pnpm", &["--filter", "@fasti/tokens", "build"])?;
@@ -88,6 +98,15 @@ pub(crate) fn package(root: &Path, locked: bool) -> anyhow::Result<()> {
     run(root, "pnpm", &["--filter", "@fasti/docs", "build"])?;
     run(root, "node", &["scripts/validate-docs-build.mjs"])?;
     println!("PASS: packaged immutable static documentation site");
+    Ok(())
+}
+
+fn run_published_contract_validators(
+    mut run_validator: impl FnMut(&'static str) -> anyhow::Result<()>,
+) -> anyhow::Result<()> {
+    for validator in PUBLISHED_CONTRACT_VALIDATORS {
+        run_validator(validator)?;
+    }
     Ok(())
 }
 
@@ -437,6 +456,32 @@ fn command_output(root: &Path, program: &str, arguments: &[&str]) -> anyhow::Res
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn package_runs_every_published_contract_validator() {
+        let mut invoked = Vec::new();
+        run_published_contract_validators(|validator| {
+            invoked.push(validator);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(invoked, PUBLISHED_CONTRACT_VALIDATORS);
+    }
+
+    #[test]
+    fn package_stops_and_propagates_a_validator_failure() {
+        let mut invoked = Vec::new();
+        let error = run_published_contract_validators(|validator| {
+            invoked.push(validator);
+            if validator == PUBLISHED_CONTRACT_VALIDATORS[1] {
+                anyhow::bail!("validator failure")
+            }
+            Ok(())
+        })
+        .unwrap_err();
+        assert_eq!(error.to_string(), "validator failure");
+        assert_eq!(invoked, PUBLISHED_CONTRACT_VALIDATORS[..2]);
+    }
 
     #[test]
     fn generated_routes_reject_traversal_and_unsafe_problem_slugs() {
