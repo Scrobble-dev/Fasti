@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { mockMissingTmdbProvider } from "./test-helpers";
 
 async function undersizedControls(scope: Locator) {
   return scope
@@ -64,10 +65,13 @@ test("Workbench navigation and theme controls keep 44 pixel targets", async ({
 test("metadata documentation links keep contrast in the default dark theme", async ({
   page,
 }) => {
+  await mockMissingTmdbProvider(page);
   await page.emulateMedia({ colorScheme: "dark" });
   await page.goto("/settings/metadata");
 
-  const documentationLinks = page.locator(".provider-card .docs-link");
+  const documentationLinks = page
+    .getByRole("region", { name: "Metadata credentials" })
+    .locator(".docs-link");
   const documentationLinkCount = await documentationLinks.count();
   expect(documentationLinkCount).toBeGreaterThan(0);
   for (let index = 0; index < documentationLinkCount; index += 1) {

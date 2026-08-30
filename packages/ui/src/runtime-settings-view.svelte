@@ -634,14 +634,17 @@
       );
       testResults = { ...testResults, [key]: undefined };
       providerNotice = "Credential saved in the platform credential store.";
+      editing = { ...editing, [key]: "" };
       onProviderCredentialsChanged?.();
     } catch (error) {
       providerProblem = hostProblemText(
         error,
         "Fasti rejected the provider credential.",
       );
+      busyProvider = undefined;
+      await tick();
+      document.getElementById(`provider-${key}`)?.focus();
     } finally {
-      editing = { ...editing, [key]: "" };
       showPassword = { ...showPassword, [key]: false };
       busyProvider = undefined;
     }

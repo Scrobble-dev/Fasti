@@ -68,18 +68,28 @@ async function installTrustedHost(page: Page, scenario: Scenario) {
     const statuses = (googleConfigured: boolean, tmdbConfigured: boolean) => [
       {
         provider: "google-books",
+        capability_id: "metadata.search",
         label: "Google Books",
-        configured: googleConfigured,
+        purpose: "Search book metadata",
+        credential_requirement: "optional_api_key",
+        credential_state: googleConfigured ? "valid" : "optional",
+        state: "available",
         source: googleConfigured ? "credential_store" : "none",
         writable: true,
+        testable: true,
         docs_url: "https://developers.google.com/books/docs/v1/using",
       },
       {
         provider: "tmdb",
+        capability_id: "metadata.search",
         label: "TMDB",
-        configured: tmdbConfigured,
+        purpose: "Search film and television metadata",
+        credential_requirement: "bearer_token",
+        credential_state: tmdbConfigured ? "valid" : "missing",
+        state: tmdbConfigured ? "available" : "degraded",
         source: tmdbConfigured ? "environment" : "none",
         writable: !tmdbConfigured,
+        testable: true,
         docs_url: "https://developer.themoviedb.org/docs",
       },
     ];
@@ -265,28 +275,32 @@ async function installTrustedHost(page: Page, scenario: Scenario) {
             ) {
               throw new Error("temporary record read failure");
             }
-            return activeScenario === "record-retry"
-              ? [
-                  {
-                    record_id: "record-recovered",
-                    grain: "work",
-                    status: "active",
-                    title: {
-                      tier: "user_override",
-                      value: "Recovered record",
-                      source: "local",
-                      is_stale: false,
-                    },
-                    poster: {
-                      tier: "empty",
-                      value: null,
-                      source: null,
-                      is_stale: false,
-                    },
-                    latest_activity: null,
-                  },
-                ]
-              : [];
+            return {
+              records:
+                activeScenario === "record-retry"
+                  ? [
+                      {
+                        record_id: "record-recovered",
+                        grain: "work",
+                        status: "active",
+                        title: {
+                          tier: "user_override",
+                          value: "Recovered record",
+                          source: "local",
+                          is_stale: false,
+                        },
+                        poster: {
+                          tier: "empty",
+                          value: null,
+                          source: null,
+                          is_stale: false,
+                        },
+                        latest_activity: null,
+                      },
+                    ]
+                  : [],
+              truncated: false,
+            };
           default:
             throw new Error(`Unexpected trusted-host command: ${command}`);
         }
