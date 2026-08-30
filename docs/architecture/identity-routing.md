@@ -63,7 +63,8 @@ standard order. The Kitsu preference tries Kitsu, MAL, and AniDB before the
 standard order.
 
 A reviewed crosswalk can satisfy the selected coordinate preference. The
-selected route retains the immutable assertion ID for inspection. Direct
+selected route retains every immutable supporting assertion ID for inspection.
+Corroborating assertions for one coordinate do not create false ambiguity. Direct
 evidence for the same coordinate wins; an accepted preferred crosswalk can win
 over a less-preferred direct fallback. Candidate or disputed mappings cannot
 enter the route planner as accepted evidence.
