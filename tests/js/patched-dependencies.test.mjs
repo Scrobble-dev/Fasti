@@ -18,7 +18,9 @@ const imageSizePath = join(
 function check(name, payload) {
   const source = `
     const { imageSize } = require(${JSON.stringify(imageSizePath)});
-    try { imageSize(Buffer.from(${JSON.stringify(payload.toString("base64"))}, "base64")); } catch {}
+    let rejected = false;
+    try { imageSize(Buffer.from(${JSON.stringify(payload.toString("base64"))}, "base64")); } catch { rejected = true; }
+    if (!rejected) throw new Error("parser accepted a zero-length record");
   `;
   const result = spawnSync(process.execPath, ["--eval", source], {
     encoding: "utf8",

@@ -125,8 +125,8 @@ fn main() -> anyhow::Result<()> {
             command: DocsCommand::Generate,
         } => docs::generate(&root).map(|_| ()),
         Command::Docs {
-            command: DocsCommand::Verify { locked: _ },
-        } => docs::verify(&root),
+            command: DocsCommand::Verify { locked },
+        } => docs::verify(&root, locked),
         Command::Docs {
             command: DocsCommand::Package { locked },
         } => docs::package(&root, locked),
@@ -188,7 +188,7 @@ fn main() -> anyhow::Result<()> {
 /// ```
 fn run_pr(root: &std::path::Path) -> anyhow::Result<()> {
     verify_contracts(root, true)?;
-    docs::verify(root)?;
+    docs::verify(root, false)?;
     orchestration::run_portable_b1(root)?;
     println!("PASS: canonical B1 pull-request gate");
     Ok(())

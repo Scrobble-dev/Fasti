@@ -51,7 +51,14 @@ pub(crate) fn generate(root: &Path) -> anyhow::Result<PathBuf> {
     Ok(output)
 }
 
-pub(crate) fn verify(root: &Path) -> anyhow::Result<()> {
+pub(crate) fn verify(root: &Path, locked: bool) -> anyhow::Result<()> {
+    if locked {
+        run(
+            root,
+            "pnpm",
+            &["install", "--frozen-lockfile", "--ignore-scripts"],
+        )?;
+    }
     run(root, "node", &["scripts/validate-docs.mjs"])?;
     run(root, "node", &["scripts/validate-docs.mjs", "--self-test"])?;
     let first = tempfile::tempdir().context("create first documentation projection")?;
@@ -73,7 +80,7 @@ pub(crate) fn package(root: &Path, locked: bool) -> anyhow::Result<()> {
         run(root, "pnpm", &["install", "--frozen-lockfile"])?;
     }
     crate::verify_contracts(root, locked)?;
-    verify(root)?;
+    verify(root, false)?;
     generate(root)?;
     run(root, "pnpm", &["--filter", "@fasti/tokens", "build"])?;
     run(root, "pnpm", &["--filter", "@fasti/deploy-plan", "build"])?;
@@ -91,6 +98,7 @@ fn generate_to(root: &Path, output: &Path) -> anyhow::Result<()> {
     let static_root = output.join("static");
     fs::create_dir_all(&content)?;
     fs::create_dir_all(&static_root)?;
+    let commit = command_output(root, "git", &["rev-parse", "HEAD"])?;
 
     for page in site.pages.iter().filter(|page| page.status == "published") {
         let physical = confined_source(root, &page.source)?;
@@ -101,6 +109,7 @@ fn generate_to(root: &Path, output: &Path) -> anyhow::Result<()> {
             .next()
             .and_then(|line| line.strip_prefix("# "))
             .context("public page must start with one H1")?;
+        let projected_markdown = pin_source_links(&markdown, &commit);
         let projected = format!(
             "---\nid: {}\nslug: {}\ntitle: {}\ndescription: {}\nsidebar_position: {}\ncustom_edit_url: {}\n---\n\n{}",
             serde_json::to_string(&page.id)?,
@@ -112,17 +121,23 @@ fn generate_to(root: &Path, output: &Path) -> anyhow::Result<()> {
                 "https://github.com/Scrobble-dev/Fasti/edit/dev/{}",
                 page.source
             ))?,
-            markdown
+            projected_markdown
+        );
+        let content_path = PathBuf::from(format!("{}.md", page.id));
+        ensure!(
+            lexically_confined(&content_path),
+            "unsafe documentation page id {}",
+            page.id
+        );
+        write(&content.join(content_path), projected.as_bytes())?;
+        let route = route_path(&page.route);
+        ensure!(
+            !route.as_os_str().is_empty() && lexically_confined(&route),
+            "unsafe documentation route {}",
+            page.route
         );
         write(
-            &content.join(format!("{}.md", page.id)),
-            projected.as_bytes(),
-        )?;
-        write(
-            &static_root
-                .join("markdown")
-                .join(route_path(&page.route))
-                .join("index.md"),
+            &static_root.join("markdown").join(route).join("index.md"),
             markdown.as_bytes(),
         )?;
     }
@@ -201,16 +216,18 @@ fn generate_to(root: &Path, output: &Path) -> anyhow::Result<()> {
         let title = problem["title"].as_str().context("problem needs title")?;
         let detail = problem["detail"].as_str().context("problem needs detail")?;
         let code = problem["code"].as_str().context("problem needs code")?;
+        let safe_state = problem["safe_state"].as_str().unwrap_or("not stated");
+        let retryability = problem["retryability"].as_str().unwrap_or("not stated");
         let page = format!(
             "---\ntitle: {}\nslug: {}\ndescription: {}\ncustom_edit_url: null\n---\n\n# {}\n\n`{}`\n\n{}\n\n## Safe state\n\n`{}`\n\n## Retry\n\n`{}`\n\n<a href=\"/problems.json\">Read the complete problem catalogue</a>\n",
             serde_json::to_string(title)?,
             serde_json::to_string(&format!("/v1/problems/{slug}"))?,
             serde_json::to_string(detail)?,
-            title,
-            code,
-            detail,
-            problem["safe_state"].as_str().unwrap_or("not stated"),
-            problem["retryability"].as_str().unwrap_or("not stated")
+            escape_mdx_text(title),
+            escape_mdx_text(code),
+            escape_mdx_text(detail),
+            escape_mdx_text(safe_state),
+            escape_mdx_text(retryability)
         );
         write(
             &content.join("v1/problems").join(slug).join("index.md"),
@@ -225,7 +242,6 @@ fn generate_to(root: &Path, output: &Path) -> anyhow::Result<()> {
     }).collect::<Vec<_>>();
     write_json(&output.join("sidebars.json"), &json!({"docs": sidebars}))?;
 
-    let commit = command_output(root, "git", &["rev-parse", "HEAD"])?;
     let release = json!({
         "schema_version": 1,
         "source_commit": commit,
@@ -286,6 +302,29 @@ fn valid_slug(slug: &str) -> bool {
         && slug
             .bytes()
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+}
+
+fn escape_mdx_text(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '{' => escaped.push_str("&#123;"),
+            '}' => escaped.push_str("&#125;"),
+            '`' => escaped.push_str("&#96;"),
+            _ => escaped.push(character),
+        }
+    }
+    escaped
+}
+
+fn pin_source_links(markdown: &str, commit: &str) -> String {
+    markdown.replace(
+        "https://github.com/Scrobble-dev/Fasti/blob/dev/",
+        &format!("https://github.com/Scrobble-dev/Fasti/blob/{commit}/"),
+    )
 }
 
 fn confined_source(root: &Path, source: &str) -> anyhow::Result<PathBuf> {
@@ -405,6 +444,21 @@ mod tests {
         assert!(!lexically_confined(Path::new("docs/../SECURITY.md")));
         assert!(valid_slug("validation-failed"));
         assert!(!valid_slug("../escape"));
+    }
+
+    #[test]
+    fn generated_mdx_is_literal_and_source_links_are_immutable() {
+        assert_eq!(
+            escape_mdx_text("a<&>{}`"),
+            "a&lt;&amp;&gt;&#123;&#125;&#96;"
+        );
+        assert_eq!(
+            pin_source_links(
+                "https://github.com/Scrobble-dev/Fasti/blob/dev/docs/capability-ledger.md",
+                "abc123"
+            ),
+            "https://github.com/Scrobble-dev/Fasti/blob/abc123/docs/capability-ledger.md"
+        );
     }
 
     #[cfg(unix)]

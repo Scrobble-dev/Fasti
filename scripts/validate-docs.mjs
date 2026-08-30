@@ -24,6 +24,14 @@ function sameSet(actual, expected, label) {
   );
 }
 
+function assertUnique(values, label) {
+  assert.equal(
+    values.length,
+    new Set(values).size,
+    `${label}: duplicates are not allowed`,
+  );
+}
+
 function parseCsv(source) {
   const rows = [];
   let row = [];
@@ -96,13 +104,11 @@ async function validate(site, personas, context) {
     ["use", "operate", "integrate", "extend", "contribute"],
     "persona tracks",
   );
-  sameSet(
-    site.pages.map(({ id }) => id),
+  assertUnique(
     site.pages.map(({ id }) => id),
     "page IDs",
   );
-  sameSet(
-    site.pages.map(({ route }) => route),
+  assertUnique(
     site.pages.map(({ route }) => route),
     "page routes",
   );
@@ -261,16 +267,24 @@ if (process.argv.includes("--self-test")) {
     /persona IDs/u,
   );
   const traversal = structuredClone(context.site);
-  traversal.pages[0].source = "docs/../SECURITY.md";
+  traversal.pages[0].source = "docs/../../security.md";
   await assert.rejects(
     validate(traversal, context.personas, context),
-    /schema|source/u,
+    /source escapes the repository/u,
   );
   const duplicate = structuredClone(context.site);
   duplicate.pages[1].route = duplicate.pages[0].route;
   await assert.rejects(
     validate(duplicate, context.personas, context),
     /page routes/u,
+  );
+  const unavailable = structuredClone(context.site);
+  unavailable.pages[0].status = "unavailable";
+  delete unavailable.pages[0].blocked_by;
+  delete unavailable.pages[0].safe_alternative;
+  await assert.rejects(
+    validate(unavailable, context.personas, context),
+    /blocked_by|safe_alternative/u,
   );
   console.log("PASS: documentation publication mutation sentinels");
 } else {

@@ -1,5 +1,4 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "artifact_bytes_max": 5242880,
   "html_file_bytes_max": 40960,
   "javascript_bytes_max": 1310720,

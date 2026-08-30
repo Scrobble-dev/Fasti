@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile, readdir, stat } from "node:fs/promises";
-import { relative, resolve } from "node:path";
+import { relative, resolve, sep } from "node:path";
 import { execFileSync } from "node:child_process";
 
 /* eslint-disable security/detect-non-literal-fs-filename -- every dynamic path is a fixed build resource, a confined internal link, or an entry discovered under the build root */
@@ -31,11 +31,10 @@ const required = [
   "search/index.html",
   "status/index.html",
 ];
-for (const path of required)
-  assert.ok(
-    (await stat(resolve(build, path))).isFile(),
-    `missing built resource ${path}`,
-  );
+for (const path of required) {
+  const information = await stat(resolve(build, path)).catch(() => undefined);
+  assert.ok(information?.isFile(), `missing built resource ${path}`);
+}
 
 const release = JSON.parse(
   await readFile(resolve(build, "release.json"), "utf8"),
@@ -76,6 +75,11 @@ for (const path of htmlFiles) {
     1,
     `${path} has an invalid canonical-link count`,
   );
+  assert.equal(
+    (html.match(/<h1(?:\s|>)/gu) ?? []).length,
+    1,
+    `${path} must contain one H1`,
+  );
   for (const match of html.matchAll(/<a\b[^>]*\bhref="([^"]+)"/gu)) {
     const url = new URL(match[1], "https://fasti.scrobble.dev");
     if (url.origin === "https://fasti.scrobble.dev")
@@ -114,9 +118,11 @@ const total = (suffix) =>
   sizes
     .filter(([path]) => path.endsWith(suffix))
     .reduce((sum, [, size]) => sum + size, 0);
-const treeTotal = (fragment) =>
+const treeTotal = (prefix) =>
   sizes
-    .filter(([path]) => path.includes(fragment))
+    .filter(([path]) =>
+      relative(build, path).split(sep).join("/").startsWith(prefix),
+    )
     .reduce((sum, [, size]) => sum + size, 0);
 assert.ok(
   sizes.reduce((sum, [, size]) => sum + size, 0) <= budgets.artifact_bytes_max,
@@ -143,7 +149,7 @@ assert.ok(
   "CSS exceeds its byte budget",
 );
 assert.ok(
-  treeTotal("/pagefind/") <= budgets.search_bytes_max,
+  treeTotal("pagefind/") <= budgets.search_bytes_max,
   "search index exceeds its byte budget",
 );
 const prose = await readFile(
