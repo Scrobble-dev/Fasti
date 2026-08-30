@@ -534,6 +534,13 @@ pub fn plan_purpose_identity_route_with_evidence(
     anime_preference: AnimeGroupingPreference,
     evidence: &[IdentityRouteEvidence],
 ) -> PurposeIdentityRoutePlan {
+    let evidence = evidence
+        .iter()
+        .filter(|item| {
+            item.accepted_assertion()
+                .is_none_or(|assertion| assertion.record_id() == record_id)
+        })
+        .collect::<Vec<_>>();
     let mut known_identifiers = evidence
         .iter()
         .map(|item| item.identifier().clone())
@@ -549,10 +556,6 @@ pub fn plan_purpose_identity_route_with_evidence(
 
     let mut candidates = evidence
         .iter()
-        .filter(|item| {
-            item.accepted_assertion()
-                .is_none_or(|assertion| assertion.record_id() == record_id)
-        })
         .filter_map(|evidence| {
             route_priority(intent, target_provider.as_str(), anime_preference, evidence).map(
                 |(priority, kind)| {
@@ -2369,6 +2372,7 @@ mod tests {
 
         assert_eq!(plan.record_id(), requested_record_id);
         assert_eq!(plan.status(), PurposeIdentityRouteStatus::Missing);
+        assert!(plan.known_identifiers().is_empty());
         assert!(plan.selected_route().is_none());
         assert!(plan.candidate_routes().is_empty());
     }
