@@ -34,7 +34,12 @@ engines:
       # the semver.org-vetted, linear-time regex in generate-release-notes.mjs
       # as "Unsafe Regular Expression" on every scan (already reviewed and
       # suppressed for the project's own ESLint run -- see the
-      # eslint-disable-next-line comment at that line). Two prior in-file
+      # eslint-disable-next-line comment at that line). Confirmed working on
+      # a direct PR into dev (this exclusion alone cleared the finding
+      # there); if it resurfaces on a PR whose head fast-forwarded in from a
+      # separate merge rather than a direct push, that's a stale Codacy
+      # check-run cache on their side, not a config regression here -- a new
+      # commit is needed to force a fresh check-run. Two prior in-file
       # suppression attempts (a rule-ID-scoped nosemgrep, then a bare
       # nosemgrep) both failed to reach whatever engine actually produces
       # this finding, confirming it isn't Semgrep-backed either.
