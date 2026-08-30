@@ -138,6 +138,10 @@ transport_disposition:
   sdk: generated_typescript_for_fasti_http_contract
   native_nuvio_clients: plain_openapi_and_fixtures_using_existing_http_serialization_stacks
   cli: existing_capability_discovery_plus_focused_integration_check
+  okf: required_for_portable_knowledge_and_conformance
+  knowledge: required_for_user_and_operator_semantics
+  package_smoke: required_for_native_and_oci_activation
+  ui: required_for_user_visible_capabilities
 
 events:
   - provider.health.changed

@@ -49,6 +49,21 @@ const IDENTITY_UAT_HEADER = [
 const IDENTITY_UAT_ROW_COUNT = 126;
 const LEGACY_UAT_ROW_COUNT = 80;
 const NUVIO_METADATA_UAT_ROW_COUNT = 60;
+const NUVIO_METADATA_NO_RUNTIME_CLAIM =
+  "This preview reserves ownership and names only; it does not claim any listed capability is implemented.";
+const NUVIO_METADATA_TRANSPORT_SURFACES = [
+  "cli",
+  "http_openapi",
+  "json_ld",
+  "json_schema",
+  "knowledge",
+  "native_nuvio_clients",
+  "okf",
+  "package_smoke",
+  "sdk",
+  "sse_asyncapi",
+  "ui",
+];
 const ALLOWED_IDENTITY_CATEGORIES = new Set([
   "stable_entity",
   "partial_identity",
@@ -234,6 +249,62 @@ function assertStringList(value, label) {
   for (const item of value) {
     assert.equal(typeof item, "string", `${label} values must be strings`);
     assert.ok(item.trim(), `${label} values must not be blank`);
+  }
+}
+
+/** Validates the planning preview fields that must fail closed before counting. */
+function assertNuvioMetadataPreviewShape(preview) {
+  assert.equal(
+    preview.implementation_rule?.no_runtime_claim,
+    NUVIO_METADATA_NO_RUNTIME_CLAIM,
+    "programme preview must preserve its exact no-runtime claim",
+  );
+  assert.ok(
+    preview.capability_groups &&
+      typeof preview.capability_groups === "object" &&
+      !Array.isArray(preview.capability_groups),
+    "programme capability groups must be a YAML map",
+  );
+  for (const [group, { ids } = {}] of Object.entries(
+    preview.capability_groups,
+  )) {
+    assertStringList(ids, `programme capability group ${group} ids`);
+  }
+  assertStringList(preview.stable_problems, "programme stable problems");
+  assertStringList(preview.events, "programme events");
+
+  assert.ok(
+    preview.transport_disposition &&
+      typeof preview.transport_disposition === "object" &&
+      !Array.isArray(preview.transport_disposition),
+    "programme transport dispositions must be a YAML map",
+  );
+  assert.deepEqual(
+    Object.keys(preview.transport_disposition).sort(),
+    NUVIO_METADATA_TRANSPORT_SURFACES,
+    "programme transport dispositions must cover every governed surface",
+  );
+  for (const [surface, disposition] of Object.entries(
+    preview.transport_disposition,
+  )) {
+    if (typeof disposition === "string") {
+      assert.ok(disposition.trim(), `${surface} disposition must not be blank`);
+      assert.notEqual(
+        disposition,
+        "not_applicable",
+        `${surface} not_applicable disposition must include a reason`,
+      );
+      continue;
+    }
+    assert.equal(
+      disposition?.disposition,
+      "not_applicable",
+      `${surface} object disposition must be not_applicable`,
+    );
+    assert.ok(
+      typeof disposition.reason === "string" && disposition.reason.trim(),
+      `${surface} not_applicable disposition must include a reason`,
+    );
   }
 }
 
@@ -575,6 +646,34 @@ async function validateUat(registry) {
   const preview = parseYaml(await readFile(nuvioMetadataPreviewPath, "utf8"));
   assert.equal(preview.preview_version, 1);
   assert.equal(preview.status, "approved_for_implementation");
+  assertNuvioMetadataPreviewShape(preview);
+  assert.throws(
+    () =>
+      assertNuvioMetadataPreviewShape({
+        ...preview,
+        events: "not-a-list",
+      }),
+    /programme events must be a YAML list/u,
+  );
+  assert.throws(
+    () =>
+      assertNuvioMetadataPreviewShape({
+        ...preview,
+        stable_problems: "not-a-list",
+      }),
+    /programme stable problems must be a YAML list/u,
+  );
+  assert.throws(
+    () =>
+      assertNuvioMetadataPreviewShape({
+        ...preview,
+        capability_groups: {
+          ...preview.capability_groups,
+          M1: { ...preview.capability_groups.M1, ids: "provider.list" },
+        },
+      }),
+    /programme capability group M1 ids must be a YAML list/u,
+  );
   const previewCapabilities = Object.values(preview.capability_groups).flatMap(
     ({ ids }) => ids,
   );

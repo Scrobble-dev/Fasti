@@ -21,9 +21,9 @@
 | -------------------------------------------------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
 | `docs/plans/nuvio-metadata-discovery-library-collections.md`   | `3d4702a003e7f098d21c821b70628dc56b6a3d1edb53543949cd99478ad55820` | Canonical scope, architecture, security, delivery, reviews, and Definition of Done.     |
 | `docs/designs/nuvio-metadata-discovery-library-collections.md` | `3c3bcafc9bcec8c97c388530852cecc7665d036841007f158364d93a9954a994` | Approved product and ownership design.                                                  |
-| `docs/designs/nuvio-metadata-flow-wireframe.html`              | `f73d27281eeb15b6b6f1b81411e0cd69774ae6ce7e237fdf675cdeab93d10bff` | Search-to-record, Nuvio, and local-workspace state reference.                           |
-| `docs/designs/nuvio-metadata-route-reference.html`             | `496abaad469f1a019cb8b95aef5bbdda50e157e74f8b0eea9c58bca934a8ae6b` | Tabler Workbench route and state reference.                                             |
-| `contracts/registry/v1/nuvio-metadata-programme-preview.yaml`  | `cf32167500c8ec31d3ee0f28b5b6572f44f57b615b6ae8183d85ea86857c46c7` | Planning-only reservation of 51 capability owners, eight events, and 35 typed problems. |
+| `docs/designs/nuvio-metadata-flow-wireframe.html`              | `26b1454b291e844589a2c5bf2e3222d105deba1b486c1c6cbcbcb777e1c3ff68` | Search-to-record, Nuvio, and local-workspace state reference.                           |
+| `docs/designs/nuvio-metadata-route-reference.html`             | `022f202a3cbbe9d780b142d872e1a612d2791a3488a7a1e18dee16ad8bf26992` | Tabler Workbench route and state reference.                                             |
+| `contracts/registry/v1/nuvio-metadata-programme-preview.yaml`  | `cabd4dfd4a3772f50e647d76871d583d3bcf5b2b21d1ba6575e40ac234e4c71e` | Planning-only reservation of 51 capability owners, eight events, and 35 typed problems. |
 | `tests/conformance/uat-matrix.csv`                             | `a8921831a3254c2246d8526538e308f9e7f4f805a086c06cc42e78535bdd017b` | Existing 80 identity cases plus 60 programme acceptance cases.                          |
 
 Hashes bind this M0 review only. Any content change requires regenerating this table and rerunning the M0 checks.
