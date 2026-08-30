@@ -8,6 +8,7 @@ own process supervision or expose a second developer launcher.
 from __future__ import annotations
 
 import argparse
+import atexit
 import copy
 import datetime
 import fcntl
@@ -19,6 +20,7 @@ import platform
 import re
 import secrets
 import shutil
+import signal
 import stat
 import subprocess  # nosec B404 -- the governed launcher must execute exact verified binaries.
 import sys
@@ -42,10 +44,110 @@ VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 BOOTSTRAP_PASSWORD = re.compile(r"^\s*password:\s*'([^']+)'\s*$")
 TRAILBASE_LICENSE_SHA256 = "be4741d827008446e5e8bf9ee42f9e57b57245b6aed260fbdaf00ffebe958fb7"
 TRAILBASE_REPOSITORY_URL = "https://github.com/trailbaseio/trailbase"
+_MANAGED_PROCESS_GROUPS: dict[int, subprocess.Popen[Any]] = {}
+_STARTING_PROCESS_GROUPS = 0
+_PENDING_TERMINATION_SIGNAL: int | None = None
+_TERMINATION_CLEANUP_INSTALLED = False
 
 
 class ReleaseError(ValueError):
     """The checked-in release lock or a supplied artifact is invalid."""
+
+
+def start_managed_process_group(
+    command: list[str | Path],
+    *,
+    environment: dict[str, str],
+    stdout: int | None,
+    stderr: int | None,
+    text: bool = False,
+) -> subprocess.Popen[Any]:
+    """Start and register one child group before cancellation can be delivered."""
+    global _STARTING_PROCESS_GROUPS
+    _STARTING_PROCESS_GROUPS += 1
+    try:
+        process = subprocess.Popen(  # nosec -- nosemgrep -- callers supply digest-verified executables and fixed argv.
+            command,  # nosemgrep -- governed local command vectors only; no shell.
+            env=environment,
+            stdout=stdout,
+            stderr=stderr,
+            text=text,
+            start_new_session=True,
+        )
+        _MANAGED_PROCESS_GROUPS[process.pid] = process
+    finally:
+        _STARTING_PROCESS_GROUPS -= 1
+        if _STARTING_PROCESS_GROUPS == 0 and _PENDING_TERMINATION_SIGNAL is not None:
+            _terminate_managed_process_groups(_PENDING_TERMINATION_SIGNAL, None)
+    return process
+
+
+def _process_group_exists(process_group: int) -> bool:
+    try:
+        os.killpg(process_group, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def stop_managed_process_group(process: subprocess.Popen[Any]) -> None:
+    try:
+        if _process_group_exists(process.pid):
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        if process.poll() is None:
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass
+        if _process_group_exists(process.pid):
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            if process.poll() is None:
+                process.wait(timeout=5)
+            deadline = time.monotonic() + 5
+            while _process_group_exists(process.pid) and time.monotonic() < deadline:
+                time.sleep(0.05)
+        if _process_group_exists(process.pid):
+            raise ReleaseError(f"could not stop managed process group {process.pid}")
+        if process.poll() is None:
+            raise ReleaseError(f"could not reap managed process {process.pid}")
+    finally:
+        if not _process_group_exists(process.pid):
+            _MANAGED_PROCESS_GROUPS.pop(process.pid, None)
+
+
+def _cleanup_managed_process_groups() -> None:
+    for process in tuple(_MANAGED_PROCESS_GROUPS.values()):
+        try:
+            stop_managed_process_group(process)
+        except (OSError, ReleaseError, subprocess.SubprocessError):
+            continue
+
+
+def _terminate_managed_process_groups(signum: int, _frame: Any) -> None:
+    global _PENDING_TERMINATION_SIGNAL
+    _PENDING_TERMINATION_SIGNAL = signum
+    _cleanup_managed_process_groups()
+    if _STARTING_PROCESS_GROUPS:
+        return
+    _PENDING_TERMINATION_SIGNAL = None
+    raise SystemExit(128 + signum)
+
+
+def install_termination_cleanup() -> None:
+    global _TERMINATION_CLEANUP_INSTALLED
+    if not _TERMINATION_CLEANUP_INSTALLED:
+        atexit.register(_cleanup_managed_process_groups)
+        _TERMINATION_CLEANUP_INSTALLED = True
+    signal.signal(signal.SIGINT, _terminate_managed_process_groups)
+    signal.signal(signal.SIGTERM, _terminate_managed_process_groups)
 
 
 def _open_safe_regular_file(path: Path) -> int:
@@ -935,8 +1037,8 @@ def bootstrap_native(
         child_environment["RUST_LOG"] = "info"
         old_umask = os.umask(0o077)
         try:
-            process = subprocess.Popen(  # nosec -- nosemgrep -- release-lock verified binary; validated loopback argv.
-                [  # nosemgrep -- exact digest-verified executable and validated fixed-shape arguments.
+            process = start_managed_process_group(
+                [
                     str(executable),
                     "--depot",
                     str(depot),
@@ -953,19 +1055,17 @@ def bootstrap_native(
                     "1",
                     "--stderr-logging",
                 ],
-                env=child_environment,
+                environment=child_environment,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
-                start_new_session=True,
             )
         finally:
             os.umask(old_umask)
 
         output_stream = process.stdout
         if output_stream is None:
-            os.killpg(process.pid, 15)
-            process.wait(timeout=5)
+            stop_managed_process_group(process)
             raise ReleaseError("TrailBase bootstrap process has no output pipe")
 
         def read_bootstrap_output() -> None:
@@ -1022,13 +1122,7 @@ def bootstrap_native(
             raise ReleaseError("TrailBase private administrator rotation failed") from error
         finally:
             initial_password.clear()
-            if process.poll() is None:
-                os.killpg(process.pid, 15)
-                try:
-                    process.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    os.killpg(process.pid, 9)
-                    process.wait(timeout=5)
+            stop_managed_process_group(process)
             reader.join(timeout=2)
 
         _deliver_admin_password_to_tty(terminal.fileno(), new_password)
@@ -1446,6 +1540,66 @@ def _backup_restore_self_test() -> None:
             raise ReleaseError("writable restore ancestor self-test did not fail")
 
 
+def _managed_process_group_self_test() -> None:
+    worker_source = f'''
+import os
+import signal
+import subprocess
+import sys
+
+sys.path.insert(0, {str(ROOT / "scripts")!r})
+import trailbase_runtime as runtime
+
+runtime.install_termination_cleanup()
+real_popen = runtime.subprocess.Popen
+
+def interrupted_popen(*args, **kwargs):
+    process = real_popen(*args, **kwargs)
+    print(process.pid, flush=True)
+    os.kill(os.getpid(), signal.SIGTERM)
+    return process
+
+runtime.subprocess.Popen = interrupted_popen
+child_source = """
+import signal
+import subprocess
+import sys
+import time
+
+subprocess.Popen([
+    sys.executable,
+    "-c",
+    "import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(30)",
+])
+time.sleep(30)
+"""
+runtime.start_managed_process_group(
+    [sys.executable, "-c", child_source],
+    environment=dict(os.environ),
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+)
+'''
+    worker = start_managed_process_group(
+        [sys.executable, "-B", "-c", worker_source],
+        environment=dict(os.environ),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+    try:
+        output_stream = worker.stdout
+        if output_stream is None:
+            raise ReleaseError("termination cleanup self-test has no output pipe")
+        child_process_group = int(output_stream.readline().strip())
+        if worker.wait(timeout=10) != 128 + signal.SIGTERM:
+            raise ReleaseError("termination cleanup returned the wrong exit status")
+        if _process_group_exists(child_process_group):
+            raise ReleaseError("termination cleanup left a child process group active")
+    finally:
+        stop_managed_process_group(worker)
+
+
 def self_test() -> None:
     release = load_release()
     mutations = []
@@ -1570,10 +1724,12 @@ def self_test() -> None:
         else:
             raise ReleaseError("non-loopback or mismatched public URL self-test did not fail")
     _backup_restore_self_test()
+    _managed_process_group_self_test()
     print("PASS: TrailBase release-lock mutation sentinels")
 
 
 def main() -> int:
+    install_termination_cleanup()
     parser = argparse.ArgumentParser(description=__doc__)
     subcommands = parser.add_subparsers(dest="command", required=True)
     subcommands.add_parser("verify-release", help="validate the checked-in exact release lock")

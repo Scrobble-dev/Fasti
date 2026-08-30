@@ -279,13 +279,7 @@ def assert_status(actual: int, expected: int, label: str, checks: list[dict[str,
 
 
 def stop_process(process: subprocess.Popen[bytes], reader: threading.Thread | None = None) -> None:
-    if process.poll() is None:
-        os.killpg(process.pid, 15)
-        try:
-            process.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            os.killpg(process.pid, 9)
-            process.wait(timeout=5)
+    runtime.stop_managed_process_group(process)
     if reader is not None:
         reader.join(timeout=2)
 
@@ -301,8 +295,8 @@ def start_fixture_release(
     output: int | None = subprocess.PIPE if initial_password is not None else subprocess.DEVNULL
     old_umask = os.umask(0o077)
     try:
-        process = subprocess.Popen(  # nosec -- nosemgrep -- exact digest-verified fixture; fixed local argv, no shell.
-            [  # nosemgrep -- exact digest-verified executable and fixed loopback arguments.
+        process = runtime.start_managed_process_group(
+            [
                 executable,
                 "--depot",
                 root / "depot",
@@ -319,10 +313,9 @@ def start_fixture_release(
                 "1",
                 "--stderr-logging",
             ],
-            env=environment,
+            environment=environment,
             stdout=output,
             stderr=subprocess.STDOUT if initial_password is not None else subprocess.DEVNULL,
-            start_new_session=True,
         )
     finally:
         os.umask(old_umask)
@@ -614,12 +607,11 @@ jobs {}
             old_affinity = os.sched_getaffinity(0)
             try:
                 os.sched_setaffinity(0, {min(old_affinity)})
-                return subprocess.Popen(  # nosec -- nosemgrep -- digest-verified binary; fixed loopback argv, no shell.
-                    command,  # nosemgrep -- exact executable and fixed loopback argument vector.
-                    env=environment,
+                return runtime.start_managed_process_group(
+                    command,
+                    environment=environment,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
-                    start_new_session=True,
                 )
             finally:
                 os.sched_setaffinity(0, old_affinity)
@@ -930,8 +922,7 @@ jobs {}
                 status, _ = request(endpoint, method, f"/{path}", {} if method == "POST" else None)
                 assert_status(status, 404, label, checks)
 
-            os.killpg(process.pid, 15)
-            process.wait(timeout=10)
+            stop_process(process)
             process = spawn()
             for _ in range(100):
                 try:
@@ -959,13 +950,7 @@ jobs {}
                 checks,
             )
         finally:
-            if process.poll() is None:
-                os.killpg(process.pid, 15)
-                try:
-                    process.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    os.killpg(process.pid, 9)
-                    process.wait(timeout=5)
+            stop_process(process)
             smtp.shutdown()
             smtp.server_close()
             smtp_thread.join(timeout=2)
@@ -1035,6 +1020,7 @@ jobs {}
 
 
 def main() -> int:
+    runtime.install_termination_cleanup()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--receipt", type=Path, required=True)
