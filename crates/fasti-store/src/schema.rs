@@ -1999,7 +1999,8 @@ fn migrate_v14(connection: &Connection) -> Result<()> {
                 AND substr(correlation_id, 21, 1) GLOB '[89ab]'
             ),
             state TEXT NOT NULL CHECK (state IN (
-                'pending', 'claimed', 'completed', 'failed', 'cleanup_uncertain', 'expired'
+                'pending', 'claimed', 'completed', 'cancelled', 'failed',
+                'cleanup_uncertain', 'expired'
             )),
             failure TEXT CHECK (failure IN (
                 'verifier_lost_on_restart', 'exchange_outcome_uncertain',
@@ -2028,6 +2029,10 @@ fn migrate_v14(connection: &Connection) -> Result<()> {
                 (state = 'completed' AND failure IS NULL
                     AND claimed_at IS NOT NULL AND terminal_at IS NOT NULL)
                 OR
+                (state = 'cancelled' AND failure IS NULL
+                    AND claimed_at IS NULL AND terminal_at IS NOT NULL
+                    AND terminal_at < expires_at)
+                OR
                 (state = 'failed' AND terminal_at IS NOT NULL AND (
                     (claimed_at IS NULL AND failure = 'verifier_lost_on_restart')
                     OR
@@ -2046,6 +2051,8 @@ fn migrate_v14(connection: &Connection) -> Result<()> {
         ) STRICT;
         CREATE INDEX auth_ceremonies_state_expiry_idx
             ON auth_ceremonies(state, expires_at, operation_id);
+        CREATE UNIQUE INDEX auth_ceremonies_browser_binding_idx
+            ON auth_ceremonies(browser_binding_digest);
         CREATE INDEX auth_ceremonies_terminal_idx
             ON auth_ceremonies(terminal_at, operation_id)
             WHERE terminal_at IS NOT NULL;
@@ -2075,7 +2082,8 @@ fn migrate_v14(connection: &Connection) -> Result<()> {
                 'first_administrator_bootstrapped', 'subject_lifecycle_changed',
                 'membership_invited', 'membership_lifecycle_changed',
                 'membership_role_changed', 'ceremony_claimed', 'ceremony_completed',
-                'ceremony_failed', 'browser_session_issued', 'browser_session_revoked'
+                'ceremony_cancelled', 'ceremony_failed', 'browser_session_issued',
+                'browser_session_revoked'
             )),
             trailbase_instance_id TEXT CHECK (
                 trailbase_instance_id IS NULL OR (
@@ -2165,7 +2173,10 @@ fn migrate_v14(connection: &Connection) -> Result<()> {
                     AND workspace_id IS NOT NULL
                     AND membership_id IS NOT NULL)
                 OR
-                (event_kind IN ('ceremony_claimed', 'ceremony_completed', 'ceremony_failed')
+                (event_kind IN (
+                        'ceremony_claimed', 'ceremony_completed',
+                        'ceremony_cancelled', 'ceremony_failed'
+                    )
                     AND trailbase_instance_id IS NOT NULL
                     AND operation_id IS NOT NULL)
                 OR
@@ -3337,8 +3348,54 @@ mod tests {
             .expect("valid pending ceremony");
         assert!(connection
             .execute(
+                "INSERT INTO auth_ceremonies(operation_id, purpose, protocol, trailbase_instance_id, activation_generation, browser_binding_digest, callback_path, return_target, correlation_id, state, failure, created_at, expires_at, claimed_at, terminal_at) VALUES (?1, 'sign_in', 'trailbase_authorization_code_pkce', ?2, 1, ?3, '/auth/trailbase/callback', 'application_home', ?4, 'pending', NULL, ?5, '2026-08-24T00:05:00.000000Z', NULL, NULL)",
+                params![
+                    fasti_domain::OperationId::new_v7().to_string(),
+                    instance_id,
+                    binding_digest,
+                    correlation_id,
+                    CREATED_AT,
+                ],
+            )
+            .is_err());
+        let lookup_plan: String = connection
+            .query_row(
+                "EXPLAIN QUERY PLAN SELECT operation_id FROM auth_ceremonies WHERE browser_binding_digest = ?1",
+                [binding_digest.as_str()],
+                |row| row.get(3),
+            )
+            .expect("browser binding lookup plan");
+        assert!(lookup_plan.contains("auth_ceremonies_browser_binding_idx"));
+        assert!(connection
+            .execute(
                 "UPDATE auth_ceremonies SET state = 'completed' WHERE operation_id = ?1",
                 [operation_id.as_str()],
+            )
+            .is_err());
+        connection
+            .execute(
+                "UPDATE auth_ceremonies SET state = 'cancelled', terminal_at = '2026-08-24T00:00:01.000000Z' WHERE operation_id = ?1",
+                [operation_id.as_str()],
+            )
+            .expect("cancel pending ceremony");
+        let claimed_operation_id = fasti_domain::OperationId::new_v7().to_string();
+        let claimed_binding_digest = format!("sha256:{}", "33".repeat(32));
+        connection
+            .execute(
+                "INSERT INTO auth_ceremonies(operation_id, purpose, protocol, trailbase_instance_id, activation_generation, browser_binding_digest, callback_path, return_target, correlation_id, state, failure, created_at, expires_at, claimed_at, terminal_at) VALUES (?1, 'sign_in', 'trailbase_authorization_code_pkce', ?2, 1, ?3, '/auth/trailbase/callback', 'application_home', ?4, 'claimed', NULL, ?5, '2026-08-24T00:05:00.000000Z', '2026-08-24T00:00:01.000000Z', NULL)",
+                params![
+                    claimed_operation_id,
+                    instance_id,
+                    claimed_binding_digest,
+                    correlation_id,
+                    CREATED_AT,
+                ],
+            )
+            .expect("claimed ceremony");
+        assert!(connection
+            .execute(
+                "UPDATE auth_ceremonies SET state = 'cancelled', terminal_at = '2026-08-24T00:00:02.000000Z' WHERE operation_id = ?1",
+                [claimed_operation_id.as_str()],
             )
             .is_err());
 

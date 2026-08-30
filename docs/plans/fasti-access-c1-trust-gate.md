@@ -106,6 +106,11 @@ or route work:
   with `capacity_exceeded` before a row, verifier, cookie, or redirect when the
   ceiling remains full. No timer, background worker, or configuration key is
   added; terminal audit evidence follows the separate 90-day rule.
+- Active cancellation has its own terminal `cancelled` state. A pending
+  cancellation wins durably before its process-memory verifier is removed;
+  claimed ceremonies cannot be cancelled because exchange outcome may already
+  be uncertain. Cancellation is never represented as expiry, failure, or row
+  deletion.
 
 ## 3. Exact TrailBase evidence
 

@@ -724,6 +724,7 @@ pub enum AuthCeremonyState {
     Pending,
     Claimed,
     Completed,
+    Cancelled,
     Failed,
     CleanupUncertain,
     Expired,
@@ -735,6 +736,7 @@ impl AuthCeremonyState {
             Self::Pending => "pending",
             Self::Claimed => "claimed",
             Self::Completed => "completed",
+            Self::Cancelled => "cancelled",
             Self::Failed => "failed",
             Self::CleanupUncertain => "cleanup_uncertain",
             Self::Expired => "expired",
@@ -746,6 +748,7 @@ impl AuthCeremonyState {
             "pending" => Some(Self::Pending),
             "claimed" => Some(Self::Claimed),
             "completed" => Some(Self::Completed),
+            "cancelled" => Some(Self::Cancelled),
             "failed" => Some(Self::Failed),
             "cleanup_uncertain" => Some(Self::CleanupUncertain),
             "expired" => Some(Self::Expired),
@@ -756,7 +759,11 @@ impl AuthCeremonyState {
     pub const fn is_terminal(self) -> bool {
         matches!(
             self,
-            Self::Completed | Self::Failed | Self::CleanupUncertain | Self::Expired
+            Self::Completed
+                | Self::Cancelled
+                | Self::Failed
+                | Self::CleanupUncertain
+                | Self::Expired
         )
     }
 }
@@ -1092,6 +1099,23 @@ impl AuthCeremony {
         Ok(())
     }
 
+    pub fn cancel(&mut self, at: DateTime<Utc>) -> Result<(), AccessInvariantError> {
+        if !matches!(self.state, AuthCeremonyState::Pending) {
+            return Err(AccessInvariantError::InvalidCeremonyTransition);
+        }
+        if at < self.created_at {
+            return Err(AccessInvariantError::InvalidTimestampOrder);
+        }
+        if at >= self.expires_at {
+            self.state = AuthCeremonyState::Expired;
+            self.terminal_at = Some(at);
+            return Err(AccessInvariantError::CeremonyExpired);
+        }
+        self.state = AuthCeremonyState::Cancelled;
+        self.terminal_at = Some(at);
+        Ok(())
+    }
+
     pub fn fail(
         &mut self,
         failure: AuthCeremonyFailure,
@@ -1185,6 +1209,13 @@ impl AuthCeremony {
             }
             AuthCeremonyState::Completed => {
                 self.failure.is_none() && self.claimed_at.is_some() && self.terminal_at.is_some()
+            }
+            AuthCeremonyState::Cancelled => {
+                self.failure.is_none()
+                    && self.claimed_at.is_none()
+                    && self
+                        .terminal_at
+                        .is_some_and(|terminal_at| terminal_at < self.expires_at)
             }
             AuthCeremonyState::Failed => {
                 self.failure.is_some_and(|failure| {
@@ -1300,6 +1331,7 @@ pub enum AccessAuditEventKind {
     MembershipRoleChanged,
     CeremonyClaimed,
     CeremonyCompleted,
+    CeremonyCancelled,
     CeremonyFailed,
     BrowserSessionIssued,
     BrowserSessionRevoked,
@@ -1318,6 +1350,7 @@ impl AccessAuditEventKind {
             Self::MembershipRoleChanged => "membership_role_changed",
             Self::CeremonyClaimed => "ceremony_claimed",
             Self::CeremonyCompleted => "ceremony_completed",
+            Self::CeremonyCancelled => "ceremony_cancelled",
             Self::CeremonyFailed => "ceremony_failed",
             Self::BrowserSessionIssued => "browser_session_issued",
             Self::BrowserSessionRevoked => "browser_session_revoked",
@@ -1336,6 +1369,7 @@ impl AccessAuditEventKind {
             "membership_role_changed" => Some(Self::MembershipRoleChanged),
             "ceremony_claimed" => Some(Self::CeremonyClaimed),
             "ceremony_completed" => Some(Self::CeremonyCompleted),
+            "ceremony_cancelled" => Some(Self::CeremonyCancelled),
             "ceremony_failed" => Some(Self::CeremonyFailed),
             "browser_session_issued" => Some(Self::BrowserSessionIssued),
             "browser_session_revoked" => Some(Self::BrowserSessionRevoked),
@@ -1793,6 +1827,7 @@ mod tests {
             AuthCeremonyState::Pending,
             AuthCeremonyState::Claimed,
             AuthCeremonyState::Completed,
+            AuthCeremonyState::Cancelled,
             AuthCeremonyState::Failed,
             AuthCeremonyState::CleanupUncertain,
             AuthCeremonyState::Expired,
@@ -1832,6 +1867,7 @@ mod tests {
             AccessAuditEventKind::MembershipRoleChanged,
             AccessAuditEventKind::CeremonyClaimed,
             AccessAuditEventKind::CeremonyCompleted,
+            AccessAuditEventKind::CeremonyCancelled,
             AccessAuditEventKind::CeremonyFailed,
             AccessAuditEventKind::BrowserSessionIssued,
             AccessAuditEventKind::BrowserSessionRevoked,
@@ -2145,6 +2181,10 @@ mod tests {
             ceremony.claim(&binding, instance_id, 7, &callback, at(2)),
             Err(AccessInvariantError::InvalidCeremonyTransition)
         );
+        assert_eq!(
+            ceremony.cancel(at(2)),
+            Err(AccessInvariantError::InvalidCeremonyTransition)
+        );
         ceremony.complete(at(2)).expect("complete");
         assert!(ceremony.state().is_terminal());
         assert_eq!(
@@ -2219,6 +2259,28 @@ mod tests {
             Err(AccessInvariantError::CeremonyExpired)
         );
         assert_eq!(expired.state(), AuthCeremonyState::Expired);
+
+        let mut cancelled = AuthCeremony::try_new(
+            OperationId::new_v7(),
+            AuthCeremonyPurpose::SignIn,
+            AuthCeremonyProtocol::TrailBaseAuthorizationCodePkce,
+            instance_id,
+            7,
+            binding,
+            callback,
+            AuthReturnTarget::ApplicationHome,
+            RequestCorrelationId::new_v7(),
+            at(0),
+            at(30),
+        )
+        .expect("cancellable ceremony");
+        cancelled.cancel(at(1)).expect("cancel");
+        assert_eq!(cancelled.state(), AuthCeremonyState::Cancelled);
+        assert_eq!(cancelled.terminal_at(), Some(at(1)));
+        assert_eq!(
+            cancelled.cancel(at(2)),
+            Err(AccessInvariantError::InvalidCeremonyTransition)
+        );
     }
 
     #[test]
@@ -2413,6 +2475,7 @@ mod tests {
         )
         .is_ok());
         assert!(restore(AuthCeremonyState::Expired, None, None, Some(at(30))).is_ok());
+        assert!(restore(AuthCeremonyState::Cancelled, None, None, Some(at(2))).is_ok());
 
         assert_eq!(
             restore(
@@ -2444,6 +2507,10 @@ mod tests {
         assert_eq!(
             restore(AuthCeremonyState::Claimed, None, Some(at(30)), None),
             Err(AccessInvariantError::InvalidTimestampOrder)
+        );
+        assert_eq!(
+            restore(AuthCeremonyState::Cancelled, None, None, Some(at(30))),
+            Err(AccessInvariantError::InvalidCeremonyTransition)
         );
         assert_eq!(
             AuthCeremony::try_new(
