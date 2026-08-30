@@ -299,6 +299,7 @@ impl AnimeGroupingPolicyView {
 pub struct AnimeGroupingPolicyImpact {
     policy: AnimeGroupingPolicyView,
     proposed_preference: AnimeGroupingPreference,
+    proposed_source: AnimeGroupingPolicySource,
     total_records: u64,
     affected_records: u64,
     unresolved_routes: u64,
@@ -312,6 +313,7 @@ impl AnimeGroupingPolicyImpact {
     pub fn new(
         policy: AnimeGroupingPolicyView,
         proposed_preference: AnimeGroupingPreference,
+        proposed_source: AnimeGroupingPolicySource,
         total_records: u64,
         affected_records: u64,
         unresolved_routes: u64,
@@ -322,6 +324,7 @@ impl AnimeGroupingPolicyImpact {
         Self {
             policy,
             proposed_preference,
+            proposed_source,
             total_records,
             affected_records,
             unresolved_routes,
@@ -337,6 +340,10 @@ impl AnimeGroupingPolicyImpact {
 
     pub const fn proposed_preference(&self) -> AnimeGroupingPreference {
         self.proposed_preference
+    }
+
+    pub const fn proposed_source(&self) -> AnimeGroupingPolicySource {
+        self.proposed_source
     }
 
     pub const fn total_records(&self) -> u64 {
