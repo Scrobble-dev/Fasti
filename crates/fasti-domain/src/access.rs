@@ -149,6 +149,23 @@ pub enum WorkspaceRole {
     Administrator,
 }
 
+impl WorkspaceRole {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Member => "member",
+            Self::Administrator => "administrator",
+        }
+    }
+
+    pub fn from_storage(value: &str) -> Option<Self> {
+        match value {
+            "member" => Some(Self::Member),
+            "administrator" => Some(Self::Administrator),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MembershipLifecycle {
     Invited,
@@ -159,6 +176,27 @@ pub enum MembershipLifecycle {
 }
 
 impl MembershipLifecycle {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Invited => "invited",
+            Self::PendingApproval => "pending_approval",
+            Self::Active => "active",
+            Self::Suspended => "suspended",
+            Self::Removed => "removed",
+        }
+    }
+
+    pub fn from_storage(value: &str) -> Option<Self> {
+        match value {
+            "invited" => Some(Self::Invited),
+            "pending_approval" => Some(Self::PendingApproval),
+            "active" => Some(Self::Active),
+            "suspended" => Some(Self::Suspended),
+            "removed" => Some(Self::Removed),
+            _ => None,
+        }
+    }
+
     pub const fn grants_access(self) -> bool {
         matches!(self, Self::Active)
     }
@@ -319,6 +357,29 @@ pub enum AuthCeremonyState {
 }
 
 impl AuthCeremonyState {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Claimed => "claimed",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::CleanupUncertain => "cleanup_uncertain",
+            Self::Expired => "expired",
+        }
+    }
+
+    pub fn from_storage(value: &str) -> Option<Self> {
+        match value {
+            "pending" => Some(Self::Pending),
+            "claimed" => Some(Self::Claimed),
+            "completed" => Some(Self::Completed),
+            "failed" => Some(Self::Failed),
+            "cleanup_uncertain" => Some(Self::CleanupUncertain),
+            "expired" => Some(Self::Expired),
+            _ => None,
+        }
+    }
+
     pub const fn is_terminal(self) -> bool {
         matches!(
             self,
@@ -381,6 +442,23 @@ pub enum AuthenticationAssurance {
 }
 
 impl AuthenticationMethod {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::TrailBasePassword => "trailbase_password",
+            Self::TrailBasePasswordTotp => "trailbase_password_totp",
+            Self::TrailBaseSocial => "trailbase_social",
+        }
+    }
+
+    pub fn from_storage(value: &str) -> Option<Self> {
+        match value {
+            "trailbase_password" => Some(Self::TrailBasePassword),
+            "trailbase_password_totp" => Some(Self::TrailBasePasswordTotp),
+            "trailbase_social" => Some(Self::TrailBaseSocial),
+            _ => None,
+        }
+    }
+
     pub const fn assurance(self) -> AuthenticationAssurance {
         match self {
             Self::TrailBasePassword | Self::TrailBaseSocial => {
@@ -729,6 +807,50 @@ mod tests {
             .expect("suspend"));
         assert_eq!(subject.authorization_epoch(), 5);
         assert!(!membership.is_authorization_viable_administrator());
+    }
+
+    #[test]
+    fn access_storage_vocabularies_round_trip_and_reject_unknown_values() {
+        for value in [WorkspaceRole::Member, WorkspaceRole::Administrator] {
+            assert_eq!(WorkspaceRole::from_storage(value.as_str()), Some(value));
+        }
+        for value in [
+            MembershipLifecycle::Invited,
+            MembershipLifecycle::PendingApproval,
+            MembershipLifecycle::Active,
+            MembershipLifecycle::Suspended,
+            MembershipLifecycle::Removed,
+        ] {
+            assert_eq!(
+                MembershipLifecycle::from_storage(value.as_str()),
+                Some(value)
+            );
+        }
+        for value in [
+            AuthCeremonyState::Pending,
+            AuthCeremonyState::Claimed,
+            AuthCeremonyState::Completed,
+            AuthCeremonyState::Failed,
+            AuthCeremonyState::CleanupUncertain,
+            AuthCeremonyState::Expired,
+        ] {
+            assert_eq!(AuthCeremonyState::from_storage(value.as_str()), Some(value));
+        }
+        for value in [
+            AuthenticationMethod::TrailBasePassword,
+            AuthenticationMethod::TrailBasePasswordTotp,
+            AuthenticationMethod::TrailBaseSocial,
+        ] {
+            assert_eq!(
+                AuthenticationMethod::from_storage(value.as_str()),
+                Some(value)
+            );
+        }
+
+        assert_eq!(WorkspaceRole::from_storage("owner"), None);
+        assert_eq!(MembershipLifecycle::from_storage("unknown"), None);
+        assert_eq!(AuthCeremonyState::from_storage("retryable"), None);
+        assert_eq!(AuthenticationMethod::from_storage("totp_enrolled"), None);
     }
 
     #[test]
