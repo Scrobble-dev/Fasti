@@ -229,6 +229,25 @@ impl PurposeIdentityRoutePlan {
     pub const fn selected_route(&self) -> Option<&PurposeIdentityRoute> {
         self.selected_route.as_ref()
     }
+
+    pub fn nuvio_content_id(&self) -> Option<String> {
+        if self.intent != ResolutionIntent::NuvioExport {
+            return None;
+        }
+        let identifier = self.selected_route()?.identifier();
+        let prefix = match identifier.namespace() {
+            "imdb.title" => return Some(identifier.value().to_owned()),
+            "tmdb.movie" | "tmdb.tv" => "tmdb",
+            "tvdb.movie" | "tvdb.series" => "tvdb",
+            "mal.anime" => "mal",
+            "anidb.anime" => "anidb",
+            "anilist.anime" => "anilist",
+            "kitsu.anime" => "kitsu",
+            "simkl.anime" => "simkl",
+            _ => return None,
+        };
+        Some(format!("{prefix}:{}", identifier.value()))
+    }
 }
 
 fn nuvio_standard_route_priority(namespace: &str, grain: Grain) -> Option<u8> {
@@ -1892,6 +1911,36 @@ mod tests {
                 .namespace(),
             "anidb.anime"
         );
+    }
+
+    #[test]
+    fn nuvio_content_ids_use_one_canonical_wire_encoder() {
+        for (namespace, grain, value, expected) in [
+            ("imdb.title", Grain::Series, "tt0944947", "tt0944947"),
+            ("tmdb.tv", Grain::Series, "1399", "tmdb:1399"),
+            ("tvdb.series", Grain::Series, "121361", "tvdb:121361"),
+            ("mal.anime", Grain::Release, "49894", "mal:49894"),
+            ("anidb.anime", Grain::Release, "15159", "anidb:15159"),
+            ("anilist.anime", Grain::Release, "32281", "anilist:32281"),
+            ("kitsu.anime", Grain::Release, "12268", "kitsu:12268"),
+            ("simkl.anime", Grain::Release, "60001", "simkl:60001"),
+        ] {
+            let plan = plan_purpose_identity_route(
+                ResolutionIntent::NuvioExport,
+                ProviderId::try_new("nuvio").expect("Nuvio provider"),
+                AnimeGroupingPreference::Automatic,
+                &[identity_claim_at(namespace, grain, value)],
+            );
+            assert_eq!(plan.nuvio_content_id().as_deref(), Some(expected));
+        }
+
+        let metadata_plan = plan_purpose_identity_route(
+            ResolutionIntent::MetadataLookup,
+            ProviderId::try_new("tmdb").expect("TMDB provider"),
+            AnimeGroupingPreference::Automatic,
+            &[identity_claim("imdb.title", "tt28254942")],
+        );
+        assert!(metadata_plan.nuvio_content_id().is_none());
     }
 
     #[test]
