@@ -1,8 +1,8 @@
-use crate::ApplicationResult;
+use crate::{ApplicationResult, SecretMaterial};
 use chrono::{DateTime, Utc};
 use fasti_domain::{
-    AuthCallbackPath, AuthCeremony, OperationId, RequestCorrelationId, Sha256Digest,
-    TrailBaseInstallation, TrailBaseInstanceId,
+    AuthCallbackPath, AuthCeremony, AuthSubjectId, MembershipId, OperationId, RequestCorrelationId,
+    Sha256Digest, TrailBaseInstallation, TrailBaseInstanceId, TrailBaseSubject, WorkspaceId,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -118,6 +118,57 @@ pub struct CancelAuthCeremonyCommand {
     at: DateTime<Utc>,
 }
 
+pub struct BootstrapFirstAdministratorCommand {
+    bootstrap_secret: SecretMaterial,
+    operation_id: OperationId,
+    trailbase_subject: TrailBaseSubject,
+    correlation_id: RequestCorrelationId,
+    at: DateTime<Utc>,
+}
+
+impl BootstrapFirstAdministratorCommand {
+    pub const fn new(
+        bootstrap_secret: SecretMaterial,
+        operation_id: OperationId,
+        trailbase_subject: TrailBaseSubject,
+        correlation_id: RequestCorrelationId,
+        at: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            bootstrap_secret,
+            operation_id,
+            trailbase_subject,
+            correlation_id,
+            at,
+        }
+    }
+    pub const fn bootstrap_secret(&self) -> &SecretMaterial {
+        &self.bootstrap_secret
+    }
+    pub const fn operation_id(&self) -> OperationId {
+        self.operation_id
+    }
+    pub const fn trailbase_subject(&self) -> TrailBaseSubject {
+        self.trailbase_subject
+    }
+    pub const fn correlation_id(&self) -> RequestCorrelationId {
+        self.correlation_id
+    }
+    pub const fn at(&self) -> DateTime<Utc> {
+        self.at
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BootstrapFirstAdministratorOutcome {
+    Created {
+        subject_id: AuthSubjectId,
+        membership_id: MembershipId,
+        workspace_id: WorkspaceId,
+    },
+    AlreadyBootstrapped,
+}
+
 impl CancelAuthCeremonyCommand {
     pub const fn new(
         operation_id: OperationId,
@@ -155,4 +206,8 @@ pub trait HumanAccessPort: Send + Sync {
         &self,
         command: CancelAuthCeremonyCommand,
     ) -> ApplicationResult<AuthCeremony>;
+    fn bootstrap_first_administrator(
+        &self,
+        command: BootstrapFirstAdministratorCommand,
+    ) -> ApplicationResult<BootstrapFirstAdministratorOutcome>;
 }

@@ -3,15 +3,18 @@ use crate::kernel::timestamp;
 use crate::SqliteKernel;
 use chrono::{DateTime, Duration, Utc};
 use fasti_application::{
-    ApplicationResult, CancelAuthCeremonyCommand, CapabilityKey, ClaimAuthCeremonyCommand,
-    FastiProblem, HumanAccessPort, ProblemCode, StartAuthCeremonyCommand,
+    AccessAdministrationPort, ApplicationResult, BootstrapFirstAdministratorCommand,
+    BootstrapFirstAdministratorOutcome, CancelAuthCeremonyCommand, CapabilityKey,
+    ClaimAuthCeremonyCommand, FastiProblem, HumanAccessPort, ProblemCode, StartAuthCeremonyCommand,
     VerifyTrailBaseInstallationCommand,
 };
 use fasti_domain::{
     AccessAuditEventKind, AccessInvariantError, AuthCallbackPath, AuthCeremony,
     AuthCeremonyFailure, AuthCeremonyProtocol, AuthCeremonyPurpose, AuthCeremonyState,
-    AuthReturnTarget, OperationId, RequestCorrelationId, Sha256Digest, TrailBaseActivationState,
-    TrailBaseInstallation, TrailBaseInstanceId,
+    AuthReturnTarget, AuthSubject, AuthSubjectId, AuthSubjectLifecycle, MembershipId,
+    MembershipLifecycle, OperationId, RequestCorrelationId, Sha256Digest, TrailBaseActivationState,
+    TrailBaseExternalAnchor, TrailBaseInstallation, TrailBaseInstanceId, TrailBaseSubject,
+    WorkspaceId, WorkspaceMembership, WorkspaceRole,
 };
 use rusqlite::{
     params, Connection, ErrorCode, OptionalExtension, Transaction, TransactionBehavior,
@@ -239,6 +242,207 @@ impl SqliteKernel {
         transaction.commit()?;
         Ok(ceremony)
     }
+
+    pub(crate) fn persist_first_administrator(
+        &self,
+        operation_id: OperationId,
+        trailbase_subject: TrailBaseSubject,
+        correlation_id: RequestCorrelationId,
+        at: DateTime<Utc>,
+    ) -> StoreResult<BootstrapFirstAdministratorOutcome> {
+        let observed_root =
+            Sha256Digest::from_bytes(&sha256_bytes(self.data_root_identity().as_bytes()));
+        let subject_id = AuthSubjectId::new_v7();
+        let membership_id = MembershipId::new_v7();
+        let connection = self
+            .inner
+            .connection
+            .lock()
+            .map_err(|_| HumanAccessStoreError::Integrity)?;
+        let transaction = Transaction::new_unchecked(&connection, TransactionBehavior::Immediate)?;
+
+        let workspace_id = load_initialized_workspace(&transaction)?;
+        let mut ceremony =
+            load_ceremony(&transaction, operation_id)?.ok_or(HumanAccessStoreError::NotFound)?;
+        if !matches!(
+            (
+                ceremony.purpose(),
+                ceremony.protocol(),
+                ceremony.return_target(),
+            ),
+            (
+                AuthCeremonyPurpose::FirstAdministratorBootstrap,
+                AuthCeremonyProtocol::TrailBaseAuthorizationCodePkce,
+                AuthReturnTarget::FirstRun,
+            )
+        ) {
+            return Err(HumanAccessStoreError::Invariant(
+                AccessInvariantError::InvalidCeremonyTransition,
+            ));
+        }
+        let installation = load_installation(&transaction)?
+            .filter(|installation| {
+                installation.id() == ceremony.trailbase_instance_id()
+                    && installation.activation_generation() == ceremony.activation_generation()
+                    && installation.physical_root_identity() == &observed_root
+                    && matches!(
+                        installation.activation_state(),
+                        TrailBaseActivationState::Active
+                    )
+            })
+            .ok_or(HumanAccessStoreError::Integrity)?;
+        if matches!(ceremony.state(), AuthCeremonyState::Completed) {
+            let matches_completed_bootstrap: bool = transaction.query_row(
+                r#"
+                SELECT EXISTS(
+                    SELECT 1
+                    FROM access_audit_events audit
+                    JOIN trailbase_auth_anchors anchor
+                      ON anchor.trailbase_instance_id = audit.trailbase_instance_id
+                     AND anchor.auth_subject_id = audit.auth_subject_id
+                    JOIN workspace_memberships membership
+                      ON membership.membership_id = audit.membership_id
+                     AND membership.auth_subject_id = audit.auth_subject_id
+                     AND membership.workspace_id = audit.workspace_id
+                    WHERE audit.event_kind = 'first_administrator_bootstrapped'
+                      AND audit.operation_id = ?1
+                      AND audit.trailbase_instance_id = ?2
+                      AND anchor.trailbase_subject = ?3
+                )
+                "#,
+                params![
+                    operation_id.to_string(),
+                    ceremony.trailbase_instance_id().to_string(),
+                    trailbase_subject.as_bytes().as_slice(),
+                ],
+                |row| row.get(0),
+            )?;
+            if !matches_completed_bootstrap {
+                return Err(HumanAccessStoreError::Integrity);
+            }
+            transaction.commit()?;
+            return Ok(BootstrapFirstAdministratorOutcome::AlreadyBootstrapped);
+        }
+        if !matches!(ceremony.state(), AuthCeremonyState::Claimed) {
+            return Err(HumanAccessStoreError::Invariant(
+                AccessInvariantError::InvalidCeremonyTransition,
+            ));
+        }
+
+        let membership_count: i64 =
+            transaction.query_row("SELECT COUNT(*) FROM workspace_memberships", [], |row| {
+                row.get(0)
+            })?;
+        if membership_count != 0 {
+            transaction.commit()?;
+            return Ok(BootstrapFirstAdministratorOutcome::AlreadyBootstrapped);
+        }
+        let anchor_conflict: bool = transaction.query_row(
+            r#"
+            SELECT EXISTS(
+                SELECT 1 FROM trailbase_auth_anchors
+                WHERE (trailbase_instance_id = ?1 AND trailbase_subject = ?2)
+                   OR auth_subject_id = ?3
+            )
+            "#,
+            params![
+                installation.id().to_string(),
+                trailbase_subject.as_bytes().as_slice(),
+                subject_id.to_string(),
+            ],
+            |row| row.get(0),
+        )?;
+        if anchor_conflict {
+            return Err(HumanAccessStoreError::Conflict);
+        }
+
+        let subject = AuthSubject::try_new(subject_id, AuthSubjectLifecycle::Active, 0, 0, at, at)?;
+        let anchor =
+            TrailBaseExternalAnchor::new(installation.id(), trailbase_subject, subject.id(), at);
+        let membership = WorkspaceMembership::try_new(
+            membership_id,
+            subject.id(),
+            workspace_id,
+            MembershipLifecycle::Active,
+            WorkspaceRole::Administrator,
+            at,
+            at,
+        )?;
+        let prior_ceremony_state = ceremony.state();
+        ceremony.complete(at)?;
+
+        map_insert(transaction.execute(
+            r#"
+            INSERT INTO auth_subjects(
+                auth_subject_id, lifecycle, auth_epoch, authorization_epoch,
+                created_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            "#,
+            params![
+                subject.id().to_string(),
+                subject.lifecycle().as_str(),
+                i64::try_from(subject.auth_epoch()).map_err(|_| HumanAccessStoreError::Integrity)?,
+                i64::try_from(subject.authorization_epoch())
+                    .map_err(|_| HumanAccessStoreError::Integrity)?,
+                timestamp(subject.created_at()),
+                timestamp(subject.updated_at()),
+            ],
+        ))?;
+        map_insert(transaction.execute(
+            r#"
+            INSERT INTO trailbase_auth_anchors(
+                trailbase_instance_id, trailbase_subject, auth_subject_id, linked_at
+            ) VALUES (?1, ?2, ?3, ?4)
+            "#,
+            params![
+                anchor.trailbase_instance_id().to_string(),
+                anchor.trailbase_subject().as_bytes().as_slice(),
+                anchor.auth_subject_id().to_string(),
+                timestamp(anchor.linked_at()),
+            ],
+        ))?;
+        map_insert(transaction.execute(
+            r#"
+            INSERT INTO workspace_memberships(
+                membership_id, auth_subject_id, workspace_id, lifecycle,
+                role, created_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            "#,
+            params![
+                membership.id().to_string(),
+                membership.subject_id().to_string(),
+                membership.workspace_id().to_string(),
+                membership.lifecycle().as_str(),
+                membership.role().as_str(),
+                timestamp(membership.created_at()),
+                timestamp(membership.updated_at()),
+            ],
+        ))?;
+        persist_ceremony_transition(&transaction, &ceremony, prior_ceremony_state)?;
+        insert_anchor_audit(&transaction, &anchor, correlation_id, at)?;
+        insert_first_administrator_audit(
+            &transaction,
+            &installation,
+            &subject,
+            &membership,
+            ceremony.id(),
+            correlation_id,
+            at,
+        )?;
+        insert_ceremony_audit(
+            &transaction,
+            AccessAuditEventKind::CeremonyCompleted,
+            &ceremony,
+            correlation_id,
+            at,
+        )?;
+        transaction.commit()?;
+        Ok(BootstrapFirstAdministratorOutcome::Created {
+            subject_id: subject.id(),
+            membership_id: membership.id(),
+            workspace_id,
+        })
+    }
 }
 
 pub(crate) fn recover_auth_ceremonies_on_open(
@@ -348,6 +552,25 @@ fn load_installation(transaction: &Transaction<'_>) -> StoreResult<Option<TrailB
         .map_err(|_| HumanAccessStoreError::Integrity)
     })
     .transpose()
+}
+
+fn load_initialized_workspace(transaction: &Transaction<'_>) -> StoreResult<WorkspaceId> {
+    transaction
+        .query_row(
+            r#"
+            SELECT node.workspace_id
+            FROM node_state node
+            JOIN workspaces workspace ON workspace.workspace_id = node.workspace_id
+            WHERE node.singleton = 1 AND node.initialized = 1
+              AND node.recovery_restore_attempt_id IS NULL
+            "#,
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?
+        .ok_or(HumanAccessStoreError::Integrity)?
+        .parse()
+        .map_err(|_| HumanAccessStoreError::Integrity)
 }
 
 fn persist_installation(
@@ -609,6 +832,65 @@ fn insert_installation_audit(
     Ok(())
 }
 
+fn insert_anchor_audit(
+    transaction: &Transaction<'_>,
+    anchor: &TrailBaseExternalAnchor,
+    correlation_id: RequestCorrelationId,
+    at: DateTime<Utc>,
+) -> StoreResult<()> {
+    prune_audit_age(transaction, at)?;
+    transaction.execute(
+        r#"
+        INSERT INTO access_audit_events(
+            event_kind, trailbase_instance_id, auth_subject_id,
+            correlation_id, occurred_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5)
+        "#,
+        params![
+            AccessAuditEventKind::AnchorLinked.as_str(),
+            anchor.trailbase_instance_id().to_string(),
+            anchor.auth_subject_id().to_string(),
+            correlation_id.to_string(),
+            timestamp(at),
+        ],
+    )?;
+    prune_audit_overflow(transaction)?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn insert_first_administrator_audit(
+    transaction: &Transaction<'_>,
+    installation: &TrailBaseInstallation,
+    subject: &AuthSubject,
+    membership: &WorkspaceMembership,
+    operation_id: OperationId,
+    correlation_id: RequestCorrelationId,
+    at: DateTime<Utc>,
+) -> StoreResult<()> {
+    prune_audit_age(transaction, at)?;
+    transaction.execute(
+        r#"
+        INSERT INTO access_audit_events(
+            event_kind, trailbase_instance_id, auth_subject_id, workspace_id,
+            membership_id, operation_id, correlation_id, occurred_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+        "#,
+        params![
+            AccessAuditEventKind::FirstAdministratorBootstrapped.as_str(),
+            installation.id().to_string(),
+            subject.id().to_string(),
+            membership.workspace_id().to_string(),
+            membership.id().to_string(),
+            operation_id.to_string(),
+            correlation_id.to_string(),
+            timestamp(at),
+        ],
+    )?;
+    prune_audit_overflow(transaction)?;
+    Ok(())
+}
+
 fn insert_ceremony_audit(
     transaction: &Transaction<'_>,
     event: AccessAuditEventKind,
@@ -739,6 +1021,31 @@ impl HumanAccessPort for SqliteKernel {
         )
         .map_err(|error| access_problem(error, command.correlation_id()))
     }
+
+    fn bootstrap_first_administrator(
+        &self,
+        command: BootstrapFirstAdministratorCommand,
+    ) -> ApplicationResult<BootstrapFirstAdministratorOutcome> {
+        let expected = AccessAdministrationPort::ensure_bootstrap_secret(self).map_err(|_| {
+            Box::new(FastiProblem::storage_unavailable(
+                CapabilityKey::CreateBrowserSession,
+                command.correlation_id(),
+            ))
+        })?;
+        if !command.bootstrap_secret().constant_time_eq(&expected) {
+            return Err(Box::new(FastiProblem::forbidden(
+                CapabilityKey::CreateBrowserSession,
+                command.correlation_id(),
+            )));
+        }
+        self.persist_first_administrator(
+            command.operation_id(),
+            command.trailbase_subject(),
+            command.correlation_id(),
+            command.at(),
+        )
+        .map_err(|error| access_problem(error, command.correlation_id()))
+    }
 }
 
 fn access_problem(
@@ -774,6 +1081,9 @@ fn access_problem(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::browser_auth::viable_administrator_count;
+    use crate::test_support::TestNode;
+    use fasti_application::SecretMaterial;
     use std::sync::{Arc, Barrier};
 
     fn at(minutes: i64) -> DateTime<Utc> {
@@ -813,6 +1123,43 @@ mod tests {
             at(expires),
         )
         .expect("ceremony")
+    }
+
+    fn bootstrap_ceremony(installation: &TrailBaseInstallation, binding_byte: u8) -> AuthCeremony {
+        AuthCeremony::try_new(
+            OperationId::new_v7(),
+            AuthCeremonyPurpose::FirstAdministratorBootstrap,
+            AuthCeremonyProtocol::TrailBaseAuthorizationCodePkce,
+            installation.id(),
+            installation.activation_generation(),
+            Sha256Digest::from_bytes(&[binding_byte; 32]),
+            AuthCallbackPath::parse("/auth/trailbase/callback").expect("callback"),
+            AuthReturnTarget::FirstRun,
+            RequestCorrelationId::new_v7(),
+            at(1),
+            at(10),
+        )
+        .expect("bootstrap ceremony")
+    }
+
+    fn claim_bootstrap(
+        kernel: &SqliteKernel,
+        installation: &TrailBaseInstallation,
+        ceremony: &AuthCeremony,
+    ) {
+        kernel
+            .insert_auth_ceremony(ceremony)
+            .expect("insert bootstrap ceremony");
+        kernel
+            .claim_auth_ceremony(
+                ceremony.browser_binding_digest(),
+                installation.id(),
+                installation.activation_generation(),
+                ceremony.callback_path(),
+                RequestCorrelationId::new_v7(),
+                at(2),
+            )
+            .expect("claim bootstrap ceremony");
     }
 
     fn insert_pending_rows(
@@ -1124,6 +1471,526 @@ mod tests {
         assert_eq!(count, AUDIT_CAPACITY);
         assert_eq!(newest_kind, AccessAuditEventKind::TrailBaseBlocked.as_str());
         assert_eq!(oldest_id, 2);
+    }
+
+    #[test]
+    fn first_administrator_bootstrap_is_atomic_and_adds_no_profile_authority() {
+        let node = TestNode::new();
+        let installation = node
+            .kernel
+            .verify_trailbase_installation(
+                TrailBaseInstanceId::new_v7(),
+                true,
+                false,
+                RequestCorrelationId::new_v7(),
+                at(0),
+            )
+            .expect("installation");
+        let ceremony = bootstrap_ceremony(&installation, 21);
+        claim_bootstrap(&node.kernel, &installation, &ceremony);
+        let baseline: (i64, i64, i64, i64) = {
+            let connection = node.kernel.inner.connection.lock().expect("connection");
+            connection
+                .query_row(
+                    "SELECT (SELECT COUNT(*) FROM profiles), (SELECT COUNT(*) FROM profile_grants), (SELECT COUNT(*) FROM grant_scopes), (SELECT COUNT(*) FROM clients)",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                )
+                .expect("baseline")
+        };
+        let outcome = HumanAccessPort::bootstrap_first_administrator(
+            &node.kernel,
+            BootstrapFirstAdministratorCommand::new(
+                node.kernel
+                    .ensure_bootstrap_secret()
+                    .expect("bootstrap secret"),
+                ceremony.id(),
+                TrailBaseSubject::from_bytes([7; 16]),
+                RequestCorrelationId::new_v7(),
+                at(3),
+            ),
+        )
+        .expect("first administrator");
+        let BootstrapFirstAdministratorOutcome::Created {
+            subject_id,
+            membership_id,
+            workspace_id,
+        } = outcome
+        else {
+            panic!("first bootstrap must create the administrator");
+        };
+
+        let connection = node.kernel.inner.connection.lock().expect("connection");
+        let persisted: (String, Vec<u8>, String, String, String, String, String) = connection
+            .query_row(
+                r#"
+                SELECT subject.lifecycle, anchor.trailbase_subject,
+                       membership.lifecycle, membership.role, ceremony.state,
+                       membership.workspace_id, membership.membership_id
+                FROM auth_subjects subject
+                JOIN trailbase_auth_anchors anchor
+                  ON anchor.auth_subject_id = subject.auth_subject_id
+                JOIN workspace_memberships membership
+                  ON membership.auth_subject_id = subject.auth_subject_id
+                JOIN auth_ceremonies ceremony ON ceremony.operation_id = ?1
+                WHERE subject.auth_subject_id = ?2
+                "#,
+                params![ceremony.id().to_string(), subject_id.to_string()],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                    ))
+                },
+            )
+            .expect("persisted bootstrap");
+        assert_eq!(persisted.0, "active");
+        assert_eq!(persisted.1, vec![7; 16]);
+        assert_eq!(persisted.2, "active");
+        assert_eq!(persisted.3, "administrator");
+        assert_eq!(persisted.4, "completed");
+        assert_eq!(persisted.5, workspace_id.to_string());
+        assert_eq!(persisted.6, membership_id.to_string());
+        assert_eq!(
+            viable_administrator_count(
+                &connection,
+                &workspace_id.to_string(),
+                CapabilityKey::CreateBrowserSession,
+                RequestCorrelationId::new_v7(),
+            )
+            .expect("viable admins"),
+            1
+        );
+        let authority_counts: (i64, i64, i64, i64) = connection
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM profiles), (SELECT COUNT(*) FROM profile_grants), (SELECT COUNT(*) FROM grant_scopes), (SELECT COUNT(*) FROM clients)",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("authority counts");
+        assert_eq!(authority_counts, baseline);
+        let bootstrap_audits: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM access_audit_events WHERE event_kind IN ('anchor_linked', 'first_administrator_bootstrapped', 'ceremony_completed')",
+                [],
+                |row| row.get(0),
+            )
+            .expect("bootstrap audits");
+        assert_eq!(bootstrap_audits, 3);
+        drop(connection);
+
+        let retry = HumanAccessPort::bootstrap_first_administrator(
+            &node.kernel,
+            BootstrapFirstAdministratorCommand::new(
+                node.kernel
+                    .ensure_bootstrap_secret()
+                    .expect("bootstrap secret"),
+                ceremony.id(),
+                TrailBaseSubject::from_bytes([7; 16]),
+                RequestCorrelationId::new_v7(),
+                at(4),
+            ),
+        )
+        .expect("bootstrap retry");
+        assert_eq!(
+            retry,
+            BootstrapFirstAdministratorOutcome::AlreadyBootstrapped
+        );
+        let connection = node.kernel.inner.connection.lock().expect("connection");
+        let retry_counts: (i64, i64, i64, i64) = connection
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM auth_subjects), (SELECT COUNT(*) FROM trailbase_auth_anchors), (SELECT COUNT(*) FROM workspace_memberships), (SELECT COUNT(*) FROM access_audit_events WHERE event_kind IN ('anchor_linked', 'first_administrator_bootstrapped', 'ceremony_completed'))",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("retry state");
+        assert_eq!(retry_counts, (1, 1, 1, 3));
+        connection
+            .execute(
+                "UPDATE trailbase_installation SET activation_state = 'blocked', activation_blocker = 'release_mismatch', updated_at = ?1",
+                [timestamp(at(5))],
+            )
+            .expect("block installation");
+        drop(connection);
+
+        let blocked_retry = HumanAccessPort::bootstrap_first_administrator(
+            &node.kernel,
+            BootstrapFirstAdministratorCommand::new(
+                node.kernel
+                    .ensure_bootstrap_secret()
+                    .expect("bootstrap secret"),
+                ceremony.id(),
+                TrailBaseSubject::from_bytes([7; 16]),
+                RequestCorrelationId::new_v7(),
+                at(6),
+            ),
+        )
+        .expect_err("blocked installation must fence a completed retry");
+        assert_eq!(blocked_retry.code(), ProblemCode::IntegrityFailed);
+        let connection = node.kernel.inner.connection.lock().expect("connection");
+        let blocked_retry_audits: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM access_audit_events WHERE event_kind IN ('anchor_linked', 'first_administrator_bootstrapped', 'ceremony_completed')",
+                [],
+                |row| row.get(0),
+            )
+            .expect("blocked retry audits");
+        assert_eq!(blocked_retry_audits, 3);
+    }
+
+    #[test]
+    fn wrong_bootstrap_secret_has_no_database_side_effect() {
+        let node = TestNode::new();
+        let installation = node
+            .kernel
+            .verify_trailbase_installation(
+                TrailBaseInstanceId::new_v7(),
+                true,
+                false,
+                RequestCorrelationId::new_v7(),
+                at(0),
+            )
+            .expect("installation");
+        let ceremony = bootstrap_ceremony(&installation, 22);
+        claim_bootstrap(&node.kernel, &installation, &ceremony);
+        let wrong = SecretMaterial::from_bytes([0; 32]);
+        let actual = node
+            .kernel
+            .ensure_bootstrap_secret()
+            .expect("bootstrap secret");
+        assert!(!wrong.constant_time_eq(&actual));
+
+        let problem = HumanAccessPort::bootstrap_first_administrator(
+            &node.kernel,
+            BootstrapFirstAdministratorCommand::new(
+                wrong,
+                ceremony.id(),
+                TrailBaseSubject::from_bytes([8; 16]),
+                RequestCorrelationId::new_v7(),
+                at(3),
+            ),
+        )
+        .expect_err("wrong secret must fail");
+        assert_eq!(problem.code(), ProblemCode::Forbidden);
+        let connection = node.kernel.inner.connection.lock().expect("connection");
+        let counts: (i64, i64, i64, String) = connection
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM auth_subjects), (SELECT COUNT(*) FROM trailbase_auth_anchors), (SELECT COUNT(*) FROM workspace_memberships), (SELECT state FROM auth_ceremonies WHERE operation_id = ?1)",
+                [ceremony.id().to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("unchanged state");
+        assert_eq!(counts, (0, 0, 0, "claimed".to_owned()));
+    }
+
+    #[test]
+    fn concurrent_first_administrator_bootstrap_has_one_writer() {
+        let node = TestNode::new();
+        let installation = node
+            .kernel
+            .verify_trailbase_installation(
+                TrailBaseInstanceId::new_v7(),
+                true,
+                false,
+                RequestCorrelationId::new_v7(),
+                at(0),
+            )
+            .expect("installation");
+        let first = bootstrap_ceremony(&installation, 23);
+        let second = bootstrap_ceremony(&installation, 24);
+        claim_bootstrap(&node.kernel, &installation, &first);
+        claim_bootstrap(&node.kernel, &installation, &second);
+        let commands = [
+            (
+                first.id(),
+                TrailBaseSubject::from_bytes([9; 16]),
+                node.kernel
+                    .ensure_bootstrap_secret()
+                    .expect("bootstrap secret"),
+            ),
+            (
+                second.id(),
+                TrailBaseSubject::from_bytes([10; 16]),
+                node.kernel
+                    .ensure_bootstrap_secret()
+                    .expect("bootstrap secret"),
+            ),
+        ];
+        let barrier = Arc::new(Barrier::new(3));
+        let mut workers = Vec::new();
+        for (operation_id, subject, secret) in commands {
+            let kernel = node.kernel.clone();
+            let barrier = Arc::clone(&barrier);
+            workers.push(std::thread::spawn(move || {
+                barrier.wait();
+                HumanAccessPort::bootstrap_first_administrator(
+                    &kernel,
+                    BootstrapFirstAdministratorCommand::new(
+                        secret,
+                        operation_id,
+                        subject,
+                        RequestCorrelationId::new_v7(),
+                        at(3),
+                    ),
+                )
+            }));
+        }
+        barrier.wait();
+        let outcomes: Vec<_> = workers
+            .into_iter()
+            .map(|worker| worker.join().expect("bootstrap worker").expect("outcome"))
+            .collect();
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter(|outcome| matches!(
+                    outcome,
+                    BootstrapFirstAdministratorOutcome::Created { .. }
+                ))
+                .count(),
+            1
+        );
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter(|outcome| matches!(
+                    outcome,
+                    BootstrapFirstAdministratorOutcome::AlreadyBootstrapped
+                ))
+                .count(),
+            1
+        );
+        let connection = node.kernel.inner.connection.lock().expect("connection");
+        let counts: (i64, i64, i64, i64, i64) = connection
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM auth_subjects), (SELECT COUNT(*) FROM trailbase_auth_anchors), (SELECT COUNT(*) FROM workspace_memberships), (SELECT COUNT(*) FROM auth_ceremonies WHERE state = 'completed'), (SELECT COUNT(*) FROM auth_ceremonies WHERE state = 'claimed')",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+            )
+            .expect("winner counts");
+        assert_eq!(counts, (1, 1, 1, 1, 1));
+    }
+
+    #[test]
+    fn removed_membership_keeps_first_administrator_bootstrap_closed() {
+        let node = TestNode::new();
+        let installation = node
+            .kernel
+            .verify_trailbase_installation(
+                TrailBaseInstanceId::new_v7(),
+                true,
+                false,
+                RequestCorrelationId::new_v7(),
+                at(0),
+            )
+            .expect("installation");
+        let first = bootstrap_ceremony(&installation, 26);
+        claim_bootstrap(&node.kernel, &installation, &first);
+        HumanAccessPort::bootstrap_first_administrator(
+            &node.kernel,
+            BootstrapFirstAdministratorCommand::new(
+                node.kernel
+                    .ensure_bootstrap_secret()
+                    .expect("bootstrap secret"),
+                first.id(),
+                TrailBaseSubject::from_bytes([12; 16]),
+                RequestCorrelationId::new_v7(),
+                at(3),
+            ),
+        )
+        .expect("initial administrator");
+        {
+            let connection = node.kernel.inner.connection.lock().expect("connection");
+            connection
+                .execute("UPDATE workspace_memberships SET lifecycle = 'removed'", [])
+                .expect("remove membership");
+        }
+
+        let second = bootstrap_ceremony(&installation, 27);
+        claim_bootstrap(&node.kernel, &installation, &second);
+        let outcome = HumanAccessPort::bootstrap_first_administrator(
+            &node.kernel,
+            BootstrapFirstAdministratorCommand::new(
+                node.kernel
+                    .ensure_bootstrap_secret()
+                    .expect("bootstrap secret"),
+                second.id(),
+                TrailBaseSubject::from_bytes([13; 16]),
+                RequestCorrelationId::new_v7(),
+                at(4),
+            ),
+        )
+        .expect("closed bootstrap");
+        assert_eq!(
+            outcome,
+            BootstrapFirstAdministratorOutcome::AlreadyBootstrapped
+        );
+        let connection = node.kernel.inner.connection.lock().expect("connection");
+        let counts: (i64, i64, i64, String) = connection
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM auth_subjects), (SELECT COUNT(*) FROM trailbase_auth_anchors), (SELECT COUNT(*) FROM workspace_memberships), (SELECT state FROM auth_ceremonies WHERE operation_id = ?1)",
+                [second.id().to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("closed state");
+        assert_eq!(counts, (1, 1, 1, "claimed".to_owned()));
+    }
+
+    #[test]
+    fn bootstrap_rejects_unclaimed_wrong_purpose_and_blocked_installation_without_writes() {
+        let node = TestNode::new();
+        let installation = node
+            .kernel
+            .verify_trailbase_installation(
+                TrailBaseInstanceId::new_v7(),
+                true,
+                false,
+                RequestCorrelationId::new_v7(),
+                at(0),
+            )
+            .expect("installation");
+        let pending = bootstrap_ceremony(&installation, 28);
+        node.kernel
+            .insert_auth_ceremony(&pending)
+            .expect("pending ceremony");
+        let pending_problem = HumanAccessPort::bootstrap_first_administrator(
+            &node.kernel,
+            BootstrapFirstAdministratorCommand::new(
+                node.kernel
+                    .ensure_bootstrap_secret()
+                    .expect("bootstrap secret"),
+                pending.id(),
+                TrailBaseSubject::from_bytes([14; 16]),
+                RequestCorrelationId::new_v7(),
+                at(2),
+            ),
+        )
+        .expect_err("pending ceremony must fail");
+        assert_eq!(pending_problem.code(), ProblemCode::ValidationFailed);
+
+        let sign_in = ceremony(&installation, 1, 10);
+        node.kernel
+            .insert_auth_ceremony(&sign_in)
+            .expect("sign-in ceremony");
+        node.kernel
+            .claim_auth_ceremony(
+                sign_in.browser_binding_digest(),
+                installation.id(),
+                installation.activation_generation(),
+                sign_in.callback_path(),
+                RequestCorrelationId::new_v7(),
+                at(2),
+            )
+            .expect("claim sign-in");
+        let purpose_problem = HumanAccessPort::bootstrap_first_administrator(
+            &node.kernel,
+            BootstrapFirstAdministratorCommand::new(
+                node.kernel
+                    .ensure_bootstrap_secret()
+                    .expect("bootstrap secret"),
+                sign_in.id(),
+                TrailBaseSubject::from_bytes([15; 16]),
+                RequestCorrelationId::new_v7(),
+                at(3),
+            ),
+        )
+        .expect_err("wrong-purpose ceremony must fail");
+        assert_eq!(purpose_problem.code(), ProblemCode::ValidationFailed);
+
+        let blocked = bootstrap_ceremony(&installation, 29);
+        claim_bootstrap(&node.kernel, &installation, &blocked);
+        {
+            let connection = node.kernel.inner.connection.lock().expect("connection");
+            connection
+                .execute(
+                    "UPDATE trailbase_installation SET activation_state = 'blocked', activation_blocker = 'release_mismatch', updated_at = ?1",
+                    [timestamp(at(3))],
+                )
+                .expect("block installation");
+        }
+        let blocked_problem = HumanAccessPort::bootstrap_first_administrator(
+            &node.kernel,
+            BootstrapFirstAdministratorCommand::new(
+                node.kernel
+                    .ensure_bootstrap_secret()
+                    .expect("bootstrap secret"),
+                blocked.id(),
+                TrailBaseSubject::from_bytes([16; 16]),
+                RequestCorrelationId::new_v7(),
+                at(4),
+            ),
+        )
+        .expect_err("blocked installation must fail");
+        assert_eq!(blocked_problem.code(), ProblemCode::IntegrityFailed);
+
+        let connection = node.kernel.inner.connection.lock().expect("connection");
+        let counts: (i64, i64, i64) = connection
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM auth_subjects), (SELECT COUNT(*) FROM trailbase_auth_anchors), (SELECT COUNT(*) FROM workspace_memberships)",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("identity state");
+        assert_eq!(counts, (0, 0, 0));
+    }
+
+    #[test]
+    fn bootstrap_audit_failure_rolls_back_identity_and_ceremony() {
+        let node = TestNode::new();
+        let installation = node
+            .kernel
+            .verify_trailbase_installation(
+                TrailBaseInstanceId::new_v7(),
+                true,
+                false,
+                RequestCorrelationId::new_v7(),
+                at(0),
+            )
+            .expect("installation");
+        let ceremony = bootstrap_ceremony(&installation, 25);
+        claim_bootstrap(&node.kernel, &installation, &ceremony);
+        {
+            let connection = node.kernel.inner.connection.lock().expect("connection");
+            connection
+                .execute_batch(
+                    r#"
+                    CREATE TRIGGER reject_first_administrator_audit
+                    BEFORE INSERT ON access_audit_events
+                    WHEN NEW.event_kind = 'first_administrator_bootstrapped'
+                    BEGIN
+                        SELECT RAISE(ABORT, 'test audit failure');
+                    END;
+                    "#,
+                )
+                .expect("failure trigger");
+        }
+        assert!(HumanAccessPort::bootstrap_first_administrator(
+            &node.kernel,
+            BootstrapFirstAdministratorCommand::new(
+                node.kernel
+                    .ensure_bootstrap_secret()
+                    .expect("bootstrap secret"),
+                ceremony.id(),
+                TrailBaseSubject::from_bytes([11; 16]),
+                RequestCorrelationId::new_v7(),
+                at(3),
+            ),
+        )
+        .is_err());
+        let connection = node.kernel.inner.connection.lock().expect("connection");
+        let counts: (i64, i64, i64, String) = connection
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM auth_subjects), (SELECT COUNT(*) FROM trailbase_auth_anchors), (SELECT COUNT(*) FROM workspace_memberships), (SELECT state FROM auth_ceremonies WHERE operation_id = ?1)",
+                [ceremony.id().to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("rolled back state");
+        assert_eq!(counts, (0, 0, 0, "claimed".to_owned()));
     }
 
     #[test]
