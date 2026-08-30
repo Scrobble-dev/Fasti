@@ -341,7 +341,7 @@ export interface WorkbenchHost {
   getSearchCacheSize?(): number;
   listReviews?(): Promise<ReviewItem[]>;
   resolveReview?(input: ResolveReviewInput): Promise<ResolveReviewOutcome>;
-  listRecords?(): Promise<RecordSummary[]>;
+  listRecords?(): Promise<RecordPage>;
   createRecord?(grain: string): Promise<CreateRecordResult>;
   attachIdentifier?(
     input: AttachIdentifierInput,
@@ -439,6 +439,11 @@ export interface RecordIdentifierView {
   readonly namespace: string;
   readonly grain: string;
   readonly value: string;
+}
+
+export interface RecordPage {
+  readonly records: RecordSummary[];
+  readonly truncated: boolean;
 }
 
 /** Wire shape of the desktop host's `list_records` command output

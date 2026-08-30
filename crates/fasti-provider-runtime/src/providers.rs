@@ -907,27 +907,8 @@ async fn send_json(
     let response = request.send().await.map_err(|_| {
         ProviderRuntimeError::provider(format!("{} could not be reached.", spec.label))
     })?;
-    if matches!(
-        response.status(),
-        reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN
-    ) {
-        return Err(ProviderRuntimeError::credential(format!(
-            "{} rejected the configured credential.",
-            spec.label
-        )));
-    }
-    if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
-        return Err(ProviderRuntimeError::rate_limited(format!(
-            "{} rate limited the request. Wait, then retry.",
-            spec.label
-        )));
-    }
-    if response.status() != reqwest::StatusCode::OK {
-        return Err(ProviderRuntimeError::response_invalid(format!(
-            "{} returned HTTP {}.",
-            spec.label,
-            response.status().as_u16()
-        )));
+    if let Some(error) = provider_status_error(spec, response.status()) {
+        return Err(error);
     }
     let json_content_type = response
         .headers()
@@ -943,6 +924,35 @@ async fn send_json(
     bounded_body(response, RESPONSE_LIMIT)
         .await
         .map_err(ProviderRuntimeError::response_invalid)
+}
+
+fn provider_status_error(
+    spec: ProviderSpec,
+    status: reqwest::StatusCode,
+) -> Option<ProviderRuntimeError> {
+    if matches!(
+        status,
+        reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN
+    ) || (status == reqwest::StatusCode::BAD_REQUEST && spec.provider == GOOGLE_BOOKS_PROVIDER)
+    {
+        return Some(ProviderRuntimeError::credential(format!(
+            "{} rejected the configured credential.",
+            spec.label
+        )));
+    }
+    if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        return Some(ProviderRuntimeError::rate_limited(format!(
+            "{} rate limited the request. Wait, then retry.",
+            spec.label
+        )));
+    }
+    (status != reqwest::StatusCode::OK).then(|| {
+        ProviderRuntimeError::response_invalid(format!(
+            "{} returned HTTP {}.",
+            spec.label,
+            status.as_u16()
+        ))
+    })
 }
 
 fn unsupported_provider() -> ProviderRuntimeError {
@@ -1040,7 +1050,8 @@ fn credential_request(
             reqwest::header::HeaderName::from_static("x-goog-api-key"),
         ),
         TMDB_PROVIDER => {
-            let mut value = Vec::with_capacity("Bearer ".len() + bytes.len());
+            let mut value =
+                zeroize::Zeroizing::new(Vec::with_capacity("Bearer ".len() + bytes.len()));
             value.extend_from_slice(b"Bearer ");
             value.extend_from_slice(bytes);
             sensitive_header_request(client, url, &value, AUTHORIZATION)
@@ -1241,7 +1252,7 @@ fn valid_candidate_text(value: &str, limit: usize) -> bool {
 mod tests {
     use super::*;
     use fasti_application::{
-        ConfigurationDigest, ProviderCapabilityId, ProviderCheckMetadata, ProviderId,
+        ConfigurationDigest, ProblemCode, ProviderCapabilityId, ProviderCheckMetadata, ProviderId,
     };
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -1326,6 +1337,16 @@ mod tests {
         let invalid = CredentialSecret::try_from_bytes(b"key with spaces".to_vec())
             .expect("bounded credential");
         assert!(credential_request(GOOGLE_BOOKS_PROVIDER, &client, url, &invalid).is_err());
+    }
+
+    #[test]
+    fn google_books_bad_request_matches_the_manifest_credential_problem() {
+        let error = provider_status_error(GOOGLE_BOOKS_SPEC, reqwest::StatusCode::BAD_REQUEST)
+            .expect("Google Books 400 is a provider problem");
+        assert_eq!(error.problem_code(), ProblemCode::ProviderCredentialInvalid);
+        let tmdb = provider_status_error(TMDB_SPEC, reqwest::StatusCode::BAD_REQUEST)
+            .expect("TMDB 400 is a provider problem");
+        assert_eq!(tmdb.problem_code(), ProblemCode::ProviderResponseInvalid);
     }
 
     #[test]

@@ -1149,7 +1149,7 @@
                         class="status-badge"
                         class:configured={hasStoredCredential(provider)}
                         class:not-configured={!hasStoredCredential(provider)}
-                        role="status">{credentialStateLabel(provider)}</span
+                        >{credentialStateLabel(provider)}</span
                       >
                       <span class="credential-source">
                         {provider.source.replaceAll("_", " ")}

@@ -2,7 +2,7 @@
   import { FastiProtocolError, connectionEndpoint } from "@fasti/sdk";
   import type {
     NetworkConfiguration,
-    RecordSummary,
+    RecordPage,
     WorkbenchHost,
   } from "@fasti/ui";
   import SetupPanel, {
@@ -239,17 +239,22 @@
           }),
         listReviews: () => invoke("list_reviews"),
         resolveReview: (input) => invoke("resolve_review", { input }),
-        listRecords: async () =>
-          (await invoke<RecordSummary[]>("list_records")).map((record) => {
-            const { poster_asset_path: path, ...summary } = record;
-            return {
-              ...summary,
-              poster: {
-                ...record.poster,
-                value: path ? convertFileSrc(path) : null,
-              },
-            };
-          }),
+        listRecords: async () => {
+          const page = await invoke<RecordPage>("list_records");
+          return {
+            ...page,
+            records: page.records.map((record) => {
+              const { poster_asset_path: path, ...summary } = record;
+              return {
+                ...summary,
+                poster: {
+                  ...record.poster,
+                  value: path ? convertFileSrc(path) : null,
+                },
+              };
+            }),
+          };
+        },
         createRecord: (grain) => invoke("create_record", { grain }),
         attachIdentifier: (input) => invoke("attach_identifier", { input }),
         registerNamespace: (input) => invoke("register_namespace", { input }),

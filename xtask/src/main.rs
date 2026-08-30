@@ -139,10 +139,14 @@ fn main() -> ExitCode {
                     ExitCode::FAILURE
                 }
             },
-            Err(integration::CheckFailure::Validation(problem)) => {
+            Err(failure @ integration::CheckFailure::Validation(_)) => {
+                let exit_code = ExitCode::from(failure.exit_code());
+                let integration::CheckFailure::Validation(problem) = failure else {
+                    unreachable!("matched validation failure")
+                };
                 match integration::render_validation_failure(&problem, output) {
                     Ok(rendered) => match write_result(&rendered, true) {
-                        Ok(()) => ExitCode::from(2),
+                        Ok(()) => exit_code,
                         Err(error) => {
                             eprintln!("Error: failed to write integration check output: {error}");
                             ExitCode::FAILURE

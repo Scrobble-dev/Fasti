@@ -413,6 +413,30 @@ mod tests {
     }
 
     #[test]
+    fn higher_capability_version_replaces_stored_state() {
+        let node = TestNode::new();
+        node.kernel
+            .put_provider_capability_state(node.access.workspace_id(), state(1, "a"))
+            .expect("store initial state");
+        let replacement = state(2, "b");
+        assert_eq!(
+            node.kernel
+                .put_provider_capability_state(node.access.workspace_id(), replacement.clone(),),
+            Ok(ProviderStateWriteOutcome::Replaced)
+        );
+        assert_eq!(
+            node.kernel
+                .get_provider_capability_state(
+                    node.access.workspace_id(),
+                    replacement.provider_id(),
+                    replacement.capability_id(),
+                )
+                .expect("read replacement"),
+            Some(replacement)
+        );
+    }
+
+    #[test]
     fn sqlite_surface_contains_no_secret_value_column() {
         let node = TestNode::new();
         node.kernel

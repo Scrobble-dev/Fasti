@@ -39,7 +39,6 @@ const GOOGLE_ARTWORK_ACCESS: OutboundAccessDeclaration<'static> = OutboundAccess
 
 struct ArtworkTarget {
     url: reqwest::Url,
-    host: &'static str,
     access: OutboundAccessDeclaration<'static>,
 }
 
@@ -201,23 +200,23 @@ fn artwork_target(provider: &str, value: &str) -> Result<ArtworkTarget, DesktopP
         return Err(unsafe_artwork_url());
     }
     let parsed_host = url.host_str().ok_or_else(unsafe_artwork_url)?;
-    let (host, access) = match provider {
+    let access = match provider {
         TMDB_PROVIDER
             if parsed_host == TMDB_IMAGE_HOST
                 && url.path().starts_with("/t/p/w500/")
                 && url.query().is_none() =>
         {
-            (TMDB_IMAGE_HOST, TMDB_ARTWORK_ACCESS)
+            TMDB_ARTWORK_ACCESS
         }
         GOOGLE_BOOKS_PROVIDER if parsed_host == GOOGLE_IMAGE_HOSTS[0] => {
-            (GOOGLE_IMAGE_HOSTS[0], GOOGLE_ARTWORK_ACCESS)
+            GOOGLE_ARTWORK_ACCESS
         }
         GOOGLE_BOOKS_PROVIDER if parsed_host == GOOGLE_IMAGE_HOSTS[1] => {
-            (GOOGLE_IMAGE_HOSTS[1], GOOGLE_ARTWORK_ACCESS)
+            GOOGLE_ARTWORK_ACCESS
         }
         _ => return Err(unsafe_artwork_url()),
     };
-    Ok(ArtworkTarget { url, host, access })
+    Ok(ArtworkTarget { url, access })
 }
 
 fn unsafe_artwork_url() -> DesktopProblem {

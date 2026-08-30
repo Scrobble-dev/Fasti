@@ -12,6 +12,7 @@ import type {
   NuvioCollectionsState,
   ProviderCredentialStatus,
   ProviderSearchCandidate,
+  RecordPage,
   RecordSummary,
   RegisterNamespaceInput,
   RegisterNamespaceResult,
@@ -309,12 +310,15 @@ export function createWebHost(
     getSearchCacheSize(): number {
       return 0;
     },
-    async listRecords(): Promise<RecordSummary[]> {
+    async listRecords(): Promise<RecordPage> {
       const response = await client.listRecords();
-      return response.records.map((record) => ({
-        ...record,
-        poster: { ...record.poster, value: null },
-      })) as RecordSummary[];
+      return {
+        truncated: response.truncated,
+        records: response.records.map((record) => ({
+          ...record,
+          poster: { ...record.poster, value: null },
+        })) as RecordSummary[],
+      };
     },
 
     async createRecord(grain: string): Promise<CreateRecordResult> {

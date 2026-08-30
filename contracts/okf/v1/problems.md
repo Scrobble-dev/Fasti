@@ -39,7 +39,7 @@ sources:
 
 # Governed problem codes
 
-These are the stable problem names referenced by finalized B1 capabilities in
+These are the stable problem names referenced by finalized capabilities in
 the [registry](../../registry/v1/capabilities.yaml).[^fasti-capability-registry]
 The shared RFC 9457 representation carries a capability ID, safe state,
 retryability, ordered next actions, and a correlation ID. Individual codes do

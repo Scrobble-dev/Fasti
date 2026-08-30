@@ -64,8 +64,15 @@
     onUpdateWorkbenchPreferences?: (
       prefs: Partial<WorkbenchPreferences>,
     ) => void;
-    onSaveProviderKey?: (provider: string, key: string) => Promise<void>;
-    onDeleteProviderKey?: (provider: string) => Promise<void>;
+    onSaveProviderKey?: (
+      provider: string,
+      capabilityId: string,
+      key: string,
+    ) => Promise<void>;
+    onDeleteProviderKey?: (
+      provider: string,
+      capabilityId: string,
+    ) => Promise<void>;
     onSaveNetworkConfiguration?: (
       input: SaveNetworkConfigurationRequest,
     ) => Promise<NetworkConfiguration>;
@@ -340,15 +347,23 @@
     });
   }
 
-  async function saveProviderKey(provider: string): Promise<void> {
-    const credential = editingKeyMap[provider]?.trim() ?? "";
+  function providerKey(provider: string, capabilityId: string): string {
+    return `${provider}:${capabilityId}`;
+  }
+
+  async function saveProviderKey(
+    provider: string,
+    capabilityId: string,
+  ): Promise<void> {
+    const key = providerKey(provider, capabilityId);
+    const credential = editingKeyMap[key]?.trim() ?? "";
     if (!credential || !onSaveProviderKey || providerBusy) return;
-    editingKeyMap[provider] = "";
-    providerBusy = provider;
+    editingKeyMap[key] = "";
+    providerBusy = key;
     providerNotice = "";
     providerProblem = "";
     try {
-      await onSaveProviderKey(provider, credential);
+      await onSaveProviderKey(provider, capabilityId, credential);
       providerNotice = "Credential saved securely for this Fasti node.";
     } catch (error) {
       providerProblem = hostProblemText(
@@ -360,14 +375,18 @@
     }
   }
 
-  async function deleteProviderKey(provider: string): Promise<void> {
+  async function deleteProviderKey(
+    provider: string,
+    capabilityId: string,
+  ): Promise<void> {
     if (!onDeleteProviderKey || providerBusy) return;
-    providerBusy = provider;
+    const key = providerKey(provider, capabilityId);
+    providerBusy = key;
     providerNotice = "";
     providerProblem = "";
     try {
-      await onDeleteProviderKey(provider);
-      editingKeyMap[provider] = "";
+      await onDeleteProviderKey(provider, capabilityId);
+      editingKeyMap[key] = "";
       providerNotice = "Credential removed from the platform credential store.";
     } catch (error) {
       providerProblem = hostProblemText(
@@ -379,9 +398,9 @@
     }
   }
 
-  function confirmProviderDelete(provider: string): void {
+  function confirmProviderDelete(provider: string, capabilityId: string): void {
     if (window.confirm("Remove this provider key from the credential store?")) {
-      void deleteProviderKey(provider);
+      void deleteProviderKey(provider, capabilityId);
     }
   }
 
@@ -1391,7 +1410,7 @@
                   class="key-input-row"
                   onsubmit={(event) => {
                     event.preventDefault();
-                    void saveProviderKey(prov.provider);
+                    void saveProviderKey(prov.provider, prov.capability_id);
                   }}
                 >
                   <input
@@ -1401,23 +1420,32 @@
                         ? "Enter an API Read Access Token"
                         : "Enter a new API key"
                       : "Managed by the environment"}
-                    value={editingKeyMap[prov.provider] ?? ""}
+                    value={editingKeyMap[
+                      providerKey(prov.provider, prov.capability_id)
+                    ] ?? ""}
                     oninput={(e) =>
-                      (editingKeyMap[prov.provider] = e.currentTarget.value)}
+                      (editingKeyMap[
+                        providerKey(prov.provider, prov.capability_id)
+                      ] = e.currentTarget.value)}
                     class="api-key-input"
                     aria-label="Provider credential for {prov.label}"
                     autocomplete="off"
                     spellcheck="false"
-                    disabled={!prov.writable || providerBusy === prov.provider}
+                    disabled={!prov.writable ||
+                      providerBusy ===
+                        providerKey(prov.provider, prov.capability_id)}
                   />
                   <button
                     type="submit"
                     class="save-key-btn"
                     disabled={!prov.writable ||
-                      !editingKeyMap[prov.provider]?.trim() ||
+                      !editingKeyMap[
+                        providerKey(prov.provider, prov.capability_id)
+                      ]?.trim() ||
                       !!providerBusy}
                   >
-                    {providerBusy === prov.provider
+                    {providerBusy ===
+                    providerKey(prov.provider, prov.capability_id)
                       ? "Saving…"
                       : "Save credential"}
                   </button>
@@ -1426,7 +1454,11 @@
                       type="button"
                       class="remove-key-btn"
                       disabled={!!providerBusy}
-                      onclick={() => confirmProviderDelete(prov.provider)}
+                      onclick={() =>
+                        confirmProviderDelete(
+                          prov.provider,
+                          prov.capability_id,
+                        )}
                     >
                       Remove credential
                     </button>

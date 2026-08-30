@@ -9,6 +9,7 @@ use chrono::{DateTime, Utc};
 use fasti_domain::WorkspaceId;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use zeroize::Zeroize;
 
 pub const MAX_PROVIDER_ID_BYTES: usize = 128;
 pub const MAX_PROVIDER_CAPABILITY_ID_BYTES: usize = 128;
@@ -306,6 +307,16 @@ pub enum ProviderCheckKind {
     Credential,
 }
 
+pub const fn credential_status_after_successful_check(
+    kind: ProviderCheckKind,
+    current: ProviderCredentialStatus,
+) -> ProviderCredentialStatus {
+    match kind {
+        ProviderCheckKind::Health => current,
+        ProviderCheckKind::Credential => ProviderCredentialStatus::Valid,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderCheckMetadata {
     status: ProviderCheckStatus,
@@ -330,7 +341,9 @@ impl ProviderCheckMetadata {
         let valid = match status {
             ProviderCheckStatus::NeverRun => checked_at.is_none() && safe_problem_code.is_none(),
             ProviderCheckStatus::Passed => checked_at.is_some() && safe_problem_code.is_none(),
-            ProviderCheckStatus::Failed | ProviderCheckStatus::Unavailable => checked_at.is_some(),
+            ProviderCheckStatus::Failed | ProviderCheckStatus::Unavailable => {
+                checked_at.is_some() && safe_problem_code.is_some()
+            }
         };
         if !valid {
             return Err(ProviderValueError::InvalidCheckMetadata);
@@ -487,14 +500,18 @@ pub struct CredentialSecret(Box<[u8]>);
 
 impl CredentialSecret {
     pub fn try_from_bytes(bytes: impl Into<Vec<u8>>) -> Result<Self, ProviderValueError> {
-        let bytes = bytes.into();
+        let mut bytes = bytes.into();
         if bytes.is_empty() {
             return Err(ProviderValueError::EmptyCredentialSecret);
         }
         if bytes.len() > MAX_CREDENTIAL_SECRET_BYTES {
+            bytes.zeroize();
             return Err(ProviderValueError::CredentialSecretTooLarge);
         }
-        Ok(Self(bytes.into_boxed_slice()))
+        let mut stored = vec![0; bytes.len()].into_boxed_slice();
+        stored.copy_from_slice(&bytes);
+        bytes.zeroize();
+        Ok(Self(stored))
     }
 
     pub fn expose(&self) -> &[u8] {
@@ -510,7 +527,7 @@ impl fmt::Debug for CredentialSecret {
 
 impl Drop for CredentialSecret {
     fn drop(&mut self) {
-        self.0.fill(0);
+        self.0.zeroize();
     }
 }
 
@@ -722,12 +739,34 @@ mod tests {
         )
         .is_ok());
         assert_eq!(
+            ProviderCheckMetadata::try_new(ProviderCheckStatus::Failed, Some(checked_at), None),
+            Err(ProviderValueError::InvalidCheckMetadata)
+        );
+        assert_eq!(
             ProviderCheckMetadata::try_new(
                 ProviderCheckStatus::Passed,
                 Some(checked_at),
                 Some(ProblemCode::StorageUnavailable),
             ),
             Err(ProviderValueError::InvalidCheckMetadata)
+        );
+    }
+
+    #[test]
+    fn successful_health_check_does_not_invent_a_credential() {
+        assert_eq!(
+            credential_status_after_successful_check(
+                ProviderCheckKind::Health,
+                ProviderCredentialStatus::NotRequired,
+            ),
+            ProviderCredentialStatus::NotRequired
+        );
+        assert_eq!(
+            credential_status_after_successful_check(
+                ProviderCheckKind::Credential,
+                ProviderCredentialStatus::StoredUnverified,
+            ),
+            ProviderCredentialStatus::Valid
         );
     }
 }

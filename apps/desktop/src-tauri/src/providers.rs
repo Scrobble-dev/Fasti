@@ -1,10 +1,11 @@
 use crate::setup::DesktopProblem;
 use chrono::Utc;
 use fasti_application::{
-    CredentialRequirement, CredentialSecret, CredentialVaultSource, OutboundAccessPolicy,
-    ProblemCode, ProviderCapabilityId, ProviderCapabilityState, ProviderCapabilityStatus,
-    ProviderCheckKind, ProviderCheckMetadata, ProviderCheckStatus, ProviderCredentialStatus,
-    ProviderId, ProviderStatePort, MAX_PROVIDER_CREDENTIAL_BYTES,
+    credential_status_after_successful_check, CredentialRequirement, CredentialSecret,
+    CredentialVaultSource, OutboundAccessPolicy, ProblemCode, ProviderCapabilityId,
+    ProviderCapabilityState, ProviderCapabilityStatus, ProviderCheckKind, ProviderCheckMetadata,
+    ProviderCheckStatus, ProviderCredentialStatus, ProviderId, ProviderStatePort,
+    MAX_PROVIDER_CREDENTIAL_BYTES,
 };
 use fasti_domain::WorkspaceId;
 use fasti_provider_runtime::{ProviderRuntime, ProviderRuntimeError, ProviderSpec};
@@ -481,7 +482,7 @@ fn record_check_result(
             ProviderCheckStatus::Passed,
             None,
             ProviderCapabilityStatus::Available,
-            ProviderCredentialStatus::Valid,
+            credential_status_after_successful_check(kind, state.credential_status()),
         ),
         Err(error) => {
             let credential_status =
@@ -577,6 +578,9 @@ fn status_view(
         writable: matches!(
             source,
             CredentialVaultSource::None | CredentialVaultSource::CredentialStore
+        ) && !matches!(
+            capability.credential_requirement,
+            CredentialRequirement::None | CredentialRequirement::UserAgentOnly
         ),
         testable: capability.credential_test,
         docs_url: spec.docs_url,

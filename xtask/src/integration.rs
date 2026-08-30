@@ -44,7 +44,6 @@ pub(crate) enum CheckFailure {
     Tool(anyhow::Error),
 }
 
-#[cfg(test)]
 impl CheckFailure {
     pub(crate) const fn exit_code(&self) -> u8 {
         match self {
@@ -896,9 +895,22 @@ fn safe_absolute_path(value: &str) -> bool {
 
 fn safe_query_entry(key: &str, value: &Value) -> bool {
     let lower = key.to_ascii_lowercase();
-    !lower.contains("key")
-        && !lower.contains("token")
-        && !lower.contains("secret")
+    ![
+        "key",
+        "token",
+        "secret",
+        "password",
+        "passwd",
+        "credential",
+        "signature",
+        "access",
+    ]
+    .iter()
+    .any(|denied| lower.contains(denied))
+        && lower != "auth"
+        && !lower.starts_with("auth_")
+        && !lower.ends_with("_auth")
+        && !lower.contains("authorization")
         && !value.to_string().contains("${secret.")
 }
 
@@ -1084,6 +1096,32 @@ conformance:
         };
         let rendered = render_validation_failure(&problem, OutputFormat::Json).expect("JSON");
         assert!(!rendered.contains(SECRET_SENTINEL));
+    }
+
+    #[test]
+    fn rejects_credential_shaped_query_parameter_names() {
+        for key in [
+            "api_key",
+            "token",
+            "secret",
+            "password",
+            "passwd",
+            "auth",
+            "authorization",
+            "credential",
+            "signature",
+            "access_token",
+        ] {
+            assert!(!safe_query_entry(key, &Value::String("literal".to_owned())));
+        }
+        assert!(safe_query_entry(
+            "q",
+            &Value::String("${input.query}".to_owned())
+        ));
+        assert!(safe_query_entry(
+            "author",
+            &Value::String("${input.author}".to_owned())
+        ));
     }
 
     #[test]

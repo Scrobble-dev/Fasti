@@ -897,6 +897,7 @@ dependencies = [
  "sha2",
  "static_assertions",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]

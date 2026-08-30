@@ -90,9 +90,7 @@
   }
   const supportedProviders = $derived(
     (providerCredentials ?? []).filter(
-      (provider) =>
-        provider.capability_id === "metadata.search" &&
-        ["google-books", "tmdb"].includes(provider.provider),
+      (provider) => provider.capability_id === "metadata.search",
     ),
   );
   function providerAvailable(provider: ProviderCredentialStatus): boolean {

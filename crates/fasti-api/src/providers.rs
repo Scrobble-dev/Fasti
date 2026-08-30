@@ -8,12 +8,12 @@ use axum::{
 };
 use chrono::Utc;
 use fasti_application::{
-    CapabilityKey, ConfigurationDigest, CredentialReference, CredentialRequirement,
-    CredentialSecret, CredentialVaultSource, FastiProblem, OutboundAccessPolicy, ProblemCode,
-    ProviderCapabilityId, ProviderCapabilityState, ProviderCapabilityStatus, ProviderCheckKind,
-    ProviderCheckMetadata, ProviderCheckStatus, ProviderCredentialStatus, ProviderId,
-    ProviderStatePort, ProviderStatePortError, RequestAccessContext, Violation,
-    MAX_PROVIDER_CREDENTIAL_BYTES,
+    credential_status_after_successful_check, CapabilityKey, ConfigurationDigest,
+    CredentialReference, CredentialRequirement, CredentialSecret, CredentialVaultSource,
+    FastiProblem, OutboundAccessPolicy, ProblemCode, ProviderCapabilityId, ProviderCapabilityState,
+    ProviderCapabilityStatus, ProviderCheckKind, ProviderCheckMetadata, ProviderCheckStatus,
+    ProviderCredentialStatus, ProviderId, ProviderStatePort, ProviderStatePortError,
+    RequestAccessContext, Violation, MAX_PROVIDER_CREDENTIAL_BYTES,
 };
 use fasti_contracts::{
     ConfigureProviderCredentialRequest, CredentialRequirementDto, ListProvidersResponse,
@@ -859,7 +859,7 @@ async fn execute_check(
         Ok(()) => (
             None,
             ProviderCheckStatus::Passed,
-            ProviderCredentialStatus::Valid,
+            credential_status_after_successful_check(kind, current.credential_status()),
         ),
         Err(error) => {
             let code = error.problem_code();
@@ -1328,6 +1328,7 @@ mod tests {
             )))),
         });
         let response = invalid
+            .clone()
             .oneshot(
                 Request::put("/api/v1/providers/tmdb/credentials/metadata.search")
                     .header(header::AUTHORIZATION, format!("Bearer {credential}"))
@@ -1342,5 +1343,38 @@ mod tests {
             .list_provider_capability_states(workspace_id)
             .expect("list provider state")
             .is_empty());
+        let response = invalid
+            .clone()
+            .oneshot(
+                Request::put("/api/v1/providers/tmdb/credentials/metadata.search")
+                    .header(header::AUTHORIZATION, format!("Bearer {credential}"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"secret":"{}"}}"#,
+                        "x".repeat(MAX_PROVIDER_CREDENTIAL_BYTES + 1)
+                    )))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(kernel
+            .list_provider_capability_states(workspace_id)
+            .expect("list provider state")
+            .is_empty());
+        let response = invalid
+            .oneshot(
+                Request::put("/api/v1/providers/tmdb/credentials/metadata.search")
+                    .header(header::AUTHORIZATION, format!("Bearer {credential}"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"secret":"{}"}}"#,
+                        "x".repeat(MAX_PROVIDER_CREDENTIAL_BYTES)
+                    )))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
     }
 }
