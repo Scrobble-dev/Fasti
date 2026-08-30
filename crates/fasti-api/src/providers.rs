@@ -729,7 +729,7 @@ pub(crate) async fn remove_provider_credential(
         capability,
         correlation_id,
     )?;
-    let Some(current) = get_state(
+    let persisted = get_state(
         &state,
         access.workspace_id(),
         ProviderId::try_new(&provider_id).map_err(|_| invalid_path(capability, correlation_id))?,
@@ -738,18 +738,38 @@ pub(crate) async fn remove_provider_credential(
         capability,
         correlation_id,
     )
-    .await?
-    else {
+    .await?;
+    let current = persisted
+        .clone()
+        .map(Ok)
+        .unwrap_or_else(|| initial_state(&state.runtime, provider, provider_capability))
+        .map_err(|error| runtime_problem(&error, capability, correlation_id))?;
+    if let Some(reference) = current.credential_reference() {
+        if matches!(
+            state
+                .runtime
+                .credential_source(reference)
+                .map_err(|error| runtime_problem(&error, capability, correlation_id))?,
+            CredentialVaultSource::Environment | CredentialVaultSource::OperatorSecretMount
+        ) {
+            return Err(application_problem(Box::new(FastiProblem::from_code(
+                ProblemCode::ProviderCredentialInvalid,
+                capability,
+                correlation_id,
+            ))));
+        }
+    }
+    if persisted.is_none() {
         return Ok(Json(ProviderCapabilityResponse {
             provider_id,
             capability: capability_dto(
                 &state.runtime,
                 provider.runtime_available,
                 provider_capability,
-                None,
+                Some(&current),
             ),
         }));
-    };
+    }
     let old_reference = current.credential_reference().cloned();
     let removed = next_state(
         &current,
@@ -1304,11 +1324,26 @@ mod tests {
             )))),
         });
         let response = readonly
+            .clone()
             .oneshot(
                 Request::put("/api/v1/providers/tmdb/credentials/metadata.search")
                     .header(header::AUTHORIZATION, format!("Bearer {credential}"))
                     .header(header::CONTENT_TYPE, "application/json")
                     .body(Body::from(r#"{"secret":"replacement"}"#))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert!(kernel
+            .list_provider_capability_states(workspace_id)
+            .expect("list provider state")
+            .is_empty());
+        let response = readonly
+            .oneshot(
+                Request::delete("/api/v1/providers/tmdb/credentials/metadata.search")
+                    .header(header::AUTHORIZATION, format!("Bearer {credential}"))
+                    .body(Body::empty())
                     .expect("request"),
             )
             .await

@@ -1120,7 +1120,7 @@
                   <tr>
                     <th scope="row">
                       <span class="provider-name">{provider.label}</span>
-                      <span class="category-pill"
+                      <span class="badge bg-secondary-lt"
                         >{providerCategory(provider.provider).label}</span
                       >
                       <a
@@ -1141,17 +1141,17 @@
                     </td>
                     <td>
                       <span
-                        class="status-badge"
-                        class:configured={provider.state === "available"}
-                        class:not-configured={provider.state !== "available"}
+                        class="badge"
+                        class:bg-success-lt={provider.state === "available"}
+                        class:bg-secondary-lt={provider.state !== "available"}
                         >{provider.state}</span
                       >
                     </td>
                     <td>
                       <span
-                        class="status-badge"
-                        class:configured={hasStoredCredential(provider)}
-                        class:not-configured={!hasStoredCredential(provider)}
+                        class="badge"
+                        class:bg-success-lt={hasStoredCredential(provider)}
+                        class:bg-secondary-lt={!hasStoredCredential(provider)}
                         >{credentialStateLabel(provider)}</span
                       >
                       <span class="credential-source">
@@ -2138,41 +2138,6 @@
     align-items: flex-start;
     justify-content: space-between;
     gap: 12px;
-  }
-
-  .category-pill {
-    font-size: 0.75rem;
-    font-weight: 600;
-    padding: 2px 8px;
-    border-radius: 9999px;
-    background: var(--fasti-surface-raised, rgba(125, 125, 125, 0.1));
-    color: var(--fasti-text-muted);
-  }
-
-  .status-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 0.75rem;
-    font-weight: 700;
-    padding: 2px 8px;
-    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
-  }
-
-  .status-badge.configured {
-    background: color-mix(
-      in srgb,
-      var(--fasti-state-success, #2fb344) 15%,
-      transparent
-    );
-    color: var(--fasti-text-primary);
-    border: 1px solid
-      color-mix(in srgb, var(--fasti-state-success, #2fb344) 40%, transparent);
-  }
-
-  .status-badge.not-configured {
-    background: color-mix(in srgb, var(--fasti-text-muted) 15%, transparent);
-    color: var(--fasti-text-muted);
   }
 
   .credential-input-row {
