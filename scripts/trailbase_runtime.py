@@ -342,7 +342,7 @@ def verify_archive(path: Path, release: dict[str, Any], target: str | None = Non
             executable.chmod(0o700)
             if sha256_file(executable) != artifact["executable_sha256"]:
                 raise ReleaseError("TrailBase executable digest differs from the approved release")
-            output = subprocess.run(  # nosec -- nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit,python.lang.security.audit.dangerous-subprocess-use-tainted-env-args -- executable bytes and digest are verified immediately above; argv is fixed.
+            output = subprocess.run(  # nosec -- nosemgrep -- digest verified immediately above; fixed argv, no shell.
                 [executable, "--version"],
                 check=True,
                 capture_output=True,
@@ -448,7 +448,7 @@ def _prepare_native_release(root: Path, release: dict[str, Any], offline: bool) 
 
     temporary_runtime = Path(tempfile.mkdtemp(prefix=f".{runtime.name}.", dir=runtime_parent))
     try:
-        os.chmod(temporary_runtime, 0o700)  # nosec B103 -- owner-only is the required mode.
+        os.chmod(temporary_runtime, 0o700)  # nosec B103 -- nosemgrep -- owner-only is required.
         with zipfile.ZipFile(archive_path) as archive:
             _write_private(temporary_runtime / "trail", archive.read("trail"), 0o700)
             _write_private(temporary_runtime / "LICENSE", archive.read("LICENSE"), 0o600)
@@ -479,7 +479,7 @@ def verify_executable(executable: Path, release: dict[str, Any], expected_sha256
         raise ReleaseError(f"TrailBase executable is not a regular file: {executable}")
     if sha256_file(executable) != expected_sha256:
         raise ReleaseError("installed TrailBase executable digest does not match the release lock")
-    output = subprocess.run(  # nosec -- nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit,python.lang.security.audit.dangerous-subprocess-use-tainted-env-args -- executable is a regular file with the exact release-lock digest; argv is fixed.
+    output = subprocess.run(  # nosec -- nosemgrep -- regular file with exact release-lock digest; fixed argv.
         [executable, "--version"],
         check=True,
         capture_output=True,
@@ -567,7 +567,7 @@ def _pin_to_one_cpu() -> None:
 
 
 def _command_json(command: list[str]) -> Any:
-    output = subprocess.run(  # nosec -- nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit,python.lang.security.audit.dangerous-subprocess-use-tainted-env-args -- private callers use only the validated podman/docker allowlist and digest-pinned references.
+    output = subprocess.run(  # nosec -- nosemgrep -- absolute allowlisted runtime; digest-pinned internal argv.
         command,
         check=True,
         capture_output=True,
@@ -711,7 +711,7 @@ def prepare_oci(root: Path, runtime: str, offline: bool) -> str:
     _private_directory(root)
     receipt_path = root / f"oci-{runtime}.json"
     if not offline:
-        subprocess.run(  # nosec -- nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit,python.lang.security.audit.dangerous-subprocess-use-tainted-env-args -- runtime is restricted to podman/docker and the image reference is digest-pinned.
+        subprocess.run(  # nosec -- nosemgrep -- absolute allowlisted runtime; digest-pinned reference.
             [runtime_executable, "pull", "--platform", platform_name.replace("-", "/", 1), reference],
             check=True,
             timeout=600,
@@ -919,7 +919,7 @@ def bootstrap_native(
         child_environment["RUST_LOG"] = "info"
         old_umask = os.umask(0o077)
         try:
-            process = subprocess.Popen(  # nosec -- nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit,python.lang.security.audit.dangerous-subprocess-use-tainted-env-args -- executable is release-lock verified and all listener inputs are validated loopback values.
+            process = subprocess.Popen(  # nosec -- nosemgrep -- release-lock verified binary; validated loopback argv.
                 [
                     str(executable),
                     "--depot",
@@ -1025,7 +1025,7 @@ def bootstrap_native(
             "schema_version": "fasti.trailbase-bootstrap.v1",
             "release": load_release()["version"],
             "admin": "admin@localhost",
-            "initial_password_rotated": True,
+            "initial_password_rotated": True,  # nosec B105 -- nosemgrep -- boolean receipt field.
             "completed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         }
         _write_private(marker, (json.dumps(receipt, indent=2) + "\n").encode("utf-8"), 0o600)
@@ -1200,7 +1200,7 @@ def restore_depot(
     if not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
         raise ReleaseError("depot backup is not a regular file")
     temporary = Path(tempfile.mkdtemp(prefix=f".{target.name}.restore.", dir=parent))
-    os.chmod(temporary, 0o700)  # nosec B103 -- owner-only is the required mode.
+    os.chmod(temporary, 0o700)  # nosec B103 -- nosemgrep -- owner-only is required.
     try:
         with zipfile.ZipFile(archive_path) as archive:
             names = archive.namelist()
@@ -1322,7 +1322,7 @@ def restore_depot(
 def _backup_restore_self_test() -> None:
     with tempfile.TemporaryDirectory(prefix="fasti-trailbase-depot-test-") as directory:
         base = Path(directory)
-        os.chmod(base, 0o700)  # nosec B103 -- owner-only is the required mode.
+        os.chmod(base, 0o700)  # nosec B103 -- nosemgrep -- owner-only is required.
         root = base / "source"
         _private_directory(root)
         receipt = {

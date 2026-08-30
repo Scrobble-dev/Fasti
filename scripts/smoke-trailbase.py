@@ -301,7 +301,7 @@ def start_fixture_release(
     output: int | None = subprocess.PIPE if initial_password is not None else subprocess.DEVNULL
     old_umask = os.umask(0o077)
     try:
-        process = subprocess.Popen(  # nosec -- nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit,python.lang.security.audit.dangerous-subprocess-use-tainted-env-args -- executable is an exact digest-verified TrailBase fixture; arguments are local constants and generated fixture paths.
+        process = subprocess.Popen(  # nosec -- nosemgrep -- exact digest-verified fixture; fixed local argv, no shell.
             [
                 executable,
                 "--depot",
@@ -393,7 +393,7 @@ def run_upgrade_fixture(
     old_root = fixture / "upgrade-old"
     old_depot = old_root / "depot"
     old_depot.mkdir(mode=0o700, parents=True)  # nosec B103 -- owner-only is the required mode.
-    os.chmod(old_root, 0o700)  # nosec B103 -- owner-only is the required mode.
+    os.chmod(old_root, 0o700)  # nosec B103 -- nosemgrep -- owner-only is required.
     old_config = '''email {
   smtp_host: "127.0.0.1"
   smtp_port: 24525
@@ -537,7 +537,7 @@ def run_fixture(source_root: Path, receipt_path: Path) -> None:
     checks: list[dict[str, object]] = []
     with tempfile.TemporaryDirectory(prefix="fasti-trailbase-conformance-") as directory:
         fixture = Path(directory)
-        os.chmod(fixture, 0o700)  # nosec B103 -- owner-only is the required mode.
+        os.chmod(fixture, 0o700)  # nosec B103 -- nosemgrep -- owner-only is required.
         backup, backup_digest = runtime.backup_depot(source_root, fixture / "backups")
         test_root = fixture / "root"
         runtime.restore_depot(backup, test_root)
@@ -608,7 +608,7 @@ jobs {}
             old_affinity = os.sched_getaffinity(0)
             try:
                 os.sched_setaffinity(0, {min(old_affinity)})
-                return subprocess.Popen(  # nosec -- nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit,python.lang.security.audit.dangerous-subprocess-use-tainted-env-args -- command starts the exact digest-verified TrailBase binary with fixed loopback fixture arguments.
+                return subprocess.Popen(  # nosec -- nosemgrep -- digest-verified binary; fixed loopback argv, no shell.
                     command,
                     env=environment,
                     stdout=subprocess.DEVNULL,
@@ -968,13 +968,13 @@ jobs {}
             oidc_thread.join(timeout=2)
 
         runtime.verify_private_root(test_root)
-        openapi = subprocess.run(  # nosec -- nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit,python.lang.security.audit.dangerous-subprocess-use-tainted-env-args -- executable is digest-verified; argv is a fixed local inspection command.
+        openapi = subprocess.run(  # nosec -- nosemgrep -- digest-verified binary; fixed local argv, no shell.
             [executable, "--depot", test_root / "depot", "openapi", "print"],
             check=True,
             capture_output=True,
             timeout=30,
         ).stdout
-        admin_list = subprocess.run(  # nosec -- nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit,python.lang.security.audit.dangerous-subprocess-use-tainted-env-args -- executable is digest-verified; argv is a fixed local administration check.
+        admin_list = subprocess.run(  # nosec -- nosemgrep -- digest-verified binary; fixed local argv, no shell.
             [executable, "--depot", test_root / "depot", "admin", "list"],
             capture_output=True,
             timeout=30,
