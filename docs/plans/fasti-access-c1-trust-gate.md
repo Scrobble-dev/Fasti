@@ -158,6 +158,13 @@ replay, second tab, or concurrent callback cannot perform a second exchange.
 Use one concrete TrailBase client. Do not add a generic identity-provider
 framework.
 
+Keep the client private in `fasti-api`, beside the shared Access callback and
+router facade used by daemon and packaged-host composition. Reuse only the
+neutral `pinned_client` and `bounded_body` mechanics from
+`fasti-provider-runtime`. Do not move TrailBase identity semantics into the
+metadata-provider runtime or SQLite store, and do not add a one-client runtime
+crate.
+
 The client must use:
 
 - the exact supervised numeric-loopback origin;
@@ -238,7 +245,7 @@ Do not create parallel session, grant, workspace, profile, or runtime models.
 | Session persistence | `crates/fasti-store/src/browser_auth.rs` | Reuse digest-only secrets, grant checks, expiry, rotation, inventory, and revocation. Replace the administrator-count placeholder through the membership owner. |
 | Local operator authority | `crates/fasti-store/src/access.rs`; `crates/fasti-store/src/kernel.rs`; local API | Reuse `bootstrap.secret`, descriptor-root checks, data-root identity, and exclusive lock. Human first-administrator bootstrap remains a distinct operation. |
 | TrailBase runtime | `third_party/trailbase/release.json`; `scripts/trailbase_runtime.py`; `scripts/dev.sh` | Reuse the release lock and sole launcher. Add no process or supervisor. |
-| HTTP hardening | Existing proxy-free, redirect-free, address-pinned transport mechanics | Reuse or extract only neutral mechanics. Do not make Access depend on provider policy types. |
+| HTTP hardening | Private `fasti-api` TrailBase client using existing proxy-free, redirect-free, address-pinned transport mechanics | Reuse only neutral mechanics. Do not make Access depend on provider policy types or expose the concrete client as a public framework. |
 | Permanent A UI | `packages/ui/src/runtime-settings-view.svelte` | Drive active Account and security state from one generated Access projection. |
 | Resumable C UI | Same route owner and application projection | Derive the next safe task from confirmed server state. Store no parallel wizard authority. |
 | B detail pattern | Existing status, problem, modal, disclosure, and focus helpers | Reuse inside A and C. Do not mount a third destination. |
