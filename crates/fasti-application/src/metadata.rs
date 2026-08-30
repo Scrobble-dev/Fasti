@@ -287,6 +287,29 @@ fn nuvio_standard_route_priority(namespace: &str, grain: Grain) -> Option<u8> {
     }
 }
 
+fn identity_route_value_is_valid(identifier: &ExternalIdentifierClaim) -> bool {
+    let value = identifier.value();
+    let positive_decimal = || {
+        let mut bytes = value.bytes();
+        bytes.next().is_some_and(|byte| matches!(byte, b'1'..=b'9'))
+            && bytes.all(|byte| byte.is_ascii_digit())
+    };
+    match identifier.namespace() {
+        "imdb.title" => value.strip_prefix("tt").is_some_and(|digits| {
+            !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())
+        }),
+        "wikidata" => value.strip_prefix('Q').is_some_and(|digits| {
+            let mut bytes = digits.bytes();
+            bytes.next().is_some_and(|byte| matches!(byte, b'1'..=b'9'))
+                && bytes.all(|byte| byte.is_ascii_digit())
+        }),
+        "tmdb.movie" | "tmdb.tv" | "tvdb.movie" | "tvdb.series" | "mal.anime" | "anidb.anime"
+        | "anilist.anime" | "kitsu.anime" | "simkl.anime" => positive_decimal(),
+        "googlebooks.volume" => ProviderIdentifierValueKind::AsciiToken.accepts(value),
+        _ => true,
+    }
+}
+
 fn route_priority(
     intent: ResolutionIntent,
     target_provider: &str,
@@ -294,6 +317,9 @@ fn route_priority(
     evidence: &IdentityRouteEvidence,
 ) -> Option<(u8, IdentityRouteKind)> {
     let identifier = evidence.identifier();
+    if !identity_route_value_is_valid(identifier) {
+        return None;
+    }
     let namespace = identifier.namespace();
     let grain = identifier.grain();
     match (intent, target_provider, namespace, grain, evidence.kind()) {
@@ -1877,6 +1903,27 @@ mod tests {
         assert_eq!(plan.status(), PurposeIdentityRouteStatus::Ambiguous);
         assert!(plan.selected_route().is_none());
         assert_eq!(plan.candidate_routes().len(), 2);
+    }
+
+    #[test]
+    fn malformed_provider_values_remain_known_but_never_route() {
+        for identifier in [
+            identity_claim_at("imdb.title", Grain::Series, "tt12:34"),
+            identity_claim_at("tmdb.tv", Grain::Series, "-1"),
+            identity_claim_at("tvdb.series", Grain::Series, "0"),
+            identity_claim_at("wikidata", Grain::Series, "q23572"),
+            identity_claim("mal.anime", "1/2"),
+        ] {
+            let plan = plan_purpose_identity_route(
+                ResolutionIntent::NuvioExport,
+                ProviderId::try_new("nuvio").expect("Nuvio provider"),
+                AnimeGroupingPreference::Automatic,
+                std::slice::from_ref(&identifier),
+            );
+            assert_eq!(plan.status(), PurposeIdentityRouteStatus::Missing);
+            assert_eq!(plan.known_identifiers(), &[identifier]);
+            assert!(plan.candidate_routes().is_empty());
+        }
     }
 
     #[test]
