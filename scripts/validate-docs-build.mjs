@@ -3,6 +3,10 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import { relative, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
 
+/* eslint-disable security/detect-non-literal-fs-filename -- every dynamic path is a fixed build resource, a confined internal link, or an entry discovered under the build root */
+/* eslint-disable security-node/detect-unhandled-async-errors -- top-level await intentionally turns traversal errors into a failing validator process */
+/* eslint-disable xss/no-mixed-html -- built HTML is inspected as inert text and is never rendered or returned by this validator */
+
 const root = resolve(import.meta.dirname, "..");
 const build = resolve(root, process.argv[2] ?? "apps/docs/build");
 const budgets = JSON.parse(
@@ -154,3 +158,5 @@ assert.ok(
 console.log(
   `PASS: static documentation artifact routes=${htmlFiles.length} source_commit=${commit}`,
 );
+
+/* eslint-enable security/detect-non-literal-fs-filename, security-node/detect-unhandled-async-errors, xss/no-mixed-html */

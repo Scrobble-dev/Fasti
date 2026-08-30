@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 
 const path = resolve(process.argv[2] ?? ".github/workflows/docs-pages.yml");
+// eslint-disable-next-line security/detect-non-literal-fs-filename -- this read-only CLI input is parsed as inert YAML and never returned or executed
 const workflow = parseYaml(await readFile(path, "utf8"));
 const keys = (value) => Object.keys(value ?? {}).sort();
 
