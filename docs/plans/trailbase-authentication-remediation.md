@@ -6,7 +6,7 @@ Owner: Commander / Mothership
 
 Target: PR #93 first, then dependency-ordered PRs to `dev`
 
-Last source refresh: 2026-08-29
+Last source refresh: 2026-08-30
 
 Implementation state: `GATE_11_IN_PROGRESS`
 
@@ -149,7 +149,29 @@ PR B file ownership during source audit:
 | `pr93_session_review`     | Exact TrailBase `v0.33.5` source, routes, configuration, lifecycle, account flows, and limitations                                     | Read-only audit.                                                          |
 | `pr93_contract_ui_review` | Contract, documentation, verifier, licence, artifact-pin, and negative-control matrix                                                  | Read-only audit.                                                          |
 
-### 2.3 Primary source registry
+### 2.3 C1 implementation checkpoint
+
+Recorded: 2026-08-30
+
+| Item | Exact evidence | State |
+| --- | --- | --- |
+| C1 base | `origin/dev` `4546459105c8c762886b32cdbd580be3e039736c`; tree `6ccfa5d96064b51f3dcd80dfb95f00cd60ce5a55` | `VERIFIED` |
+| Gate 10 artifacts | All six SHA-256 values in `approved.json` match the current A, C, board, HTML, CSS, and design-review artifacts | `VERIFIED` |
+| Package B | PR #114 merged to `dev`; exact merged tree equals the reviewed PR tree | `COMPLETE_WITH_EVIDENCE` |
+| C1 written gate | [`fasti-access-c1-trust-gate.md`](fasti-access-c1-trust-gate.md) | `BLOCKED_PRIMARY_SOURCE_CONFLICT` |
+| TrailBase verification keys | Exact `v0.33.5` public OpenAPI has no JSON Web Key Set or public verification-key route. The source-only key route is administrator and CSRF protected. No supported overlap, version, rotation, or retirement API exists. | `BLOCKED` |
+| TrailBase account state | The public status route can recheck only the current refresh-token subject and email-verification state. It has no arbitrary account lifecycle lookup or disabled/suspended state. | `BLOCKED` |
+| Browser callback | Exact source supports Proof Key for Code Exchange and a code-only redirect. TrailBase does not round-trip Fasti state. The approved separate browser-binding cookie still requires real-browser proof. | `PARTIAL`; cannot repair the trust blocker |
+| Metadata M2 ownership | Active uncommitted M2 owns migration version 12 and overlaps C1 schema, registry, generator, API, SDK, host, and Workbench files. | `WAITING_FOR_HANDOFF_OR_MERGE` |
+| Safe state | No C1 production code, schema, contracts, routes, or runtime behavior changed. A documentation-only isolated gate worktree records the conflict. | `VERIFIED` |
+
+Stop result: C1 and every package that depends on C1 must remain fail closed.
+TrailBase remains the selected account platform. Do not replace it, read its
+depot or private keys, call undocumented endpoints, or weaken `C1-TB-TRUST`.
+Resume only when pinned official evidence supplies the approved public trust
+and account-state capability, then reconcile with the Metadata M2 owner.
+
+### 2.4 Primary source registry
 
 Use exact versions and current primary sources:
 
