@@ -726,7 +726,7 @@ pub(crate) fn write_gate_suite_receipt(
         !source.dirty,
         "source tree is dirty after gate execution; no suite receipt was emitted"
     );
-    let receipt = json!({
+    let mut receipt = json!({
         "receipt_version": "1.0.0",
         "kind": kind,
         "command": command,
@@ -739,6 +739,9 @@ pub(crate) fn write_gate_suite_receipt(
         "gate_count": gates.len(),
         "gates": gates,
     });
+    if let Some(scope) = gate_suite_scope(kind) {
+        receipt["scope"] = scope;
+    }
     let path = root.join(relative_path);
     let parent = path
         .parent()
@@ -764,6 +767,26 @@ pub(crate) fn write_gate_suite_receipt(
         .map_err(|error| error.error)
         .with_context(|| format!("failed to atomically publish receipt {}", path.display()))?;
     Ok(path)
+}
+
+fn gate_suite_scope(kind: &str) -> Option<Value> {
+    (kind == "fasti.access-c1.delivery").then(|| {
+        json!({
+            "bootstrap_path": "trusted_local_operator_cli",
+            "source_capabilities_delivered": [
+                "trailbase_trust_boundary",
+                "first_administrator_identity",
+                "ordinary_browser_sessions",
+                "account_and_security_projection",
+                "resumable_first_run_projection"
+            ],
+            "runtime_evidence": {
+                "ordinary_browser_sessions": "fixture_only_exact_browser_pending"
+            },
+            "deferred": ["packaged_tauri_authentication"],
+            "packaged_desktop_authentication_claimed": false
+        })
+    })
 }
 
 fn write_receipt(
@@ -1150,6 +1173,26 @@ mod tests {
 
         assert!(error.to_string().contains("source tree is dirty"));
         assert!(!root.path().join(receipt).exists());
+    }
+
+    #[test]
+    fn access_delivery_receipt_names_the_cli_path_and_packaged_deferral() {
+        let scope = gate_suite_scope("fasti.access-c1.delivery").expect("C1 scope");
+        assert_eq!(
+            scope.pointer("/bootstrap_path").and_then(Value::as_str),
+            Some("trusted_local_operator_cli")
+        );
+        assert_eq!(
+            scope
+                .pointer("/packaged_desktop_authentication_claimed")
+                .and_then(Value::as_bool),
+            Some(false)
+        );
+        assert_eq!(
+            scope.pointer("/deferred/0").and_then(Value::as_str),
+            Some("packaged_tauri_authentication")
+        );
+        assert!(gate_suite_scope("fasti.other").is_none());
     }
 
     #[test]

@@ -910,10 +910,15 @@ dependencies = [
 name = "fasti-cli"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "clap",
+ "fasti-api",
  "fasti-application",
  "fasti-contracts",
+ "fasti-store",
+ "rustix",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]

@@ -10,9 +10,9 @@ use fasti_application::{
     CompleteTrailBaseBootstrapCommand, CompleteTrailBaseSignInContinuationCommand,
     ConfirmTrailBaseSignInCommand, ConfirmedTrailBaseIdentity, CreatedBrowserSession,
     FailAuthCeremonyCommand, FastiProblem, HumanAccessPort, PreauthorizeTrailBaseBootstrapCommand,
-    PreauthorizeTrailBaseSignInCommand, ProblemCode, ReadTrailBaseInstallationQuery,
-    ReadTrailBaseSignInContinuationQuery, SessionPolicy, StartAuthCeremonyCommand,
-    StartTrailBaseBootstrapCommand, VerifyTrailBaseInstallationCommand,
+    PreauthorizeTrailBaseSignInCommand, PrepareTrailBaseBootstrapQuery, ProblemCode,
+    ReadTrailBaseInstallationQuery, ReadTrailBaseSignInContinuationQuery, SessionPolicy,
+    StartAuthCeremonyCommand, StartTrailBaseBootstrapCommand, VerifyTrailBaseInstallationCommand,
     AUTH_SELECTION_CHOICE_LIMIT,
 };
 use fasti_domain::{
@@ -140,6 +140,54 @@ impl SignInCandidate {
 }
 
 impl SqliteKernel {
+    pub(crate) fn prepare_trailbase_bootstrap_selection(
+        &self,
+    ) -> StoreResult<AuthCeremonySelection> {
+        let connection = self
+            .inner
+            .connection
+            .lock()
+            .map_err(|_| HumanAccessStoreError::Integrity)?;
+        let (workspace_id, grant_id) = connection
+            .query_row(
+                r#"
+                SELECT node.workspace_id, grant.grant_id
+                FROM node_state node
+                JOIN profile_grants grant
+                  ON grant.workspace_id = node.workspace_id
+                 AND grant.profile_id = node.profile_id
+                 AND grant.client_id = node.client_id
+                JOIN clients client
+                  ON client.workspace_id = grant.workspace_id
+                 AND client.client_id = grant.client_id
+                WHERE node.singleton = 1
+                  AND node.initialized = 1
+                  AND node.initialization_consumed_at IS NOT NULL
+                  AND node.recovery_restore_attempt_id IS NULL
+                  AND grant.status = 'active'
+                  AND client.status = 'active'
+                  AND NOT EXISTS(SELECT 1 FROM workspace_memberships)
+                  AND NOT EXISTS(SELECT 1 FROM trailbase_auth_anchors)
+                "#,
+                [],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?
+            .ok_or(HumanAccessStoreError::Conflict)?;
+        AuthCeremonySelection::try_new(
+            AuthCeremonyPurpose::FirstAdministratorBootstrap,
+            workspace_id
+                .parse()
+                .map_err(|_| HumanAccessStoreError::Integrity)?,
+            grant_id
+                .parse()
+                .map_err(|_| HumanAccessStoreError::Integrity)?,
+            None,
+            None,
+        )
+        .map_err(HumanAccessStoreError::Invariant)
+    }
+
     pub(crate) fn verify_trailbase_installation(
         &self,
         instance_id: TrailBaseInstanceId,
@@ -732,6 +780,28 @@ impl SqliteKernel {
         &self,
         command: &CompleteTrailBaseBootstrapCommand,
     ) -> StoreResult<CreatedBrowserSession> {
+        self.complete_trailbase_bootstrap_transaction(command, true)?
+            .ok_or(HumanAccessStoreError::Integrity)
+    }
+
+    pub(crate) fn complete_trailbase_identity_bootstrap(
+        &self,
+        command: &CompleteTrailBaseBootstrapCommand,
+    ) -> StoreResult<()> {
+        if self
+            .complete_trailbase_bootstrap_transaction(command, false)?
+            .is_some()
+        {
+            return Err(HumanAccessStoreError::Integrity);
+        }
+        Ok(())
+    }
+
+    fn complete_trailbase_bootstrap_transaction(
+        &self,
+        command: &CompleteTrailBaseBootstrapCommand,
+        issue_browser_session: bool,
+    ) -> StoreResult<Option<CreatedBrowserSession>> {
         let authorization = command.authorization();
         let connection = self
             .inner
@@ -822,6 +892,16 @@ impl SqliteKernel {
             authorization.correlation_id(),
             authorization.at(),
         )?;
+        if !issue_browser_session {
+            revoke_subject_sessions(
+                &transaction,
+                subject.id(),
+                Some(selection.workspace_id()),
+                subject.id(),
+                authorization.correlation_id(),
+                authorization.at(),
+            )?;
+        }
         let prior_state = ceremony.state();
         ceremony.complete(authorization.at())?;
         persist_ceremony_transition(&transaction, &ceremony, prior_state)?;
@@ -833,7 +913,7 @@ impl SqliteKernel {
             authorization.at(),
         )?;
         transaction.commit()?;
-        Ok(created)
+        Ok(issue_browser_session.then_some(created))
     }
 
     fn persist_membership_lifecycle_change(
@@ -1204,13 +1284,14 @@ fn load_initialized_workspace(transaction: &Transaction<'_>) -> StoreResult<Work
             FROM node_state node
             JOIN workspaces workspace ON workspace.workspace_id = node.workspace_id
             WHERE node.singleton = 1 AND node.initialized = 1
+              AND node.initialization_consumed_at IS NOT NULL
               AND node.recovery_restore_attempt_id IS NULL
             "#,
             [],
             |row| row.get::<_, String>(0),
         )
         .optional()?
-        .ok_or(HumanAccessStoreError::Integrity)?
+        .ok_or(HumanAccessStoreError::NotFound)?
         .parse()
         .map_err(|_| HumanAccessStoreError::Integrity)
 }
@@ -1641,11 +1722,8 @@ fn authorize_bootstrap(
             row.get(0)
         })?;
     let anchor_exists: bool = transaction.query_row(
-        "SELECT EXISTS(SELECT 1 FROM trailbase_auth_anchors WHERE trailbase_instance_id = ?1 AND trailbase_subject = ?2)",
-        params![
-            command.identity().instance_id().to_string(),
-            command.identity().subject().as_bytes().as_slice(),
-        ],
+        "SELECT EXISTS(SELECT 1 FROM trailbase_auth_anchors)",
+        [],
         |row| row.get(0),
     )?;
     let grant_active: bool = transaction.query_row(
@@ -2773,7 +2851,16 @@ impl HumanAccessPort for SqliteKernel {
             command.ceremony().correlation_id(),
         )?;
         self.insert_auth_ceremony(command.ceremony())
-            .map_err(|error| access_problem(error, command.ceremony().correlation_id()))
+            .map_err(|error| bootstrap_problem(error, command.ceremony().correlation_id()))
+    }
+
+    fn prepare_trailbase_bootstrap(
+        &self,
+        query: PrepareTrailBaseBootstrapQuery,
+    ) -> ApplicationResult<AuthCeremonySelection> {
+        verify_bootstrap_secret(self, query.bootstrap_secret(), query.correlation_id())?;
+        self.prepare_trailbase_bootstrap_selection()
+            .map_err(|error| bootstrap_problem(error, query.correlation_id()))
     }
 
     fn claim_auth_ceremony(
@@ -2854,7 +2941,7 @@ impl HumanAccessPort for SqliteKernel {
         command: PreauthorizeTrailBaseBootstrapCommand,
     ) -> ApplicationResult<()> {
         SqliteKernel::preauthorize_trailbase_bootstrap(self, &command)
-            .map_err(|error| access_problem(error, command.correlation_id()))
+            .map_err(|error| bootstrap_problem(error, command.correlation_id()))
     }
 
     fn fail_auth_ceremony(
@@ -2877,7 +2964,22 @@ impl HumanAccessPort for SqliteKernel {
         )?;
         let correlation_id = authorization.correlation_id();
         SqliteKernel::complete_trailbase_bootstrap(self, &command)
-            .map_err(|error| access_problem(error, correlation_id))
+            .map_err(|error| bootstrap_problem(error, correlation_id))
+    }
+
+    fn complete_trailbase_identity_bootstrap(
+        &self,
+        command: CompleteTrailBaseBootstrapCommand,
+    ) -> ApplicationResult<()> {
+        let authorization = command.authorization();
+        verify_bootstrap_secret(
+            self,
+            command.bootstrap_secret(),
+            authorization.correlation_id(),
+        )?;
+        let correlation_id = authorization.correlation_id();
+        SqliteKernel::complete_trailbase_identity_bootstrap(self, &command)
+            .map_err(|error| bootstrap_problem(error, correlation_id))
     }
 
     fn change_membership_lifecycle(
@@ -2909,7 +3011,7 @@ fn verify_bootstrap_secret(
 ) -> ApplicationResult<()> {
     let expected = AccessAdministrationPort::ensure_bootstrap_secret(kernel).map_err(|_| {
         Box::new(FastiProblem::storage_unavailable(
-            CapabilityKey::CreateBrowserSession,
+            CapabilityKey::AccessIdentityBootstrap,
             correlation_id,
         ))
     })?;
@@ -2917,7 +3019,7 @@ fn verify_bootstrap_secret(
         Ok(())
     } else {
         Err(Box::new(FastiProblem::forbidden(
-            CapabilityKey::CreateBrowserSession,
+            CapabilityKey::AccessIdentityBootstrap,
             correlation_id,
         )))
     }
@@ -2933,6 +3035,25 @@ fn session_creation_error(code: ProblemCode) -> HumanAccessStoreError {
 
 fn access_problem(
     error: HumanAccessStoreError,
+    correlation_id: RequestCorrelationId,
+) -> Box<FastiProblem> {
+    human_access_problem(error, CapabilityKey::CreateBrowserSession, correlation_id)
+}
+
+fn bootstrap_problem(
+    error: HumanAccessStoreError,
+    correlation_id: RequestCorrelationId,
+) -> Box<FastiProblem> {
+    human_access_problem(
+        error,
+        CapabilityKey::AccessIdentityBootstrap,
+        correlation_id,
+    )
+}
+
+fn human_access_problem(
+    error: HumanAccessStoreError,
+    capability: CapabilityKey,
     correlation_id: RequestCorrelationId,
 ) -> Box<FastiProblem> {
     let code = match error {
@@ -2973,11 +3094,7 @@ fn access_problem(
         ) => ProblemCode::Forbidden,
         HumanAccessStoreError::Invariant(_) => ProblemCode::ValidationFailed,
     };
-    Box::new(FastiProblem::from_code(
-        code,
-        CapabilityKey::CreateBrowserSession,
-        correlation_id,
-    ))
+    Box::new(FastiProblem::from_code(code, capability, correlation_id))
 }
 
 #[cfg(test)]
@@ -4347,6 +4464,330 @@ mod tests {
             )
             .expect("bootstrap state");
         assert_eq!(state, (1, 1, 1, 1, "completed".to_owned(), None));
+    }
+
+    #[test]
+    fn operator_bootstrap_requires_consumed_node_enrollment() {
+        let node = TestNode::new();
+        let secret = node
+            .kernel
+            .ensure_bootstrap_secret()
+            .expect("bootstrap secret");
+        {
+            let connection = node.kernel.inner.connection.lock().expect("connection");
+            connection
+                .execute(
+                    "UPDATE node_state SET initialization_consumed_at = NULL WHERE singleton = 1",
+                    [],
+                )
+                .expect("restore provisional state");
+        }
+        let denied = HumanAccessPort::prepare_trailbase_bootstrap(
+            &node.kernel,
+            PrepareTrailBaseBootstrapQuery::new(
+                SecretMaterial::from_bytes(*secret.expose_bytes()),
+                RequestCorrelationId::new_v7(),
+            ),
+        )
+        .expect_err("provisional enrollment must not authorize human bootstrap");
+        assert_eq!(denied.code(), ProblemCode::Forbidden);
+        assert_eq!(denied.capability(), CapabilityKey::AccessIdentityBootstrap);
+        {
+            let connection = node.kernel.inner.connection.lock().expect("connection");
+            connection
+                .execute(
+                    "UPDATE node_state SET initialization_consumed_at = ?1 WHERE singleton = 1",
+                    [timestamp(at(1))],
+                )
+                .expect("complete enrollment");
+            let ceremony_count: i64 = connection
+                .query_row("SELECT COUNT(*) FROM auth_ceremonies", [], |row| row.get(0))
+                .expect("ceremony count");
+            assert_eq!(ceremony_count, 0);
+        }
+        let selection = HumanAccessPort::prepare_trailbase_bootstrap(
+            &node.kernel,
+            PrepareTrailBaseBootstrapQuery::new(secret, RequestCorrelationId::new_v7()),
+        )
+        .expect("completed enrollment selection");
+        assert_eq!(selection.workspace_id(), node.access.workspace_id());
+        assert_eq!(
+            selection.selected_profile_grant_id(),
+            node.access.grant_id()
+        );
+    }
+
+    #[test]
+    fn operator_bootstrap_preserves_provenance_without_an_active_session() {
+        let node = TestNode::new();
+        let installation = node
+            .kernel
+            .verify_trailbase_installation(
+                TrailBaseInstanceId::new_v7(),
+                fixture_root_identity(),
+                fixture_release_lock_identity(),
+                false,
+                RequestCorrelationId::new_v7(),
+                at(0),
+            )
+            .expect("active installation");
+        let ceremony = bootstrap_ceremony(&node, &installation, 86);
+        claim_bootstrap(&node.kernel, &installation, &ceremony);
+        let identity = confirmed_identity(&installation, 86);
+        let authorization = PreauthorizeTrailBaseBootstrapCommand::new(
+            ceremony.id(),
+            identity,
+            RequestCorrelationId::new_v7(),
+            at(4),
+        );
+        HumanAccessPort::preauthorize_trailbase_bootstrap(&node.kernel, authorization)
+            .expect("bootstrap preauthorization");
+        HumanAccessPort::complete_trailbase_identity_bootstrap(
+            &node.kernel,
+            CompleteTrailBaseBootstrapCommand::new(
+                authorization,
+                node.kernel
+                    .ensure_bootstrap_secret()
+                    .expect("bootstrap secret"),
+            ),
+        )
+        .expect("identity-only completion");
+        let connection = node.kernel.inner.connection.lock().expect("connection");
+        let evidence: (i64, i64, i64, i64, i64, i64, String) = connection
+            .query_row(
+                r#"
+                SELECT (SELECT COUNT(*) FROM auth_subjects),
+                       (SELECT COUNT(*) FROM workspace_memberships),
+                       (SELECT COUNT(*) FROM fasti_browser_sessions),
+                       (SELECT COUNT(*) FROM fasti_browser_sessions WHERE revoked_at IS NULL),
+                       (SELECT COUNT(*) FROM fasti_browser_session_authentication),
+                       (SELECT COUNT(*) FROM access_audit_events WHERE event_kind = 'browser_session_revoked'),
+                       state
+                FROM auth_ceremonies
+                WHERE operation_id = ?1
+                "#,
+                [ceremony.id().to_string()],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                    ))
+                },
+            )
+            .expect("operator bootstrap evidence");
+        assert_eq!(evidence, (1, 1, 1, 0, 1, 1, "completed".to_owned()));
+    }
+
+    #[test]
+    fn operator_bootstrap_rechecks_enrollment_and_global_anchor_state() {
+        let node = TestNode::new();
+        let installation = node
+            .kernel
+            .verify_trailbase_installation(
+                TrailBaseInstanceId::new_v7(),
+                fixture_root_identity(),
+                fixture_release_lock_identity(),
+                false,
+                RequestCorrelationId::new_v7(),
+                at(0),
+            )
+            .expect("active installation");
+        let ceremony = bootstrap_ceremony(&node, &installation, 87);
+        claim_bootstrap(&node.kernel, &installation, &ceremony);
+        let authorization = PreauthorizeTrailBaseBootstrapCommand::new(
+            ceremony.id(),
+            confirmed_identity(&installation, 87),
+            RequestCorrelationId::new_v7(),
+            at(4),
+        );
+        HumanAccessPort::preauthorize_trailbase_bootstrap(&node.kernel, authorization)
+            .expect("bootstrap preauthorization");
+        {
+            let connection = node.kernel.inner.connection.lock().expect("connection");
+            connection
+                .execute(
+                    "UPDATE node_state SET initialization_consumed_at = NULL WHERE singleton = 1",
+                    [],
+                )
+                .expect("restore provisional enrollment");
+        }
+        let denied = HumanAccessPort::complete_trailbase_identity_bootstrap(
+            &node.kernel,
+            CompleteTrailBaseBootstrapCommand::new(
+                authorization,
+                node.kernel
+                    .ensure_bootstrap_secret()
+                    .expect("bootstrap secret"),
+            ),
+        )
+        .expect_err("final transaction must recheck enrollment");
+        assert_eq!(denied.code(), ProblemCode::Forbidden);
+        {
+            let connection = node.kernel.inner.connection.lock().expect("connection");
+            let state: (i64, i64, i64, String) = connection
+                .query_row(
+                    r#"
+                    SELECT (SELECT COUNT(*) FROM auth_subjects),
+                           (SELECT COUNT(*) FROM workspace_memberships),
+                           (SELECT COUNT(*) FROM fasti_browser_sessions),
+                           state
+                    FROM auth_ceremonies WHERE operation_id = ?1
+                    "#,
+                    [ceremony.id().to_string()],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                )
+                .expect("unchanged provisional bootstrap");
+            assert_eq!(state, (0, 0, 0, "claimed".to_owned()));
+        }
+
+        let node = TestNode::new();
+        let installation = node
+            .kernel
+            .verify_trailbase_installation(
+                TrailBaseInstanceId::new_v7(),
+                fixture_root_identity(),
+                fixture_release_lock_identity(),
+                false,
+                RequestCorrelationId::new_v7(),
+                at(0),
+            )
+            .expect("active installation");
+        let ceremony = bootstrap_ceremony(&node, &installation, 88);
+        claim_bootstrap(&node.kernel, &installation, &ceremony);
+        let authorization = PreauthorizeTrailBaseBootstrapCommand::new(
+            ceremony.id(),
+            confirmed_identity(&installation, 88),
+            RequestCorrelationId::new_v7(),
+            at(4),
+        );
+        HumanAccessPort::preauthorize_trailbase_bootstrap(&node.kernel, authorization)
+            .expect("bootstrap preauthorization");
+        {
+            let connection = node.kernel.inner.connection.lock().expect("connection");
+            let transaction = connection.unchecked_transaction().expect("transaction");
+            let subject = AuthSubject::try_new(
+                AuthSubjectId::new_v7(),
+                AuthSubjectLifecycle::Active,
+                0,
+                0,
+                at(5),
+                at(5),
+            )
+            .expect("unrelated subject");
+            insert_subject(&transaction, &subject).expect("insert unrelated subject");
+            insert_anchor(
+                &transaction,
+                &TrailBaseExternalAnchor::new(
+                    installation.id(),
+                    TrailBaseSubject::from_bytes([99; 16]),
+                    subject.id(),
+                    at(5),
+                ),
+            )
+            .expect("insert unrelated anchor");
+            transaction.commit().expect("commit unrelated anchor");
+        }
+        let denied = HumanAccessPort::complete_trailbase_identity_bootstrap(
+            &node.kernel,
+            CompleteTrailBaseBootstrapCommand::new(
+                authorization,
+                node.kernel
+                    .ensure_bootstrap_secret()
+                    .expect("bootstrap secret"),
+            ),
+        )
+        .expect_err("any existing anchor must close bootstrap");
+        assert_eq!(denied.code(), ProblemCode::Forbidden);
+        let connection = node.kernel.inner.connection.lock().expect("connection");
+        let state: (i64, i64, i64, String) = connection
+            .query_row(
+                r#"
+                SELECT (SELECT COUNT(*) FROM auth_subjects),
+                       (SELECT COUNT(*) FROM trailbase_auth_anchors),
+                       (SELECT COUNT(*) FROM fasti_browser_sessions),
+                       state
+                FROM auth_ceremonies WHERE operation_id = ?1
+                "#,
+                [ceremony.id().to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("unchanged anchored bootstrap");
+        assert_eq!(state, (1, 1, 0, "claimed".to_owned()));
+    }
+
+    #[test]
+    fn operator_bootstrap_revocation_failure_rolls_back_identity() {
+        let node = TestNode::new();
+        let installation = node
+            .kernel
+            .verify_trailbase_installation(
+                TrailBaseInstanceId::new_v7(),
+                fixture_root_identity(),
+                fixture_release_lock_identity(),
+                false,
+                RequestCorrelationId::new_v7(),
+                at(0),
+            )
+            .expect("active installation");
+        let ceremony = bootstrap_ceremony(&node, &installation, 89);
+        claim_bootstrap(&node.kernel, &installation, &ceremony);
+        let authorization = PreauthorizeTrailBaseBootstrapCommand::new(
+            ceremony.id(),
+            confirmed_identity(&installation, 89),
+            RequestCorrelationId::new_v7(),
+            at(4),
+        );
+        HumanAccessPort::preauthorize_trailbase_bootstrap(&node.kernel, authorization)
+            .expect("bootstrap preauthorization");
+        {
+            let connection = node.kernel.inner.connection.lock().expect("connection");
+            connection
+                .execute_batch(
+                    "CREATE TRIGGER fail_operator_revocation_audit BEFORE INSERT ON access_audit_events WHEN NEW.event_kind = 'browser_session_revoked' BEGIN SELECT RAISE(ABORT, 'injected revocation audit failure'); END;",
+                )
+                .expect("failure trigger");
+        }
+        HumanAccessPort::complete_trailbase_identity_bootstrap(
+            &node.kernel,
+            CompleteTrailBaseBootstrapCommand::new(
+                authorization,
+                node.kernel
+                    .ensure_bootstrap_secret()
+                    .expect("bootstrap secret"),
+            ),
+        )
+        .expect_err("revocation audit failure must abort completion");
+        let connection = node.kernel.inner.connection.lock().expect("connection");
+        let state: (i64, i64, i64, i64, i64, String) = connection
+            .query_row(
+                r#"
+                SELECT (SELECT COUNT(*) FROM auth_subjects),
+                       (SELECT COUNT(*) FROM trailbase_auth_anchors),
+                       (SELECT COUNT(*) FROM workspace_memberships),
+                       (SELECT COUNT(*) FROM auth_subject_profile_grants),
+                       (SELECT COUNT(*) FROM fasti_browser_sessions),
+                       state
+                FROM auth_ceremonies WHERE operation_id = ?1
+                "#,
+                [ceremony.id().to_string()],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .expect("rolled-back operator bootstrap");
+        assert_eq!(state, (0, 0, 0, 0, 0, "claimed".to_owned()));
     }
 
     #[test]

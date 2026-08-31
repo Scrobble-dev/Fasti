@@ -60,7 +60,7 @@ pub(crate) fn run_access_c1(root: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub(crate) fn access_c1_gates() -> [CommandGate; 4] {
+pub(crate) fn access_c1_gates() -> [CommandGate; 7] {
     [
         CommandGate::new(
             "access.prepared_machine",
@@ -73,6 +73,44 @@ pub(crate) fn access_c1_gates() -> [CommandGate; 4] {
             "cargo",
             ["xtask", "contract", "verify", "--locked"],
             "repair the generated Access contract, SDK, package, and no-secret surfaces",
+        ),
+        CommandGate::new(
+            "access.operator_cli",
+            "cargo",
+            [
+                "test",
+                "--locked",
+                "--offline",
+                "-p",
+                "fasti-cli",
+            ],
+            "repair the trusted first-administrator command and its bounded input contract",
+        ),
+        CommandGate::new(
+            "access.operator_orchestration",
+            "cargo",
+            [
+                "test",
+                "--locked",
+                "--offline",
+                "-p",
+                "fasti-api",
+                "operator_bootstrap",
+            ],
+            "repair the exact TrailBase operator exchange and cleanup sequence",
+        ),
+        CommandGate::new(
+            "access.operator_transaction",
+            "cargo",
+            [
+                "test",
+                "--locked",
+                "--offline",
+                "-p",
+                "fasti-store",
+                "operator_bootstrap",
+            ],
+            "repair the atomic first-administrator transaction and leave no active browser session",
         ),
         CommandGate::new(
             "access.desktop_host",
@@ -392,6 +430,9 @@ mod tests {
             [
                 "access.prepared_machine",
                 "access.contract_profile",
+                "access.operator_cli",
+                "access.operator_orchestration",
+                "access.operator_transaction",
                 "access.desktop_host",
                 "access.browser_fixture",
             ]
@@ -404,11 +445,14 @@ mod tests {
             gates[1].display(),
             "\"cargo\" \"xtask\" \"contract\" \"verify\" \"--locked\""
         );
-        assert!(gates[2]
+        assert!(gates[2].display().contains("fasti-cli"));
+        assert!(gates[3].display().contains("operator_bootstrap"));
+        assert!(gates[4].display().contains("operator_bootstrap"));
+        assert!(gates[5]
             .display()
             .contains("apps/desktop/src-tauri/Cargo.toml"));
-        assert!(gates[3].display().contains("tests/e2e/access-c1.spec.ts"));
-        assert!(gates[3].display().contains("--project=chrome"));
+        assert!(gates[6].display().contains("tests/e2e/access-c1.spec.ts"));
+        assert!(gates[6].display().contains("--project=chrome"));
     }
 
     #[test]

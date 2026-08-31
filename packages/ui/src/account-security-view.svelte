@@ -667,6 +667,24 @@
             installation administrator as a shared person account.
           {/if}
         </p>
+        {#if mode === "first_run" && !host.startFirstAdministratorBootstrap}
+          <p
+            id="first-administrator-unavailable"
+            class="alert alert-warning"
+            role="status"
+          >
+            <strong
+              >First-administrator confirmation is unavailable here.</strong
+            >
+            The packaged WebView cannot yet retain the required Secure callback cookie.
+            On Unix, run
+            <code
+              >fasti access bootstrap-administrator --data-root &lt;Fasti data
+              root&gt; --trailbase-root &lt;TrailBase root&gt;</code
+            >
+            from the installation owner's terminal. Then sign in to this browser.
+          </p>
+        {/if}
         <label
           class="form-check remember-browser-check d-flex align-items-center mb-3"
         >
@@ -683,11 +701,14 @@
           </span>
         </label>
         <div class="d-flex flex-wrap gap-2">
-          {#if mode === "first_run" && host.startFirstAdministratorBootstrap}
+          {#if mode === "first_run"}
             <button
               type="button"
               class="btn btn-primary"
-              disabled={Boolean(busy)}
+              disabled={!host.startFirstAdministratorBootstrap || Boolean(busy)}
+              aria-describedby={host.startFirstAdministratorBootstrap
+                ? undefined
+                : "first-administrator-unavailable"}
               onclick={() => void startSignIn(true)}
             >
               <IconUserCheck size={18} aria-hidden="true" />

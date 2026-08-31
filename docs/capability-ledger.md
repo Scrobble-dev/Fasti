@@ -51,9 +51,10 @@ session, fixture listener, success response, or UI success state.
 C1 adds finite OpenAPI, JSON Schema, problem, capability, and TypeScript SDK
 surfaces for sign-in, continuation, Access projection, and browser-session
 management. Its callback is browser navigation and has no SDK method.
-First-administrator bootstrap is packaged-host IPC. AsyncAPI and JSON-LD remain
-not applicable. The implemented projection UI binding does not claim package
-smoke.
+First-administrator bootstrap is a trusted local Unix CLI operation. It has no
+HTTP, SDK, AsyncAPI, JSON-LD, or active packaged-host surface. Windows setup is
+deferred with packaged-host authentication. The implemented projection UI
+binding does not claim package smoke.
 
 PR B records these TrailBase contract dispositions:
 

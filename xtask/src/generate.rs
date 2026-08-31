@@ -2389,6 +2389,21 @@ fn resolve_required_binding(
             );
         }
         "cli" => {
+            if binding == "cli:access-identity-bootstrap" {
+                let main_source =
+                    fs::read_to_string(workspace_root.join("crates/fasti-cli/src/main.rs"))?;
+                ensure!(
+                    capability_id == "access.identity.bootstrap"
+                        && main_source.contains("BootstrapAdministrator")
+                        && main_source.contains("LocalOperatorAccessRuntime")
+                        && main_source.contains("--password")
+                        && main_source.contains(
+                            "first_administrator_cli_accepts_only_private_root_locations"
+                        ),
+                    "trusted CLI first-administrator bootstrap binding is absent"
+                );
+                return Ok(());
+            }
             ensure!(binding == "cli:capability-discovery", "unknown CLI binding");
             let source =
                 fs::read_to_string(workspace_root.join("crates/fasti-cli/src/capabilities.rs"))?;
@@ -2528,6 +2543,16 @@ fn resolve_required_binding(
                         && smoke.contains("metadata_claim_stale")
                         && smoke.contains("projection.get(\"fields\")"),
                     "production metadata smoke is absent"
+                );
+            }
+            "package-smoke:c1-operator-bootstrap" => {
+                let smoke = fs::read_to_string(workspace_root.join("scripts/smoke-oci.sh"))?;
+                ensure!(
+                    capability_id == "access.identity.bootstrap"
+                        && smoke.contains("access bootstrap-administrator --help")
+                        && smoke.contains("--password")
+                        && smoke.contains("/missing-fasti-data-root"),
+                    "C1 operator bootstrap package smoke is absent"
                 );
             }
             _ => anyhow::bail!("unknown package-smoke binding"),

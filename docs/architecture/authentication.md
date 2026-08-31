@@ -139,8 +139,9 @@ unavailable states until their approved owner passes its package gate.
 - C1 generates the finite browser-authentication and session OpenAPI, JSON
   Schema, typed problem, capability, and TypeScript SDK surfaces. Its callback
   is browser navigation and has no SDK method. AsyncAPI and JSON-LD remain not
-  applicable. First-administrator bootstrap remains packaged-host IPC rather
-  than HTTP.
+  applicable. First-administrator bootstrap uses the trusted local Unix CLI
+  and has no HTTP or SDK operation. Windows and packaged-host authentication
+  remain deferred.
 
 ## Compatibility reference
 

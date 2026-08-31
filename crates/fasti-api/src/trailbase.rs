@@ -246,7 +246,14 @@ pub(super) enum TrailBaseCallbackOutcome {
 
 enum ClaimedCallbackCompletion {
     Session(Box<CreatedBrowserSession>),
+    IdentityEstablished,
     SelectionRequired(DateTime<Utc>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BootstrapCompletion {
+    BrowserSession,
+    IdentityOnly,
 }
 
 pub(super) struct TrailBaseCallbackFailure {
@@ -533,6 +540,76 @@ impl TrailBaseOrchestrator {
         correlation_id: RequestCorrelationId,
         at: DateTime<Utc>,
     ) -> Result<TrailBaseCallbackOutcome, TrailBaseCallbackFailure> {
+        let (code, claimed) =
+            self.claim_callback(authorization_code, browser_binding, correlation_id, at)?;
+        let return_target = claimed.return_target();
+        let continuation_expires_at = claimed.expires_at();
+        self.finish_claimed_callback(
+            code,
+            claimed,
+            BootstrapCompletion::BrowserSession,
+            correlation_id,
+            at,
+        )
+        .await
+        .map(|completion| match completion {
+            ClaimedCallbackCompletion::Session(created) => {
+                TrailBaseCallbackOutcome::SessionCreated {
+                    created,
+                    return_target,
+                }
+            }
+            ClaimedCallbackCompletion::SelectionRequired(expires_at) => {
+                TrailBaseCallbackOutcome::SelectionRequired {
+                    expires_at,
+                    return_target,
+                }
+            }
+            ClaimedCallbackCompletion::IdentityEstablished => {
+                unreachable!("browser completion must issue a session or require a selection")
+            }
+        })
+        .map_err(|error| TrailBaseCallbackFailure {
+            error,
+            return_target: Some(return_target),
+            continuation_expires_at: Some(continuation_expires_at),
+        })
+    }
+
+    pub(super) async fn callback_for_operator(
+        &self,
+        authorization_code: String,
+        browser_binding: &SecretMaterial,
+        correlation_id: RequestCorrelationId,
+        at: DateTime<Utc>,
+    ) -> Result<(), TrailBaseOrchestrationError> {
+        let (code, claimed) = self
+            .claim_callback(authorization_code, browser_binding, correlation_id, at)
+            .map_err(|failure| failure.error)?;
+        self.finish_claimed_callback(
+            code,
+            claimed,
+            BootstrapCompletion::IdentityOnly,
+            correlation_id,
+            at,
+        )
+        .await
+        .and_then(|completion| match completion {
+            ClaimedCallbackCompletion::IdentityEstablished => Ok(()),
+            ClaimedCallbackCompletion::Session(_)
+            | ClaimedCallbackCompletion::SelectionRequired(_) => {
+                Err(TrailBaseOrchestrationError::LocalState)
+            }
+        })
+    }
+
+    fn claim_callback(
+        &self,
+        authorization_code: String,
+        browser_binding: &SecretMaterial,
+        correlation_id: RequestCorrelationId,
+        at: DateTime<Utc>,
+    ) -> Result<(AuthorizationCode, AuthCeremony), TrailBaseCallbackFailure> {
         let code =
             AuthorizationCode::parse(authorization_code).map_err(|_| TrailBaseCallbackFailure {
                 error: TrailBaseOrchestrationError::InvalidInput,
@@ -573,45 +650,24 @@ impl TrailBaseOrchestrator {
                     }
                 }
             })?;
-        let return_target = claimed.return_target();
-        let continuation_expires_at = claimed.expires_at();
         if claimed.failure() == Some(AuthCeremonyFailure::TrustUnavailable) {
             self.vault.clear();
             return Err(TrailBaseCallbackFailure {
                 error: TrailBaseOrchestrationError::ApplicationProblem(
                     ProblemCode::TrailBaseTrustUnavailable,
                 ),
-                return_target: Some(return_target),
-                continuation_expires_at: Some(continuation_expires_at),
+                return_target: Some(claimed.return_target()),
+                continuation_expires_at: Some(claimed.expires_at()),
             });
         }
-        self.finish_claimed_callback(code, claimed, correlation_id, at)
-            .await
-            .map(|completion| match completion {
-                ClaimedCallbackCompletion::Session(created) => {
-                    TrailBaseCallbackOutcome::SessionCreated {
-                        created,
-                        return_target,
-                    }
-                }
-                ClaimedCallbackCompletion::SelectionRequired(expires_at) => {
-                    TrailBaseCallbackOutcome::SelectionRequired {
-                        expires_at,
-                        return_target,
-                    }
-                }
-            })
-            .map_err(|error| TrailBaseCallbackFailure {
-                error,
-                return_target: Some(return_target),
-                continuation_expires_at: Some(continuation_expires_at),
-            })
+        Ok((code, claimed))
     }
 
     async fn finish_claimed_callback(
         &self,
         code: AuthorizationCode,
         claimed: AuthCeremony,
+        bootstrap_completion: BootstrapCompletion,
         correlation_id: RequestCorrelationId,
         at: DateTime<Utc>,
     ) -> Result<ClaimedCallbackCompletion, TrailBaseOrchestrationError> {
@@ -763,18 +819,27 @@ impl TrailBaseOrchestrator {
                         return Err(TrailBaseOrchestrationError::ApplicationProblem(code));
                     }
                 };
-                match self.access.complete_trailbase_bootstrap(
-                    CompleteTrailBaseBootstrapCommand::new(
-                        PreauthorizeTrailBaseBootstrapCommand::new(
-                            claimed.id(),
-                            identity,
-                            correlation_id,
-                            at,
-                        ),
-                        bootstrap_secret,
+                let command = CompleteTrailBaseBootstrapCommand::new(
+                    PreauthorizeTrailBaseBootstrapCommand::new(
+                        claimed.id(),
+                        identity,
+                        correlation_id,
+                        at,
                     ),
-                ) {
-                    Ok(created) => Ok(ClaimedCallbackCompletion::Session(Box::new(created))),
+                    bootstrap_secret,
+                );
+                let completed = match bootstrap_completion {
+                    BootstrapCompletion::BrowserSession => self
+                        .access
+                        .complete_trailbase_bootstrap(command)
+                        .map(|created| ClaimedCallbackCompletion::Session(Box::new(created))),
+                    BootstrapCompletion::IdentityOnly => self
+                        .access
+                        .complete_trailbase_identity_bootstrap(command)
+                        .map(|()| ClaimedCallbackCompletion::IdentityEstablished),
+                };
+                match completed {
+                    Ok(completion) => Ok(completion),
                     Err(problem) => {
                         let code = problem.code();
                         if let Some(failure) = failure_for_local_problem(code) {
@@ -1697,6 +1762,61 @@ mod tests {
                 ),
             ]
         );
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn operator_bootstrap_reuses_exact_exchange_and_returns_no_active_session() {
+        let (_root, kernel, installation, _access) = initialized_access_node();
+        let callback_at = Utc::now();
+        let (client, state, task) = spawn_successful_auth_fixture(callback_at).await;
+        let orchestrator = Arc::new(test_orchestrator(client, &kernel, &installation));
+        let runtime =
+            crate::LocalOperatorAccessRuntime::from_test_orchestrator(kernel.clone(), orchestrator);
+        let started = runtime
+            .start_first_administrator_bootstrap()
+            .expect("start operator bootstrap");
+        runtime
+            .complete_first_administrator_bootstrap(
+                &started,
+                &format!(
+                    "{}?code={}",
+                    crate::FASTI_ACCESS_CALLBACK_URL,
+                    "a".repeat(48)
+                ),
+            )
+            .await
+            .expect("complete operator bootstrap");
+
+        assert_eq!(
+            state.requests.lock().expect("requests").as_slice(),
+            [
+                ("token".to_owned(), "POST".to_owned(), TOKEN_PATH.to_owned()),
+                (
+                    "status".to_owned(),
+                    "GET".to_owned(),
+                    STATUS_PATH.to_owned()
+                ),
+                (
+                    "logout".to_owned(),
+                    "POST".to_owned(),
+                    LOGOUT_PATH.to_owned()
+                ),
+            ]
+        );
+        let connection = rusqlite::Connection::open(kernel.database_path()).expect("database");
+        let evidence: (i64, i64, i64) = connection
+            .query_row(
+                r#"
+                SELECT (SELECT COUNT(*) FROM fasti_browser_sessions WHERE revoked_at IS NULL),
+                       (SELECT COUNT(*) FROM fasti_browser_session_authentication),
+                       (SELECT COUNT(*) FROM workspace_memberships WHERE role = 'administrator')
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("operator bootstrap evidence");
+        assert_eq!(evidence, (0, 1, 1));
         task.abort();
     }
 

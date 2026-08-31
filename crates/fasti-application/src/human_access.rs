@@ -81,6 +81,31 @@ pub struct StartTrailBaseBootstrapCommand {
     bootstrap_secret: SecretMaterial,
 }
 
+pub struct PrepareTrailBaseBootstrapQuery {
+    bootstrap_secret: SecretMaterial,
+    correlation_id: RequestCorrelationId,
+}
+
+impl PrepareTrailBaseBootstrapQuery {
+    pub const fn new(
+        bootstrap_secret: SecretMaterial,
+        correlation_id: RequestCorrelationId,
+    ) -> Self {
+        Self {
+            bootstrap_secret,
+            correlation_id,
+        }
+    }
+
+    pub const fn bootstrap_secret(&self) -> &SecretMaterial {
+        &self.bootstrap_secret
+    }
+
+    pub const fn correlation_id(&self) -> RequestCorrelationId {
+        self.correlation_id
+    }
+}
+
 impl StartTrailBaseBootstrapCommand {
     pub const fn new(ceremony: AuthCeremony, bootstrap_secret: SecretMaterial) -> Self {
         Self {
@@ -690,6 +715,10 @@ pub trait HumanAccessPort: Send + Sync {
         &self,
         command: StartTrailBaseBootstrapCommand,
     ) -> ApplicationResult<()>;
+    fn prepare_trailbase_bootstrap(
+        &self,
+        query: PrepareTrailBaseBootstrapQuery,
+    ) -> ApplicationResult<fasti_domain::AuthCeremonySelection>;
     fn claim_auth_ceremony(
         &self,
         command: ClaimAuthCeremonyCommand,
@@ -730,6 +759,10 @@ pub trait HumanAccessPort: Send + Sync {
         &self,
         command: CompleteTrailBaseBootstrapCommand,
     ) -> ApplicationResult<crate::CreatedBrowserSession>;
+    fn complete_trailbase_identity_bootstrap(
+        &self,
+        command: CompleteTrailBaseBootstrapCommand,
+    ) -> ApplicationResult<()>;
     fn change_membership_lifecycle(
         &self,
         command: ChangeMembershipLifecycleCommand,

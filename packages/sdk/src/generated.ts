@@ -7383,15 +7383,16 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
     },
     "c1_identity_bootstrap": {
       "cli": {
-        "reason": "C1 assigns first-administrator bootstrap to the packaged host.",
-        "state": "not_applicable"
+        "binding": "cli:access-identity-bootstrap",
+        "binding_visibility": "public",
+        "state": "required"
       },
       "domain_application": {
         "binding_visibility": "internal",
         "state": "required"
       },
       "http_openapi": {
-        "reason": "First-administrator bootstrap is an in-process packaged-host operation and has no HTTP route.",
+        "reason": "First-administrator bootstrap is a trusted local CLI operation and has no HTTP route.",
         "state": "not_applicable"
       },
       "json_ld": {
@@ -7399,7 +7400,7 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "state": "not_applicable"
       },
       "json_schema": {
-        "reason": "No public transport represents the host-owned bootstrap command.",
+        "reason": "No public transport represents the local-operator bootstrap command.",
         "state": "not_applicable"
       },
       "knowledge": {
@@ -7413,9 +7414,9 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "state": "required"
       },
       "package_smoke": {
-        "body": "c1",
-        "reason": "Packaged-host bootstrap smoke is delivered with C1 host composition.",
-        "state": "later_body"
+        "binding": "package-smoke:c1-operator-bootstrap",
+        "binding_visibility": "public",
+        "state": "required"
       },
       "sdk": {
         "reason": "Browser and third-party SDK callers cannot invoke local-operator bootstrap.",
@@ -7426,9 +7427,8 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "state": "not_applicable"
       },
       "ui": {
-        "body": "c1",
-        "reason": "The approved resumable first-run UI is delivered in C1.4.",
-        "state": "later_body"
+        "reason": "The active first-administrator operation is the trusted local CLI; packaged first-run authentication remains unavailable until C1-TAURI-AUTH.",
+        "state": "not_applicable"
       }
     },
     "health": {

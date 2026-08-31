@@ -123,6 +123,21 @@ Configure and verify TrailBase mail delivery for the installation before
 inviting people or relying on password reset. Keep mail credentials out of
 Fasti, browser storage, command arguments, logs, and evidence receipts.
 
+For a new Fasti data root on a supported Unix host, stop `fastid` and establish
+the first administrator:
+
+```bash
+cargo run --locked -p fasti-cli -- access bootstrap-administrator \
+  --data-root /absolute/private/fasti-root \
+  --trailbase-root /absolute/private/trailbase-root
+```
+
+Open the printed TrailBase URL and sign in with the first person's TrailBase
+account. Paste the complete callback URL when prompted. Input is bounded and
+hidden. Do not pass a password, token, subject, bootstrap secret, or callback
+binding as a command argument. The command creates no active browser session.
+Start the normal host, then use **Sign in** in an ordinary browser.
+
 The route-exposure contract is:
 
 | Mode   | Account routes   | Admin routes                                | Record API                                  | Readiness evidence                                 |

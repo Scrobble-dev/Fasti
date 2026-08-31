@@ -714,6 +714,44 @@ test("ending the current session removes profile authority", async ({
   expect(ended).toBe(1);
 });
 
+test("first-run keeps deferred packaged bootstrap visible with the Unix recovery path", async ({
+  page,
+}) => {
+  await page.route("**/api/access/v1/**", (route) => {
+    const path = new URL(route.request().url()).pathname;
+    return path.endsWith("/trailbase/continuation")
+      ? fulfillJson(
+          route,
+          problem(
+            "auth_browser_binding_invalid",
+            "browser.session.create",
+            401,
+          ),
+          401,
+        )
+      : fulfillJson(
+          route,
+          problem("browser_session_expired", "access.projection.read", 401),
+          401,
+        );
+  });
+
+  await page.goto("/first-run");
+  const setup = page.getByTestId("first-run-guided-setup");
+  await expect(
+    setup.getByRole("button", { name: "Confirm first Fasti administrator" }),
+  ).toBeDisabled();
+  await expect(setup.getByRole("status")).toContainText(
+    "The packaged WebView cannot yet retain the required Secure callback cookie.",
+  );
+  await expect(setup.getByRole("status")).toContainText(
+    "fasti access bootstrap-administrator",
+  );
+  await expect(
+    setup.getByRole("button", { name: "Sign in to an existing account" }),
+  ).toBeEnabled();
+});
+
 test("the callback hint is scrubbed and one explicit continuation choice is posted once", async ({
   page,
 }) => {

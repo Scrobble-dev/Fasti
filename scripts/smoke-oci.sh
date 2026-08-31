@@ -147,6 +147,28 @@ if "$oci_runtime" run --rm --network none "$image" /usr/local/bin/fasti verify >
   exit 1
 fi
 
+if ! "$oci_runtime" run --rm --network none "$image" /usr/local/bin/fasti \
+  access bootstrap-administrator --help >"$cli_stdout" 2>"$cli_stderr"; then
+  echo "First-administrator CLI help is unavailable" >&2
+  exit 1
+fi
+if grep -Eiq 'password|token|bootstrap.secret|browser.binding' "$cli_stdout"; then
+  echo "First-administrator CLI help exposes a forbidden credential argument" >&2
+  exit 1
+fi
+if "$oci_runtime" run --rm --network none "$image" /usr/local/bin/fasti \
+  access bootstrap-administrator \
+  --data-root /missing-fasti-data-root \
+  --trailbase-root /missing-trailbase-root \
+  --password must-not-echo >"$cli_stdout" 2>"$cli_stderr"; then
+  echo "First-administrator CLI accepted a password argument" >&2
+  exit 1
+fi
+if grep -Fq 'must-not-echo' "$cli_stdout" "$cli_stderr"; then
+  echo "First-administrator CLI repeated a rejected credential value" >&2
+  exit 1
+fi
+
 isolated_id="$("$oci_runtime" run --detach --rm --network none "$image")"
 for attempt in $(seq 1 30); do
   if isolated_health="$("$oci_runtime" exec "$isolated_id" wget -q -O - http://127.0.0.1:8420/api/v1/health)"; then

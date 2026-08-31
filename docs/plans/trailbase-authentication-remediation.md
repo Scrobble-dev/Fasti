@@ -1314,7 +1314,7 @@ Add:
 
 Reuse PR A's `AuthSubject`, `FastiBrowserSession`, `BrowserSessionId`, and `SessionPolicy` without a second model. Link the PR A subject to TrailBase only through the approved reset/bootstrap path. Replace `BrowserUser.is_admin` with membership and role. Do not dual-run human authentication.
 
-C1 replaces the A-only fixture journey with pinned TrailBase APIs and the real Fasti exchange. The packaged-host bootstrap reads the owner-only data-root secret, proves the descriptor-root and lock, selects and proves the TrailBase anchor, and performs one transactional membership/role creation. It never sends the bootstrap secret to the browser or prints it. A losing race creates no membership, role, profile, or grant. The route, host, and transaction source exists locally. A packaged desktop must not show `Access ready` until the separate `C1-TAURI-AUTH` transport and WebView evidence passes.
+C1 replaces the A-only fixture journey with pinned TrailBase APIs and the real Fasti exchange. The trusted local Unix CLI reads the owner-only data-root secret, proves the descriptor-root and lock, selects and proves the TrailBase anchor, and performs one transactional membership/role creation. It never sends or prints the bootstrap secret and returns no active browser session. A losing race creates no membership, role, profile, or grant. Ordinary browser sign-in uses the fixed local route after bootstrap. Windows first-administrator setup stays deferred with packaged authentication. A packaged desktop must not show `Access ready` until the separate `C1-TAURI-AUTH` transport and WebView evidence passes.
 
 C1 freezes activation as inactive, active, or blocked with generation-bound
 proof. Release mismatch is the only C1-recoverable blocker; physical-root

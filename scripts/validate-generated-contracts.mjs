@@ -718,7 +718,11 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
           assert.equal(capability.id, "receipt.stream");
           break;
         case "cli":
-          assert.equal(binding, "cli:capability-discovery");
+          if (capability.id === "access.identity.bootstrap") {
+            assert.equal(binding, "cli:access-identity-bootstrap");
+          } else {
+            assert.equal(binding, "cli:capability-discovery");
+          }
           break;
         case "json_schema":
           if (binding === "schema:health-response") {
@@ -757,15 +761,19 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
         case "package_smoke":
           assert.equal(
             binding,
-            capability.id === "system.health"
-              ? "package-smoke:production-health"
-              : capability.id.startsWith("provider.")
-                ? "package-smoke:production-providers"
-                : capability.id.startsWith("metadata.")
-                  ? "package-smoke:production-metadata"
-                  : ["client.enroll", "node.initialize"].includes(capability.id)
-                    ? "package-smoke:production-bootstrap"
-                    : "package-smoke:b1-conformance-fixture",
+            capability.id === "access.identity.bootstrap"
+              ? "package-smoke:c1-operator-bootstrap"
+              : capability.id === "system.health"
+                ? "package-smoke:production-health"
+                : capability.id.startsWith("provider.")
+                  ? "package-smoke:production-providers"
+                  : capability.id.startsWith("metadata.")
+                    ? "package-smoke:production-metadata"
+                    : ["client.enroll", "node.initialize"].includes(
+                          capability.id,
+                        )
+                      ? "package-smoke:production-bootstrap"
+                      : "package-smoke:b1-conformance-fixture",
           );
           break;
         case "ui":

@@ -475,36 +475,26 @@ grant_owner_client_id }`. Only persistence that truly records source
 
 #### C1.3d — trusted composition and deferred platform gate
 
-- The packaged Tauri host is the sole first-administrator bootstrap owner in
-  C1. It reuses the opened `SqliteKernel`, `DesktopState.setup_gate`, owner-only
-  `bootstrap.secret`, data-root descriptor/permissions, and exclusive lock. In
-  packaged mode it embeds the existing local `fasti-api` router and owns the
-  fixed `127.0.0.1:8420` listener. The host command, HTTP callback, kernel,
-  active TrailBase generation, and process-memory PKCE verifier vault all use
-  that one Access runtime. It never starts or connects to a second `fastid`
-  process for the same data root.
-  A Rust host command loads and constant-time checks the bootstrap secret,
-  starts the one-use bootstrap ceremony through the in-process Access runtime,
-  and uses the locked Tauri/Webview cookie facility to set the narrow binding
-  cookie before navigation. JavaScript receives only the fixed authorization
-  URL and ceremony expiry. It never receives the bootstrap secret, ceremony
-  binding secret, or a privileged HTTP operation. Do not add another launcher,
-  wizard framework, provider abstraction, or loopback-only bootstrap
-  substitute.
-- After the callback has claimed a ceremony that the packaged host already
-  opened for first-administrator bootstrap, the server loads the owner-only
-  bootstrap secret again inside the process for final transactional
-  verification. The callback never accepts that secret from a cookie, header,
-  query, body, JavaScript, or SDK. A normal sign-in ceremony cannot be promoted
-  to bootstrap by this internal composition.
-- Composition roots are mutually exclusive. Standalone `fastid` owns one
-  concrete local router and Access runtime for ordinary sign-in and application
-  access. Packaged Tauri mode embeds and reuses that same router/runtime shape
-  in the host process so first-administrator ceremony start and callback share
-  one verifier vault. No second process may own the data root or fixed port.
-  Either root mounts browser-session routes only after the exact supervised
-  TrailBase release and active installation/generation have been verified.
-  The browser cannot construct or replace the runtime.
+- The trusted local Unix CLI owns the active C1 first-administrator bootstrap. Run
+  `fasti access bootstrap-administrator` while `fastid` is stopped. The CLI
+  holds the exclusive data-root lock, proves the owner-only `bootstrap.secret`,
+  requires completed first-client enrollment, verifies the exact active
+  TrailBase installation receipt, and keeps the PKCE verifier and callback
+  binding in one Rust process. It accepts no password, token, bootstrap secret,
+  subject, or binding argument.
+- The CLI prints only the TrailBase authorization URL and expiry. TrailBase
+  receives each person's password. The operator pastes the exact fixed callback
+  URL through bounded, non-echoed terminal input. Fasti then performs the same
+  `/token` -> `/status` -> `/logout` exchange and one transactional anchor,
+  subject, administrator membership, profile-grant, provenance, audit, and
+  ceremony completion. The transaction immediately revokes its evidence-only
+  Fasti session, returns no cookie or session secret, and leaves ordinary
+  browser sign-in as the next action.
+- The CLI, standalone `fastid`, and packaged host are mutually exclusive owners
+  of one data root. The CLI has no router or fabricated listener. `fastid` owns
+  the exact `127.0.0.1:8420` router for ordinary browser sign-in. A normal
+  sign-in ceremony cannot become bootstrap, and no loopback HTTP caller can
+  invoke the operator operation.
 - The locked Tauri 2.11.5/Wry 0.55.1 native cookie source is preserved, but its
   runtime proof is no longer an immediate C1 exit gate. Linux, Windows, and
   macOS WebView callback transport, first-administrator authentication, and
@@ -517,6 +507,9 @@ grant_owner_client_id }`. Only persistence that truly records source
   restart, exact TrailBase outage behavior, and ordinary-browser evidence
   pass. Packaged-host runtime and WebView proof remain required only before a
   packaged desktop authentication claim.
+- Windows first-administrator setup is deferred with packaged authentication;
+  no Windows CLI support is claimed until protected console input and its
+  exact platform evidence exist.
 
 ### 2.5 C1.3a-c completion record
 

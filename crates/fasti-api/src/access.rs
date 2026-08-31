@@ -7,8 +7,8 @@ use crate::trailbase::{
     sha256_digest, TrailBaseCallbackOutcome, TrailBaseOrchestrationError, TrailBaseOrchestrator,
 };
 use crate::{
-    FASTI_ACCESS_BINDING_COOKIE, FASTI_ACCESS_CALLBACK_PATH, FASTI_ACCESS_CONTINUATION_COOKIE,
-    FASTI_ACCESS_CONTINUATION_PATH, FASTI_ACCESS_HOST,
+    FASTI_ACCESS_BINDING_COOKIE, FASTI_ACCESS_CALLBACK_PATH, FASTI_ACCESS_CALLBACK_URL,
+    FASTI_ACCESS_CONTINUATION_COOKIE, FASTI_ACCESS_CONTINUATION_PATH, FASTI_ACCESS_HOST,
 };
 use axum::{
     extract::{rejection::JsonRejection, DefaultBodyLimit, Path, RawQuery, State},
@@ -422,6 +422,14 @@ fn exact_callback_code(raw_query: Option<&str>) -> Option<String> {
     } else {
         None
     }
+}
+
+pub(crate) fn exact_callback_url_code(value: &str) -> Option<String> {
+    exact_callback_code(
+        value
+            .strip_prefix(FASTI_ACCESS_CALLBACK_URL)?
+            .strip_prefix('?'),
+    )
 }
 
 fn exact_host(headers: &HeaderMap) -> bool {
@@ -1336,6 +1344,23 @@ mod tests {
             Some("code=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa+"),
         ] {
             assert!(exact_callback_code(invalid).is_none());
+        }
+    }
+
+    #[test]
+    fn operator_callback_parser_requires_the_exact_fixed_url() {
+        let code = "aB3".repeat(16);
+        let valid = format!("{FASTI_ACCESS_CALLBACK_URL}?code={code}");
+        assert_eq!(exact_callback_url_code(&valid), Some(code));
+        for invalid in [
+            format!(" {valid}"),
+            format!("{valid} "),
+            format!("{valid}&extra=1"),
+            format!("{valid}#fragment"),
+            valid.replace("127.0.0.1", "localhost"),
+            valid.replace(FASTI_ACCESS_CALLBACK_PATH, "/wrong"),
+        ] {
+            assert!(exact_callback_url_code(&invalid).is_none());
         }
     }
 

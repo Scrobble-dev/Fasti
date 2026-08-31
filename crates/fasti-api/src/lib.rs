@@ -449,6 +449,12 @@ pub struct DirectLoopbackAccessRuntime {
     trailbase: Option<Arc<trailbase::TrailBaseOrchestrator>>,
 }
 
+/// Trusted headless host for first-administrator setup while `fastid` is stopped.
+pub struct LocalOperatorAccessRuntime {
+    trailbase: Arc<trailbase::TrailBaseOrchestrator>,
+    access: Arc<dyn LocalKernel>,
+}
+
 /// First-administrator ceremony material kept inside trusted Rust host code.
 pub struct StartedFirstAdministratorBootstrap {
     operation_id: fasti_domain::OperationId,
@@ -471,6 +477,81 @@ impl StartedFirstAdministratorBootstrap {
     }
 }
 
+fn verified_trailbase_orchestrator(
+    kernel: &Arc<dyn LocalKernel>,
+    trailbase_root: &Path,
+) -> io::Result<Option<Arc<trailbase::TrailBaseOrchestrator>>> {
+    let evidence = trailbase::verify_installation_receipt(trailbase_root)?;
+    let installation = fasti_application::HumanAccessPort::verify_trailbase_installation(
+        kernel.as_ref(),
+        fasti_application::VerifyTrailBaseInstallationCommand::new(
+            evidence.instance_id,
+            evidence.physical_root_identity,
+            evidence.release_lock_identity,
+            evidence.declared_restore,
+            RequestCorrelationId::new_v7(),
+            chrono::Utc::now(),
+        ),
+    )
+    .map_err(|_| io::Error::other("TrailBase activation verification failed"))?;
+    Ok(
+        (installation.activation_state() == TrailBaseActivationState::Active).then(|| {
+            Arc::new(
+                trailbase::TrailBaseOrchestrator::production(Arc::clone(kernel), &installation)
+                    .expect("active TrailBase installation must satisfy the fixed C1 client"),
+            )
+        }),
+    )
+}
+
+fn start_first_administrator_bootstrap(
+    trailbase: &trailbase::TrailBaseOrchestrator,
+    selection: AuthCeremonySelection,
+    bootstrap_secret: SecretMaterial,
+) -> Result<StartedFirstAdministratorBootstrap, ProblemCode> {
+    let created_at = chrono::Utc::now();
+    let expires_at = created_at
+        + chrono::Duration::from_std(C1_AUTH_CEREMONY_LIFETIME)
+            .expect("C1 ceremony lifetime fits chrono");
+    let started = trailbase
+        .start_bootstrap(
+            selection,
+            bootstrap_secret,
+            RequestCorrelationId::new_v7(),
+            created_at,
+            expires_at,
+        )
+        .map_err(|error| match error {
+            trailbase::TrailBaseOrchestrationError::ApplicationProblem(code) => code,
+            trailbase::TrailBaseOrchestrationError::InvalidInput => ProblemCode::IntegrityFailed,
+            trailbase::TrailBaseOrchestrationError::LocalState => ProblemCode::StorageUnavailable,
+            _ => ProblemCode::TrailBaseTrustUnavailable,
+        })?;
+    Ok(StartedFirstAdministratorBootstrap {
+        operation_id: started.operation_id,
+        authorization_url: started.authorization_url,
+        expires_at: started.expires_at,
+        browser_binding: started.browser_binding,
+    })
+}
+
+fn cancel_first_administrator_bootstrap(
+    trailbase: &trailbase::TrailBaseOrchestrator,
+    started: StartedFirstAdministratorBootstrap,
+) -> Result<(), ProblemCode> {
+    trailbase
+        .cancel(fasti_application::CancelAuthCeremonyCommand::new(
+            started.operation_id,
+            RequestCorrelationId::new_v7(),
+            chrono::Utc::now(),
+        ))
+        .map_err(|error| match error {
+            trailbase::TrailBaseOrchestrationError::ApplicationProblem(code) => code,
+            trailbase::TrailBaseOrchestrationError::LocalState => ProblemCode::StorageUnavailable,
+            _ => ProblemCode::TrailBaseTrustUnavailable,
+        })
+}
+
 impl DirectLoopbackAccessRuntime {
     pub fn new(
         kernel: Arc<dyn LocalKernel>,
@@ -491,36 +572,12 @@ impl DirectLoopbackAccessRuntime {
         let boundary =
             BrowserRequestBoundaryPolicy::try_new(FASTI_ACCESS_ORIGIN, FASTI_ACCESS_HOST)
                 .expect("fixed C1 browser boundary is valid");
-        let installation = trailbase_root
-            .map(|root| {
-                let evidence = trailbase::verify_installation_receipt(root)?;
-                fasti_application::HumanAccessPort::verify_trailbase_installation(
-                    kernel.as_ref(),
-                    fasti_application::VerifyTrailBaseInstallationCommand::new(
-                        evidence.instance_id,
-                        evidence.physical_root_identity,
-                        evidence.release_lock_identity,
-                        evidence.declared_restore,
-                        RequestCorrelationId::new_v7(),
-                        chrono::Utc::now(),
-                    ),
-                )
-                .map_err(|_| io::Error::other("TrailBase activation verification failed"))
-            })
-            .transpose()?;
-        let trailbase = installation.and_then(|installation| {
-            (installation.activation_state() == TrailBaseActivationState::Active).then(|| {
-                Arc::new(
-                    trailbase::TrailBaseOrchestrator::production(
-                        Arc::clone(&kernel),
-                        &installation,
-                    )
-                    .expect("active TrailBase installation must satisfy the fixed C1 client"),
-                )
-            })
-        });
+        let trailbase = trailbase_root
+            .map(|root| verified_trailbase_orchestrator(&kernel, root))
+            .transpose()?
+            .flatten();
         let browser_runtime = Some((boundary, trailbase.as_ref().map(Arc::clone)));
-        let router = durable_loopback_router(kernel, data_root, browser_runtime);
+        let router = durable_loopback_router(Arc::clone(&kernel), data_root, browser_runtime);
         Ok(Self { router, trailbase })
     }
 
@@ -538,7 +595,7 @@ impl DirectLoopbackAccessRuntime {
             BrowserRequestBoundaryPolicy::try_new(FASTI_ACCESS_ORIGIN, FASTI_ACCESS_HOST)
                 .expect("fixed C1 browser boundary is valid");
         let router = durable_loopback_router(
-            kernel,
+            Arc::clone(&kernel),
             data_root,
             Some((boundary, Some(Arc::clone(&trailbase)))),
         );
@@ -557,55 +614,95 @@ impl DirectLoopbackAccessRuntime {
             .trailbase
             .as_ref()
             .ok_or(ProblemCode::TrailBaseTrustUnavailable)?;
-        let created_at = chrono::Utc::now();
-        let expires_at = created_at
-            + chrono::Duration::from_std(C1_AUTH_CEREMONY_LIFETIME)
-                .expect("C1 ceremony lifetime fits chrono");
-        let started = trailbase
-            .start_bootstrap(
-                selection,
-                bootstrap_secret,
-                RequestCorrelationId::new_v7(),
-                created_at,
-                expires_at,
-            )
-            .map_err(|error| match error {
-                trailbase::TrailBaseOrchestrationError::ApplicationProblem(code) => code,
-                trailbase::TrailBaseOrchestrationError::InvalidInput => {
-                    ProblemCode::IntegrityFailed
-                }
-                trailbase::TrailBaseOrchestrationError::LocalState => {
-                    ProblemCode::StorageUnavailable
-                }
-                _ => ProblemCode::TrailBaseTrustUnavailable,
-            })?;
-        Ok(StartedFirstAdministratorBootstrap {
-            operation_id: started.operation_id,
-            authorization_url: started.authorization_url,
-            expires_at: started.expires_at,
-            browser_binding: started.browser_binding,
-        })
+        start_first_administrator_bootstrap(trailbase, selection, bootstrap_secret)
     }
 
     pub fn cancel_first_administrator_bootstrap(
         &self,
         started: StartedFirstAdministratorBootstrap,
     ) -> Result<(), ProblemCode> {
-        self.trailbase
+        let trailbase = self
+            .trailbase
             .as_ref()
-            .ok_or(ProblemCode::TrailBaseTrustUnavailable)?
-            .cancel(fasti_application::CancelAuthCeremonyCommand::new(
-                started.operation_id,
+            .ok_or(ProblemCode::TrailBaseTrustUnavailable)?;
+        cancel_first_administrator_bootstrap(trailbase, started)
+    }
+}
+
+impl LocalOperatorAccessRuntime {
+    pub fn new(kernel: Arc<dyn LocalKernel>, trailbase_root: &Path) -> io::Result<Self> {
+        let trailbase = verified_trailbase_orchestrator(&kernel, trailbase_root)?
+            .ok_or_else(|| io::Error::other("TrailBase installation is not active"))?;
+        Ok(Self {
+            trailbase,
+            access: kernel,
+        })
+    }
+
+    #[cfg(test)]
+    fn from_test_orchestrator(
+        kernel: Arc<dyn LocalKernel>,
+        trailbase: Arc<trailbase::TrailBaseOrchestrator>,
+    ) -> Self {
+        Self {
+            trailbase,
+            access: kernel,
+        }
+    }
+
+    pub fn start_first_administrator_bootstrap(
+        &self,
+    ) -> Result<StartedFirstAdministratorBootstrap, ProblemCode> {
+        let correlation_id = RequestCorrelationId::new_v7();
+        let bootstrap_secret = self
+            .access
+            .ensure_bootstrap_secret()
+            .map_err(|problem| problem.code())?;
+        let selection = self
+            .access
+            .prepare_trailbase_bootstrap(fasti_application::PrepareTrailBaseBootstrapQuery::new(
+                SecretMaterial::from_bytes(*bootstrap_secret.expose_bytes()),
+                correlation_id,
+            ))
+            .map_err(|problem| problem.code())?;
+        start_first_administrator_bootstrap(&self.trailbase, selection, bootstrap_secret)
+    }
+
+    pub async fn complete_first_administrator_bootstrap(
+        &self,
+        started: &StartedFirstAdministratorBootstrap,
+        callback_url: &str,
+    ) -> Result<(), ProblemCode> {
+        let code = access::exact_callback_url_code(callback_url)
+            .ok_or(ProblemCode::TrailBaseProofInvalid)?;
+        self.trailbase
+            .callback_for_operator(
+                code,
+                &started.browser_binding,
                 RequestCorrelationId::new_v7(),
                 chrono::Utc::now(),
-            ))
+            )
+            .await
             .map_err(|error| match error {
                 trailbase::TrailBaseOrchestrationError::ApplicationProblem(code) => code,
+                trailbase::TrailBaseOrchestrationError::InvalidInput => {
+                    ProblemCode::TrailBaseProofInvalid
+                }
                 trailbase::TrailBaseOrchestrationError::LocalState => {
                     ProblemCode::StorageUnavailable
                 }
-                _ => ProblemCode::TrailBaseTrustUnavailable,
+                trailbase::TrailBaseOrchestrationError::LogoutUncertain => {
+                    ProblemCode::TrailBaseSessionCleanupFailed
+                }
+                _ => ProblemCode::IdentityServiceUnavailable,
             })
+    }
+
+    pub fn cancel_first_administrator_bootstrap(
+        &self,
+        started: StartedFirstAdministratorBootstrap,
+    ) -> Result<(), ProblemCode> {
+        cancel_first_administrator_bootstrap(&self.trailbase, started)
     }
 }
 

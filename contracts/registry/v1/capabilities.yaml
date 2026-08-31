@@ -380,22 +380,18 @@ surface_profiles:
     http_openapi:
       {
         state: not_applicable,
-        reason: First-administrator bootstrap is an in-process packaged-host operation and has no HTTP route.,
+        reason: First-administrator bootstrap is a trusted local CLI operation and has no HTTP route.,
       }
     sse_asyncapi:
       {
         state: not_applicable,
         reason: First-administrator bootstrap is a finite operation and has no event stream.,
       }
-    cli:
-      {
-        state: not_applicable,
-        reason: C1 assigns first-administrator bootstrap to the packaged host.,
-      }
+    cli: { state: required, binding: "cli:access-identity-bootstrap" }
     json_schema:
       {
         state: not_applicable,
-        reason: No public transport represents the host-owned bootstrap command.,
+        reason: No public transport represents the local-operator bootstrap command.,
       }
     json_ld:
       {
@@ -410,16 +406,11 @@ surface_profiles:
       }
     knowledge: { state: required, binding: "knowledge:problem-catalog" }
     package_smoke:
-      {
-        state: later_body,
-        body: c1,
-        reason: Packaged-host bootstrap smoke is delivered with C1 host composition.,
-      }
+      { state: required, binding: "package-smoke:c1-operator-bootstrap" }
     ui:
       {
-        state: later_body,
-        body: c1,
-        reason: The approved resumable first-run UI is delivered in C1.4.,
+        state: not_applicable,
+        reason: The active first-administrator operation is the trusted local CLI; packaged first-run authentication remains unavailable until C1-TAURI-AUTH.,
       }
 
   c1_access_projection:

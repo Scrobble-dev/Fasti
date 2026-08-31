@@ -195,8 +195,6 @@
       host = {
         networkConfigurationScope: "node",
         profileDataAuthority: "browser_session",
-        startFirstAdministratorBootstrap: () =>
-          invoke("start_first_administrator_bootstrap"),
         startTrailBaseSignIn: (request) =>
           accessClient.startTrailBaseSignIn(request),
         readTrailBaseContinuation: (signal) =>
