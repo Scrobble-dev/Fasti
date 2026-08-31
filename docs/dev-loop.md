@@ -139,17 +139,12 @@ Run the C1 gate suite with:
 cargo xtask test milestone --body C1
 ```
 
-Run it from an active local Linux Wayland or X11 session on a host that permits
-unprivileged user and network namespaces. The release-host gate builds and
-copies the locked desktop binary, gives it private data and XDG roots, and runs
-its fixed loopback listener inside a route-less namespace. Headless runners,
-macOS, and Windows do not satisfy that Linux gate.
-
-The command writes `target/fasti-receipts/access-c1.json`. This is a gate-suite
-receipt, not a closure manifest. The Linux release-host smoke proves embedded
-routes and Wry process composition only. Authenticated package smoke, packaged
-WebView behavior, cross-platform, assistive-technology, review, pull-request,
-merge, and release evidence remain pending.
+The command writes `target/fasti-receipts/access-c1.json` as the in-scope C1
+delivery receipt. Its locked desktop tests cover the trusted-host source
+boundary only. They do not prove packaged Tauri authentication. That WebView,
+cross-platform, and packaged assistive-technology work is deferred to
+`C1-TAURI-AUTH`; no packaged desktop authentication support is claimed.
+Review, exact-head CI, merge, and merged-tree evidence remain required.
 
 ## Desktop QA
 

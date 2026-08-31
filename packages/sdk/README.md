@@ -57,9 +57,10 @@ These C1 methods exist only on the exact requested-and-bound
 `127.0.0.1:8420` durable listener. Exchange and new session issuance require a
 verified installation receipt and persisted active TrailBase activation.
 Fallback, alternate-loopback, generic, integration, wildcard or container
-forwarding, and remote routers omit C1. Package smoke, closure manifest,
-packaged WebView, platform, assistive-technology, exact-head, merge, and release
-evidence remain pending.
+forwarding, and remote routers omit C1. Review, exact-head, merge, and
+merged-tree evidence remain pending. Packaged Tauri authentication, platform
+WebView behavior, and packaged assistive-technology evidence are deferred to
+`C1-TAURI-AUTH` and are not claimed.
 
 ## Governed metadata projections
 

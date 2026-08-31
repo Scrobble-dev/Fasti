@@ -42,9 +42,11 @@ issuance require a verified installation receipt and persisted active
 activation. Port fallback, alternate loopback, generic local, integration,
 container-forwarded, wildcard, and remote routers omit C1 routes.
 
-This source state is not a supported release. Package smoke, packaged WebView,
-cross-platform, assistive-technology, pull-request, merge, and release evidence
-remain pending.
+This source state is not a supported release. C1 review, exact-head CI, merge,
+and merged-tree evidence remain pending. Packaged Tauri authentication,
+cross-platform WebView behavior, and packaged assistive-technology proof are
+deferred to `C1-TAURI-AUTH`; no packaged desktop authentication support is
+claimed.
 
 ## Required sign-in methods
 

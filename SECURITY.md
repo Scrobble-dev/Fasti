@@ -33,7 +33,7 @@ The project will acknowledge and investigate reports as maintainer availability 
 - Durable setup publishes `already_initialized`, `bootstrap_closed`, `integrity_failed`, and `storage_unavailable`. Authentication, cursor, evidence, identity, and review failures remain staged until their public routes activate.
 - `cargo-deny` (`deny.toml`) gates the main workspace's dependency licenses, advisories, and sources in CI; a documented allowlist keeps every dependency compatible with distributing Fasti under AGPL-3.0-or-later as a dependency, not a derivative.
 
-These controls make the development baseline and B2/C1 review implementation safer. Durable local routes require an explicit data root and direct loopback or an explicitly declared loopback-only container port forward. The authenticated remote subset excludes human-account and browser-session routes. This does not make Fasti a supported service. C1 package smoke, closure manifest, packaged WebView, cross-platform, assistive-technology, exact-head, merge, and release evidence remain pending.
+These controls make the development baseline and B2/C1 review implementation safer. Durable local routes require an explicit data root and direct loopback or an explicitly declared loopback-only container port forward. The authenticated remote subset excludes human-account and browser-session routes. This does not make Fasti a supported service. C1 review, exact-head, merge, and merged-tree evidence remain pending. Packaged Tauri authentication and its cross-platform WebView and assistive-technology evidence are deferred to `C1-TAURI-AUTH` and are not claimed.
 
 ## Temporary dependency exception
 
@@ -69,7 +69,7 @@ The system must fail closed when authorization, durability, limits, source ident
 
 B2-B8 must still prove, rather than merely document:
 
-- C1's combined package smoke, packaged WebView cookie behavior, cross-platform listener and process behavior, assistive-technology evidence, final security review, exact-head CI, and merged-tree proof;
+- C1's final security review, ordinary-browser accessibility evidence, exact-head CI, and merged-tree proof; packaged WebView cookie behavior, cross-platform listener and process behavior, and packaged assistive-technology evidence belong to the unclaimed `C1-TAURI-AUTH` follow-up;
 - future authenticated local transport if the approved same-user local-process threat boundary changes; C1 does not claim that its installation receipt authenticates the live loopback peer after process replacement;
 - first-client enrollment, closed bootstrap, rotation, revocation, expiry, current-epoch authorization, and profile isolation under process-crash, restart, concurrency, and supported physical-storage tests;
 - strict body, stream, byte, temporary-space, archive, and concurrency limits before expensive work;

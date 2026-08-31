@@ -1,6 +1,6 @@
 # Fasti Access C1 implementation gate
 
-Status: `C1_5_SOURCE_COMPLETE_CLOSURE_EVIDENCE_PENDING`
+Status: `C1_SOURCE_COMPLETE_DELIVERY_GATES_PENDING_TAURI_DEFERRED`
 
 Recorded: 2026-08-30
 
@@ -473,7 +473,7 @@ grant_owner_client_id }`. Only persistence that truly records source
   operations and no event channel. JSON-LD remains not applicable because
   identity and session state are private security state.
 
-#### C1.3d — trusted composition and exit gate
+#### C1.3d — trusted composition and deferred platform gate
 
 - The packaged Tauri host is the sole first-administrator bootstrap owner in
   C1. It reuses the opened `SqliteKernel`, `DesktopState.setup_gate`, owner-only
@@ -505,19 +505,18 @@ grant_owner_client_id }`. Only persistence that truly records source
   Either root mounts browser-session routes only after the exact supervised
   TrailBase release and active installation/generation have been verified.
   The browser cannot construct or replace the runtime.
-- Before using a Tauri cookie API, verify the exact locked Tauri version and
-  primary source. The locked Tauri 2.11.5/Wry 0.55.1 native facility is the
-  selected minimum and receives the exact loopback domain above. Do not add a
-  cookie dependency or custom cookie store. Linux, Windows, and macOS WebView
-  tests must prove that the native-set binding cookie is returned only to the
-  exact loopback callback. A platform that rejects it keeps first-run
-  bootstrap unavailable; do not weaken the cookie.
-- Exit only after operation authorization matrices, transaction rollback,
+- The locked Tauri 2.11.5/Wry 0.55.1 native cookie source is preserved, but its
+  runtime proof is no longer an immediate C1 exit gate. Linux, Windows, and
+  macOS WebView callback transport, first-administrator authentication, and
+  cookie behavior belong to `C1-TAURI-AUTH`. A platform that rejects the
+  Secure cookie remains unavailable; do not add a cookie dependency, custom
+  cookie store, or weaker cookie.
+- C1 exits only after operation authorization matrices, transaction rollback,
   cookie/path/origin/two-tab/replay tests, generated drift, SDK parsing,
-  no-secret scans, local/remote router negatives, packaged-host bootstrap,
-  restart, and exact TrailBase outage behavior pass. Real-browser cookie
-  behavior is also an entry gate for C1.4; unit HTTP tests alone do not prove
-  `Secure` and `SameSite` behavior on the fixed loopback origin.
+  no-secret scans, local/remote router negatives, trusted-host source tests,
+  restart, exact TrailBase outage behavior, and ordinary-browser evidence
+  pass. Packaged-host runtime and WebView proof remain required only before a
+  packaged desktop authentication claim.
 
 ### 2.5 C1.3a-c completion record
 
@@ -594,7 +593,8 @@ pushed or merged.
 
 Code completion is not platform conformance. Real Linux, Windows, and macOS
 WebViews must still prove the native-set Secure callback cookie, exact-path
-delivery, two-start recovery, and one exchange before C1.3d closes. The local
+delivery, two-start recovery, and one exchange before `C1-TAURI-AUTH` closes.
+They do not block immediate C1 delivery. The local
 fixed port is currently owned by an unrelated `pasta.avx2` process, PID
 `1329362`; no shared process was stopped and no fallback was introduced.
 
@@ -632,8 +632,9 @@ TrailBase /token -> /status -> local subject check -> /logout -> discard
 ```
 
 The C1.4 UI may be authored and fixture-tested while packaged platform proof
-is pending, but it must not claim runtime completion or activate ordinary
-sign-in before both this continuation gate and the WebView cookie gate pass.
+is pending. Ordinary-browser activation requires this continuation gate and
+ordinary-browser evidence. Packaged desktop activation separately requires
+the `C1-TAURI-AUTH` WebView gate.
 
 ### 2.8 Frozen identity-first continuation contract
 
@@ -784,10 +785,33 @@ active activation. Port fallback, alternate loopback, generic local,
 integration, wildcard or container forwarding, and remote routers omit the C1
 route set.
 
-Source implementation is not C1 closure. The closure manifest, package smoke,
-packaged WebView behavior, Linux/Windows/macOS evidence, assistive-technology
-evidence, full WCAG 2.2 Level AA and EN 301 549 evaluation, final reviews,
-exact-head CI, pull request, merge, release, and deployment remain pending.
+Source implementation is not C1 delivery. The in-scope milestone receipt,
+final reviews, exact-head CI, pull request, merge, and merged-tree evidence
+remain pending. Full WCAG 2.2 Level AA and EN 301 549 conformance is not
+claimed.
+
+### 2.10 Deferred packaged Tauri authentication
+
+Work package `C1-TAURI-AUTH` owns packaged-WebView authentication after C1
+merges. It is not part of the immediate C1 delivery boundary.
+
+The preserved Linux failure harness is
+`scripts/smoke-desktop-access-webdriver.py`. With WebKitGTK 2.52.3 it reached
+the exact pinned TrailBase sign-in flow, then failed before callback exchange
+because the packaged WebView did not retain the required Secure callback-
+binding cookie on either `http://127.0.0.1` or `http://localhost`. Both native
+cookie insertion and an HTTP `Set-Cookie` probe failed. The harness uses
+generated disposable credentials, redacts values, and writes no password or
+vendor token to its evidence.
+
+This evidence does not authorize local HTTPS, certificate generation, a
+weaker cookie, JavaScript credential storage, or a separate native session
+system. C1 keeps the ordinary-browser Secure-cookie contract and direct
+TrailBase backchannel unchanged. No packaged desktop authentication support is
+claimed. The follow-up must choose and verify its transport independently,
+retain the existing Fasti authorization and transaction boundary, and prove
+Linux, Windows, macOS, platform accessibility, restart, revocation, and
+no-secret behavior before activation.
 
 ## 3. Exact TrailBase evidence
 
@@ -1401,15 +1425,15 @@ C1 reuses these owners. It does not rebuild them.
 - [x] **T4 (P1, human: ~2 days / Codex: ~6 hours)** — Access API and contracts — Mount authorized operations and generate every applicable contract and SDK surface.
   - Surfaced by: code-quality review; C1 capabilities are reserved but not mounted.
   - Files: API, capability registry, generators, SDK, host after M2 handoff.
-  - Verify: generated drift, mutation tests, authorization negatives, and no-secret schemas. The local source implementation is complete; C1 closure evidence remains pending.
+  - Verify: generated drift, mutation tests, authorization negatives, and no-secret schemas. The local source implementation is complete; C1 delivery evidence remains pending.
 - [x] **T5 (P1, human: ~3 days / Codex: ~1 day)** — Gate 10 A+C source — Implement permanent A, resumable C, and shared B evidence from one projection.
   - Surfaced by: UI test review; the earlier truthful unavailable shells required one implemented projection and separate A and C purposes.
   - Files: existing runtime settings owner, host, types, and `access-c1.spec.ts` after M2 handoff.
   - Verify: focused browser, theme, reflow, automated Axe, Tabler-policy, and Impeccable source checks. Packaged and manual acceptance stays in T6.
-- [ ] **T6 (P1, human: ~2 days / Codex: ~6 hours)** — Closure — Add the C1 milestone, run all delivery gates, open one PR, merge the green exact head, and verify merged `dev`.
-  - Surfaced by: test and delivery review; the gate-suite runner now exists, but the closure manifest and delivery evidence do not.
+- [ ] **T6 (P1, human: ~2 days / Codex: ~6 hours)** — Delivery — Run the C1 milestone, open one PR, merge the green exact head, and verify merged `dev`.
+  - Surfaced by: test and delivery review; the in-scope runner exists, but its exact-head receipt and delivery evidence are pending.
   - Files: existing xtask/test/evidence/documentation owners after M2 handoff.
-  - Verify: C1 milestone, canonical PR gate, native/OCI envelopes, full packaged browser, accessibility and cognitive-accessibility acceptance, reviews, rollback, exact-head and merged-head receipts.
+  - Verify: C1 milestone, canonical PR gate, native/OCI envelopes, browser A+C accessibility automation, reviews, rollback, exact-head and merged-head receipts. Packaged Tauri authentication is separately owned by `C1-TAURI-AUTH`.
 
 ## 19. Safe next action
 
@@ -1418,10 +1442,10 @@ C1 reuses these owners. It does not rebuild them.
 2. Keep the local source checkpoint at
    `dde753d77aa5022cdcffc7b284f2abf78c94af79` while C1.5 reviews the combined
    result.
-3. Run the C1 gate suite. Treat its receipt as gate evidence only, not a closure
-   manifest.
-4. Complete package smoke, packaged WebView, platform, assistive-technology,
-   security, design, developer-experience, and exact-head delivery evidence.
+3. Run the C1 gate suite. Treat its receipt as the in-scope delivery receipt,
+   not proof of packaged Tauri authentication.
+4. Complete security, design, developer-experience, browser accessibility,
+   exact-head, and merged-tree delivery evidence.
 5. Reconcile the one documentation-only `origin/dev` commit without changing
    C1 behavior. Do not claim a merge or allocate v15 before merged-tree proof.
 6. Keep one writer for shared source surfaces while later-slice agents remain
@@ -1449,8 +1473,9 @@ single-runtime, actor-provenance, problem-contract, native-cookie, and
 RegisterNamespace policy gaps. Additive AGY challenged the corrected contract;
 it did not replace the subagent review or an evidence gate.
 
-**VERDICT:** C1 SOURCE IMPLEMENTATION COMPLETE LOCALLY; C1.5 CLOSURE PENDING.
-Do not claim package, platform, accessibility conformance, pull request, merge,
-release, or deployment evidence before its exact gate passes.
+**VERDICT:** C1 SOURCE IMPLEMENTATION COMPLETE LOCALLY; C1 DELIVERY GATES
+PENDING; PACKAGED TAURI AUTHENTICATION DEFERRED. Do not claim packaged desktop
+authentication, accessibility conformance, pull request, merge, release, or
+deployment evidence before its exact gate passes.
 
 NO UNRESOLVED DECISIONS

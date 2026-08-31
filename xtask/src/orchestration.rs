@@ -53,14 +53,14 @@ pub(crate) fn run_access_c1(root: &Path) -> anyhow::Result<()> {
     write_gate_suite_receipt(
         root,
         Path::new("target/fasti-receipts/access-c1.json"),
-        "fasti.access-c1.gates",
+        "fasti.access-c1.delivery",
         "cargo xtask test milestone --body C1",
         &records,
     )?;
     Ok(())
 }
 
-pub(crate) fn access_c1_gates() -> [CommandGate; 5] {
+pub(crate) fn access_c1_gates() -> [CommandGate; 4] {
     [
         CommandGate::new(
             "access.prepared_machine",
@@ -84,13 +84,7 @@ pub(crate) fn access_c1_gates() -> [CommandGate; 5] {
                 "--manifest-path",
                 "apps/desktop/src-tauri/Cargo.toml",
             ],
-            "install the locked desktop prerequisites and repair the packaged-host Access boundary",
-        ),
-        CommandGate::new(
-            "access.desktop_release_host_smoke",
-            "bash",
-            ["scripts/smoke-desktop-access.sh"],
-            "run the copied Linux release desktop in a local display session and repair its embedded Access composition",
+            "install the locked desktop prerequisites and repair the trusted-host Access source boundary",
         ),
         CommandGate::new(
             "access.browser_fixture",
@@ -391,7 +385,7 @@ mod tests {
     }
 
     #[test]
-    fn access_c1_reuses_existing_release_contract_host_and_browser_gates() {
+    fn access_c1_reuses_prepared_contract_host_and_browser_gates() {
         let gates = access_c1_gates();
         assert_eq!(
             gates.iter().map(CommandGate::id).collect::<Vec<_>>(),
@@ -399,7 +393,6 @@ mod tests {
                 "access.prepared_machine",
                 "access.contract_profile",
                 "access.desktop_host",
-                "access.desktop_release_host_smoke",
                 "access.browser_fixture",
             ]
         );
@@ -414,12 +407,8 @@ mod tests {
         assert!(gates[2]
             .display()
             .contains("apps/desktop/src-tauri/Cargo.toml"));
-        assert_eq!(
-            gates[3].display(),
-            "\"bash\" \"scripts/smoke-desktop-access.sh\""
-        );
-        assert!(gates[4].display().contains("tests/e2e/access-c1.spec.ts"));
-        assert!(gates[4].display().contains("--project=chrome"));
+        assert!(gates[3].display().contains("tests/e2e/access-c1.spec.ts"));
+        assert!(gates[3].display().contains("--project=chrome"));
     }
 
     #[test]

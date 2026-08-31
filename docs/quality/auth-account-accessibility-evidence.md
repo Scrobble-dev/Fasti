@@ -10,11 +10,11 @@ not a production identity, WCAG 2.2 Level AA, or EN 301 549 conformance claim.
 
 | Capability                                               | Current local source state                                                | Remaining evidence                                                                                                                           |
 | -------------------------------------------------------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| Human sign-in                                            | C1 fixed-origin source implemented; new issuance requires verified active TrailBase evidence | Package smoke, packaged WebView cookie behavior, platform evidence, final review, and delivery.                                               |
-| Fasti browser session                                    | C1 issuance, projection, inventory, rotation, profile selection, and revocation source implemented | Package smoke, platform evidence, final review, exact-head CI, and merged-tree proof.                                                         |
+| Human sign-in                                            | C1 fixed-origin ordinary-browser source implemented; new issuance requires verified active TrailBase evidence | Browser exact-head evidence, final review, and delivery. Packaged Tauri authentication is a separate follow-up.                              |
+| Fasti browser session                                    | C1 issuance, projection, inventory, rotation, profile selection, and revocation source implemented | Browser accessibility evidence, final review, exact-head CI, and merged-tree proof.                                                          |
 | Session location and device                              | Not recorded                                                              | The product must say `Not recorded` until a governed collection contract exists.                                                             |
-| Profile switching                                        | Implemented through the current session and one Access projection         | Packaged-host and final authorization evidence.                                                                                              |
-| TrailBase password and supported social OIDC/PKCE        | C1 direct exchange source implemented; vendor tokens are revoked and discarded | Prepared native integration, packaged WebView, outage, and delivery evidence.                                                               |
+| Profile switching                                        | Implemented through the current session and one Access projection         | Browser and final authorization evidence.                                                                                                   |
+| TrailBase password and supported social OIDC/PKCE        | C1 direct exchange source implemented; vendor tokens are revoked and discarded | Prepared native integration, outage, browser, and delivery evidence. Packaged Tauri transport remains unclaimed.                            |
 | TrailBase password plus TOTP                             | Unavailable in C1 because v0.33.5 loses the original PKCE ceremony        | A pinned official release that preserves and verifies the full ceremony.                                                                     |
 | Passkeys and recovery codes                              | Unavailable until PR D                                                    | Server-owned credential lifecycle and recovery evidence.                                                                                     |
 | Generic OIDC, Authentik, OAuth, and device authorization | Unavailable until the relevant PR E package                               | Protocol, management, consent, token, device, and revocation evidence for each named capability.                                             |
@@ -33,9 +33,10 @@ Workbench suite passed 32 tests. Type checking, the Tabler policy check, the
 Impeccable detector, and the automated Axe/theme/reflow matrix also passed at
 that checkpoint.
 
-These are fixture and source checks. The C1 closure manifest, package smoke,
-packaged WebView, Linux/Windows/macOS, Orca/NVDA/VoiceOver, manual keyboard,
-and final exact-head evidence remain pending.
+These are fixture and source checks. Browser manual keyboard,
+assistive-technology, and final exact-head evidence remain pending. Packaged
+WebView, Linux/Windows/macOS desktop, and packaged assistive-technology proof
+are deferred to `C1-TAURI-AUTH` and are not C1 delivery claims.
 
 ## Interaction acceptance checklist
 
@@ -76,7 +77,7 @@ progressive disclosure, and inclusive design.
 ## WCAG 2.2 Level AA acceptance matrix
 
 Automated source checks cover parts of this matrix. Every row stays pending
-until the packaged platform and manual evidence are attached to the exact head.
+until ordinary-browser and manual evidence are attached to the exact head.
 
 | Success criterion                   | C1 result      | Required evidence                                                              |
 | ----------------------------------- | -------------- | ------------------------------------------------------------------------------ |
@@ -110,10 +111,10 @@ until the packaged platform and manual evidence are attached to the exact head.
 Applicable web clauses include 9.1.3.1, 9.1.4.3, 9.1.4.10, 9.1.4.11,
 9.2.1.1, 9.2.4.3, 9.2.4.6, 9.2.4.7, 9.2.5.3, 9.2.5.7, 9.2.5.8,
 9.3.2.1, 9.3.2.2, 9.3.3.1, 9.3.3.2, 9.3.3.3, 9.3.3.4, 9.4.1.2,
-and 9.4.1.3. Their results are pending. Clause 11 software evidence also
-requires the Tauri shell, operating-system accessibility APIs, high-contrast
-modes, platform text scaling, and assistive-technology runs. This record is not
-EN 301 549 certification.
+and 9.4.1.3. Their results are pending. Clause 11 software evidence for the
+Tauri shell, operating-system accessibility APIs, high-contrast modes,
+platform text scaling, and packaged assistive-technology runs belongs to
+`C1-TAURI-AUTH`. This record is not EN 301 549 certification.
 
 ## Required holistic evidence
 

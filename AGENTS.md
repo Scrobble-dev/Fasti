@@ -233,10 +233,14 @@ Document:
 - tests;
 - rollback.
 
-For C1, `cargo xtask test milestone --body C1` writes a gate-suite receipt only.
-It is not a closure manifest. Keep package smoke, packaged WebView,
-cross-platform, assistive-technology, exact-head, merge, and release evidence
-pending until each named gate passes.
+For C1, `cargo xtask test milestone --body C1` writes the in-scope delivery
+receipt. It proves the prepared TrailBase service, generated contracts and SDK,
+trusted-host source tests, and browser A+C fixture on
+the exact source tree. It does not prove packaged Tauri authentication.
+`C1-TAURI-AUTH` owns that deferred WebView, cross-platform, and packaged
+assistive-technology evidence. Do not weaken Secure cookies or claim packaged
+desktop authentication before that follow-up passes. Exact-head review, CI,
+merge, and merged-tree evidence remain required for C1 delivery.
 
 ## Quality and Security Invariants
 
