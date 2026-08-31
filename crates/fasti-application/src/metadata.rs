@@ -161,6 +161,7 @@ pub struct PurposeIdentityRoute {
 pub struct AcceptedIdentityRouteAssertion {
     assertion_id: IdentityAssertionId,
     record_id: RecordId,
+    source_grain: Grain,
     relation: IdentityAssertionRelation,
 }
 
@@ -171,6 +172,10 @@ impl AcceptedIdentityRouteAssertion {
 
     pub const fn record_id(self) -> RecordId {
         self.record_id
+    }
+
+    pub const fn source_grain(self) -> Grain {
+        self.source_grain
     }
 
     pub const fn relation(self) -> IdentityAssertionRelation {
@@ -215,6 +220,7 @@ impl IdentityRouteEvidence {
                 accepted_assertion: Some(AcceptedIdentityRouteAssertion {
                     assertion_id: assertion.assertion_id(),
                     record_id: assertion.record_id(),
+                    source_grain: assertion.source().grain(),
                     relation: assertion.relation(),
                 }),
             })
@@ -367,6 +373,7 @@ fn route_priority(
         let assertion = evidence.accepted_assertion()?;
         let exact = assertion.relation() == IdentityAssertionRelation::Exact;
         let safe_tv_work_subset = assertion.relation() == IdentityAssertionRelation::SubsetOf
+            && assertion.source_grain() == Grain::Release
             && groups_by_tv_work(anime_preference)
             && matches!(
                 (namespace, grain),
@@ -1862,6 +1869,7 @@ mod tests {
 
     fn crosswalk_assertion_fixture(
         record_id: RecordId,
+        source_grain: Grain,
         target: ExternalIdentifierClaim,
         relation: IdentityAssertionRelation,
         initial_status: IdentityAssertionStatus,
@@ -1894,7 +1902,7 @@ mod tests {
             ExternalIdentifierId::new_v7(),
             WorkspaceId::new_v7(),
             record_id,
-            identity_claim_at("source.fixture", Grain::Release, "source"),
+            identity_claim_at("source.fixture", source_grain, "source"),
         );
         IdentityAssertion::try_new(
             assertion_id,
@@ -1936,6 +1944,7 @@ mod tests {
     ) -> (IdentityRouteEvidence, IdentityAssertionId) {
         let assertion = crosswalk_assertion_fixture(
             record_id,
+            Grain::Release,
             target,
             relation,
             IdentityAssertionStatus::Accepted,
@@ -1954,6 +1963,7 @@ mod tests {
     fn accepted_crosswalk_requires_a_validated_effective_lifecycle() {
         let assertion = crosswalk_assertion_fixture(
             RecordId::new_v7(),
+            Grain::Release,
             identity_claim("mal.anime", "49894"),
             IdentityAssertionRelation::Exact,
             IdentityAssertionStatus::Candidate,
@@ -2037,6 +2047,7 @@ mod tests {
 
         let inferred = crosswalk_assertion_fixture(
             RecordId::new_v7(),
+            Grain::Release,
             identity_claim("imdb.title", "tt28254942"),
             IdentityAssertionRelation::Exact,
             IdentityAssertionStatus::Candidate,
@@ -2714,6 +2725,29 @@ mod tests {
                 .accepted_assertions()[0]
                 .relation(),
             IdentityAssertionRelation::SubsetOf
+        );
+
+        let non_release_assertion = crosswalk_assertion_fixture(
+            record_id,
+            Grain::Film,
+            identity_claim_at("tmdb.tv", Grain::Series, "1399"),
+            IdentityAssertionRelation::SubsetOf,
+            IdentityAssertionStatus::Accepted,
+            IdentityAssertionEvidenceClass::Verified,
+            IdentityEvidenceMethod::HumanVerified,
+        );
+        let non_release = IdentityRouteEvidence::accepted_crosswalk(&non_release_assertion, &[])
+            .expect("accepted non-release evidence");
+        let non_release_plan = plan_purpose_identity_route_with_evidence(
+            record_id,
+            ResolutionIntent::NuvioExport,
+            ProviderId::try_new("nuvio").expect("Nuvio provider"),
+            AnimeGroupingPreference::GroupByTvWork,
+            &[non_release],
+        );
+        assert_eq!(
+            non_release_plan.status(),
+            PurposeIdentityRouteStatus::Missing
         );
 
         let release_preference = plan_purpose_identity_route_with_evidence(
