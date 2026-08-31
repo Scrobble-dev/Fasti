@@ -489,7 +489,25 @@ impl ApplyAnimeGroupingPolicyChangeOutcome {
             } => Some(applied_operation_id),
             AnimeGroupingPolicyChange::Set(_) | AnimeGroupingPolicyChange::InheritProfile => None,
         };
-        if !previous_source.is_valid_for(policy.scope())
+        let change_matches_policy = match change {
+            AnimeGroupingPolicyChange::Set(preference) => {
+                let expected_source = match policy.scope() {
+                    AnimeGroupingPolicyScope::Profile => AnimeGroupingPolicySource::ProfileDefault,
+                    AnimeGroupingPolicyScope::Client(_) => {
+                        AnimeGroupingPolicySource::ClientOverride
+                    }
+                };
+                policy.preference() == preference && policy.source() == expected_source
+            }
+            AnimeGroupingPolicyChange::InheritProfile => {
+                matches!(policy.scope(), AnimeGroupingPolicyScope::Client(_))
+                    && policy.source() == AnimeGroupingPolicySource::ProfileDefault
+            }
+            AnimeGroupingPolicyChange::Rollback { .. } => true,
+        };
+        if !change.is_valid_for(policy.scope())
+            || !change_matches_policy
+            || !previous_source.is_valid_for(policy.scope())
             || possible_season_regroupings > affected_records
             || rolled_back_operation_id == Some(operation_id)
         {
@@ -897,6 +915,68 @@ mod tests {
             1,
         )
         .is_err());
+        assert!(ApplyAnimeGroupingPolicyChangeOutcome::try_new(
+            operation_id,
+            AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::KeepMalReleasesSeparate),
+            AnimeGroupingPreference::Automatic,
+            AnimeGroupingPolicySource::ProfileDefault,
+            policy,
+            0,
+            0,
+            0,
+        )
+        .is_err());
+        assert!(ApplyAnimeGroupingPolicyChangeOutcome::try_new(
+            operation_id,
+            AnimeGroupingPolicyChange::InheritProfile,
+            AnimeGroupingPreference::Automatic,
+            AnimeGroupingPolicySource::ProfileDefault,
+            policy,
+            0,
+            0,
+            0,
+        )
+        .is_err());
+
+        let client_id = ClientId::new_v7();
+        let client_override = AnimeGroupingPolicyView::try_new(
+            ProfileId::new_v7(),
+            AnimeGroupingPolicyScope::Client(client_id),
+            AnimeGroupingPolicySource::ClientOverride,
+            AnimeGroupingPreference::Automatic,
+            1,
+        )
+        .expect("valid client override");
+        assert!(ApplyAnimeGroupingPolicyChangeOutcome::try_new(
+            operation_id,
+            AnimeGroupingPolicyChange::InheritProfile,
+            AnimeGroupingPreference::Automatic,
+            AnimeGroupingPolicySource::ClientOverride,
+            client_override,
+            0,
+            0,
+            0,
+        )
+        .is_err());
+        let inherited = AnimeGroupingPolicyView::try_new(
+            ProfileId::new_v7(),
+            AnimeGroupingPolicyScope::Client(client_id),
+            AnimeGroupingPolicySource::ProfileDefault,
+            AnimeGroupingPreference::Automatic,
+            2,
+        )
+        .expect("valid inherited policy");
+        assert!(ApplyAnimeGroupingPolicyChangeOutcome::try_new(
+            operation_id,
+            AnimeGroupingPolicyChange::InheritProfile,
+            AnimeGroupingPreference::KeepMalReleasesSeparate,
+            AnimeGroupingPolicySource::ClientOverride,
+            inherited,
+            1,
+            0,
+            0,
+        )
+        .is_ok());
 
         let rollback = ApplyAnimeGroupingPolicyChangeOutcome::try_new(
             operation_id,
