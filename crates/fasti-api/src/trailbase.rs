@@ -1821,7 +1821,7 @@ mod tests {
             .await
             .expect("ordinary sign-in response");
         assert_eq!(start_response.status(), StatusCode::OK);
-        let binding_cookie = start_response
+        let binding_set_cookie = start_response
             .headers()
             .get_all(header::SET_COOKIE)
             .iter()
@@ -1829,14 +1829,27 @@ mod tests {
                 let value = value.to_str().ok()?;
                 value
                     .starts_with(crate::FASTI_ACCESS_BINDING_COOKIE)
-                    .then(|| {
-                        value
-                            .split_once(';')
-                            .map_or(value, |(cookie, _)| cookie)
-                            .to_owned()
-                    })
+                    .then(|| value.to_owned())
             })
             .expect("path-scoped binding cookie");
+        let binding_attributes = binding_set_cookie.split("; ").collect::<Vec<_>>();
+        assert_eq!(binding_attributes.len(), 6);
+        assert!(binding_attributes[0].starts_with(crate::FASTI_ACCESS_BINDING_COOKIE));
+        assert_eq!(
+            binding_attributes[1],
+            "Path=/api/access/v1/trailbase/callback"
+        );
+        assert!(binding_attributes[2]
+            .strip_prefix("Max-Age=")
+            .is_some_and(|value| value
+                .parse::<u64>()
+                .is_ok_and(|value| value > 0 && value <= 600)));
+        assert_eq!(
+            &binding_attributes[3..],
+            ["Secure", "HttpOnly", "SameSite=Lax"]
+        );
+        assert!(!binding_set_cookie.contains("Domain="));
+        let binding_cookie = binding_attributes[0].to_owned();
 
         let callback_response = runtime
             .router()
