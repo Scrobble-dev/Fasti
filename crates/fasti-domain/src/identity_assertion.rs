@@ -370,6 +370,7 @@ pub struct IdentityAssertion {
     workspace_id: WorkspaceId,
     record_id: RecordId,
     source_external_identifier_id: ExternalIdentifierId,
+    source: ExternalIdentifierClaim,
     target: ExternalIdentifierClaim,
     relation: IdentityAssertionRelation,
     coverage: Vec<IdentityCoverageSegment>,
@@ -491,6 +492,7 @@ impl IdentityAssertion {
             workspace_id: source.workspace_id(),
             record_id: source.record_id(),
             source_external_identifier_id: source.external_identifier_id(),
+            source: source.claim().clone(),
             target,
             relation,
             coverage,
@@ -520,6 +522,10 @@ impl IdentityAssertion {
 
     pub const fn source_external_identifier_id(&self) -> ExternalIdentifierId {
         self.source_external_identifier_id
+    }
+
+    pub const fn source(&self) -> &ExternalIdentifierClaim {
+        &self.source
     }
 
     pub const fn target(&self) -> &ExternalIdentifierClaim {
@@ -802,6 +808,7 @@ mod tests {
             assertion.source_external_identifier_id(),
             source.external_identifier_id()
         );
+        assert_eq!(assertion.source(), source.claim());
         assert_eq!(assertion.relation(), IdentityAssertionRelation::Exact);
         assert_eq!(
             assertion.initial_status(),
