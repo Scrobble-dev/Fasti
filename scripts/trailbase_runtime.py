@@ -31,6 +31,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -40,11 +41,15 @@ ROOT = Path(__file__).resolve().parents[1]
 RELEASE_PATH = ROOT / "third_party" / "trailbase" / "release.json"
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 OCI_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+TRAILBASE_INSTANCE_ID = re.compile(r"^tbi_[0-9a-f]{32}$")
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
 VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 BOOTSTRAP_PASSWORD = re.compile(r"^\s*password:\s*'([^']+)'\s*$")
 TRAILBASE_LICENSE_SHA256 = "be4741d827008446e5e8bf9ee42f9e57b57245b6aed260fbdaf00ffebe958fb7"
 TRAILBASE_REPOSITORY_URL = "https://github.com/trailbaseio/trailbase"
+INSTALLATION_RECEIPT_NAME = ".fasti-installation.json"
+INSTALLATION_RECEIPT_SCHEMA = "fasti.trailbase-installation.v1"
+RUNTIME_NONCE_BYTES = 32
 _MANAGED_PROCESS_GROUPS: dict[int, subprocess.Popen[Any]] = {}
 _STARTING_PROCESS_GROUPS = 0
 _PENDING_TERMINATION_SIGNAL: int | None = None
@@ -193,6 +198,30 @@ def _require_https(value: Any, label: str) -> str:
     if any(character.isspace() for character in value) or "@" in value.split("//", 1)[1]:
         raise ReleaseError(f"{label} must not contain credentials or whitespace")
     return value
+
+
+def _utc_now() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _new_trailbase_instance_id() -> str:
+    value = bytearray(secrets.token_bytes(16))
+    value[:6] = int(time.time_ns() // 1_000_000).to_bytes(6, "big")
+    value[6] = (value[6] & 0x0F) | 0x70
+    value[8] = (value[8] & 0x3F) | 0x80
+    return f"tbi_{uuid.UUID(bytes=bytes(value)).hex}"
+
+
+def _parse_timestamp(value: Any, label: str) -> datetime.datetime:
+    if not isinstance(value, str):
+        raise ReleaseError(f"{label} must be an RFC 3339 timestamp")
+    try:
+        parsed = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise ReleaseError(f"{label} must be an RFC 3339 timestamp") from error
+    if parsed.tzinfo is None:
+        raise ReleaseError(f"{label} must include an offset")
+    return parsed.astimezone(datetime.timezone.utc)
 
 
 def validate_release(release: Any) -> None:
@@ -473,6 +502,201 @@ def _write_private(path: Path, data: bytes, mode: int) -> None:
         os.close(descriptor)
 
 
+def _open_private_root(root: Path) -> int:
+    descriptor = os.open(
+        root,
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0),
+    )
+    try:
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISDIR(metadata.st_mode)
+            or metadata.st_uid != os.geteuid()
+            or metadata.st_mode & 0o077
+        ):
+            raise ReleaseError("TrailBase root is not an owner-only directory")
+        return descriptor
+    except (OSError, ReleaseError):
+        os.close(descriptor)
+        raise
+
+
+def _read_private_at(root_descriptor: int, name: str, maximum_bytes: int) -> bytes:
+    descriptor = os.open(
+        name,
+        os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+        dir_fd=root_descriptor,
+    )
+    try:
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != os.geteuid()
+            or metadata.st_nlink != 1
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+            or metadata.st_size > maximum_bytes
+        ):
+            raise ReleaseError(f"TrailBase installation evidence is unsafe: {name}")
+        with os.fdopen(os.dup(descriptor), "rb") as source:
+            return source.read()
+    finally:
+        os.close(descriptor)
+
+
+def _write_private_atomic_at(root_descriptor: int, name: str, data: bytes) -> None:
+    temporary = f".{name}.{os.getpid()}.{secrets.token_hex(8)}.tmp"
+    descriptor = os.open(
+        temporary,
+        os.O_WRONLY
+        | os.O_CREAT
+        | os.O_EXCL
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0),
+        0o600,
+        dir_fd=root_descriptor,
+    )
+    try:
+        with os.fdopen(descriptor, "wb", closefd=False) as destination:
+            destination.write(data)
+            destination.flush()
+            os.fsync(destination.fileno())
+        os.replace(
+            temporary,
+            name,
+            src_dir_fd=root_descriptor,
+            dst_dir_fd=root_descriptor,
+        )
+        os.fsync(root_descriptor)
+    finally:
+        os.close(descriptor)
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(temporary, dir_fd=root_descriptor)
+
+
+def _release_lock_identity() -> str:
+    return f"sha256:{hashlib.sha256(_read_regular_file(RELEASE_PATH, 64 * 1024)).hexdigest()}"
+
+
+def _physical_root_identity_at(root_descriptor: int) -> str:
+    metadata = os.fstat(root_descriptor)
+    nonce = _read_private_at(root_descriptor, "runtime.lock", RUNTIME_NONCE_BYTES)
+    if len(nonce) != RUNTIME_NONCE_BYTES:
+        raise ReleaseError("TrailBase runtime nonce has the wrong length")
+    material = (
+        metadata.st_dev.to_bytes(8, "big")
+        + metadata.st_ino.to_bytes(8, "big")
+        + nonce
+    )
+    return f"sha256:{hashlib.sha256(material).hexdigest()}"
+
+
+def _physical_root_identity(root: Path) -> str:
+    root_descriptor = _open_private_root(root)
+    try:
+        return _physical_root_identity_at(root_descriptor)
+    finally:
+        os.close(root_descriptor)
+
+
+def _artifact_identity(release: dict[str, Any], runtime: str, runtime_target: str) -> str:
+    if runtime == "native":
+        artifact = release["native"].get(runtime_target)
+        if isinstance(artifact, dict):
+            return f"sha256:{artifact['executable_sha256']}"
+    elif runtime == "oci":
+        artifact = release["oci"]["platform_manifests"].get(runtime_target)
+        if isinstance(artifact, dict):
+            return artifact["manifest_digest"]
+    raise ReleaseError("TrailBase installation runtime target is not release locked")
+
+
+def _validate_installation_receipt(
+    receipt: Any,
+    release: dict[str, Any],
+    physical_root_identity: str | None,
+) -> dict[str, Any]:
+    expected_fields = {
+        "schema_version",
+        "instance_id",
+        "physical_root_identity",
+        "release_lock_identity",
+        "runtime",
+        "runtime_target",
+        "artifact_identity",
+        "declared_restore",
+        "created_at",
+        "verified_at",
+    }
+    if not isinstance(receipt, dict):
+        raise ReleaseError("TrailBase installation receipt must be an object")
+    _require_keys(receipt, expected_fields, "TrailBase installation receipt")
+    if receipt["schema_version"] != INSTALLATION_RECEIPT_SCHEMA:
+        raise ReleaseError("unsupported TrailBase installation receipt schema")
+    instance_id = receipt["instance_id"]
+    if not isinstance(instance_id, str) or not TRAILBASE_INSTANCE_ID.fullmatch(instance_id):
+        raise ReleaseError("TrailBase instance ID is invalid")
+    parsed_id = uuid.UUID(hex=instance_id.removeprefix("tbi_"))
+    if parsed_id.version != 7 or parsed_id.variant != uuid.RFC_4122:
+        raise ReleaseError("TrailBase instance ID must be a UUIDv7")
+    for field in ("physical_root_identity", "release_lock_identity", "artifact_identity"):
+        if not isinstance(receipt[field], str) or not OCI_DIGEST.fullmatch(receipt[field]):
+            raise ReleaseError(f"TrailBase installation {field} is invalid")
+    if (
+        physical_root_identity is not None
+        and receipt["physical_root_identity"] != physical_root_identity
+    ):
+        raise ReleaseError("TrailBase installation receipt belongs to a different physical root")
+    if receipt["release_lock_identity"] != _release_lock_identity():
+        raise ReleaseError("TrailBase installation receipt belongs to a different release lock")
+    if receipt["runtime"] not in {"native", "oci"} or not isinstance(
+        receipt["runtime_target"], str
+    ):
+        raise ReleaseError("TrailBase installation runtime is invalid")
+    if receipt["artifact_identity"] != _artifact_identity(
+        release, receipt["runtime"], receipt["runtime_target"]
+    ):
+        raise ReleaseError("TrailBase installation artifact differs from the release lock")
+    if not isinstance(receipt["declared_restore"], bool):
+        raise ReleaseError("TrailBase installation declared_restore must be boolean")
+    created_at = _parse_timestamp(receipt["created_at"], "created_at")
+    verified_at = _parse_timestamp(receipt["verified_at"], "verified_at")
+    if created_at > verified_at:
+        raise ReleaseError("TrailBase installation timestamps are out of order")
+    return receipt
+
+
+def _read_installation_receipt(
+    root: Path,
+    release: dict[str, Any],
+    physical_root_identity: str | None,
+) -> dict[str, Any]:
+    root_descriptor = _open_private_root(root)
+    try:
+        try:
+            receipt = json.loads(
+                _read_private_at(root_descriptor, INSTALLATION_RECEIPT_NAME, 16 * 1024)
+            )
+        except json.JSONDecodeError as error:
+            raise ReleaseError("TrailBase installation receipt is invalid JSON") from error
+    finally:
+        os.close(root_descriptor)
+    return _validate_installation_receipt(receipt, release, physical_root_identity)
+
+
+def _write_installation_receipt(root: Path, receipt: dict[str, Any]) -> None:
+    root_descriptor = _open_private_root(root)
+    try:
+        if receipt["physical_root_identity"] != _physical_root_identity_at(root_descriptor):
+            raise ReleaseError("TrailBase root changed before installation receipt publication")
+        payload = (json.dumps(receipt, indent=2, sort_keys=True) + "\n").encode("utf-8")
+        _write_private_atomic_at(root_descriptor, INSTALLATION_RECEIPT_NAME, payload)
+    finally:
+        os.close(root_descriptor)
+
+
 def _private_directory(path: Path) -> None:
     path.mkdir(mode=0o700, parents=True, exist_ok=True)
     metadata = path.lstat()
@@ -501,13 +725,20 @@ def _acquire_runtime_lock(root: Path) -> int:
         fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         os.fchmod(descriptor, 0o600)
         metadata = os.fstat(descriptor)
+        if metadata.st_size == 0:
+            nonce = secrets.token_bytes(RUNTIME_NONCE_BYTES)
+            if os.write(descriptor, nonce) != len(nonce):
+                raise ReleaseError("TrailBase runtime nonce write did not complete")
+            os.fsync(descriptor)
+            metadata = os.fstat(descriptor)
         if (
             not stat.S_ISREG(metadata.st_mode)
             or metadata.st_uid != os.geteuid()
             or metadata.st_nlink != 1
             or stat.S_IMODE(metadata.st_mode) != 0o600
+            or metadata.st_size != RUNTIME_NONCE_BYTES
         ):
-            raise ReleaseError("TrailBase runtime lock is not an owner-only regular file")
+            raise ReleaseError("TrailBase runtime lock is not an owner-only 32-byte nonce file")
         return descriptor
     except (OSError, ReleaseError):
         os.close(descriptor)
@@ -530,8 +761,9 @@ def verify_runtime_lock(root: Path) -> None:
             metadata.st_uid != os.geteuid()
             or metadata.st_nlink != 1
             or stat.S_IMODE(metadata.st_mode) != 0o600
+            or metadata.st_size != RUNTIME_NONCE_BYTES
         ):
-            raise ReleaseError("TrailBase runtime lock is not an owner-only regular file")
+            raise ReleaseError("TrailBase runtime lock is not an owner-only 32-byte nonce file")
     finally:
         os.close(descriptor)
 
@@ -671,6 +903,71 @@ def verify_private_root(root: Path, release_version: str | None = None) -> None:
                 raise ReleaseError(f"TrailBase file permits group or other access: {path}")
             if not stat.S_ISREG(item.st_mode) and not stat.S_ISDIR(item.st_mode):
                 raise ReleaseError(f"TrailBase root contains an unsupported file type: {path}")
+
+
+def prepare_installation(
+    root: Path,
+    runtime: str,
+    oci_runtime: str | None = None,
+) -> dict[str, Any]:
+    release = load_release()
+    verify_runtime_lock(root)
+    verify_private_root(root, release["version"])
+    physical_root_identity = _physical_root_identity(root)
+    receipt_path = root / INSTALLATION_RECEIPT_NAME
+    existing: dict[str, Any] | None = None
+    if receipt_path.exists() or receipt_path.is_symlink():
+        existing = _read_installation_receipt(root, release, physical_root_identity)
+
+    if runtime == "native":
+        runtime_target = host_target()
+        executable = prepare_native(root, offline=True)
+        artifact_identity = f"sha256:{sha256_file(executable)}"
+    elif runtime == "oci":
+        if oci_runtime is None:
+            raise ReleaseError("OCI installation preparation requires podman or docker")
+        prepare_oci(root, oci_runtime, offline=True)
+        runtime_target = host_oci_platform()
+        artifact_identity = _artifact_identity(release, runtime, runtime_target)
+    else:
+        raise ReleaseError("TrailBase installation runtime must be native or oci")
+    if artifact_identity != _artifact_identity(release, runtime, runtime_target):
+        raise ReleaseError("selected TrailBase artifact differs from the release lock")
+
+    now = _utc_now()
+    receipt = {
+        "schema_version": INSTALLATION_RECEIPT_SCHEMA,
+        "instance_id": existing["instance_id"] if existing else _new_trailbase_instance_id(),
+        "physical_root_identity": physical_root_identity,
+        "release_lock_identity": _release_lock_identity(),
+        "runtime": runtime,
+        "runtime_target": runtime_target,
+        "artifact_identity": artifact_identity,
+        "declared_restore": existing["declared_restore"] if existing else False,
+        "created_at": existing["created_at"] if existing else now,
+        "verified_at": now,
+    }
+    _validate_installation_receipt(receipt, release, physical_root_identity)
+    _write_installation_receipt(root, receipt)
+    return verify_installation(root)
+
+
+def verify_installation(root: Path) -> dict[str, Any]:
+    release = load_release()
+    verify_runtime_lock(root)
+    verify_private_root(root, release["version"])
+    physical_root_identity = _physical_root_identity(root)
+    receipt = _read_installation_receipt(root, release, physical_root_identity)
+    if receipt["runtime"] == "native":
+        executable = (
+            root / "runtime" / f"v{release['version']}-{receipt['runtime_target']}" / "trail"
+        )
+        verify_executable(
+            executable,
+            release,
+            receipt["artifact_identity"].removeprefix("sha256:"),
+        )
+    return receipt
 
 
 def _new_admin_password() -> str:
@@ -1167,6 +1464,7 @@ def bootstrap_native(
             "completed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         }
         _write_private(marker, (json.dumps(receipt, indent=2) + "\n").encode("utf-8"), 0o600)
+        prepare_installation(root, "native")
     finally:
         if runtime_lock is not None:
             os.close(runtime_lock)
@@ -1214,6 +1512,17 @@ def run_native(
     )
 
 
+def _declare_restored_installation(root: Path) -> dict[str, Any]:
+    release = load_release()
+    receipt = dict(_read_installation_receipt(root, release, None))
+    receipt["physical_root_identity"] = _physical_root_identity(root)
+    receipt["declared_restore"] = True
+    receipt["verified_at"] = _utc_now()
+    _validate_installation_receipt(receipt, release, receipt["physical_root_identity"])
+    _write_installation_receipt(root, receipt)
+    return verify_installation(root)
+
+
 def _archive_path(value: str) -> Path:
     path = Path(value)
     if path.is_absolute() or ".." in path.parts or not path.parts:
@@ -1228,6 +1537,7 @@ def backup_depot(
 ) -> tuple[Path, str]:
     release_version = release_version or load_release()["version"]
     verify_private_root(root, release_version)
+    verify_installation(root)
     try:
         runtime_lock = _acquire_runtime_lock(root)
     except BlockingIOError as error:
@@ -1238,7 +1548,7 @@ def backup_depot(
         destination = output_dir / f"trailbase-v{release_version}-{timestamp}.zip"
         temporary = output_dir / f".{destination.name}.{os.getpid()}.tmp"
         inventory: list[dict[str, Any]] = []
-        sources = [root / "bootstrap.json", root / "depot"]
+        sources = [root / INSTALLATION_RECEIPT_NAME, root / "bootstrap.json", root / "depot"]
         descriptor = os.open(
             temporary,
             os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0),
@@ -1392,7 +1702,10 @@ def restore_depot(
                     raise ReleaseError("depot backup entry is invalid")
                 relative = _archive_path(entry["path"])
                 if not (
-                    relative.parts == ("bootstrap.json",)
+                    relative.parts in {
+                        (INSTALLATION_RECEIPT_NAME,),
+                        ("bootstrap.json",),
+                    }
                     or relative.parts[0] == "depot"
                 ):
                     raise ReleaseError(
@@ -1477,6 +1790,7 @@ def restore_depot(
         prepare_runtime_lock(temporary)
         verify_runtime_lock(temporary)
         verify_private_root(temporary, release_version)
+        _declare_restored_installation(temporary)
         current_parent = _validate_restore_parent(parent)
         if (current_parent.st_dev, current_parent.st_ino) != (
             parent_metadata.st_dev,
@@ -1520,11 +1834,65 @@ def _backup_restore_self_test() -> None:
             path = root / relative
             _private_directory(path.parent)
             _write_private(path, relative.encode(), 0o600)
+        prepare_runtime_lock(root)
+        release = load_release()
+        created_at = "2026-08-30T00:00:00Z"
+        source_receipt = {
+            "schema_version": INSTALLATION_RECEIPT_SCHEMA,
+            "instance_id": _new_trailbase_instance_id(),
+            "physical_root_identity": _physical_root_identity(root),
+            "release_lock_identity": _release_lock_identity(),
+            "runtime": "oci",
+            "runtime_target": host_oci_platform(),
+            "artifact_identity": _artifact_identity(release, "oci", host_oci_platform()),
+            "declared_restore": False,
+            "created_at": created_at,
+            "verified_at": created_at,
+        }
+        _write_installation_receipt(root, source_receipt)
+        verify_installation(root)
+        receipt_with_unknown_field = {**source_receipt, "unexpected": True}
+        try:
+            _validate_installation_receipt(
+                receipt_with_unknown_field,
+                release,
+                source_receipt["physical_root_identity"],
+            )
+        except ReleaseError:
+            pass
+        else:
+            raise ReleaseError("installation receipt accepted an unknown field")
+        source_nonce = (root / "runtime.lock").read_bytes()
+
+        renamed = base / "renamed"
+        root.rename(renamed)
+        root = renamed
+        if verify_installation(root)["instance_id"] != source_receipt["instance_id"]:
+            raise ReleaseError("renamed installation did not keep its instance ID")
+
+        unmanaged_copy = base / "unmanaged-copy"
+        shutil.copytree(root, unmanaged_copy)
+        try:
+            verify_installation(unmanaged_copy)
+        except ReleaseError:
+            pass
+        else:
+            raise ReleaseError("unmanaged copy retained the source physical-root identity")
         backup, _digest = backup_depot(root, base / "backups")
         restored = base / "restored"
         restore_depot(backup, restored)
         verify_runtime_lock(restored)
         verify_private_root(restored)
+        restored_receipt = verify_installation(restored)
+        if (
+            restored_receipt["instance_id"] != source_receipt["instance_id"]
+            or restored_receipt["declared_restore"] is not True
+            or restored_receipt["created_at"] != source_receipt["created_at"]
+            or (restored / "runtime.lock").read_bytes() == source_nonce
+        ):
+            raise ReleaseError(
+                "managed restore did not preserve ID, declare restore, and rotate nonce"
+            )
         if (restored / "depot/uploads/example.bin").read_bytes() != b"depot/uploads/example.bin":
             raise ReleaseError("full-depot backup self-test lost nested content")
         try:
@@ -1678,6 +2046,9 @@ def _runtime_lock_self_test() -> None:
             os.umask(previous_umask)
         lock = root / "runtime.lock"
         verify_runtime_lock(root)
+        nonce = lock.read_bytes()
+        if len(nonce) != RUNTIME_NONCE_BYTES:
+            raise ReleaseError("runtime lock self-test did not mint a 32-byte nonce")
 
         os.chmod(lock, 0o644)
         held = os.open(lock, os.O_RDWR | getattr(os, "O_NOFOLLOW", 0))
@@ -1702,6 +2073,8 @@ def _runtime_lock_self_test() -> None:
         prepare_runtime_lock(root)
         if stat.S_IMODE(lock.stat().st_mode) != 0o600:
             raise ReleaseError("runtime lock self-test did not repair a stopped lock")
+        if lock.read_bytes() != nonce:
+            raise ReleaseError("runtime lock self-test replaced a stable nonce")
 
         alias = root / "runtime-lock-alias"
         os.link(lock, alias)
@@ -1901,6 +2274,18 @@ def main() -> int:
         "prepare-runtime-lock", help="create or repair the stopped owner-only runtime lock"
     )
     prepare_runtime_lock_parser.add_argument("root", type=Path)
+    prepare_installation_parser = subcommands.add_parser(
+        "prepare-installation",
+        help="atomically create or refresh the exact installation receipt",
+    )
+    prepare_installation_parser.add_argument("root", type=Path)
+    prepare_installation_parser.add_argument("--runtime", choices=["native", "oci"], required=True)
+    prepare_installation_parser.add_argument("--oci-runtime", choices=["podman", "docker"])
+    verify_installation_parser = subcommands.add_parser(
+        "verify-installation",
+        help="emit the exact verified installation receipt as JSON",
+    )
+    verify_installation_parser.add_argument("root", type=Path)
     verify_oci_container_parser = subcommands.add_parser(
         "verify-oci-container", help="verify a running container uses the exact release image"
     )
@@ -1963,6 +2348,21 @@ def main() -> int:
         elif arguments.command == "prepare-runtime-lock":
             prepare_runtime_lock(arguments.root)
             print(f"PASS: owner-only TrailBase runtime lock {arguments.root}")
+        elif arguments.command == "prepare-installation":
+            if (arguments.runtime == "oci") != (arguments.oci_runtime is not None):
+                raise ReleaseError("--oci-runtime is required only for runtime oci")
+            print(
+                json.dumps(
+                    prepare_installation(
+                        arguments.root,
+                        arguments.runtime,
+                        arguments.oci_runtime,
+                    ),
+                    sort_keys=True,
+                )
+            )
+        elif arguments.command == "verify-installation":
+            print(json.dumps(verify_installation(arguments.root), sort_keys=True))
         elif arguments.command == "verify-oci-container":
             verify_oci_container(arguments.root, arguments.runtime, arguments.name)
             print(f"PASS: exact running TrailBase OCI container {arguments.name}")

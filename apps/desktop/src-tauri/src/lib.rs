@@ -215,7 +215,6 @@ fn start_first_administrator_bootstrap(
             access.grant_id(),
             None,
             None,
-            false,
         )
         .map_err(|_| {
             DesktopProblem::access_unavailable(
@@ -784,6 +783,17 @@ fn select_data_root(
     }
 }
 
+fn trailbase_root() -> io::Result<Option<PathBuf>> {
+    let value = std::env::var_os("FASTI_TRAILBASE_ROOT");
+    if value.as_ref().is_some_and(|value| value.is_empty()) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "FASTI_TRAILBASE_ROOT must name a directory when it is set",
+        ));
+    }
+    Ok(value.map(PathBuf::from))
+}
+
 #[cfg(feature = "desktop-runtime")]
 fn data_root(app: &tauri::App) -> io::Result<PathBuf> {
     let explicit = std::env::var_os("FASTI_DATA_ROOT");
@@ -855,12 +865,14 @@ pub fn run() {
             let (access_runtime, access_server) = {
                 let listener = bind_access_listener()?;
                 let bound_addr = listener.local_addr()?;
+                let trailbase_root = trailbase_root()?;
                 let runtime = Arc::new(fasti_api::DirectLoopbackAccessRuntime::new(
                     kernel.clone(),
                     bound_addr,
                     false,
                     &data_root,
-                ));
+                    trailbase_root.as_deref(),
+                )?);
                 let resolver = Arc::new(app.asset_resolver());
                 let router = runtime.router().fallback(
                     move |method: axum::http::Method, uri: axum::http::Uri| {

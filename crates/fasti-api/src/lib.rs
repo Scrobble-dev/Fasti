@@ -14,6 +14,7 @@ use fasti_application::{
 use fasti_contracts::{HealthResponse, ProblemActionDto, ProblemDetails, ViolationDto};
 use fasti_domain::{AuthCeremonySelection, RequestCorrelationId, TrailBaseActivationState};
 use std::collections::BTreeMap;
+use std::io;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
@@ -436,8 +437,10 @@ pub fn direct_loopback_api_router(
     bound_addr: SocketAddr,
     used_fallback: bool,
     data_root: &Path,
-) -> Router {
-    DirectLoopbackAccessRuntime::new(kernel, bound_addr, used_fallback, data_root).router()
+    trailbase_root: Option<&Path>,
+) -> io::Result<Router> {
+    DirectLoopbackAccessRuntime::new(kernel, bound_addr, used_fallback, data_root, trailbase_root)
+        .map(|runtime| runtime.router())
 }
 
 /// One fixed-origin Access runtime shared by its router and packaged host.
@@ -474,7 +477,8 @@ impl DirectLoopbackAccessRuntime {
         bound_addr: SocketAddr,
         used_fallback: bool,
         data_root: &Path,
-    ) -> Self {
+        trailbase_root: Option<&Path>,
+    ) -> io::Result<Self> {
         assert_eq!(
             bound_addr,
             FASTI_ACCESS_HOST.parse().expect("fixed C1 address"),
@@ -487,11 +491,23 @@ impl DirectLoopbackAccessRuntime {
         let boundary =
             BrowserRequestBoundaryPolicy::try_new(FASTI_ACCESS_ORIGIN, FASTI_ACCESS_HOST)
                 .expect("fixed C1 browser boundary is valid");
-        let installation = kernel
-            .read_trailbase_installation(fasti_application::ReadTrailBaseInstallationQuery::new(
-                RequestCorrelationId::new_v7(),
-            ))
-            .expect("TrailBase activation state must be readable before mounting Access");
+        let installation = trailbase_root
+            .map(|root| {
+                let evidence = trailbase::verify_installation_receipt(root)?;
+                fasti_application::HumanAccessPort::verify_trailbase_installation(
+                    kernel.as_ref(),
+                    fasti_application::VerifyTrailBaseInstallationCommand::new(
+                        evidence.instance_id,
+                        evidence.physical_root_identity,
+                        evidence.release_lock_identity,
+                        evidence.declared_restore,
+                        RequestCorrelationId::new_v7(),
+                        chrono::Utc::now(),
+                    ),
+                )
+                .map_err(|_| io::Error::other("TrailBase activation verification failed"))
+            })
+            .transpose()?;
         let trailbase = installation.and_then(|installation| {
             (installation.activation_state() == TrailBaseActivationState::Active).then(|| {
                 Arc::new(
@@ -503,11 +519,9 @@ impl DirectLoopbackAccessRuntime {
                 )
             })
         });
-        let browser_runtime = trailbase
-            .as_ref()
-            .map(|trailbase| (boundary, Arc::clone(trailbase)));
+        let browser_runtime = Some((boundary, trailbase.as_ref().map(Arc::clone)));
         let router = durable_loopback_router(kernel, data_root, browser_runtime);
-        Self { router, trailbase }
+        Ok(Self { router, trailbase })
     }
 
     pub fn router(&self) -> Router {
@@ -523,8 +537,11 @@ impl DirectLoopbackAccessRuntime {
         let boundary =
             BrowserRequestBoundaryPolicy::try_new(FASTI_ACCESS_ORIGIN, FASTI_ACCESS_HOST)
                 .expect("fixed C1 browser boundary is valid");
-        let router =
-            durable_loopback_router(kernel, data_root, Some((boundary, Arc::clone(&trailbase))));
+        let router = durable_loopback_router(
+            kernel,
+            data_root,
+            Some((boundary, Some(Arc::clone(&trailbase)))),
+        );
         Self {
             router,
             trailbase: Some(trailbase),
@@ -597,7 +614,7 @@ fn durable_loopback_router(
     data_root: &Path,
     browser_runtime: Option<(
         BrowserRequestBoundaryPolicy,
-        Arc<trailbase::TrailBaseOrchestrator>,
+        Option<Arc<trailbase::TrailBaseOrchestrator>>,
     )>,
 ) -> Router {
     assert!(
@@ -615,7 +632,7 @@ fn durable_loopback_router(
         .as_ref()
         .map(|(boundary, _)| boundary.clone());
     let access = browser_runtime.map_or_else(Router::new, |(boundary, trailbase)| {
-        access::router(Arc::clone(&kernel), boundary, Some(trailbase))
+        access::router(Arc::clone(&kernel), boundary, trailbase)
     });
     let integration_state = local::LocalApiState {
         kernel: Arc::clone(&kernel),
@@ -701,6 +718,8 @@ mod tests {
     use fasti_application::{
         AccessAdministrationPort, AuthenticateCredentialQuery, CapabilityKey, SecretMaterial,
     };
+    #[cfg(target_os = "linux")]
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
     use tower::ServiceExt;
     use utoipa::openapi::OpenApiVersion;
 
@@ -714,6 +733,59 @@ mod tests {
     #[cfg(target_os = "linux")]
     fn test_bind_addr() -> SocketAddr {
         "127.0.0.1:8420".parse().expect("loopback address")
+    }
+
+    #[cfg(target_os = "linux")]
+    fn test_trailbase_root() -> tempfile::TempDir {
+        fn digest(bytes: &[u8]) -> String {
+            trailbase::sha256_digest(bytes).to_string()
+        }
+
+        let root = tempfile::tempdir().expect("temporary TrailBase root");
+        std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700))
+            .expect("private root");
+        let nonce = [7_u8; 32];
+        let lock = root.path().join("runtime.lock");
+        std::fs::write(&lock, nonce).expect("runtime nonce");
+        std::fs::set_permissions(&lock, std::fs::Permissions::from_mode(0o600))
+            .expect("private nonce");
+        let metadata = std::fs::metadata(root.path()).expect("root metadata");
+        let mut identity = Vec::with_capacity(48);
+        identity.extend_from_slice(&metadata.dev().to_be_bytes());
+        identity.extend_from_slice(&metadata.ino().to_be_bytes());
+        identity.extend_from_slice(&nonce);
+        let (runtime_target, artifact_identity) = if cfg!(target_arch = "aarch64") {
+            (
+                "linux-aarch64",
+                "sha256:e8d86d361682e697d78fa159fb9c706f30ebdcc886a3015daa78d75eb9d7c199",
+            )
+        } else {
+            (
+                "linux-x86_64",
+                "sha256:550c053355bdc68222c94fe84ecc0e23ef983cfb7232863a7c51ff9b84bce18e",
+            )
+        };
+        let receipt = serde_json::json!({
+            "schema_version": "fasti.trailbase-installation.v1",
+            "instance_id": fasti_domain::TrailBaseInstanceId::new_v7(),
+            "physical_root_identity": digest(&identity),
+            "release_lock_identity": digest(include_bytes!("../../../third_party/trailbase/release.json")),
+            "runtime": "native",
+            "runtime_target": runtime_target,
+            "artifact_identity": artifact_identity,
+            "declared_restore": false,
+            "created_at": "2026-08-30T00:00:00Z",
+            "verified_at": "2026-08-30T00:00:01Z"
+        });
+        let receipt_path = root.path().join(".fasti-installation.json");
+        std::fs::write(
+            &receipt_path,
+            serde_json::to_vec(&receipt).expect("receipt JSON"),
+        )
+        .expect("installation receipt");
+        std::fs::set_permissions(&receipt_path, std::fs::Permissions::from_mode(0o600))
+            .expect("private receipt");
+        root
     }
 
     #[tokio::test]
@@ -1267,26 +1339,32 @@ mod tests {
             "127.0.0.1:8420".parse().expect("fixed listener"),
             false,
             root.path(),
-        );
-        assert_access_routes_are_absent(inactive).await;
-
-        fasti_application::HumanAccessPort::verify_trailbase_installation(
-            kernel.as_ref(),
-            fasti_application::VerifyTrailBaseInstallationCommand::new(
-                fasti_domain::TrailBaseInstanceId::new_v7(),
-                true,
-                false,
-                fasti_domain::RequestCorrelationId::new_v7(),
-                chrono::Utc::now(),
-            ),
+            None,
         )
-        .expect("activate TrailBase");
+        .expect("inactive router");
+        let inactive_callback = inactive
+            .oneshot(
+                Request::get(format!(
+                    "/api/access/v1/trailbase/callback?code={}",
+                    "a".repeat(48)
+                ))
+                .header(header::HOST, "127.0.0.1:8420")
+                .body(Body::empty())
+                .expect("callback request"),
+            )
+            .await
+            .expect("inactive callback response");
+        assert_eq!(inactive_callback.status(), StatusCode::SEE_OTHER);
+
+        let trailbase_root = test_trailbase_root();
         let direct = direct_loopback_api_router(
             kernel.clone(),
             "127.0.0.1:8420".parse().expect("fixed listener"),
             false,
             root.path(),
-        );
+            Some(trailbase_root.path()),
+        )
+        .expect("verified direct router");
         let generic = api_router(kernel.clone(), test_bind_addr(), root.path());
         let integration = integration_router(kernel.clone());
         let remote = remote_api_router(
@@ -1332,6 +1410,34 @@ mod tests {
         for router in [generic, integration, remote] {
             assert_access_routes_are_absent(router).await;
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn copied_trailbase_receipt_cannot_activate_a_different_root() {
+        let (data_root, kernel) = test_kernel();
+        let source = test_trailbase_root();
+        let copy = tempfile::tempdir().expect("copied TrailBase root");
+        std::fs::set_permissions(copy.path(), std::fs::Permissions::from_mode(0o700))
+            .expect("private copied root");
+        for name in ["runtime.lock", ".fasti-installation.json"] {
+            std::fs::copy(source.path().join(name), copy.path().join(name))
+                .expect("copy installation evidence");
+            std::fs::set_permissions(
+                copy.path().join(name),
+                std::fs::Permissions::from_mode(0o600),
+            )
+            .expect("private copied evidence");
+        }
+
+        let result = DirectLoopbackAccessRuntime::new(
+            kernel,
+            "127.0.0.1:8420".parse().expect("fixed listener"),
+            false,
+            data_root.path(),
+            Some(copy.path()),
+        );
+        assert!(result.is_err());
     }
 
     #[cfg(target_os = "linux")]

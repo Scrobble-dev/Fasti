@@ -143,13 +143,12 @@ impl SqliteKernel {
     pub(crate) fn verify_trailbase_installation(
         &self,
         instance_id: TrailBaseInstanceId,
-        release_matches: bool,
+        observed_root: Sha256Digest,
+        release_lock_identity: Sha256Digest,
         declared_restore: bool,
         correlation_id: RequestCorrelationId,
         at: DateTime<Utc>,
     ) -> StoreResult<TrailBaseInstallation> {
-        let observed_root =
-            Sha256Digest::from_bytes(&sha256_bytes(self.data_root_identity().as_bytes()));
         let connection = self
             .inner
             .connection
@@ -161,13 +160,18 @@ impl SqliteKernel {
         let mut installation = match current {
             Some(current) if current.id() == instance_id => current,
             Some(_) => return Err(HumanAccessStoreError::Integrity),
-            None => TrailBaseInstallation::new(instance_id, observed_root.clone(), at),
+            None => TrailBaseInstallation::new(
+                instance_id,
+                observed_root.clone(),
+                release_lock_identity.clone(),
+                at,
+            ),
         };
 
         let changed = if declared_restore {
             installation.declare_restore(at)?
         } else {
-            installation.verify(&observed_root, release_matches, at)?
+            installation.verify(&observed_root, &release_lock_identity, at)?
         };
         persist_installation(&transaction, &installation, is_new)?;
         if changed {
@@ -1152,8 +1156,9 @@ fn load_installation(connection: &Connection) -> StoreResult<Option<TrailBaseIns
     let row = connection
         .query_row(
             r#"
-            SELECT trailbase_instance_id, physical_root_identity, activation_state,
-                   activation_blocker, activation_generation, created_at, updated_at
+            SELECT trailbase_instance_id, physical_root_identity, release_lock_identity,
+                   activation_state, activation_blocker, activation_generation, created_at,
+                   updated_at
             FROM trailbase_installation WHERE singleton = 1
             "#,
             [],
@@ -1161,27 +1166,33 @@ fn load_installation(connection: &Connection) -> StoreResult<Option<TrailBaseIns
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, Option<String>>(3)?,
-                    row.get::<_, i64>(4)?,
-                    row.get::<_, String>(5)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, i64>(5)?,
                     row.get::<_, String>(6)?,
+                    row.get::<_, String>(7)?,
                 ))
             },
         )
         .optional()?;
-    row.map(|(id, root, state, blocker, generation, created, updated)| {
-        TrailBaseInstallation::try_from_persisted(
-            id.parse().map_err(|_| HumanAccessStoreError::Integrity)?,
-            root.parse().map_err(|_| HumanAccessStoreError::Integrity)?,
-            TrailBaseActivationState::from_storage(&state, blocker.as_deref())
-                .ok_or(HumanAccessStoreError::Integrity)?,
-            u64::try_from(generation).map_err(|_| HumanAccessStoreError::Integrity)?,
-            parse_time(&created)?,
-            parse_time(&updated)?,
-        )
-        .map_err(|_| HumanAccessStoreError::Integrity)
-    })
+    row.map(
+        |(id, root, release_lock, state, blocker, generation, created, updated)| {
+            TrailBaseInstallation::try_from_persisted(
+                id.parse().map_err(|_| HumanAccessStoreError::Integrity)?,
+                root.parse().map_err(|_| HumanAccessStoreError::Integrity)?,
+                release_lock
+                    .map(|value| value.parse().map_err(|_| HumanAccessStoreError::Integrity))
+                    .transpose()?,
+                TrailBaseActivationState::from_storage(&state, blocker.as_deref())
+                    .ok_or(HumanAccessStoreError::Integrity)?,
+                u64::try_from(generation).map_err(|_| HumanAccessStoreError::Integrity)?,
+                parse_time(&created)?,
+                parse_time(&updated)?,
+            )
+            .map_err(|_| HumanAccessStoreError::Integrity)
+        },
+    )
     .transpose()
 }
 
@@ -2066,14 +2077,17 @@ fn persist_installation(
         transaction.execute(
             r#"
             INSERT INTO trailbase_installation(
-                singleton, trailbase_instance_id, physical_root_identity,
+                singleton, trailbase_instance_id, physical_root_identity, release_lock_identity,
                 activation_state, activation_blocker, activation_generation,
                 created_at, updated_at
-            ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
             "#,
             params![
                 installation.id().to_string(),
                 installation.physical_root_identity().as_str(),
+                installation
+                    .release_lock_identity()
+                    .map(Sha256Digest::as_str),
                 state,
                 blocker,
                 generation,
@@ -2085,11 +2099,14 @@ fn persist_installation(
         transaction.execute(
             r#"
             UPDATE trailbase_installation
-            SET activation_state = ?1, activation_blocker = ?2,
-                activation_generation = ?3, updated_at = ?4
-            WHERE singleton = 1 AND trailbase_instance_id = ?5
+            SET release_lock_identity = ?1, activation_state = ?2, activation_blocker = ?3,
+                activation_generation = ?4, updated_at = ?5
+            WHERE singleton = 1 AND trailbase_instance_id = ?6
             "#,
             params![
+                installation
+                    .release_lock_identity()
+                    .map(Sha256Digest::as_str),
                 state,
                 blocker,
                 generation,
@@ -2732,7 +2749,8 @@ impl HumanAccessPort for SqliteKernel {
         SqliteKernel::verify_trailbase_installation(
             self,
             command.instance_id(),
-            command.release_matches(),
+            command.observed_root_identity().clone(),
+            command.release_lock_identity().clone(),
             command.declared_restore(),
             command.correlation_id(),
             command.at(),
@@ -2970,7 +2988,7 @@ mod tests {
         BrowserRequestBoundaryPolicy, BrowserSessionPort, CreateBrowserSessionCommand,
         CreatedBrowserSession, SecretMaterial, SessionPolicy,
     };
-    use fasti_domain::{ProfileGrantId, TrailBaseSubject};
+    use fasti_domain::{ProfileGrantId, TrailBaseActivationBlocker, TrailBaseSubject};
     use std::sync::{Arc, Barrier};
 
     fn at(minutes: i64) -> DateTime<Utc> {
@@ -2980,13 +2998,26 @@ mod tests {
             + Duration::minutes(minutes)
     }
 
+    fn fixture_root_identity() -> Sha256Digest {
+        Sha256Digest::from_bytes(&[0x11; 32])
+    }
+
+    fn fixture_release_lock_identity() -> Sha256Digest {
+        Sha256Digest::from_bytes(&[0x22; 32])
+    }
+
+    fn other_release_lock_identity() -> Sha256Digest {
+        Sha256Digest::from_bytes(&[0x33; 32])
+    }
+
     fn active_kernel() -> (tempfile::TempDir, SqliteKernel, TrailBaseInstallation) {
         let root = tempfile::tempdir().expect("temporary root");
         let kernel = SqliteKernel::open(root.path()).expect("kernel");
         let installation = kernel
             .verify_trailbase_installation(
                 TrailBaseInstanceId::new_v7(),
-                true,
+                fixture_root_identity(),
+                fixture_release_lock_identity(),
                 false,
                 RequestCorrelationId::new_v7(),
                 at(0),
@@ -3384,7 +3415,8 @@ mod tests {
             .kernel
             .verify_trailbase_installation(
                 TrailBaseInstanceId::new_v7(),
-                true,
+                fixture_root_identity(),
+                fixture_release_lock_identity(),
                 false,
                 RequestCorrelationId::new_v7(),
                 at(0),
@@ -3492,7 +3524,8 @@ mod tests {
             .kernel
             .verify_trailbase_installation(
                 TrailBaseInstanceId::new_v7(),
-                true,
+                fixture_root_identity(),
+                fixture_release_lock_identity(),
                 false,
                 RequestCorrelationId::new_v7(),
                 at(0),
@@ -3560,7 +3593,8 @@ mod tests {
             .kernel
             .verify_trailbase_installation(
                 TrailBaseInstanceId::new_v7(),
-                true,
+                fixture_root_identity(),
+                fixture_release_lock_identity(),
                 false,
                 RequestCorrelationId::new_v7(),
                 at(0),
@@ -3675,7 +3709,8 @@ mod tests {
                 .kernel
                 .verify_trailbase_installation(
                     TrailBaseInstanceId::new_v7(),
-                    true,
+                    fixture_root_identity(),
+                    fixture_release_lock_identity(),
                     false,
                     RequestCorrelationId::new_v7(),
                     at(0),
@@ -3706,7 +3741,8 @@ mod tests {
                 node.kernel
                     .verify_trailbase_installation(
                         installation.id(),
-                        true,
+                        fixture_root_identity(),
+                        fixture_release_lock_identity(),
                         true,
                         RequestCorrelationId::new_v7(),
                         at(6),
@@ -3783,7 +3819,8 @@ mod tests {
             .kernel
             .verify_trailbase_installation(
                 TrailBaseInstanceId::new_v7(),
-                true,
+                fixture_root_identity(),
+                fixture_release_lock_identity(),
                 false,
                 RequestCorrelationId::new_v7(),
                 at(0),
@@ -3905,7 +3942,8 @@ mod tests {
             .kernel
             .verify_trailbase_installation(
                 TrailBaseInstanceId::new_v7(),
-                true,
+                fixture_root_identity(),
+                fixture_release_lock_identity(),
                 false,
                 RequestCorrelationId::new_v7(),
                 at(0),
@@ -4123,7 +4161,8 @@ mod tests {
             .kernel
             .verify_trailbase_installation(
                 TrailBaseInstanceId::new_v7(),
-                true,
+                fixture_root_identity(),
+                fixture_release_lock_identity(),
                 false,
                 RequestCorrelationId::new_v7(),
                 at(0),
@@ -4181,7 +4220,8 @@ mod tests {
             .kernel
             .verify_trailbase_installation(
                 TrailBaseInstanceId::new_v7(),
-                true,
+                fixture_root_identity(),
+                fixture_release_lock_identity(),
                 false,
                 RequestCorrelationId::new_v7(),
                 at(0),
@@ -4227,7 +4267,8 @@ mod tests {
             .kernel
             .verify_trailbase_installation(
                 TrailBaseInstanceId::new_v7(),
-                true,
+                fixture_root_identity(),
+                fixture_release_lock_identity(),
                 false,
                 RequestCorrelationId::new_v7(),
                 at(0),
@@ -4315,7 +4356,8 @@ mod tests {
             .kernel
             .verify_trailbase_installation(
                 TrailBaseInstanceId::new_v7(),
-                true,
+                fixture_root_identity(),
+                fixture_release_lock_identity(),
                 false,
                 RequestCorrelationId::new_v7(),
                 at(0),
@@ -4402,7 +4444,8 @@ mod tests {
             .kernel
             .verify_trailbase_installation(
                 TrailBaseInstanceId::new_v7(),
-                true,
+                fixture_root_identity(),
+                fixture_release_lock_identity(),
                 false,
                 RequestCorrelationId::new_v7(),
                 at(0),
@@ -4470,6 +4513,82 @@ mod tests {
     }
 
     #[test]
+    fn installation_persists_exact_root_and_release_identities() {
+        let (_root, kernel, active) = active_kernel();
+        assert_eq!(active.physical_root_identity(), &fixture_root_identity());
+        assert_eq!(
+            active.release_lock_identity(),
+            Some(&fixture_release_lock_identity())
+        );
+
+        let repeated = kernel
+            .verify_trailbase_installation(
+                active.id(),
+                fixture_root_identity(),
+                fixture_release_lock_identity(),
+                false,
+                RequestCorrelationId::new_v7(),
+                at(0),
+            )
+            .expect("same installation identity is idempotent");
+        assert_eq!(repeated.activation_generation(), 1);
+
+        let release_blocked = kernel
+            .verify_trailbase_installation(
+                active.id(),
+                fixture_root_identity(),
+                other_release_lock_identity(),
+                false,
+                RequestCorrelationId::new_v7(),
+                at(1),
+            )
+            .expect("exact release mismatch blocks");
+        assert_eq!(
+            release_blocked.activation_state(),
+            TrailBaseActivationState::Blocked(TrailBaseActivationBlocker::ReleaseMismatch)
+        );
+        assert_eq!(release_blocked.activation_generation(), 2);
+        assert_eq!(
+            release_blocked.release_lock_identity(),
+            Some(&fixture_release_lock_identity())
+        );
+
+        let repaired = kernel
+            .verify_trailbase_installation(
+                active.id(),
+                fixture_root_identity(),
+                fixture_release_lock_identity(),
+                false,
+                RequestCorrelationId::new_v7(),
+                at(2),
+            )
+            .expect("exact release repairs the recoverable blocker");
+        assert_eq!(
+            repaired.activation_state(),
+            TrailBaseActivationState::Active
+        );
+        assert_eq!(repaired.activation_generation(), 2);
+
+        let root_blocked = kernel
+            .verify_trailbase_installation(
+                active.id(),
+                Sha256Digest::from_bytes(&[0x44; 32]),
+                fixture_release_lock_identity(),
+                false,
+                RequestCorrelationId::new_v7(),
+                at(3),
+            )
+            .expect("exact root mismatch blocks");
+        assert_eq!(
+            root_blocked.activation_state(),
+            TrailBaseActivationState::Blocked(
+                TrailBaseActivationBlocker::PhysicalRootIdentityMismatch
+            )
+        );
+        assert_eq!(root_blocked.activation_generation(), 3);
+    }
+
+    #[test]
     fn installation_is_bound_to_physical_root_and_declared_restore_is_terminal_in_c1() {
         let (_root, kernel, active) = active_kernel();
         assert_eq!(active.activation_state(), TrailBaseActivationState::Active);
@@ -4478,7 +4597,8 @@ mod tests {
         let blocked = kernel
             .verify_trailbase_installation(
                 active.id(),
-                true,
+                fixture_root_identity(),
+                fixture_release_lock_identity(),
                 true,
                 RequestCorrelationId::new_v7(),
                 at(1),
@@ -4492,7 +4612,8 @@ mod tests {
         assert!(matches!(
             kernel.verify_trailbase_installation(
                 active.id(),
-                true,
+                fixture_root_identity(),
+                fixture_release_lock_identity(),
                 false,
                 RequestCorrelationId::new_v7(),
                 at(2),
@@ -4715,7 +4836,8 @@ mod tests {
         kernel
             .verify_trailbase_installation(
                 installation.id(),
-                false,
+                fixture_root_identity(),
+                other_release_lock_identity(),
                 false,
                 RequestCorrelationId::new_v7(),
                 at(1),
@@ -4747,7 +4869,8 @@ mod tests {
             .kernel
             .verify_trailbase_installation(
                 TrailBaseInstanceId::new_v7(),
-                true,
+                fixture_root_identity(),
+                fixture_release_lock_identity(),
                 false,
                 RequestCorrelationId::new_v7(),
                 at(0),
@@ -4877,7 +5000,8 @@ mod tests {
             .kernel
             .verify_trailbase_installation(
                 TrailBaseInstanceId::new_v7(),
-                true,
+                fixture_root_identity(),
+                fixture_release_lock_identity(),
                 false,
                 RequestCorrelationId::new_v7(),
                 at(0),
@@ -4978,7 +5102,8 @@ mod tests {
             .kernel
             .verify_trailbase_installation(
                 TrailBaseInstanceId::new_v7(),
-                true,
+                fixture_root_identity(),
+                fixture_release_lock_identity(),
                 false,
                 RequestCorrelationId::new_v7(),
                 at(0),
@@ -5077,7 +5202,8 @@ mod tests {
             .kernel
             .verify_trailbase_installation(
                 TrailBaseInstanceId::new_v7(),
-                true,
+                fixture_root_identity(),
+                fixture_release_lock_identity(),
                 false,
                 RequestCorrelationId::new_v7(),
                 at(0),
@@ -5182,7 +5308,8 @@ mod tests {
             .kernel
             .verify_trailbase_installation(
                 TrailBaseInstanceId::new_v7(),
-                true,
+                fixture_root_identity(),
+                fixture_release_lock_identity(),
                 false,
                 RequestCorrelationId::new_v7(),
                 at(0),
@@ -5302,7 +5429,8 @@ mod tests {
             .kernel
             .verify_trailbase_installation(
                 TrailBaseInstanceId::new_v7(),
-                true,
+                fixture_root_identity(),
+                fixture_release_lock_identity(),
                 false,
                 RequestCorrelationId::new_v7(),
                 at(0),
@@ -5412,7 +5540,8 @@ mod tests {
             .kernel
             .verify_trailbase_installation(
                 TrailBaseInstanceId::new_v7(),
-                true,
+                fixture_root_identity(),
+                fixture_release_lock_identity(),
                 false,
                 RequestCorrelationId::new_v7(),
                 at(0),
@@ -5483,7 +5612,8 @@ mod tests {
             .kernel
             .verify_trailbase_installation(
                 TrailBaseInstanceId::new_v7(),
-                true,
+                fixture_root_identity(),
+                fixture_release_lock_identity(),
                 false,
                 RequestCorrelationId::new_v7(),
                 at(0),
@@ -5576,7 +5706,8 @@ mod tests {
             .kernel
             .verify_trailbase_installation(
                 TrailBaseInstanceId::new_v7(),
-                true,
+                fixture_root_identity(),
+                fixture_release_lock_identity(),
                 false,
                 RequestCorrelationId::new_v7(),
                 at(0),
@@ -5690,7 +5821,8 @@ mod tests {
         let installation = kernel
             .verify_trailbase_installation(
                 TrailBaseInstanceId::new_v7(),
-                true,
+                fixture_root_identity(),
+                fixture_release_lock_identity(),
                 false,
                 RequestCorrelationId::new_v7(),
                 started,

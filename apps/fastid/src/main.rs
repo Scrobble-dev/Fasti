@@ -203,6 +203,14 @@ fn data_root() -> Result<Option<PathBuf>> {
     parse_data_root(env::var_os("FASTI_DATA_ROOT"))
 }
 
+fn trailbase_root() -> Result<Option<PathBuf>> {
+    let value = env::var_os("FASTI_TRAILBASE_ROOT");
+    if value.as_ref().is_some_and(|value| value.is_empty()) {
+        anyhow::bail!("FASTI_TRAILBASE_ROOT must name a directory when it is set");
+    }
+    Ok(value.map(PathBuf::from))
+}
+
 fn provider_runtime(kernel: &SqliteKernel) -> Result<Arc<ProviderRuntime>> {
     PlatformCredentialVault::initialize()
         .map_err(|error| anyhow::anyhow!("provider credential store is unavailable: {error}"))?;
@@ -306,6 +314,7 @@ async fn main() -> Result<()> {
     let addr = listener.local_addr()?;
 
     let configured_data_root = data_root()?;
+    let configured_trailbase_root = trailbase_root()?;
     let kernel = configured_data_root
         .as_ref()
         .map(|data_root| {
@@ -343,7 +352,13 @@ async fn main() -> Result<()> {
                 );
                 let local_router = if browser_access_is_direct(requested_addr, addr, used_fallback)
                 {
-                    direct_loopback_api_router(kernel.clone(), addr, used_fallback, data_root)
+                    direct_loopback_api_router(
+                        kernel.clone(),
+                        addr,
+                        used_fallback,
+                        data_root,
+                        configured_trailbase_root.as_deref(),
+                    )?
                 } else {
                     api_router(
                         kernel.clone(),

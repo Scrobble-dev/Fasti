@@ -1876,6 +1876,13 @@ fn migrate_v14(connection: &Connection) -> Result<()> {
                 AND substr(physical_root_identity, 1, 7) = 'sha256:'
                 AND substr(physical_root_identity, 8) NOT GLOB '*[^0-9a-f]*'
             ),
+            release_lock_identity TEXT CHECK (
+                release_lock_identity IS NULL OR (
+                    length(release_lock_identity) = 71
+                    AND substr(release_lock_identity, 1, 7) = 'sha256:'
+                    AND substr(release_lock_identity, 8) NOT GLOB '*[^0-9a-f]*'
+                )
+            ),
             activation_state TEXT NOT NULL
                 CHECK (activation_state IN ('inactive', 'active', 'blocked')),
             activation_blocker TEXT CHECK (activation_blocker IN (
@@ -1892,6 +1899,7 @@ fn migrate_v14(connection: &Connection) -> Result<()> {
                 OR
                 (activation_state = 'active'
                     AND activation_blocker IS NULL
+                    AND release_lock_identity IS NOT NULL
                     AND activation_generation >= 1)
                 OR
                 (activation_state = 'blocked' AND activation_blocker IS NOT NULL)
@@ -3431,6 +3439,7 @@ mod tests {
         let operation_id = fasti_domain::OperationId::new_v7().to_string();
         let correlation_id = fasti_domain::RequestCorrelationId::new_v7().to_string();
         let root_digest = format!("sha256:{}", "11".repeat(32));
+        let release_lock_digest = format!("sha256:{}", "22".repeat(32));
         let binding_digest = format!("sha256:{}", "22".repeat(32));
         connection
             .execute(
@@ -3446,8 +3455,32 @@ mod tests {
             .expect("subject");
         connection
             .execute(
+                "INSERT INTO trailbase_installation(singleton, trailbase_instance_id, physical_root_identity, release_lock_identity, activation_state, activation_blocker, activation_generation, created_at, updated_at) VALUES (1, ?1, ?2, NULL, 'inactive', NULL, 0, ?3, ?3)",
+                params![instance_id, root_digest, CREATED_AT],
+            )
+            .expect("inactive installation may omit release lock identity");
+        connection
+            .execute("DELETE FROM trailbase_installation", [])
+            .expect("replace inactive constraint fixture");
+        connection
+            .execute(
+                "INSERT INTO trailbase_installation(singleton, trailbase_instance_id, physical_root_identity, release_lock_identity, activation_state, activation_blocker, activation_generation, created_at, updated_at) VALUES (1, ?1, ?2, NULL, 'blocked', 'declared_restore', 0, ?3, ?3)",
+                params![instance_id, root_digest, CREATED_AT],
+            )
+            .expect("blocked installation may omit release lock identity");
+        connection
+            .execute("DELETE FROM trailbase_installation", [])
+            .expect("replace blocked constraint fixture");
+        assert!(connection
+            .execute(
                 "INSERT INTO trailbase_installation(singleton, trailbase_instance_id, physical_root_identity, activation_state, activation_blocker, activation_generation, created_at, updated_at) VALUES (1, ?1, ?2, 'active', NULL, 1, ?3, ?3)",
                 params![instance_id, root_digest, CREATED_AT],
+            )
+            .is_err());
+        connection
+            .execute(
+                "INSERT INTO trailbase_installation(singleton, trailbase_instance_id, physical_root_identity, release_lock_identity, activation_state, activation_blocker, activation_generation, created_at, updated_at) VALUES (1, ?1, ?2, ?3, 'active', NULL, 1, ?4, ?4)",
+                params![instance_id, root_digest, release_lock_digest, CREATED_AT],
             )
             .expect("installation");
         connection

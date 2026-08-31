@@ -21,9 +21,14 @@ use reqwest::{
     Client, Response, StatusCode,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+#[cfg(unix)]
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::{
     collections::HashMap,
+    fs::File,
+    io::{self, Read},
     net::SocketAddr,
+    path::Path,
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -48,6 +53,164 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 const TOTAL_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_FUTURE_SKEW: TimeDelta = TimeDelta::seconds(60);
 const MAX_TOKEN_LIFETIME: TimeDelta = TimeDelta::hours(2);
+const INSTALLATION_RECEIPT_LIMIT: u64 = 16 * 1024;
+const INSTALLATION_RECEIPT_SCHEMA: &str = "fasti.trailbase-installation.v1";
+const INSTALLATION_RECEIPT_NAME: &str = ".fasti-installation.json";
+const RUNTIME_LOCK_NAME: &str = "runtime.lock";
+const RUNTIME_NONCE_BYTES: usize = 32;
+const RELEASE_LOCK: &[u8] = include_bytes!("../../../third_party/trailbase/release.json");
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TrailBaseInstallationReceipt {
+    schema_version: String,
+    instance_id: TrailBaseInstanceId,
+    physical_root_identity: Sha256Digest,
+    release_lock_identity: Sha256Digest,
+    runtime: String,
+    runtime_target: String,
+    artifact_identity: Sha256Digest,
+    declared_restore: bool,
+    created_at: DateTime<Utc>,
+    verified_at: DateTime<Utc>,
+}
+
+pub(crate) struct VerifiedTrailBaseInstallation {
+    pub(crate) instance_id: TrailBaseInstanceId,
+    pub(crate) physical_root_identity: Sha256Digest,
+    pub(crate) release_lock_identity: Sha256Digest,
+    pub(crate) declared_restore: bool,
+}
+
+#[cfg(unix)]
+pub(crate) fn verify_installation_receipt(
+    root: &Path,
+) -> io::Result<VerifiedTrailBaseInstallation> {
+    let root_fd = rustix::fs::open(
+        root,
+        rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::DIRECTORY
+            | rustix::fs::OFlags::CLOEXEC
+            | rustix::fs::OFlags::NOFOLLOW,
+        rustix::fs::Mode::empty(),
+    )
+    .map(File::from)
+    .map_err(errno)?;
+    let root_metadata = root_fd.metadata()?;
+    require_private(&root_metadata, true)?;
+    let mut nonce_file = open_regular_beneath(&root_fd, RUNTIME_LOCK_NAME)?;
+    let mut nonce = [0_u8; RUNTIME_NONCE_BYTES];
+    nonce_file.read_exact(&mut nonce)?;
+    let mut extra = [0_u8; 1];
+    if nonce_file.read(&mut extra)? != 0 {
+        return Err(invalid_data("TrailBase runtime nonce has the wrong length"));
+    }
+    let mut root_material = Vec::with_capacity(16 + RUNTIME_NONCE_BYTES);
+    root_material.extend_from_slice(&root_metadata.dev().to_be_bytes());
+    root_material.extend_from_slice(&root_metadata.ino().to_be_bytes());
+    root_material.extend_from_slice(&nonce);
+    let observed_root_identity = sha256_digest(&root_material);
+
+    let mut receipt_file = open_regular_beneath(&root_fd, INSTALLATION_RECEIPT_NAME)?;
+    let mut bytes = Vec::new();
+    receipt_file
+        .by_ref()
+        .take(INSTALLATION_RECEIPT_LIMIT + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > INSTALLATION_RECEIPT_LIMIT {
+        return Err(invalid_data("TrailBase installation receipt is too large"));
+    }
+    let receipt: TrailBaseInstallationReceipt = serde_json::from_slice(&bytes)
+        .map_err(|_| invalid_data("TrailBase installation receipt is invalid"))?;
+    let release_lock_identity = sha256_digest(RELEASE_LOCK);
+    if receipt.schema_version != INSTALLATION_RECEIPT_SCHEMA
+        || receipt.physical_root_identity != observed_root_identity
+        || receipt.release_lock_identity != release_lock_identity
+        || receipt.created_at > receipt.verified_at
+        || !artifact_belongs_to_release(&receipt)
+    {
+        return Err(invalid_data(
+            "TrailBase installation receipt does not match this root and release",
+        ));
+    }
+    Ok(VerifiedTrailBaseInstallation {
+        instance_id: receipt.instance_id,
+        physical_root_identity: observed_root_identity,
+        release_lock_identity,
+        declared_restore: receipt.declared_restore,
+    })
+}
+
+#[cfg(not(unix))]
+pub(crate) fn verify_installation_receipt(
+    _root: &Path,
+) -> io::Result<VerifiedTrailBaseInstallation> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "TrailBase installation identity is unavailable on this platform",
+    ))
+}
+
+#[cfg(unix)]
+fn open_regular_beneath(root: &File, name: &str) -> io::Result<File> {
+    let file = rustix::fs::openat(
+        root,
+        name,
+        rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::NOFOLLOW,
+        rustix::fs::Mode::empty(),
+    )
+    .map(File::from)
+    .map_err(errno)?;
+    require_private(&file.metadata()?, false)?;
+    Ok(file)
+}
+
+#[cfg(unix)]
+fn require_private(metadata: &std::fs::Metadata, directory: bool) -> io::Result<()> {
+    if directory != metadata.is_dir()
+        || !directory && !metadata.is_file()
+        || metadata.uid() != rustix::process::geteuid().as_raw()
+        || !directory && metadata.nlink() != 1
+        || metadata.permissions().mode() & 0o077 != 0
+    {
+        return Err(invalid_data(
+            "TrailBase installation evidence is not owner-only",
+        ));
+    }
+    Ok(())
+}
+
+fn artifact_belongs_to_release(receipt: &TrailBaseInstallationReceipt) -> bool {
+    let Ok(release) = serde_json::from_slice::<serde_json::Value>(RELEASE_LOCK) else {
+        return false;
+    };
+    let expected = match receipt.runtime.as_str() {
+        "native" => release
+            .get("native")
+            .and_then(|platforms| platforms.get(&receipt.runtime_target))
+            .and_then(|platform| platform.get("executable_sha256"))
+            .and_then(serde_json::Value::as_str)
+            .map(|digest| format!("sha256:{digest}")),
+        "oci" => release
+            .pointer(&format!(
+                "/oci/platform_manifests/{}/manifest_digest",
+                receipt.runtime_target
+            ))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned),
+        _ => None,
+    };
+    expected.as_deref() == Some(receipt.artifact_identity.as_str())
+}
+
+fn invalid_data(message: &'static str) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, message)
+}
+
+#[cfg(unix)]
+fn errno(error: rustix::io::Errno) -> io::Error {
+    io::Error::from_raw_os_error(error.raw_os_error())
+}
 
 pub(super) struct TrailBaseClient {
     client: Client,
@@ -1065,7 +1228,7 @@ fn authentication_method(provider: u8) -> Option<AuthenticationMethod> {
     }
 }
 
-pub(super) fn sha256_digest(value: &[u8; 32]) -> Sha256Digest {
+pub(super) fn sha256_digest(value: &[u8]) -> Sha256Digest {
     use sha2::{Digest, Sha256};
     let bytes: [u8; 32] = Sha256::digest(value).into();
     Sha256Digest::from_bytes(&bytes)
@@ -1227,7 +1390,8 @@ mod tests {
             kernel.as_ref(),
             VerifyTrailBaseInstallationCommand::new(
                 TrailBaseInstanceId::new_v7(),
-                true,
+                Sha256Digest::from_bytes(&[1; 32]),
+                Sha256Digest::from_bytes(&[2; 32]),
                 false,
                 RequestCorrelationId::new_v7(),
                 DateTime::parse_from_rfc3339("2026-08-30T00:00:00Z")
@@ -2016,7 +2180,7 @@ mod tests {
         let orchestrator = test_orchestrator(client, &kernel, &installation);
         let started = start_bootstrap_ceremony(&orchestrator, &kernel, access, callback_at);
         let binding = Zeroizing::new(*started.browser_binding.expose_bytes());
-        let binding_digest = sha256_digest(&binding);
+        let binding_digest = sha256_digest(&binding[..]);
         let bootstrap_secret_path = kernel.data_root().join("bootstrap.secret");
         std::fs::remove_file(&bootstrap_secret_path).expect("remove bootstrap secret");
         std::fs::create_dir(&bootstrap_secret_path)
@@ -2114,7 +2278,7 @@ mod tests {
         let orchestrator = test_orchestrator(client, &kernel, &installation);
         let started = start_bootstrap_ceremony(&orchestrator, &kernel, access, callback_at);
         let binding = Zeroizing::new(*started.browser_binding.expose_bytes());
-        let binding_digest = sha256_digest(&binding);
+        let binding_digest = sha256_digest(&binding[..]);
         rusqlite::Connection::open(kernel.database_path())
             .expect("open test database")
             .execute_batch(
@@ -2610,7 +2774,7 @@ mod tests {
             )
             .expect("start ordinary sign-in");
         let binding = Zeroizing::new(*started.browser_binding.expose_bytes());
-        let digest = sha256_digest(&binding);
+        let digest = sha256_digest(&binding[..]);
         let result = orchestrator
             .callback(
                 "a".repeat(48),

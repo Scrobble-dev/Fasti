@@ -135,6 +135,7 @@ impl TrailBaseActivationState {
 pub struct TrailBaseInstallation {
     id: TrailBaseInstanceId,
     physical_root_identity: Sha256Digest,
+    release_lock_identity: Option<Sha256Digest>,
     activation_state: TrailBaseActivationState,
     activation_generation: u64,
     created_at: DateTime<Utc>,
@@ -145,11 +146,13 @@ impl TrailBaseInstallation {
     pub fn new(
         id: TrailBaseInstanceId,
         physical_root_identity: Sha256Digest,
+        release_lock_identity: Sha256Digest,
         created_at: DateTime<Utc>,
     ) -> Self {
         Self {
             id,
             physical_root_identity,
+            release_lock_identity: Some(release_lock_identity),
             activation_state: TrailBaseActivationState::Inactive,
             activation_generation: 0,
             created_at,
@@ -160,6 +163,7 @@ impl TrailBaseInstallation {
     pub fn try_from_persisted(
         id: TrailBaseInstanceId,
         physical_root_identity: Sha256Digest,
+        release_lock_identity: Option<Sha256Digest>,
         activation_state: TrailBaseActivationState,
         activation_generation: u64,
         created_at: DateTime<Utc>,
@@ -171,13 +175,14 @@ impl TrailBaseInstallation {
         if matches!(activation_state, TrailBaseActivationState::Inactive)
             && activation_generation != 0
             || matches!(activation_state, TrailBaseActivationState::Active)
-                && activation_generation == 0
+                && (activation_generation == 0 || release_lock_identity.is_none())
         {
             return Err(AccessInvariantError::InvalidActivationState);
         }
         Ok(Self {
             id,
             physical_root_identity,
+            release_lock_identity,
             activation_state,
             activation_generation,
             created_at,
@@ -190,6 +195,9 @@ impl TrailBaseInstallation {
     }
     pub const fn physical_root_identity(&self) -> &Sha256Digest {
         &self.physical_root_identity
+    }
+    pub const fn release_lock_identity(&self) -> Option<&Sha256Digest> {
+        self.release_lock_identity.as_ref()
     }
     pub const fn activation_state(&self) -> TrailBaseActivationState {
         self.activation_state
@@ -207,7 +215,7 @@ impl TrailBaseInstallation {
     pub fn verify(
         &mut self,
         observed_root_identity: &Sha256Digest,
-        release_matches: bool,
+        observed_release_lock_identity: &Sha256Digest,
         at: DateTime<Utc>,
     ) -> Result<bool, AccessInvariantError> {
         self.validate_time(at)?;
@@ -220,7 +228,7 @@ impl TrailBaseInstallation {
         if observed_root_identity != &self.physical_root_identity {
             return self.block(TrailBaseActivationBlocker::PhysicalRootIdentityMismatch, at);
         }
-        if !release_matches {
+        if self.release_lock_identity.as_ref() != Some(observed_release_lock_identity) {
             return self.block(TrailBaseActivationBlocker::ReleaseMismatch, at);
         }
 
@@ -2563,21 +2571,29 @@ mod tests {
     #[test]
     fn trailbase_activation_is_generation_bound_and_nonrecoverable_blocks_are_terminal_in_c1() {
         let root = Sha256Digest::from_bytes(&[1; 32]);
-        let mut installation =
-            TrailBaseInstallation::new(TrailBaseInstanceId::new_v7(), root.clone(), at(0));
+        let release = Sha256Digest::from_bytes(&[2; 32]);
+        let other_release = Sha256Digest::from_bytes(&[3; 32]);
+        let mut installation = TrailBaseInstallation::new(
+            TrailBaseInstanceId::new_v7(),
+            root.clone(),
+            release.clone(),
+            at(0),
+        );
 
         assert_eq!(
             installation.activation_state(),
             TrailBaseActivationState::Inactive
         );
-        assert!(installation.verify(&root, true, at(1)).expect("activate"));
+        assert!(installation
+            .verify(&root, &release, at(1))
+            .expect("activate"));
         assert_eq!(installation.activation_generation(), 1);
         assert!(!installation
-            .verify(&root, true, at(1))
+            .verify(&root, &release, at(1))
             .expect("repeat verification"));
 
         assert!(installation
-            .verify(&root, false, at(2))
+            .verify(&root, &other_release, at(2))
             .expect("release mismatch blocks"));
         assert_eq!(installation.activation_generation(), 2);
         assert_eq!(
@@ -2585,10 +2601,10 @@ mod tests {
             TrailBaseActivationState::Blocked(TrailBaseActivationBlocker::ReleaseMismatch)
         );
         assert!(!installation
-            .verify(&root, false, at(2))
+            .verify(&root, &other_release, at(2))
             .expect("repeat blocker is idempotent"));
         assert!(installation
-            .verify(&root, true, at(3))
+            .verify(&root, &release, at(3))
             .expect("exact release repair"));
         assert_eq!(installation.activation_generation(), 2);
 
@@ -2597,7 +2613,7 @@ mod tests {
             .expect("declared restore"));
         assert_eq!(installation.activation_generation(), 3);
         assert_eq!(
-            installation.verify(&root, false, at(5)),
+            installation.verify(&root, &other_release, at(5)),
             Err(AccessInvariantError::TrailBaseInstallationBlocked)
         );
         assert_eq!(
@@ -2605,15 +2621,21 @@ mod tests {
             TrailBaseActivationState::Blocked(TrailBaseActivationBlocker::DeclaredRestore)
         );
 
-        let mut root_mismatch =
-            TrailBaseInstallation::new(TrailBaseInstanceId::new_v7(), root.clone(), at(0));
-        root_mismatch.verify(&root, true, at(1)).expect("activate");
+        let mut root_mismatch = TrailBaseInstallation::new(
+            TrailBaseInstanceId::new_v7(),
+            root.clone(),
+            release.clone(),
+            at(0),
+        );
         root_mismatch
-            .verify(&root, false, at(2))
+            .verify(&root, &release, at(1))
+            .expect("activate");
+        root_mismatch
+            .verify(&root, &other_release, at(2))
             .expect("release mismatch");
         let generation_after_release_block = root_mismatch.activation_generation();
         assert!(root_mismatch
-            .verify(&Sha256Digest::from_bytes(&[9; 32]), true, at(3))
+            .verify(&Sha256Digest::from_bytes(&[9; 32]), &release, at(3))
             .expect("non-recoverable blocker replaces release mismatch"));
         assert_eq!(
             root_mismatch.activation_state(),
@@ -2626,7 +2648,7 @@ mod tests {
             generation_after_release_block
         );
         assert_eq!(
-            root_mismatch.verify(&root, false, at(4)),
+            root_mismatch.verify(&root, &other_release, at(4)),
             Err(AccessInvariantError::TrailBaseInstallationBlocked)
         );
         assert_eq!(
@@ -2640,9 +2662,11 @@ mod tests {
     #[test]
     fn trailbase_activation_overflow_fails_without_partial_mutation() {
         let root = Sha256Digest::from_bytes(&[2; 32]);
+        let release = Sha256Digest::from_bytes(&[3; 32]);
         let mut installation = TrailBaseInstallation::try_from_persisted(
             TrailBaseInstanceId::new_v7(),
             root.clone(),
+            Some(release.clone()),
             TrailBaseActivationState::Active,
             u64::MAX,
             at(0),
@@ -2651,7 +2675,7 @@ mod tests {
         .expect("persisted installation");
 
         assert_eq!(
-            installation.verify(&root, false, at(1)),
+            installation.verify(&root, &Sha256Digest::from_bytes(&[4; 32]), at(1)),
             Err(AccessInvariantError::ActivationGenerationOverflow)
         );
         assert_eq!(

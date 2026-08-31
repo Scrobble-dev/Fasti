@@ -679,13 +679,15 @@ mod tests {
                     r#"
                     INSERT INTO trailbase_installation(
                         singleton, trailbase_instance_id, physical_root_identity,
+                        release_lock_identity,
                         activation_state, activation_blocker, activation_generation,
                         created_at, updated_at
-                    ) VALUES (1, ?1, ?2, 'active', NULL, 1, ?3, ?3)
+                    ) VALUES (1, ?1, ?2, ?3, 'active', NULL, 1, ?4, ?4)
                     "#,
                     params![
                         instance_id.to_string(),
                         Sha256Digest::from_bytes(&[7; 32]).to_string(),
+                        Sha256Digest::from_bytes(&[8; 32]).to_string(),
                         timestamp(at(0)),
                     ],
                 )

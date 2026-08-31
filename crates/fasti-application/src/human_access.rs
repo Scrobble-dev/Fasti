@@ -7,10 +7,11 @@ use fasti_domain::{
     TrailBaseSubject, WorkspaceRole,
 };
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct VerifyTrailBaseInstallationCommand {
     instance_id: TrailBaseInstanceId,
-    release_matches: bool,
+    observed_root_identity: Sha256Digest,
+    release_lock_identity: Sha256Digest,
     declared_restore: bool,
     correlation_id: RequestCorrelationId,
     at: DateTime<Utc>,
@@ -34,14 +35,16 @@ impl ReadTrailBaseInstallationQuery {
 impl VerifyTrailBaseInstallationCommand {
     pub const fn new(
         instance_id: TrailBaseInstanceId,
-        release_matches: bool,
+        observed_root_identity: Sha256Digest,
+        release_lock_identity: Sha256Digest,
         declared_restore: bool,
         correlation_id: RequestCorrelationId,
         at: DateTime<Utc>,
     ) -> Self {
         Self {
             instance_id,
-            release_matches,
+            observed_root_identity,
+            release_lock_identity,
             declared_restore,
             correlation_id,
             at,
@@ -51,8 +54,11 @@ impl VerifyTrailBaseInstallationCommand {
     pub const fn instance_id(&self) -> TrailBaseInstanceId {
         self.instance_id
     }
-    pub const fn release_matches(&self) -> bool {
-        self.release_matches
+    pub const fn observed_root_identity(&self) -> &Sha256Digest {
+        &self.observed_root_identity
+    }
+    pub const fn release_lock_identity(&self) -> &Sha256Digest {
+        &self.release_lock_identity
     }
     pub const fn declared_restore(&self) -> bool {
         self.declared_restore
