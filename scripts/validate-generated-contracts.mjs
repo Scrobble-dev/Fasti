@@ -154,6 +154,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     "/api/access/v1/browser-sessions/{browser_session_id}",
     "/api/access/v1/projection",
     "/api/access/v1/trailbase/callback",
+    "/api/access/v1/trailbase/continuation",
     "/api/access/v1/trailbase/sign-in",
     "/api/v1/client-enrollments",
     "/api/v1/health",
@@ -181,6 +182,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
   ]);
   assert.deepEqual(Object.keys(openapi.components.securitySchemes), [
     "auth_binding_cookie",
+    "auth_continuation_cookie",
     "bootstrap_bearer",
     "browser_session_cookie",
     "credential_bearer",
@@ -410,6 +412,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
   const healthCapability = capabilities.get("system.health");
   assert.deepEqual(Object.keys(openapi.components.securitySchemes).sort(), [
     "auth_binding_cookie",
+    "auth_continuation_cookie",
     "bootstrap_bearer",
     "browser_session_cookie",
     "credential_bearer",
@@ -491,6 +494,14 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
         operation.operationId === "complete_trailbase_authentication"
       ) {
         security = [{ auth_binding_cookie: [] }];
+      } else if (
+        [
+          "read_trailbase_continuation",
+          "complete_trailbase_continuation",
+          "cancel_trailbase_continuation",
+        ].includes(operation.operationId)
+      ) {
+        security = [{ auth_continuation_cookie: [] }];
       } else if (browserReads.has(operation.operationId)) {
         security = [{ browser_session_cookie: [] }];
       } else if (browserMutations.has(operation.operationId)) {
@@ -526,6 +537,46 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
       "validation_failed",
     ],
     complete_trailbase_authentication: [],
+    read_trailbase_continuation: [
+      "auth_browser_binding_invalid",
+      "auth_continuation_persistence_failed",
+      "auth_subject_unaffiliated",
+      "capacity_exceeded",
+      "forbidden",
+      "identity_service_unavailable",
+      "integrity_failed",
+      "storage_unavailable",
+      "trailbase_proof_invalid",
+      "trailbase_session_cleanup_failed",
+      "trailbase_trust_unavailable",
+      "validation_failed",
+    ],
+    complete_trailbase_continuation: [
+      "auth_browser_binding_invalid",
+      "auth_continuation_persistence_failed",
+      "auth_selection_changed",
+      "auth_subject_unaffiliated",
+      "capacity_exceeded",
+      "forbidden",
+      "identity_service_unavailable",
+      "integrity_failed",
+      "malformed_json",
+      "payload_too_large",
+      "storage_unavailable",
+      "trailbase_proof_invalid",
+      "trailbase_session_cleanup_failed",
+      "trailbase_trust_unavailable",
+      "unsupported_media_type",
+      "validation_failed",
+    ],
+    cancel_trailbase_continuation: [
+      "auth_browser_binding_invalid",
+      "forbidden",
+      "integrity_failed",
+      "storage_unavailable",
+      "trailbase_proof_invalid",
+      "validation_failed",
+    ],
     read_access_projection: [
       "browser_session_expired",
       "browser_session_revoked",

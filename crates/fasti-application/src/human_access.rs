@@ -331,6 +331,214 @@ impl ConfirmedTrailBaseIdentity {
     }
 }
 
+pub const AUTH_SELECTION_CHOICE_LIMIT: usize = 64;
+
+#[derive(Debug, Clone, Copy)]
+pub struct ConfirmTrailBaseSignInCommand(PreauthorizeTrailBaseSignInCommand);
+
+impl ConfirmTrailBaseSignInCommand {
+    pub const fn new(authorization: PreauthorizeTrailBaseSignInCommand) -> Self {
+        Self(authorization)
+    }
+    pub const fn authorization(&self) -> PreauthorizeTrailBaseSignInCommand {
+        self.0
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ReadTrailBaseSignInContinuationQuery {
+    browser_binding_digest: Sha256Digest,
+    correlation_id: RequestCorrelationId,
+    at: DateTime<Utc>,
+}
+
+impl ReadTrailBaseSignInContinuationQuery {
+    pub const fn new(
+        browser_binding_digest: Sha256Digest,
+        correlation_id: RequestCorrelationId,
+        at: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            browser_binding_digest,
+            correlation_id,
+            at,
+        }
+    }
+    pub const fn browser_binding_digest(&self) -> &Sha256Digest {
+        &self.browser_binding_digest
+    }
+    pub const fn correlation_id(&self) -> RequestCorrelationId {
+        self.correlation_id
+    }
+    pub const fn at(&self) -> DateTime<Utc> {
+        self.at
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CompleteTrailBaseSignInContinuationCommand {
+    browser_binding_digest: Sha256Digest,
+    choice_ordinal: u8,
+    candidate_revision: Sha256Digest,
+    correlation_id: RequestCorrelationId,
+    at: DateTime<Utc>,
+}
+
+impl CompleteTrailBaseSignInContinuationCommand {
+    pub const fn new(
+        browser_binding_digest: Sha256Digest,
+        choice_ordinal: u8,
+        candidate_revision: Sha256Digest,
+        correlation_id: RequestCorrelationId,
+        at: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            browser_binding_digest,
+            choice_ordinal,
+            candidate_revision,
+            correlation_id,
+            at,
+        }
+    }
+    pub const fn browser_binding_digest(&self) -> &Sha256Digest {
+        &self.browser_binding_digest
+    }
+    pub const fn choice_ordinal(&self) -> u8 {
+        self.choice_ordinal
+    }
+    pub const fn candidate_revision(&self) -> &Sha256Digest {
+        &self.candidate_revision
+    }
+    pub const fn correlation_id(&self) -> RequestCorrelationId {
+        self.correlation_id
+    }
+    pub const fn at(&self) -> DateTime<Utc> {
+        self.at
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CancelTrailBaseSignInContinuationCommand {
+    browser_binding_digest: Sha256Digest,
+    correlation_id: RequestCorrelationId,
+    at: DateTime<Utc>,
+}
+
+impl CancelTrailBaseSignInContinuationCommand {
+    pub const fn new(
+        browser_binding_digest: Sha256Digest,
+        correlation_id: RequestCorrelationId,
+        at: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            browser_binding_digest,
+            correlation_id,
+            at,
+        }
+    }
+    pub const fn browser_binding_digest(&self) -> &Sha256Digest {
+        &self.browser_binding_digest
+    }
+    pub const fn correlation_id(&self) -> RequestCorrelationId {
+        self.correlation_id
+    }
+    pub const fn at(&self) -> DateTime<Utc> {
+        self.at
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AuthSelectionChoice {
+    ordinal: u8,
+    workspace_ordinal: u8,
+    profile_ordinal: u8,
+    workspace_created_at: DateTime<Utc>,
+    profile_created_at: DateTime<Utc>,
+    membership_state: fasti_domain::MembershipLifecycle,
+    role: WorkspaceRole,
+}
+
+impl AuthSelectionChoice {
+    #[allow(clippy::too_many_arguments)]
+    pub const fn new(
+        ordinal: u8,
+        workspace_ordinal: u8,
+        profile_ordinal: u8,
+        workspace_created_at: DateTime<Utc>,
+        profile_created_at: DateTime<Utc>,
+        membership_state: fasti_domain::MembershipLifecycle,
+        role: WorkspaceRole,
+    ) -> Self {
+        Self {
+            ordinal,
+            workspace_ordinal,
+            profile_ordinal,
+            workspace_created_at,
+            profile_created_at,
+            membership_state,
+            role,
+        }
+    }
+    pub const fn ordinal(self) -> u8 {
+        self.ordinal
+    }
+    pub const fn workspace_ordinal(self) -> u8 {
+        self.workspace_ordinal
+    }
+    pub const fn profile_ordinal(self) -> u8 {
+        self.profile_ordinal
+    }
+    pub const fn workspace_created_at(self) -> DateTime<Utc> {
+        self.workspace_created_at
+    }
+    pub const fn profile_created_at(self) -> DateTime<Utc> {
+        self.profile_created_at
+    }
+    pub const fn membership_state(self) -> fasti_domain::MembershipLifecycle {
+        self.membership_state
+    }
+    pub const fn role(self) -> WorkspaceRole {
+        self.role
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthSelectionProjection {
+    expires_at: DateTime<Utc>,
+    remembered: bool,
+    candidate_revision: Sha256Digest,
+    choices: Vec<AuthSelectionChoice>,
+}
+
+impl AuthSelectionProjection {
+    pub fn new(
+        expires_at: DateTime<Utc>,
+        remembered: bool,
+        candidate_revision: Sha256Digest,
+        choices: Vec<AuthSelectionChoice>,
+    ) -> Self {
+        assert!(!choices.is_empty() && choices.len() <= AUTH_SELECTION_CHOICE_LIMIT);
+        Self {
+            expires_at,
+            remembered,
+            candidate_revision,
+            choices,
+        }
+    }
+    pub const fn expires_at(&self) -> DateTime<Utc> {
+        self.expires_at
+    }
+    pub const fn remembered(&self) -> bool {
+        self.remembered
+    }
+    pub const fn candidate_revision(&self) -> &Sha256Digest {
+        &self.candidate_revision
+    }
+    pub fn choices(&self) -> &[AuthSelectionChoice] {
+        &self.choices
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct PreauthorizeTrailBaseSignInCommand {
     operation_id: OperationId,
@@ -400,18 +608,6 @@ impl PreauthorizeTrailBaseBootstrapCommand {
     }
     pub const fn at(&self) -> DateTime<Utc> {
         self.at
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct CompleteTrailBaseSignInCommand(PreauthorizeTrailBaseSignInCommand);
-
-impl CompleteTrailBaseSignInCommand {
-    pub const fn new(command: PreauthorizeTrailBaseSignInCommand) -> Self {
-        Self(command)
-    }
-    pub const fn authorization(&self) -> PreauthorizeTrailBaseSignInCommand {
-        self.0
     }
 }
 
@@ -500,6 +696,22 @@ pub trait HumanAccessPort: Send + Sync {
         &self,
         command: PreauthorizeTrailBaseSignInCommand,
     ) -> ApplicationResult<()>;
+    fn confirm_trailbase_sign_in(
+        &self,
+        command: ConfirmTrailBaseSignInCommand,
+    ) -> ApplicationResult<AuthCeremony>;
+    fn read_trailbase_sign_in_continuation(
+        &self,
+        query: ReadTrailBaseSignInContinuationQuery,
+    ) -> ApplicationResult<AuthSelectionProjection>;
+    fn complete_trailbase_sign_in_continuation(
+        &self,
+        command: CompleteTrailBaseSignInContinuationCommand,
+    ) -> ApplicationResult<crate::CreatedBrowserSession>;
+    fn cancel_trailbase_sign_in_continuation(
+        &self,
+        command: CancelTrailBaseSignInContinuationCommand,
+    ) -> ApplicationResult<AuthCeremony>;
     fn preauthorize_trailbase_bootstrap(
         &self,
         command: PreauthorizeTrailBaseBootstrapCommand,
@@ -508,10 +720,6 @@ pub trait HumanAccessPort: Send + Sync {
         &self,
         command: FailAuthCeremonyCommand,
     ) -> ApplicationResult<AuthCeremony>;
-    fn complete_trailbase_sign_in(
-        &self,
-        command: CompleteTrailBaseSignInCommand,
-    ) -> ApplicationResult<crate::CreatedBrowserSession>;
     fn complete_trailbase_bootstrap(
         &self,
         command: CompleteTrailBaseBootstrapCommand,

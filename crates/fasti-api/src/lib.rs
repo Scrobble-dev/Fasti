@@ -33,6 +33,8 @@ pub const FASTI_ACCESS_CALLBACK_PATH: &str = "/api/access/v1/trailbase/callback"
 pub const FASTI_ACCESS_CALLBACK_URL: &str =
     "http://127.0.0.1:8420/api/access/v1/trailbase/callback";
 pub const FASTI_ACCESS_BINDING_COOKIE: &str = "__Secure-fasti_auth_binding";
+pub const FASTI_ACCESS_CONTINUATION_PATH: &str = "/api/access/v1/trailbase/continuation";
+pub const FASTI_ACCESS_CONTINUATION_COOKIE: &str = "__Secure-fasti_auth_continuation";
 
 mod access;
 mod integrations;
@@ -149,6 +151,13 @@ impl Modify for ProductionSecurityAddon {
                     "One-use, callback-path-scoped browser binding for a TrailBase ceremony.",
                 ))),
             );
+            components.add_security_scheme(
+                "auth_continuation_cookie",
+                SecurityScheme::ApiKey(ApiKey::Cookie(ApiKeyValue::with_description(
+                    FASTI_ACCESS_CONTINUATION_COOKIE,
+                    "One-use, continuation-path-scoped binding for explicit Fasti sign-in selection.",
+                ))),
+            );
             let Some(RefOr::T(Schema::OneOf(override_schema))) =
                 components.schemas.get_mut("MetadataOverrideMutationDto")
             else {
@@ -171,6 +180,9 @@ impl Modify for ProductionSecurityAddon {
         health_check,
         access::start_trailbase_sign_in,
         access::complete_trailbase_authentication,
+        access::read_trailbase_continuation,
+        access::complete_trailbase_continuation,
+        access::cancel_trailbase_continuation,
         access::read_access_projection,
         access::read_browser_session,
         access::end_browser_session,
@@ -211,6 +223,9 @@ impl Modify for ProductionSecurityAddon {
         HealthResponse,
         fasti_contracts::StartTrailBaseSignInRequest,
         fasti_contracts::StartTrailBaseSignInResponse,
+        fasti_contracts::TrailBaseContinuationChoiceDto,
+        fasti_contracts::ReadTrailBaseContinuationResponse,
+        fasti_contracts::CompleteTrailBaseContinuationRequest,
         fasti_contracts::SelectBrowserSessionProfileRequest,
         fasti_contracts::BrowserSessionDto,
         fasti_contracts::ReadBrowserSessionResponse,
@@ -868,6 +883,7 @@ mod tests {
             "/api/v1/profile/metadata-projection",
             "/api/access/v1/trailbase/sign-in",
             "/api/access/v1/trailbase/callback",
+            "/api/access/v1/trailbase/continuation",
             "/api/access/v1/projection",
             "/api/access/v1/browser-session",
             "/api/access/v1/browser-sessions",
@@ -878,7 +894,7 @@ mod tests {
         ] {
             assert!(document.paths.paths.contains_key(path), "missing {path}");
         }
-        assert_eq!(document.paths.paths.len(), 32);
+        assert_eq!(document.paths.paths.len(), 33);
 
         let serialized = serde_json::to_string(&document).expect("serializable OpenAPI document");
         assert!(serialized.contains("#/components/schemas/HealthResponse"));
@@ -913,6 +929,10 @@ mod tests {
             Some(&serde_json::json!("__Secure-fasti_auth_binding"))
         );
         assert_eq!(
+            value.pointer("/components/securitySchemes/auth_continuation_cookie/name"),
+            Some(&serde_json::json!("__Secure-fasti_auth_continuation"))
+        );
+        assert_eq!(
             value.pointer("/paths/~1api~1access~1v1~1projection/get/security"),
             Some(&serde_json::json!([{"browser_session_cookie": []}]))
         );
@@ -928,6 +948,14 @@ mod tests {
             value.pointer("/paths/~1api~1access~1v1~1trailbase~1callback/get/security"),
             Some(&serde_json::json!([{"auth_binding_cookie": []}]))
         );
+        for method in ["get", "post", "delete"] {
+            assert_eq!(
+                value.pointer(&format!(
+                    "/paths/~1api~1access~1v1~1trailbase~1continuation/{method}/security"
+                )),
+                Some(&serde_json::json!([{"auth_continuation_cookie": []}]))
+            );
+        }
         assert_eq!(
             value
                 .pointer("/paths/~1api~1v1~1records/get/security")
@@ -975,6 +1003,9 @@ mod tests {
             "HealthResponse",
             "StartTrailBaseSignInRequest",
             "StartTrailBaseSignInResponse",
+            "TrailBaseContinuationChoiceDto",
+            "ReadTrailBaseContinuationResponse",
+            "CompleteTrailBaseContinuationRequest",
             "BrowserSessionDto",
             "AccessProjectionResponse",
             "ListBrowserSessionsResponse",

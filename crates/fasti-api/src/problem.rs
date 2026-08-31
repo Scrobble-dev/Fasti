@@ -15,6 +15,12 @@ pub(crate) struct HttpProblem {
     body: Box<ProblemDetails>,
 }
 
+impl HttpProblem {
+    pub(crate) fn code(&self) -> &str {
+        &self.body.code
+    }
+}
+
 impl IntoResponse for HttpProblem {
     fn into_response(self) -> Response {
         (

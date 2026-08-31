@@ -1982,19 +1982,23 @@ fn migrate_v14(connection: &Connection) -> Result<()> {
                 AND substr(browser_binding_digest, 1, 7) = 'sha256:'
                 AND substr(browser_binding_digest, 8) NOT GLOB '*[^0-9a-f]*'
             ),
-            workspace_id TEXT NOT NULL CHECK (
-                length(workspace_id) = 36
-                AND substr(workspace_id, 1, 4) = 'wsp_'
-                AND substr(workspace_id, 5) NOT GLOB '*[^0-9a-f]*'
-                AND substr(workspace_id, 17, 1) = '7'
-                AND substr(workspace_id, 21, 1) GLOB '[89ab]'
+            workspace_id TEXT CHECK (
+                workspace_id IS NULL OR (
+                    length(workspace_id) = 36
+                    AND substr(workspace_id, 1, 4) = 'wsp_'
+                    AND substr(workspace_id, 5) NOT GLOB '*[^0-9a-f]*'
+                    AND substr(workspace_id, 17, 1) = '7'
+                    AND substr(workspace_id, 21, 1) GLOB '[89ab]'
+                )
             ),
-            selected_profile_grant_id TEXT NOT NULL CHECK (
-                length(selected_profile_grant_id) = 36
-                AND substr(selected_profile_grant_id, 1, 4) = 'grt_'
-                AND substr(selected_profile_grant_id, 5) NOT GLOB '*[^0-9a-f]*'
-                AND substr(selected_profile_grant_id, 17, 1) = '7'
-                AND substr(selected_profile_grant_id, 21, 1) GLOB '[89ab]'
+            selected_profile_grant_id TEXT CHECK (
+                selected_profile_grant_id IS NULL OR (
+                    length(selected_profile_grant_id) = 36
+                    AND substr(selected_profile_grant_id, 1, 4) = 'grt_'
+                    AND substr(selected_profile_grant_id, 5) NOT GLOB '*[^0-9a-f]*'
+                    AND substr(selected_profile_grant_id, 17, 1) = '7'
+                    AND substr(selected_profile_grant_id, 21, 1) GLOB '[89ab]'
+                )
             ),
             bound_browser_session_id TEXT CHECK (
                 bound_browser_session_id IS NULL OR (
@@ -2015,6 +2019,21 @@ fn migrate_v14(connection: &Connection) -> Result<()> {
                 )
             ),
             remembered INTEGER NOT NULL CHECK (remembered IN (0, 1)),
+            confirmed_auth_subject_id TEXT
+                REFERENCES auth_subjects(auth_subject_id),
+            authentication_method TEXT CHECK (
+                authentication_method IS NULL OR authentication_method IN (
+                    'trailbase_password', 'trailbase_social'
+                )
+            ),
+            authentication_verified_at TEXT,
+            confirmed_auth_epoch INTEGER CHECK (
+                confirmed_auth_epoch IS NULL OR confirmed_auth_epoch >= 0
+            ),
+            confirmed_authorization_epoch INTEGER CHECK (
+                confirmed_authorization_epoch IS NULL
+                OR confirmed_authorization_epoch >= 0
+            ),
             callback_path TEXT NOT NULL CHECK (
                 length(callback_path) BETWEEN 1 AND 128
                 AND substr(callback_path, 1, 1) = '/'
@@ -2032,13 +2051,14 @@ fn migrate_v14(connection: &Connection) -> Result<()> {
                 AND substr(correlation_id, 21, 1) GLOB '[89ab]'
             ),
             state TEXT NOT NULL CHECK (state IN (
-                'pending', 'claimed', 'completed', 'cancelled', 'failed',
-                'cleanup_uncertain', 'expired'
+                'pending', 'claimed', 'selection_required', 'completed',
+                'cancelled', 'failed', 'cleanup_uncertain', 'expired'
             )),
             failure TEXT CHECK (failure IN (
                 'verifier_lost_on_restart', 'exchange_outcome_uncertain',
                 'exchange_failed', 'status_rejected', 'logout_uncertain',
-                'local_authorization_denied'
+                'local_authorization_denied', 'local_persistence_failed',
+                'trust_unavailable'
             )),
             created_at TEXT NOT NULL,
             expires_at TEXT NOT NULL,
@@ -2048,20 +2068,80 @@ fn migrate_v14(connection: &Connection) -> Result<()> {
             CHECK (claimed_at IS NULL OR (claimed_at >= created_at AND claimed_at < expires_at)),
             CHECK (terminal_at IS NULL OR terminal_at >= COALESCE(claimed_at, created_at)),
             CHECK (
+                (workspace_id IS NULL
+                    AND selected_profile_grant_id IS NULL
+                    AND bound_browser_session_id IS NULL
+                    AND invited_membership_id IS NULL)
+                OR
+                (workspace_id IS NOT NULL AND selected_profile_grant_id IS NOT NULL)
+            ),
+            CHECK (
+                (confirmed_auth_subject_id IS NULL
+                    AND authentication_method IS NULL
+                    AND authentication_verified_at IS NULL
+                    AND confirmed_auth_epoch IS NULL
+                    AND confirmed_authorization_epoch IS NULL)
+                OR
+                (confirmed_auth_subject_id IS NOT NULL
+                    AND authentication_method IS NOT NULL
+                    AND authentication_verified_at IS NOT NULL
+                    AND confirmed_auth_epoch IS NOT NULL
+                    AND confirmed_authorization_epoch IS NOT NULL)
+            ),
+            CHECK (
+                authentication_verified_at IS NULL OR (
+                    claimed_at IS NOT NULL
+                    AND authentication_verified_at >= claimed_at
+                    AND authentication_verified_at < expires_at
+                )
+            ),
+            CHECK (
                 (purpose = 'sign_in' AND return_target = 'application_home')
                 OR (purpose = 'recent_authentication' AND return_target = 'account_security')
                 OR (purpose = 'first_administrator_bootstrap' AND return_target = 'first_run')
             ),
             CHECK (
-                (purpose = 'sign_in' AND bound_browser_session_id IS NULL)
+                (purpose = 'sign_in'
+                    AND bound_browser_session_id IS NULL
+                    AND (
+                        (state IN (
+                            'pending', 'claimed', 'failed', 'cleanup_uncertain'
+                        )
+                            AND workspace_id IS NULL
+                            AND confirmed_auth_subject_id IS NULL)
+                        OR
+                        (state IN ('cancelled', 'expired')
+                            AND workspace_id IS NULL
+                            AND (
+                                (claimed_at IS NULL
+                                    AND confirmed_auth_subject_id IS NULL)
+                                OR
+                                (claimed_at IS NOT NULL
+                                    AND confirmed_auth_subject_id IS NOT NULL)
+                            ))
+                        OR
+                        (state = 'selection_required'
+                            AND workspace_id IS NULL
+                            AND confirmed_auth_subject_id IS NOT NULL)
+                        OR
+                        (state = 'completed'
+                            AND workspace_id IS NOT NULL
+                            AND confirmed_auth_subject_id IS NOT NULL)
+                    ))
                 OR (purpose = 'recent_authentication'
+                    AND workspace_id IS NOT NULL
                     AND bound_browser_session_id IS NOT NULL
                     AND invited_membership_id IS NULL
-                    AND remembered = 0)
+                    AND remembered = 0
+                    AND confirmed_auth_subject_id IS NULL
+                    AND state <> 'selection_required')
                 OR (purpose = 'first_administrator_bootstrap'
+                    AND workspace_id IS NOT NULL
                     AND bound_browser_session_id IS NULL
                     AND invited_membership_id IS NULL
-                    AND remembered = 0)
+                    AND remembered = 0
+                    AND confirmed_auth_subject_id IS NULL
+                    AND state <> 'selection_required')
             ),
             CHECK (
                 (state = 'pending' AND failure IS NULL
@@ -2070,18 +2150,23 @@ fn migrate_v14(connection: &Connection) -> Result<()> {
                 (state = 'claimed' AND failure IS NULL
                     AND claimed_at IS NOT NULL AND terminal_at IS NULL)
                 OR
+                (state = 'selection_required' AND failure IS NULL
+                    AND claimed_at IS NOT NULL AND terminal_at IS NULL)
+                OR
                 (state = 'completed' AND failure IS NULL
-                    AND claimed_at IS NOT NULL AND terminal_at IS NOT NULL)
+                    AND claimed_at IS NOT NULL AND terminal_at IS NOT NULL
+                    AND terminal_at < expires_at)
                 OR
                 (state = 'cancelled' AND failure IS NULL
-                    AND claimed_at IS NULL AND terminal_at IS NOT NULL
+                    AND terminal_at IS NOT NULL
                     AND terminal_at < expires_at)
                 OR
                 (state = 'failed' AND terminal_at IS NOT NULL AND (
                     (claimed_at IS NULL AND failure = 'verifier_lost_on_restart')
                     OR
                     (claimed_at IS NOT NULL AND failure IN (
-                        'exchange_failed', 'status_rejected', 'local_authorization_denied'
+                        'exchange_failed', 'status_rejected', 'local_authorization_denied',
+                        'local_persistence_failed', 'trust_unavailable'
                     ))
                 ))
                 OR
@@ -2089,7 +2174,7 @@ fn migrate_v14(connection: &Connection) -> Result<()> {
                     AND terminal_at IS NOT NULL
                     AND failure IN ('exchange_outcome_uncertain', 'logout_uncertain'))
                 OR
-                (state = 'expired' AND failure IS NULL AND claimed_at IS NULL
+                (state = 'expired' AND failure IS NULL
                     AND terminal_at IS NOT NULL AND terminal_at >= expires_at)
             )
         ) STRICT;
@@ -2136,7 +2221,7 @@ fn migrate_v14(connection: &Connection) -> Result<()> {
                 'membership_invitation_accepted', 'membership_approved',
                 'membership_suspended', 'membership_resumed', 'membership_removed',
                 'membership_promoted', 'membership_demoted',
-                'ceremony_claimed', 'ceremony_completed',
+                'ceremony_claimed', 'ceremony_selection_required', 'ceremony_completed',
                 'ceremony_cancelled', 'ceremony_expired',
                 'ceremony_cleanup_uncertain', 'ceremony_failed',
                 'browser_session_issued', 'browser_session_revoked'
@@ -2247,7 +2332,7 @@ fn migrate_v14(connection: &Connection) -> Result<()> {
                     AND membership_id IS NOT NULL)
                 OR
                 (event_kind IN (
-                        'ceremony_claimed', 'ceremony_completed',
+                        'ceremony_claimed', 'ceremony_selection_required', 'ceremony_completed',
                         'ceremony_cancelled', 'ceremony_expired',
                         'ceremony_cleanup_uncertain', 'ceremony_failed'
                     )
@@ -3420,14 +3505,14 @@ mod tests {
 
         assert!(connection
             .execute(
-                "INSERT INTO auth_ceremonies(operation_id, purpose, protocol, trailbase_instance_id, activation_generation, browser_binding_digest, workspace_id, selected_profile_grant_id, bound_browser_session_id, invited_membership_id, remembered, callback_path, return_target, correlation_id, state, failure, created_at, expires_at, claimed_at, terminal_at) VALUES (?1, 'sign_in', 'trailbase_authorization_code_pkce', ?2, 1, ?3, ?4, ?5, NULL, NULL, 0, '/auth/trailbase/callback', 'first_run', ?6, 'pending', NULL, ?7, '2026-08-24T00:05:00.000000Z', NULL, NULL)",
-                params![operation_id, instance_id, binding_digest, workspace_id, grant_id, correlation_id, CREATED_AT],
+                "INSERT INTO auth_ceremonies(operation_id, purpose, protocol, trailbase_instance_id, activation_generation, browser_binding_digest, workspace_id, selected_profile_grant_id, bound_browser_session_id, invited_membership_id, remembered, callback_path, return_target, correlation_id, state, failure, created_at, expires_at, claimed_at, terminal_at) VALUES (?1, 'sign_in', 'trailbase_authorization_code_pkce', ?2, 1, ?3, NULL, NULL, NULL, NULL, 0, '/auth/trailbase/callback', 'first_run', ?4, 'pending', NULL, ?5, '2026-08-24T00:05:00.000000Z', NULL, NULL)",
+                params![operation_id, instance_id, binding_digest, correlation_id, CREATED_AT],
             )
             .is_err());
         connection
             .execute(
-                "INSERT INTO auth_ceremonies(operation_id, purpose, protocol, trailbase_instance_id, activation_generation, browser_binding_digest, workspace_id, selected_profile_grant_id, bound_browser_session_id, invited_membership_id, remembered, callback_path, return_target, correlation_id, state, failure, created_at, expires_at, claimed_at, terminal_at) VALUES (?1, 'sign_in', 'trailbase_authorization_code_pkce', ?2, 1, ?3, ?4, ?5, NULL, NULL, 0, '/auth/trailbase/callback', 'application_home', ?6, 'pending', NULL, ?7, '2026-08-24T00:05:00.000000Z', NULL, NULL)",
-                params![operation_id, instance_id, binding_digest, workspace_id, grant_id, correlation_id, CREATED_AT],
+                "INSERT INTO auth_ceremonies(operation_id, purpose, protocol, trailbase_instance_id, activation_generation, browser_binding_digest, workspace_id, selected_profile_grant_id, bound_browser_session_id, invited_membership_id, remembered, callback_path, return_target, correlation_id, state, failure, created_at, expires_at, claimed_at, terminal_at) VALUES (?1, 'sign_in', 'trailbase_authorization_code_pkce', ?2, 1, ?3, NULL, NULL, NULL, NULL, 0, '/auth/trailbase/callback', 'application_home', ?4, 'pending', NULL, ?5, '2026-08-24T00:05:00.000000Z', NULL, NULL)",
+                params![operation_id, instance_id, binding_digest, correlation_id, CREATED_AT],
             )
             .expect("valid pending ceremony");
         let browser_session_id = fasti_domain::BrowserSessionId::new_v7().to_string();
@@ -3439,8 +3524,8 @@ mod tests {
             .is_err());
         connection
             .execute(
-                "UPDATE auth_ceremonies SET purpose = 'recent_authentication', return_target = 'account_security', bound_browser_session_id = ?1, remembered = 0 WHERE operation_id = ?2",
-                params![browser_session_id, operation_id],
+                "UPDATE auth_ceremonies SET purpose = 'recent_authentication', return_target = 'account_security', workspace_id = ?1, selected_profile_grant_id = ?2, bound_browser_session_id = ?3, remembered = 0 WHERE operation_id = ?4",
+                params![workspace_id, grant_id, browser_session_id, operation_id],
             )
             .expect("valid reserved recent-auth association");
         assert!(connection
@@ -3451,19 +3536,17 @@ mod tests {
             .is_err());
         connection
             .execute(
-                "UPDATE auth_ceremonies SET purpose = 'sign_in', return_target = 'application_home', bound_browser_session_id = NULL WHERE operation_id = ?1",
+                "UPDATE auth_ceremonies SET purpose = 'sign_in', return_target = 'application_home', workspace_id = NULL, selected_profile_grant_id = NULL, bound_browser_session_id = NULL WHERE operation_id = ?1",
                 [operation_id.as_str()],
             )
             .expect("restore sign-in association");
         assert!(connection
             .execute(
-                "INSERT INTO auth_ceremonies(operation_id, purpose, protocol, trailbase_instance_id, activation_generation, browser_binding_digest, workspace_id, selected_profile_grant_id, bound_browser_session_id, invited_membership_id, remembered, callback_path, return_target, correlation_id, state, failure, created_at, expires_at, claimed_at, terminal_at) VALUES (?1, 'sign_in', 'trailbase_authorization_code_pkce', ?2, 1, ?3, ?4, ?5, NULL, NULL, 0, '/auth/trailbase/callback', 'application_home', ?6, 'pending', NULL, ?7, '2026-08-24T00:05:00.000000Z', NULL, NULL)",
+                "INSERT INTO auth_ceremonies(operation_id, purpose, protocol, trailbase_instance_id, activation_generation, browser_binding_digest, workspace_id, selected_profile_grant_id, bound_browser_session_id, invited_membership_id, remembered, callback_path, return_target, correlation_id, state, failure, created_at, expires_at, claimed_at, terminal_at) VALUES (?1, 'sign_in', 'trailbase_authorization_code_pkce', ?2, 1, ?3, NULL, NULL, NULL, NULL, 0, '/auth/trailbase/callback', 'application_home', ?4, 'pending', NULL, ?5, '2026-08-24T00:05:00.000000Z', NULL, NULL)",
                 params![
                     fasti_domain::OperationId::new_v7().to_string(),
                     instance_id,
                     binding_digest,
-                    workspace_id,
-                    grant_id,
                     correlation_id,
                     CREATED_AT,
                 ],
@@ -3493,13 +3576,11 @@ mod tests {
         let claimed_binding_digest = format!("sha256:{}", "33".repeat(32));
         connection
             .execute(
-                "INSERT INTO auth_ceremonies(operation_id, purpose, protocol, trailbase_instance_id, activation_generation, browser_binding_digest, workspace_id, selected_profile_grant_id, bound_browser_session_id, invited_membership_id, remembered, callback_path, return_target, correlation_id, state, failure, created_at, expires_at, claimed_at, terminal_at) VALUES (?1, 'sign_in', 'trailbase_authorization_code_pkce', ?2, 1, ?3, ?4, ?5, NULL, NULL, 0, '/auth/trailbase/callback', 'application_home', ?6, 'claimed', NULL, ?7, '2026-08-24T00:05:00.000000Z', '2026-08-24T00:00:01.000000Z', NULL)",
+                "INSERT INTO auth_ceremonies(operation_id, purpose, protocol, trailbase_instance_id, activation_generation, browser_binding_digest, workspace_id, selected_profile_grant_id, bound_browser_session_id, invited_membership_id, remembered, callback_path, return_target, correlation_id, state, failure, created_at, expires_at, claimed_at, terminal_at) VALUES (?1, 'sign_in', 'trailbase_authorization_code_pkce', ?2, 1, ?3, NULL, NULL, NULL, NULL, 0, '/auth/trailbase/callback', 'application_home', ?4, 'claimed', NULL, ?5, '2026-08-24T00:05:00.000000Z', '2026-08-24T00:00:01.000000Z', NULL)",
                 params![
                     claimed_operation_id,
                     instance_id,
                     claimed_binding_digest,
-                    workspace_id,
-                    grant_id,
                     correlation_id,
                     CREATED_AT,
                 ],

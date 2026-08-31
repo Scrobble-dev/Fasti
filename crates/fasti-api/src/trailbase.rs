@@ -4,7 +4,7 @@
 use base64::{engine::general_purpose::URL_SAFE, engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use chrono::{DateTime, TimeDelta, Utc};
 use fasti_application::{
-    CancelAuthCeremonyCommand, CompleteTrailBaseBootstrapCommand, CompleteTrailBaseSignInCommand,
+    CancelAuthCeremonyCommand, CompleteTrailBaseBootstrapCommand, ConfirmTrailBaseSignInCommand,
     ConfirmedTrailBaseIdentity, CreatedBrowserSession, FailAuthCeremonyCommand, LocalKernel,
     PreauthorizeTrailBaseBootstrapCommand, PreauthorizeTrailBaseSignInCommand, ProblemCode,
     SecretMaterial, StartAuthCeremonyCommand, StartTrailBaseBootstrapCommand,
@@ -70,14 +70,26 @@ pub(super) struct StartedTrailBaseCeremony {
     pub(super) browser_binding: SecretMaterial,
 }
 
-pub(super) struct TrailBaseCallbackOutcome {
-    pub(super) created: CreatedBrowserSession,
-    pub(super) return_target: AuthReturnTarget,
+pub(super) enum TrailBaseCallbackOutcome {
+    SessionCreated {
+        created: Box<CreatedBrowserSession>,
+        return_target: AuthReturnTarget,
+    },
+    SelectionRequired {
+        expires_at: DateTime<Utc>,
+        return_target: AuthReturnTarget,
+    },
+}
+
+enum ClaimedCallbackCompletion {
+    Session(Box<CreatedBrowserSession>),
+    SelectionRequired(DateTime<Utc>),
 }
 
 pub(super) struct TrailBaseCallbackFailure {
     pub(super) error: TrailBaseOrchestrationError,
     pub(super) return_target: Option<AuthReturnTarget>,
+    pub(super) continuation_expires_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,6 +102,15 @@ pub(super) enum TrailBaseOrchestrationError {
     StatusRejected,
     LogoutUncertain,
     LocalAuthorizationDenied,
+}
+
+const fn failure_for_local_problem(code: ProblemCode) -> Option<AuthCeremonyFailure> {
+    match code {
+        ProblemCode::AuthSubjectUnaffiliated => Some(AuthCeremonyFailure::LocalAuthorizationDenied),
+        ProblemCode::TrailBaseTrustUnavailable => Some(AuthCeremonyFailure::TrustUnavailable),
+        ProblemCode::StorageUnavailable => Some(AuthCeremonyFailure::LocalPersistenceFailed),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -193,7 +214,7 @@ impl TrailBaseOrchestrator {
 
     pub(super) fn start_sign_in(
         &self,
-        selection: AuthCeremonySelection,
+        remembered: bool,
         correlation_id: RequestCorrelationId,
         created_at: DateTime<Utc>,
         expires_at: DateTime<Utc>,
@@ -202,7 +223,8 @@ impl TrailBaseOrchestrator {
             AuthCeremonyPurpose::SignIn,
             self.instance_id,
             self.activation_generation,
-            selection,
+            None,
+            remembered,
             None,
             correlation_id,
             created_at,
@@ -223,7 +245,8 @@ impl TrailBaseOrchestrator {
             AuthCeremonyPurpose::FirstAdministratorBootstrap,
             self.instance_id,
             self.activation_generation,
-            selection,
+            Some(selection),
+            false,
             Some(bootstrap_secret),
             correlation_id,
             created_at,
@@ -237,7 +260,8 @@ impl TrailBaseOrchestrator {
         purpose: AuthCeremonyPurpose,
         instance_id: TrailBaseInstanceId,
         activation_generation: u64,
-        selection: AuthCeremonySelection,
+        selection: Option<AuthCeremonySelection>,
+        remembered: bool,
         bootstrap_secret: Option<SecretMaterial>,
         correlation_id: RequestCorrelationId,
         created_at: DateTime<Utc>,
@@ -265,6 +289,7 @@ impl TrailBaseOrchestrator {
             activation_generation,
             browser_binding_digest,
             selection,
+            remembered,
             AuthCallbackPath::parse(FASTI_ACCESS_CALLBACK_PATH)
                 .map_err(|_| TrailBaseOrchestrationError::InvalidInput)?,
             purpose.return_target(),
@@ -322,9 +347,18 @@ impl TrailBaseOrchestrator {
         correlation_id: RequestCorrelationId,
         at: DateTime<Utc>,
     ) -> Result<CreatedBrowserSession, TrailBaseOrchestrationError> {
-        self.callback_for_browser(authorization_code, browser_binding, correlation_id, at)
+        self.callback_for_browser(authorization_code, &browser_binding, correlation_id, at)
             .await
-            .map(|outcome| outcome.created)
+            .and_then(|outcome| match outcome {
+                TrailBaseCallbackOutcome::SessionCreated { created, .. } => Ok(*created),
+                TrailBaseCallbackOutcome::SelectionRequired { .. } => {
+                    Err(TrailBaseCallbackFailure {
+                        error: TrailBaseOrchestrationError::LocalAuthorizationDenied,
+                        return_target: Some(AuthReturnTarget::ApplicationHome),
+                        continuation_expires_at: None,
+                    })
+                }
+            })
             .map_err(|failure| failure.error)
     }
 
@@ -332,7 +366,7 @@ impl TrailBaseOrchestrator {
     pub(super) async fn callback_for_browser(
         &self,
         authorization_code: String,
-        browser_binding: SecretMaterial,
+        browser_binding: &SecretMaterial,
         correlation_id: RequestCorrelationId,
         at: DateTime<Utc>,
     ) -> Result<TrailBaseCallbackOutcome, TrailBaseCallbackFailure> {
@@ -340,11 +374,13 @@ impl TrailBaseOrchestrator {
             AuthorizationCode::parse(authorization_code).map_err(|_| TrailBaseCallbackFailure {
                 error: TrailBaseOrchestrationError::InvalidInput,
                 return_target: None,
+                continuation_expires_at: None,
             })?;
         let callback_path = AuthCallbackPath::parse(FASTI_ACCESS_CALLBACK_PATH).map_err(|_| {
             TrailBaseCallbackFailure {
                 error: TrailBaseOrchestrationError::InvalidInput,
                 return_target: None,
+                continuation_expires_at: None,
             }
         })?;
         let claimed = self
@@ -357,20 +393,55 @@ impl TrailBaseOrchestrator {
                 correlation_id,
                 at,
             ))
-            .map_err(|_| TrailBaseCallbackFailure {
-                error: TrailBaseOrchestrationError::LocalState,
-                return_target: None,
+            .map_err(|problem| {
+                let code = problem.code();
+                if code == ProblemCode::TrailBaseTrustUnavailable {
+                    self.vault.clear();
+                    TrailBaseCallbackFailure {
+                        error: TrailBaseOrchestrationError::ApplicationProblem(code),
+                        return_target: None,
+                        continuation_expires_at: None,
+                    }
+                } else {
+                    TrailBaseCallbackFailure {
+                        error: TrailBaseOrchestrationError::LocalState,
+                        return_target: None,
+                        continuation_expires_at: None,
+                    }
+                }
             })?;
         let return_target = claimed.return_target();
+        let continuation_expires_at = claimed.expires_at();
+        if claimed.failure() == Some(AuthCeremonyFailure::TrustUnavailable) {
+            self.vault.clear();
+            return Err(TrailBaseCallbackFailure {
+                error: TrailBaseOrchestrationError::ApplicationProblem(
+                    ProblemCode::TrailBaseTrustUnavailable,
+                ),
+                return_target: Some(return_target),
+                continuation_expires_at: Some(continuation_expires_at),
+            });
+        }
         self.finish_claimed_callback(code, claimed, correlation_id, at)
             .await
-            .map(|created| TrailBaseCallbackOutcome {
-                created,
-                return_target,
+            .map(|completion| match completion {
+                ClaimedCallbackCompletion::Session(created) => {
+                    TrailBaseCallbackOutcome::SessionCreated {
+                        created,
+                        return_target,
+                    }
+                }
+                ClaimedCallbackCompletion::SelectionRequired(expires_at) => {
+                    TrailBaseCallbackOutcome::SelectionRequired {
+                        expires_at,
+                        return_target,
+                    }
+                }
             })
             .map_err(|error| TrailBaseCallbackFailure {
                 error,
                 return_target: Some(return_target),
+                continuation_expires_at: Some(continuation_expires_at),
             })
     }
 
@@ -380,7 +451,7 @@ impl TrailBaseOrchestrator {
         claimed: AuthCeremony,
         correlation_id: RequestCorrelationId,
         at: DateTime<Utc>,
-    ) -> Result<CreatedBrowserSession, TrailBaseOrchestrationError> {
+    ) -> Result<ClaimedCallbackCompletion, TrailBaseOrchestrationError> {
         let verifier = match self.vault.take(claimed.id()) {
             Some(verifier) => verifier,
             None => {
@@ -461,17 +532,21 @@ impl TrailBaseOrchestrator {
                 correlation_id,
             ))),
         };
-        if local_authorization.is_err() {
-            return self
-                .cleanup_and_fail(
-                    session,
+        if let Err(problem) = local_authorization {
+            let code = problem.code();
+            if self.client.logout(session).await.is_err() {
+                self.record_failure(
                     claimed.id(),
-                    AuthCeremonyFailure::LocalAuthorizationDenied,
-                    TrailBaseOrchestrationError::LocalAuthorizationDenied,
+                    AuthCeremonyFailure::LogoutUncertain,
                     correlation_id,
                     at,
-                )
-                .await;
+                )?;
+                return Err(TrailBaseOrchestrationError::LogoutUncertain);
+            }
+            if let Some(failure) = failure_for_local_problem(code) {
+                self.record_failure(claimed.id(), failure, correlation_id, at)?;
+            }
+            return Err(TrailBaseOrchestrationError::ApplicationProblem(code));
         }
         if self.client.logout(session).await.is_err() {
             self.record_failure(
@@ -482,33 +557,51 @@ impl TrailBaseOrchestrator {
             )?;
             return Err(TrailBaseOrchestrationError::LogoutUncertain);
         }
-        let completed = match claimed.purpose() {
+        match claimed.purpose() {
             AuthCeremonyPurpose::SignIn => {
-                self.access
-                    .complete_trailbase_sign_in(CompleteTrailBaseSignInCommand::new(
+                match self
+                    .access
+                    .confirm_trailbase_sign_in(ConfirmTrailBaseSignInCommand::new(
                         PreauthorizeTrailBaseSignInCommand::new(
                             claimed.id(),
                             identity,
                             correlation_id,
                             at,
                         ),
-                    ))
+                    )) {
+                    Ok(ceremony) => Ok(ClaimedCallbackCompletion::SelectionRequired(
+                        ceremony.expires_at(),
+                    )),
+                    Err(problem) => {
+                        let code = problem.code();
+                        if matches!(
+                            failure_for_local_problem(code),
+                            Some(AuthCeremonyFailure::LocalPersistenceFailed)
+                        ) {
+                            self.record_failure(
+                                claimed.id(),
+                                AuthCeremonyFailure::LocalPersistenceFailed,
+                                correlation_id,
+                                at,
+                            )?;
+                        }
+                        Err(TrailBaseOrchestrationError::ApplicationProblem(code))
+                    }
+                }
             }
             AuthCeremonyPurpose::FirstAdministratorBootstrap => {
                 let bootstrap_secret = match self.access.ensure_bootstrap_secret() {
                     Ok(secret) => secret,
-                    Err(_) => {
-                        self.record_failure(
-                            claimed.id(),
-                            AuthCeremonyFailure::LocalAuthorizationDenied,
-                            correlation_id,
-                            at,
-                        )?;
-                        return Err(TrailBaseOrchestrationError::LocalState);
+                    Err(problem) => {
+                        let code = problem.code();
+                        if let Some(failure) = failure_for_local_problem(code) {
+                            self.record_failure(claimed.id(), failure, correlation_id, at)?;
+                        }
+                        return Err(TrailBaseOrchestrationError::ApplicationProblem(code));
                     }
                 };
-                self.access
-                    .complete_trailbase_bootstrap(CompleteTrailBaseBootstrapCommand::new(
+                match self.access.complete_trailbase_bootstrap(
+                    CompleteTrailBaseBootstrapCommand::new(
                         PreauthorizeTrailBaseBootstrapCommand::new(
                             claimed.id(),
                             identity,
@@ -516,27 +609,25 @@ impl TrailBaseOrchestrator {
                             at,
                         ),
                         bootstrap_secret,
-                    ))
+                    ),
+                ) {
+                    Ok(created) => Ok(ClaimedCallbackCompletion::Session(Box::new(created))),
+                    Err(problem) => {
+                        let code = problem.code();
+                        if let Some(failure) = failure_for_local_problem(code) {
+                            self.record_failure(claimed.id(), failure, correlation_id, at)?;
+                        }
+                        Err(TrailBaseOrchestrationError::ApplicationProblem(code))
+                    }
+                }
             }
             AuthCeremonyPurpose::RecentAuthentication => {
-                return Err(TrailBaseOrchestrationError::LocalAuthorizationDenied);
-            }
-        };
-        match completed {
-            Ok(created) => Ok(created),
-            Err(_) => {
-                self.record_failure(
-                    claimed.id(),
-                    AuthCeremonyFailure::LocalAuthorizationDenied,
-                    correlation_id,
-                    at,
-                )?;
                 Err(TrailBaseOrchestrationError::LocalAuthorizationDenied)
             }
         }
     }
 
-    async fn cleanup_and_fail(
+    async fn cleanup_and_fail<T>(
         &self,
         session: TrailBaseSession,
         operation_id: OperationId,
@@ -544,7 +635,7 @@ impl TrailBaseOrchestrator {
         result: TrailBaseOrchestrationError,
         correlation_id: RequestCorrelationId,
         at: DateTime<Utc>,
-    ) -> Result<CreatedBrowserSession, TrailBaseOrchestrationError> {
+    ) -> Result<T, TrailBaseOrchestrationError> {
         if self.client.logout(session).await.is_err() {
             self.record_failure(
                 operation_id,
@@ -823,6 +914,13 @@ impl PkceVault {
         self.take(operation_id).is_some()
     }
 
+    fn clear(&self) {
+        if let Ok(mut state) = self.inner.lock() {
+            state.verifiers.clear();
+            state.reserved = 0;
+        }
+    }
+
     #[cfg(test)]
     fn live_len(&self) -> usize {
         self.inner.lock().expect("PKCE vault").verifiers.len()
@@ -967,7 +1065,7 @@ fn authentication_method(provider: u8) -> Option<AuthenticationMethod> {
     }
 }
 
-fn sha256_digest(value: &[u8; 32]) -> Sha256Digest {
+pub(super) fn sha256_digest(value: &[u8; 32]) -> Sha256Digest {
     use sha2::{Digest, Sha256};
     let bytes: [u8; 32] = Sha256::digest(value).into();
     Sha256Digest::from_bytes(&bytes)
@@ -998,8 +1096,9 @@ mod tests {
         Router,
     };
     use fasti_application::{
-        AccessAdministrationPort, EnrollFirstClientCommand, HumanAccessPort, InitializeNodeCommand,
-        VerifyTrailBaseInstallationCommand,
+        AccessAdministrationPort, CancelTrailBaseSignInContinuationCommand,
+        EnrollFirstClientCommand, HumanAccessPort, InitializeNodeCommand,
+        ReadTrailBaseSignInContinuationQuery, VerifyTrailBaseInstallationCommand,
     };
     use fasti_store::SqliteKernel;
     use serde_json::json;
@@ -1169,7 +1268,6 @@ mod tests {
                     access.grant_id(),
                     None,
                     None,
-                    false,
                 )
                 .expect("selection"),
                 kernel.ensure_bootstrap_secret().expect("bootstrap secret"),
@@ -1331,7 +1429,6 @@ mod tests {
                     access.grant_id(),
                     None,
                     None,
-                    false,
                 )
                 .expect("bootstrap selection"),
                 kernel.ensure_bootstrap_secret().expect("bootstrap secret"),
@@ -1344,7 +1441,6 @@ mod tests {
                 access.grant_id(),
                 None,
                 None,
-                false,
             )
             .expect("second bootstrap selection"),
             kernel.ensure_bootstrap_secret().expect("bootstrap secret"),
@@ -1441,6 +1537,422 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn packaged_runtime_ordinary_sign_in_continues_to_one_opaque_fasti_session() {
+        let (root, kernel, installation, access) = initialized_access_node();
+        let callback_at = Utc::now();
+        let (client, state, task) = spawn_successful_auth_fixture(callback_at).await;
+        let orchestrator = Arc::new(test_orchestrator(client, &kernel, &installation));
+        let runtime = crate::DirectLoopbackAccessRuntime::from_test_orchestrator(
+            kernel.clone(),
+            root.path(),
+            Arc::clone(&orchestrator),
+        );
+        let bootstrap = runtime
+            .start_first_administrator_bootstrap(
+                AuthCeremonySelection::try_new(
+                    AuthCeremonyPurpose::FirstAdministratorBootstrap,
+                    access.workspace_id(),
+                    access.grant_id(),
+                    None,
+                    None,
+                )
+                .expect("bootstrap selection"),
+                kernel.ensure_bootstrap_secret().expect("bootstrap secret"),
+            )
+            .expect("start bootstrap");
+        let bootstrap_response = runtime
+            .router()
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "{FASTI_ACCESS_CALLBACK_PATH}?code={}",
+                        "a".repeat(48)
+                    ))
+                    .header(header::HOST, crate::FASTI_ACCESS_HOST)
+                    .header(
+                        header::COOKIE,
+                        format!(
+                            "{}={}",
+                            crate::FASTI_ACCESS_BINDING_COOKIE,
+                            bootstrap.browser_binding().expose_hex()
+                        ),
+                    )
+                    .body(Body::empty())
+                    .expect("bootstrap callback request"),
+            )
+            .await
+            .expect("bootstrap callback response");
+        assert_eq!(bootstrap_response.status(), StatusCode::SEE_OTHER);
+
+        let expired = orchestrator
+            .start_sign_in(
+                false,
+                RequestCorrelationId::new_v7(),
+                callback_at - TimeDelta::minutes(1),
+                callback_at + TimeDelta::minutes(8),
+            )
+            .expect("start expiring sign-in");
+        let expired_cookie = format!(
+            "{}={}",
+            crate::FASTI_ACCESS_CONTINUATION_COOKIE,
+            expired.browser_binding.expose_hex()
+        );
+        let expired_result = orchestrator
+            .callback_for_browser(
+                "a".repeat(48),
+                &expired.browser_binding,
+                RequestCorrelationId::new_v7(),
+                callback_at,
+            )
+            .await;
+        assert!(matches!(
+            expired_result,
+            Ok(TrailBaseCallbackOutcome::SelectionRequired { .. })
+        ));
+        rusqlite::Connection::open(kernel.database_path())
+            .expect("open expiring ceremony database")
+            .execute(
+                "UPDATE auth_ceremonies SET expires_at = ?1 WHERE operation_id = ?2",
+                rusqlite::params![
+                    (callback_at + TimeDelta::microseconds(1))
+                        .to_rfc3339_opts(chrono::SecondsFormat::Micros, true),
+                    expired.operation_id.to_string(),
+                ],
+            )
+            .expect("expire selected ceremony at the next route read");
+        let expired_response = runtime
+            .router()
+            .oneshot(
+                Request::builder()
+                    .uri(crate::FASTI_ACCESS_CONTINUATION_PATH)
+                    .header(header::HOST, crate::FASTI_ACCESS_HOST)
+                    .header(header::COOKIE, expired_cookie)
+                    .body(Body::empty())
+                    .expect("expired continuation request"),
+            )
+            .await
+            .expect("expired continuation response");
+        assert_eq!(expired_response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            expired_response.headers().get(header::CACHE_CONTROL),
+            Some(&HeaderValue::from_static("private, no-store"))
+        );
+        assert_eq!(
+            expired_response.headers().get(header::SET_COOKIE),
+            Some(&HeaderValue::from_static("__Secure-fasti_auth_continuation=; Domain=127.0.0.1; Path=/api/access/v1/trailbase/continuation; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=Strict"))
+        );
+
+        let start_response = runtime
+            .router()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/access/v1/trailbase/sign-in")
+                    .header(header::HOST, crate::FASTI_ACCESS_HOST)
+                    .header(header::ORIGIN, crate::FASTI_ACCESS_ORIGIN)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"remembered":false}"#))
+                    .expect("ordinary sign-in request"),
+            )
+            .await
+            .expect("ordinary sign-in response");
+        assert_eq!(start_response.status(), StatusCode::OK);
+        let binding_cookie = start_response
+            .headers()
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .find_map(|value| {
+                let value = value.to_str().ok()?;
+                value
+                    .starts_with(crate::FASTI_ACCESS_BINDING_COOKIE)
+                    .then(|| {
+                        value
+                            .split_once(';')
+                            .map_or(value, |(cookie, _)| cookie)
+                            .to_owned()
+                    })
+            })
+            .expect("path-scoped binding cookie");
+
+        let callback_response = runtime
+            .router()
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "{FASTI_ACCESS_CALLBACK_PATH}?code={}",
+                        "a".repeat(48)
+                    ))
+                    .header(header::HOST, crate::FASTI_ACCESS_HOST)
+                    .header(header::COOKIE, binding_cookie)
+                    .body(Body::empty())
+                    .expect("ordinary callback request"),
+            )
+            .await
+            .expect("ordinary callback response");
+        assert_eq!(callback_response.status(), StatusCode::SEE_OTHER);
+        assert_eq!(
+            callback_response.headers().get(header::LOCATION),
+            Some(&HeaderValue::from_static("/?auth=continue"))
+        );
+        let callback_counts: (i64, i64) = rusqlite::Connection::open(kernel.database_path())
+            .expect("inspect callback state")
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM fasti_browser_sessions), (SELECT COUNT(*) FROM fasti_browser_session_authentication)",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("callback state counts");
+        assert_eq!(callback_counts, (1, 1));
+        let continuation_cookie = callback_response
+            .headers()
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .find_map(|value| {
+                let value = value.to_str().ok()?;
+                value
+                    .starts_with(crate::FASTI_ACCESS_CONTINUATION_COOKIE)
+                    .then(|| {
+                        value
+                            .split_once(';')
+                            .map_or(value, |(cookie, _)| cookie)
+                            .to_owned()
+                    })
+            })
+            .expect("continuation cookie");
+
+        let boundary_cases = [
+            (
+                "wrong Host",
+                Request::builder()
+                    .uri(crate::FASTI_ACCESS_CONTINUATION_PATH)
+                    .header(header::HOST, "127.0.0.1:8421")
+                    .header(header::COOKIE, &continuation_cookie)
+                    .body(Body::empty())
+                    .expect("wrong Host request"),
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                "missing mutation Origin",
+                Request::builder()
+                    .method("POST")
+                    .uri(crate::FASTI_ACCESS_CONTINUATION_PATH)
+                    .header(header::HOST, crate::FASTI_ACCESS_HOST)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::COOKIE, &continuation_cookie)
+                    .body(Body::from("{}"))
+                    .expect("missing Origin request"),
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                "bearer credential",
+                Request::builder()
+                    .uri(crate::FASTI_ACCESS_CONTINUATION_PATH)
+                    .header(header::HOST, crate::FASTI_ACCESS_HOST)
+                    .header(header::AUTHORIZATION, "Bearer forbidden")
+                    .header(header::COOKIE, &continuation_cookie)
+                    .body(Body::empty())
+                    .expect("bearer request"),
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                "duplicate continuation cookie",
+                Request::builder()
+                    .uri(crate::FASTI_ACCESS_CONTINUATION_PATH)
+                    .header(header::HOST, crate::FASTI_ACCESS_HOST)
+                    .header(header::COOKIE, &continuation_cookie)
+                    .header(header::COOKIE, &continuation_cookie)
+                    .body(Body::empty())
+                    .expect("duplicate cookie request"),
+                StatusCode::UNAUTHORIZED,
+            ),
+        ];
+        for (label, request, expected) in boundary_cases {
+            let response = runtime
+                .router()
+                .oneshot(request)
+                .await
+                .expect("boundary response");
+            assert_eq!(response.status(), expected, "{label}");
+            assert_eq!(
+                response.headers().get(header::CACHE_CONTROL),
+                Some(&HeaderValue::from_static("private, no-store")),
+                "{label}"
+            );
+            if expected == StatusCode::UNAUTHORIZED {
+                assert_eq!(
+                    response.headers().get(header::SET_COOKIE),
+                    Some(&HeaderValue::from_static("__Secure-fasti_auth_continuation=; Domain=127.0.0.1; Path=/api/access/v1/trailbase/continuation; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=Strict"))
+                );
+            }
+        }
+
+        let projection_response = runtime
+            .router()
+            .oneshot(
+                Request::builder()
+                    .uri(crate::FASTI_ACCESS_CONTINUATION_PATH)
+                    .header(header::HOST, crate::FASTI_ACCESS_HOST)
+                    .header(header::COOKIE, &continuation_cookie)
+                    .body(Body::empty())
+                    .expect("continuation read request"),
+            )
+            .await
+            .expect("continuation read response");
+        assert_eq!(projection_response.status(), StatusCode::OK);
+        let projection: serde_json::Value = serde_json::from_slice(
+            &to_bytes(projection_response.into_body(), 16 * 1024)
+                .await
+                .expect("bounded continuation body"),
+        )
+        .expect("continuation JSON");
+        assert_eq!(
+            projection
+                .get("choices")
+                .and_then(serde_json::Value::as_array)
+                .map(Vec::len),
+            Some(1)
+        );
+        let revision = projection
+            .get("candidate_revision")
+            .and_then(serde_json::Value::as_str)
+            .expect("candidate revision");
+
+        let complete_response = runtime
+            .router()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(crate::FASTI_ACCESS_CONTINUATION_PATH)
+                    .header(header::HOST, crate::FASTI_ACCESS_HOST)
+                    .header(header::ORIGIN, crate::FASTI_ACCESS_ORIGIN)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::COOKIE, &continuation_cookie)
+                    .body(Body::from(
+                        json!({
+                            "choice_ordinal": 0,
+                            "candidate_revision": revision,
+                        })
+                        .to_string(),
+                    ))
+                    .expect("continuation completion request"),
+            )
+            .await
+            .expect("continuation completion response");
+        assert_eq!(complete_response.status(), StatusCode::NO_CONTENT);
+        let complete_cookies = complete_response
+            .headers()
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .map(|value| value.to_str().expect("completion Set-Cookie"))
+            .collect::<Vec<_>>();
+        assert_eq!(complete_cookies.len(), 3);
+        assert!(complete_cookies
+            .iter()
+            .any(|cookie| cookie.starts_with("__Host-fasti_csrf=")));
+        assert!(complete_cookies.iter().any(|cookie| {
+            *cookie
+                == "__Secure-fasti_auth_continuation=; Domain=127.0.0.1; Path=/api/access/v1/trailbase/continuation; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=Strict"
+        }));
+        let session_cookie = complete_cookies
+            .iter()
+            .find_map(|value| {
+                value.starts_with("__Host-fasti_session=").then(|| {
+                    value
+                        .split_once(';')
+                        .map_or(*value, |(cookie, _)| cookie)
+                        .to_owned()
+                })
+            })
+            .expect("opaque Fasti session cookie");
+        let completion_counts: (i64, i64) =
+            rusqlite::Connection::open(kernel.database_path())
+                .expect("inspect completion state")
+                .query_row(
+                    "SELECT (SELECT COUNT(*) FROM fasti_browser_sessions), (SELECT COUNT(*) FROM fasti_browser_session_authentication)",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .expect("completion state counts");
+        assert_eq!(completion_counts, (2, 2));
+
+        let session_response = runtime
+            .router()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/access/v1/browser-session")
+                    .header(header::HOST, crate::FASTI_ACCESS_HOST)
+                    .header(header::COOKIE, session_cookie)
+                    .body(Body::empty())
+                    .expect("browser session request"),
+            )
+            .await
+            .expect("browser session response");
+        assert_eq!(session_response.status(), StatusCode::OK);
+        let dismiss_response = runtime
+            .router()
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(crate::FASTI_ACCESS_CONTINUATION_PATH)
+                    .header(header::HOST, crate::FASTI_ACCESS_HOST)
+                    .header(header::ORIGIN, crate::FASTI_ACCESS_ORIGIN)
+                    .header(header::COOKIE, continuation_cookie)
+                    .body(Body::empty())
+                    .expect("completed continuation dismissal request"),
+            )
+            .await
+            .expect("completed continuation dismissal response");
+        assert_eq!(dismiss_response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            dismiss_response.headers().get(header::CACHE_CONTROL),
+            Some(&HeaderValue::from_static("private, no-store"))
+        );
+        assert_eq!(
+            dismiss_response.headers().get(header::SET_COOKIE),
+            Some(&HeaderValue::from_static("__Secure-fasti_auth_continuation=; Domain=127.0.0.1; Path=/api/access/v1/trailbase/continuation; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=Strict"))
+        );
+        assert_eq!(
+            state.requests.lock().expect("requests").as_slice(),
+            [
+                ("token".to_owned(), "POST".to_owned(), TOKEN_PATH.to_owned()),
+                (
+                    "status".to_owned(),
+                    "GET".to_owned(),
+                    STATUS_PATH.to_owned()
+                ),
+                (
+                    "logout".to_owned(),
+                    "POST".to_owned(),
+                    LOGOUT_PATH.to_owned()
+                ),
+                ("token".to_owned(), "POST".to_owned(), TOKEN_PATH.to_owned()),
+                (
+                    "status".to_owned(),
+                    "GET".to_owned(),
+                    STATUS_PATH.to_owned()
+                ),
+                (
+                    "logout".to_owned(),
+                    "POST".to_owned(),
+                    LOGOUT_PATH.to_owned()
+                ),
+                ("token".to_owned(), "POST".to_owned(), TOKEN_PATH.to_owned()),
+                (
+                    "status".to_owned(),
+                    "GET".to_owned(),
+                    STATUS_PATH.to_owned()
+                ),
+                (
+                    "logout".to_owned(),
+                    "POST".to_owned(),
+                    LOGOUT_PATH.to_owned()
+                ),
+            ]
+        );
+        task.abort();
+    }
+
+    #[tokio::test]
     async fn packaged_runtime_cancellation_removes_the_durable_ceremony_and_pkce_verifier() {
         let (root, kernel, installation, access) = initialized_access_node();
         let callback_at = Utc::now();
@@ -1459,7 +1971,6 @@ mod tests {
                     access.grant_id(),
                     None,
                     None,
-                    false,
                 )
                 .expect("bootstrap selection"),
                 kernel.ensure_bootstrap_secret().expect("bootstrap secret"),
@@ -1498,13 +2009,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn bootstrap_secret_reload_failure_terminalizes_the_claimed_ceremony() {
+    async fn bootstrap_secret_reload_failure_records_exact_local_persistence_evidence() {
         let (_root, kernel, installation, access) = initialized_access_node();
         let callback_at = Utc::now();
         let (client, state, task) = spawn_successful_auth_fixture(callback_at).await;
         let orchestrator = test_orchestrator(client, &kernel, &installation);
         let started = start_bootstrap_ceremony(&orchestrator, &kernel, access, callback_at);
         let binding = Zeroizing::new(*started.browser_binding.expose_bytes());
+        let binding_digest = sha256_digest(&binding);
         let bootstrap_secret_path = kernel.data_root().join("bootstrap.secret");
         std::fs::remove_file(&bootstrap_secret_path).expect("remove bootstrap secret");
         std::fs::create_dir(&bootstrap_secret_path)
@@ -1518,7 +2030,25 @@ mod tests {
                 callback_at,
             )
             .await;
-        assert_eq!(result.err(), Some(TrailBaseOrchestrationError::LocalState));
+        assert_eq!(
+            result.err(),
+            Some(TrailBaseOrchestrationError::ApplicationProblem(
+                ProblemCode::StorageUnavailable
+            ))
+        );
+        let evidence = HumanAccessPort::read_trailbase_sign_in_continuation(
+            kernel.as_ref(),
+            ReadTrailBaseSignInContinuationQuery::new(
+                binding_digest,
+                RequestCorrelationId::new_v7(),
+                callback_at,
+            ),
+        )
+        .expect_err("terminal bootstrap persistence evidence");
+        assert_eq!(
+            evidence.code(),
+            ProblemCode::AuthContinuationPersistenceFailed
+        );
         let requests_after_failure = state.requests.lock().expect("requests").clone();
         assert_eq!(
             requests_after_failure,
@@ -1553,7 +2083,7 @@ mod tests {
         assert!(kernel
             .fail_auth_ceremony(FailAuthCeremonyCommand::new(
                 started.operation_id,
-                AuthCeremonyFailure::LocalAuthorizationDenied,
+                AuthCeremonyFailure::LocalPersistenceFailed,
                 RequestCorrelationId::new_v7(),
                 callback_at,
             ))
@@ -1573,6 +2103,87 @@ mod tests {
                 callback_at + TimeDelta::seconds(2),
             ))
             .expect("fresh bootstrap remains available");
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn bootstrap_session_insert_failure_records_exact_local_persistence_evidence() {
+        let (_root, kernel, installation, access) = initialized_access_node();
+        let callback_at = Utc::now();
+        let (client, state, task) = spawn_successful_auth_fixture(callback_at).await;
+        let orchestrator = test_orchestrator(client, &kernel, &installation);
+        let started = start_bootstrap_ceremony(&orchestrator, &kernel, access, callback_at);
+        let binding = Zeroizing::new(*started.browser_binding.expose_bytes());
+        let binding_digest = sha256_digest(&binding);
+        rusqlite::Connection::open(kernel.database_path())
+            .expect("open test database")
+            .execute_batch(
+                "CREATE TRIGGER fail_bootstrap_session_insert BEFORE INSERT ON fasti_browser_sessions BEGIN SELECT RAISE(ABORT, 'injected bootstrap session failure'); END;",
+            )
+            .expect("install session failure trigger");
+
+        let result = orchestrator
+            .callback(
+                "a".repeat(48),
+                started.browser_binding,
+                RequestCorrelationId::new_v7(),
+                callback_at,
+            )
+            .await;
+        assert_eq!(
+            result.err(),
+            Some(TrailBaseOrchestrationError::ApplicationProblem(
+                ProblemCode::StorageUnavailable
+            ))
+        );
+        let evidence = HumanAccessPort::read_trailbase_sign_in_continuation(
+            kernel.as_ref(),
+            ReadTrailBaseSignInContinuationQuery::new(
+                binding_digest,
+                RequestCorrelationId::new_v7(),
+                callback_at,
+            ),
+        )
+        .expect_err("terminal bootstrap session persistence evidence");
+        assert_eq!(
+            evidence.code(),
+            ProblemCode::AuthContinuationPersistenceFailed
+        );
+        let terminal: (String, String, i64, i64, i64) =
+            rusqlite::Connection::open(kernel.database_path())
+                .expect("inspect terminal evidence")
+                .query_row(
+                    r#"
+                    SELECT state, failure,
+                           (SELECT COUNT(*) FROM auth_subjects),
+                           (SELECT COUNT(*) FROM fasti_browser_sessions),
+                           (SELECT COUNT(*) FROM access_audit_events
+                            WHERE operation_id = ?1 AND event_kind = 'ceremony_failed')
+                    FROM auth_ceremonies WHERE operation_id = ?1
+                    "#,
+                    [started.operation_id.to_string()],
+                    |row| {
+                        Ok((
+                            row.get(0)?,
+                            row.get(1)?,
+                            row.get(2)?,
+                            row.get(3)?,
+                            row.get(4)?,
+                        ))
+                    },
+                )
+                .expect("terminal bootstrap persistence evidence");
+        assert_eq!(
+            terminal,
+            (
+                "failed".to_owned(),
+                "local_persistence_failed".to_owned(),
+                0,
+                0,
+                1
+            )
+        );
+        assert_eq!(state.requests.lock().expect("requests").len(), 3);
         task.abort();
     }
 
@@ -1682,7 +2293,7 @@ mod tests {
 
     #[tokio::test]
     async fn normal_sign_in_never_loads_bootstrap_secret_and_denial_logs_out_once() {
-        let (_root, kernel, installation, access) = initialized_access_node();
+        let (_root, kernel, installation, _access) = initialized_access_node();
         let callback_at = DateTime::parse_from_rfc3339("2026-08-30T00:02:00Z")
             .expect("time")
             .with_timezone(&Utc);
@@ -1735,15 +2346,7 @@ mod tests {
         };
         let started = orchestrator
             .start_sign_in(
-                AuthCeremonySelection::try_new(
-                    AuthCeremonyPurpose::SignIn,
-                    access.workspace_id(),
-                    access.grant_id(),
-                    None,
-                    None,
-                    false,
-                )
-                .expect("selection"),
+                false,
                 RequestCorrelationId::new_v7(),
                 callback_at - TimeDelta::minutes(1),
                 callback_at + TimeDelta::minutes(8),
@@ -1764,7 +2367,9 @@ mod tests {
             .await;
         assert!(matches!(
             result,
-            Err(TrailBaseOrchestrationError::LocalAuthorizationDenied)
+            Err(TrailBaseOrchestrationError::ApplicationProblem(
+                ProblemCode::AuthSubjectUnaffiliated
+            ))
         ));
         let replay = orchestrator
             .callback(
@@ -1793,6 +2398,307 @@ mod tests {
                     LOGOUT_PATH.to_owned()
                 ),
             ]
+        );
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn claim_time_trust_drift_terminalizes_without_vendor_io_and_clears_verifiers() {
+        let (root, kernel, installation, _) = initialized_access_node();
+        let callback_at = Utc::now();
+        let (client, state, task) = spawn_successful_auth_fixture(callback_at).await;
+        let orchestrator = Arc::new(test_orchestrator(client, &kernel, &installation));
+        let runtime = crate::DirectLoopbackAccessRuntime::from_test_orchestrator(
+            kernel.clone(),
+            root.path(),
+            Arc::clone(&orchestrator),
+        );
+        let started = orchestrator
+            .start_sign_in(
+                false,
+                RequestCorrelationId::new_v7(),
+                callback_at - TimeDelta::minutes(1),
+                callback_at + TimeDelta::minutes(8),
+            )
+            .expect("start sign-in before trust drift");
+        assert_eq!(orchestrator.vault.live_len(), 1);
+        rusqlite::Connection::open(kernel.database_path())
+            .expect("open test database")
+            .execute(
+                "UPDATE trailbase_installation SET activation_state = 'blocked', activation_blocker = 'release_mismatch' WHERE singleton = 1",
+                [],
+            )
+            .expect("block active installation");
+
+        let binding = started.browser_binding.expose_hex();
+        let callback_response = runtime
+            .router()
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "{FASTI_ACCESS_CALLBACK_PATH}?code={}",
+                        "a".repeat(48)
+                    ))
+                    .header(header::HOST, crate::FASTI_ACCESS_HOST)
+                    .header(
+                        header::COOKIE,
+                        format!("{}={binding}", crate::FASTI_ACCESS_BINDING_COOKIE),
+                    )
+                    .body(Body::empty())
+                    .expect("claim-time trust drift callback request"),
+            )
+            .await;
+        let callback_response = callback_response.expect("claim-time trust drift callback");
+        assert_eq!(
+            callback_response.status(),
+            StatusCode::SEE_OTHER,
+            "callback redirects to the durable failure evidence"
+        );
+        assert!(callback_response
+            .headers()
+            .get(header::LOCATION)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.starts_with("/?auth=failed&correlation_id=req_")));
+        assert_eq!(
+            callback_response.headers().get(header::CACHE_CONTROL),
+            Some(&HeaderValue::from_static("private, no-store"))
+        );
+        let cookies = callback_response
+            .headers()
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .map(|value| value.to_str().expect("callback Set-Cookie"))
+            .collect::<Vec<_>>();
+        assert_eq!(cookies.len(), 2);
+        assert!(cookies.iter().any(|cookie| {
+            *cookie
+                == "__Secure-fasti_auth_binding=; Domain=127.0.0.1; Path=/api/access/v1/trailbase/callback; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=Lax"
+        }));
+        let continuation_cookie = cookies
+            .iter()
+            .find(|cookie| cookie.starts_with(crate::FASTI_ACCESS_CONTINUATION_COOKIE))
+            .expect("path-scoped continuation cookie");
+        let continuation_attributes = continuation_cookie.split("; ").collect::<Vec<_>>();
+        assert_eq!(
+            continuation_attributes[0],
+            format!("{}={binding}", crate::FASTI_ACCESS_CONTINUATION_COOKIE)
+        );
+        assert_eq!(continuation_attributes[1], "Domain=127.0.0.1");
+        assert_eq!(
+            continuation_attributes[2],
+            format!("Path={}", crate::FASTI_ACCESS_CONTINUATION_PATH)
+        );
+        assert!(continuation_attributes[3]
+            .strip_prefix("Max-Age=")
+            .is_some_and(|value| value
+                .parse::<u64>()
+                .is_ok_and(|value| value > 0 && value <= 480)));
+        assert_eq!(
+            &continuation_attributes[4..],
+            ["Secure", "HttpOnly", "SameSite=Strict"]
+        );
+        let continuation_cookie = continuation_attributes[0].to_owned();
+
+        assert_eq!(orchestrator.vault.live_len(), 0);
+        assert!(state.requests.lock().expect("requests").is_empty());
+
+        let evidence_response = runtime
+            .router()
+            .oneshot(
+                Request::builder()
+                    .uri(crate::FASTI_ACCESS_CONTINUATION_PATH)
+                    .header(header::HOST, crate::FASTI_ACCESS_HOST)
+                    .header(header::COOKIE, &continuation_cookie)
+                    .body(Body::empty())
+                    .expect("trust evidence request"),
+            )
+            .await
+            .expect("trust evidence response");
+        assert_eq!(evidence_response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            evidence_response.headers().get(header::CACHE_CONTROL),
+            Some(&HeaderValue::from_static("private, no-store"))
+        );
+        assert!(!evidence_response.headers().contains_key(header::SET_COOKIE));
+        let evidence: serde_json::Value = serde_json::from_slice(
+            &to_bytes(evidence_response.into_body(), 16 * 1024)
+                .await
+                .expect("bounded trust evidence body"),
+        )
+        .expect("trust evidence JSON");
+        assert_eq!(
+            evidence.get("code").and_then(serde_json::Value::as_str),
+            Some("trailbase_trust_unavailable")
+        );
+
+        let dismiss_response = runtime
+            .router()
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(crate::FASTI_ACCESS_CONTINUATION_PATH)
+                    .header(header::HOST, crate::FASTI_ACCESS_HOST)
+                    .header(header::ORIGIN, crate::FASTI_ACCESS_ORIGIN)
+                    .header(header::COOKIE, continuation_cookie)
+                    .body(Body::empty())
+                    .expect("trust evidence dismissal request"),
+            )
+            .await
+            .expect("trust evidence dismissal response");
+        assert_eq!(dismiss_response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            dismiss_response.headers().get(header::CACHE_CONTROL),
+            Some(&HeaderValue::from_static("private, no-store"))
+        );
+        assert_eq!(
+            dismiss_response.headers().get(header::SET_COOKIE),
+            Some(&HeaderValue::from_static("__Secure-fasti_auth_continuation=; Domain=127.0.0.1; Path=/api/access/v1/trailbase/continuation; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=Strict"))
+        );
+
+        let terminal: (String, String, i64, i64) =
+            rusqlite::Connection::open(kernel.database_path())
+                .expect("inspect terminal trust evidence")
+                .query_row(
+                    r#"
+                    SELECT state, failure, claimed_at IS NOT NULL,
+                           (SELECT COUNT(*) FROM access_audit_events
+                            WHERE operation_id = ?1 AND event_kind = 'ceremony_failed')
+                    FROM auth_ceremonies WHERE operation_id = ?1
+                    "#,
+                    [started.operation_id.to_string()],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                )
+                .expect("terminal trust evidence");
+        assert_eq!(
+            terminal,
+            ("failed".to_owned(), "trust_unavailable".to_owned(), 1, 1)
+        );
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn post_logout_selection_persistence_failure_keeps_exact_terminal_evidence() {
+        let (_root, kernel, installation, access) = initialized_access_node();
+        let callback_at = DateTime::parse_from_rfc3339("2026-08-30T00:02:00Z")
+            .expect("time")
+            .with_timezone(&Utc);
+        let (client, state, task) = spawn_successful_auth_fixture(callback_at).await;
+        let orchestrator = test_orchestrator(client, &kernel, &installation);
+        let bootstrap = start_bootstrap_ceremony(&orchestrator, &kernel, access, callback_at);
+        let bootstrap_result = orchestrator
+            .callback(
+                "a".repeat(48),
+                bootstrap.browser_binding,
+                RequestCorrelationId::new_v7(),
+                callback_at,
+            )
+            .await;
+        assert!(bootstrap_result.is_ok(), "establish affiliated subject");
+        rusqlite::Connection::open(kernel.database_path())
+            .expect("test database connection")
+            .execute_batch(
+                "CREATE TRIGGER fail_selection_audit BEFORE INSERT ON access_audit_events WHEN NEW.event_kind = 'ceremony_selection_required' BEGIN SELECT RAISE(ABORT, 'injected selection audit failure'); END;",
+            )
+            .expect("install narrow failure trigger");
+
+        let started = orchestrator
+            .start_sign_in(
+                false,
+                RequestCorrelationId::new_v7(),
+                callback_at + TimeDelta::minutes(1),
+                callback_at + TimeDelta::minutes(9),
+            )
+            .expect("start ordinary sign-in");
+        let binding = Zeroizing::new(*started.browser_binding.expose_bytes());
+        let digest = sha256_digest(&binding);
+        let result = orchestrator
+            .callback(
+                "a".repeat(48),
+                started.browser_binding,
+                RequestCorrelationId::new_v7(),
+                callback_at + TimeDelta::minutes(2),
+            )
+            .await;
+        assert_eq!(
+            result.err(),
+            Some(TrailBaseOrchestrationError::ApplicationProblem(
+                ProblemCode::StorageUnavailable
+            ))
+        );
+        let continuation = HumanAccessPort::read_trailbase_sign_in_continuation(
+            kernel.as_ref(),
+            ReadTrailBaseSignInContinuationQuery::new(
+                digest.clone(),
+                RequestCorrelationId::new_v7(),
+                callback_at + TimeDelta::minutes(3),
+            ),
+        )
+        .expect_err("terminal persistence failure");
+        assert_eq!(
+            continuation.code(),
+            ProblemCode::AuthContinuationPersistenceFailed
+        );
+        HumanAccessPort::cancel_trailbase_sign_in_continuation(
+            kernel.as_ref(),
+            CancelTrailBaseSignInContinuationCommand::new(
+                digest,
+                RequestCorrelationId::new_v7(),
+                callback_at + TimeDelta::minutes(4),
+            ),
+        )
+        .expect("dismiss terminal evidence");
+
+        let connection =
+            rusqlite::Connection::open(kernel.database_path()).expect("inspect terminal evidence");
+        let evidence: (String, String, i64, i64, i64) = connection
+            .query_row(
+                r#"
+                SELECT state, failure,
+                       (SELECT COUNT(*) FROM fasti_browser_sessions),
+                       (SELECT COUNT(*) FROM access_audit_events audit
+                        WHERE audit.operation_id = ceremony.operation_id
+                          AND audit.event_kind = 'ceremony_selection_required'),
+                       (SELECT COUNT(*) FROM access_audit_events audit
+                        WHERE audit.operation_id = ceremony.operation_id
+                          AND audit.event_kind = 'ceremony_failed')
+                FROM auth_ceremonies ceremony WHERE operation_id = ?1
+                "#,
+                [started.operation_id.to_string()],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .expect("terminal evidence row");
+        assert_eq!(
+            evidence,
+            (
+                "failed".to_owned(),
+                "local_persistence_failed".to_owned(),
+                1,
+                0,
+                1
+            )
+        );
+
+        let requests_after_failure = state.requests.lock().expect("requests").clone();
+        let replay = orchestrator
+            .callback(
+                "a".repeat(48),
+                SecretMaterial::from_bytes(*binding),
+                RequestCorrelationId::new_v7(),
+                callback_at + TimeDelta::minutes(5),
+            )
+            .await;
+        assert_eq!(replay.err(), Some(TrailBaseOrchestrationError::LocalState));
+        assert_eq!(
+            *state.requests.lock().expect("requests"),
+            requests_after_failure
         );
         task.abort();
     }

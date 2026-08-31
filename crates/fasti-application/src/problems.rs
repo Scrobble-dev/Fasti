@@ -488,7 +488,7 @@ define_problem_catalog!(
     },
     AuthBrowserBindingInvalid => "auth_browser_binding_invalid" {
         title: "Authentication browser binding invalid", status: 401,
-        detail: ProblemDetail::Static("the browser callback is not bound to one active Fasti authentication ceremony"),
+        detail: ProblemDetail::Static("the browser request is not bound to one active Fasti authentication ceremony"),
         documentation_path: "v1/problems/auth-browser-binding-invalid", safe_state: NoMutation,
         retryability: RetryAfterCorrection,
         default_next_action: ("restart_sign_in", "Start a new sign-in ceremony"),
@@ -500,6 +500,22 @@ define_problem_catalog!(
         documentation_path: "v1/problems/auth-subject-unaffiliated", safe_state: PriorStateRetained,
         retryability: RetryAfterCorrection,
         default_next_action: ("request_workspace_membership", "Ask a workspace administrator for access"),
+        param_policy: ProblemParamPolicy::None
+    },
+    AuthSelectionChanged => "auth_selection_changed" {
+        title: "Sign-in choices changed", status: 409,
+        detail: ProblemDetail::Static("the available sign-in choices changed after they were reviewed"),
+        documentation_path: "v1/problems/auth-selection-changed", safe_state: PriorStateRetained,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("review_sign_in_choices", "Review the current sign-in choices"),
+        param_policy: ProblemParamPolicy::None
+    },
+    AuthContinuationPersistenceFailed => "auth_continuation_persistence_failed" {
+        title: "Sign-in continuation persistence failed", status: 503,
+        detail: ProblemDetail::Static("Fasti could not persist the sign-in selection after TrailBase session cleanup, so no Fasti browser session was issued"),
+        documentation_path: "v1/problems/auth-continuation-persistence-failed", safe_state: PriorStateRetained,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("restart_sign_in", "Start a new sign-in ceremony"),
         param_policy: ProblemParamPolicy::None
     },
     AuthIdentityConflict => "auth_identity_conflict" {
@@ -629,6 +645,8 @@ impl ProblemCode {
             | Self::TrailBaseSessionCleanupFailed
             | Self::AuthBrowserBindingInvalid
             | Self::AuthSubjectUnaffiliated
+            | Self::AuthSelectionChanged
+            | Self::AuthContinuationPersistenceFailed
             | Self::AuthIdentityConflict
             | Self::AuthLastSignInMethod
             | Self::AuthAssuranceInsufficient
@@ -663,6 +681,8 @@ impl ProblemCode {
             | Self::TrailBaseSessionCleanupFailed
             | Self::AuthBrowserBindingInvalid
             | Self::AuthSubjectUnaffiliated
+            | Self::AuthSelectionChanged
+            | Self::AuthContinuationPersistenceFailed
             | Self::AuthIdentityConflict
             | Self::AlreadyInitialized
             | Self::AuthenticationFailed
@@ -1242,9 +1262,22 @@ mod tests {
         assert_eq!(binding.safe_state(), SafeState::NoMutation);
         assert_eq!(binding.param_policy(), ProblemParamPolicy::None);
 
+        let persistence = ProblemCode::AuthContinuationPersistenceFailed.contract();
+        assert_eq!(persistence.status(), 503);
+        assert_eq!(persistence.safe_state(), SafeState::PriorStateRetained);
+        assert_eq!(
+            persistence.retryability(),
+            Retryability::RetryAfterCorrection
+        );
+        assert_eq!(persistence.default_next_action().id(), "restart_sign_in");
+
         let conflict = ProblemCode::AuthIdentityConflict.contract();
         assert_eq!(conflict.status(), 409);
         assert_eq!(conflict.retryability(), Retryability::NotRetryable);
+
+        let selection = ProblemCode::AuthSelectionChanged;
+        assert_eq!(selection.introduced_in(), CapabilityBody::C1);
+        assert_eq!(selection.contract_state(), ContractState::Finalized);
     }
 
     #[test]

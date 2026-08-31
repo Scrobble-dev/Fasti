@@ -81,7 +81,9 @@ const PRODUCTION_SCHEMAS = {
       "exchange_failed",
       "status_rejected",
       "logout_uncertain",
-      "local_authorization_denied"
+      "local_authorization_denied",
+      "local_persistence_failed",
+      "trust_unavailable"
     ],
     "type": "string"
   },
@@ -89,6 +91,7 @@ const PRODUCTION_SCHEMAS = {
     "enum": [
       "pending",
       "claimed",
+      "selection_required",
       "completed",
       "cancelled",
       "failed",
@@ -634,6 +637,30 @@ const PRODUCTION_SCHEMAS = {
     "required": [
       "credential_scheme",
       "credential"
+    ],
+    "type": "object"
+  },
+  "CompleteTrailBaseContinuationRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "candidate_revision": {
+        "description": "Candidate revision returned by the continuation read, echoed unchanged.",
+        "maxLength": 71,
+        "minLength": 71,
+        "pattern": "^sha256:[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "choice_ordinal": {
+        "description": "Zero-based opaque choice submitted with the unchanged candidate revision.",
+        "format": "int32",
+        "maximum": 63,
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "choice_ordinal",
+      "candidate_revision"
     ],
     "type": "object"
   },
@@ -2339,6 +2366,42 @@ const PRODUCTION_SCHEMAS = {
     ],
     "type": "object"
   },
+  "ReadTrailBaseContinuationResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "candidate_revision": {
+        "description": "Revision submitted unchanged with the chosen zero-based choice ordinal.",
+        "maxLength": 71,
+        "minLength": 71,
+        "pattern": "^sha256:[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "choices": {
+        "items": {
+          "$ref": "#/components/schemas/TrailBaseContinuationChoiceDto"
+        },
+        "maxItems": 64,
+        "minItems": 1,
+        "type": "array"
+      },
+      "expires_at": {
+        "format": "date-time",
+        "maxLength": 35,
+        "minLength": 20,
+        "type": "string"
+      },
+      "remembered": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "expires_at",
+      "remembered",
+      "candidate_revision",
+      "choices"
+    ],
+    "type": "object"
+  },
   "RecentAuthenticationDto": {
     "additionalProperties": false,
     "properties": {
@@ -2742,34 +2805,11 @@ const PRODUCTION_SCHEMAS = {
   "StartTrailBaseSignInRequest": {
     "additionalProperties": false,
     "properties": {
-      "invited_membership_id": {
-        "maxLength": 36,
-        "minLength": 36,
-        "pattern": "^mem_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
-        "type": [
-          "string",
-          "null"
-        ]
-      },
-      "profile_grant_id": {
-        "maxLength": 36,
-        "minLength": 36,
-        "pattern": "^grt_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
-        "type": "string"
-      },
       "remembered": {
         "type": "boolean"
-      },
-      "workspace_id": {
-        "maxLength": 36,
-        "minLength": 36,
-        "pattern": "^wsp_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
-        "type": "string"
       }
     },
     "required": [
-      "workspace_id",
-      "profile_grant_id",
       "remembered"
     ],
     "type": "object"
@@ -2782,12 +2822,6 @@ const PRODUCTION_SCHEMAS = {
         "minLength": 1,
         "type": "string"
       },
-      "ceremony_id": {
-        "maxLength": 35,
-        "minLength": 35,
-        "pattern": "^op_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
-        "type": "string"
-      },
       "expires_at": {
         "format": "date-time",
         "maxLength": 35,
@@ -2797,7 +2831,6 @@ const PRODUCTION_SCHEMAS = {
     },
     "required": [
       "authorization_url",
-      "ceremony_id",
       "expires_at"
     ],
     "type": "object"
@@ -3069,6 +3102,60 @@ const PRODUCTION_SCHEMAS = {
     ],
     "type": "string"
   },
+  "TrailBaseContinuationChoiceDto": {
+    "additionalProperties": false,
+    "properties": {
+      "choice_ordinal": {
+        "description": "Zero-based opaque choice submitted with the unchanged candidate revision.",
+        "format": "int32",
+        "maximum": 63,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "membership_state": {
+        "$ref": "#/components/schemas/AccessMembershipLifecycleDto"
+      },
+      "profile_created_at": {
+        "format": "date-time",
+        "maxLength": 35,
+        "minLength": 20,
+        "type": "string"
+      },
+      "profile_ordinal": {
+        "description": "One-based profile number for display only.",
+        "format": "int32",
+        "maximum": 64,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "role": {
+        "$ref": "#/components/schemas/AccessWorkspaceRoleDto"
+      },
+      "workspace_created_at": {
+        "format": "date-time",
+        "maxLength": 35,
+        "minLength": 20,
+        "type": "string"
+      },
+      "workspace_ordinal": {
+        "description": "One-based workspace number for display only.",
+        "format": "int32",
+        "maximum": 64,
+        "minimum": 1,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "choice_ordinal",
+      "workspace_ordinal",
+      "profile_ordinal",
+      "workspace_created_at",
+      "profile_created_at",
+      "membership_state",
+      "role"
+    ],
+    "type": "object"
+  },
   "ViolationDto": {
     "additionalProperties": false,
     "properties": {
@@ -3198,10 +3285,10 @@ export type AccessAuthenticationMethodDto = "trail_base_password" | "trail_base_
 export type AccessEvidenceKindDto = "current_session_issued" | "first_administrator_bootstrap";
 
 // prettier-ignore
-export type AccessCeremonyStateDto = "cancelled" | "claimed" | "cleanup_uncertain" | "completed" | "expired" | "failed" | "pending";
+export type AccessCeremonyStateDto = "cancelled" | "claimed" | "cleanup_uncertain" | "completed" | "expired" | "failed" | "pending" | "selection_required";
 
 // prettier-ignore
-export type AccessCeremonyFailureDto = "exchange_failed" | "exchange_outcome_uncertain" | "local_authorization_denied" | "logout_uncertain" | "status_rejected" | "verifier_lost_on_restart";
+export type AccessCeremonyFailureDto = "exchange_failed" | "exchange_outcome_uncertain" | "local_authorization_denied" | "local_persistence_failed" | "logout_uncertain" | "status_rejected" | "trust_unavailable" | "verifier_lost_on_restart";
 
 // prettier-ignore
 export type AccessFirstRunStepKeyDto = "account_confirmed" | "devices_and_clients" | "external_identity" | "recovery" | "strong_sign_in";
@@ -3545,16 +3632,34 @@ export interface MetadataProjectionConfigurationResponse {
 }
 
 export interface StartTrailBaseSignInRequest {
-  readonly invited_membership_id?: null | string;
-  readonly profile_grant_id: string;
   readonly remembered: boolean;
-  readonly workspace_id: string;
 }
 
 export interface StartTrailBaseSignInResponse {
   readonly authorization_url: string;
-  readonly ceremony_id: string;
   readonly expires_at: string;
+}
+
+export interface TrailBaseContinuationChoiceDto {
+  readonly choice_ordinal: number;
+  readonly membership_state: AccessMembershipLifecycleDto;
+  readonly profile_created_at: string;
+  readonly profile_ordinal: number;
+  readonly role: AccessWorkspaceRoleDto;
+  readonly workspace_created_at: string;
+  readonly workspace_ordinal: number;
+}
+
+export interface ReadTrailBaseContinuationResponse {
+  readonly candidate_revision: string;
+  readonly choices: ReadonlyArray<TrailBaseContinuationChoiceDto>;
+  readonly expires_at: string;
+  readonly remembered: boolean;
+}
+
+export interface CompleteTrailBaseContinuationRequest {
+  readonly candidate_revision: string;
+  readonly choice_ordinal: number;
 }
 
 export interface SelectBrowserSessionProfileRequest {
@@ -3703,6 +3808,9 @@ export const LOCAL_RUNTIME_OPERATIONS = {
   readMetadataProjection: { operationId: "read_metadata_projection", method: "GET", path: "/api/v1/records/{record_id}/metadata-projection", capabilityId: "metadata.projection.read", authorization: "scoped", requiredScopes: ["metadata_projection_read"], problemCodes: ["authentication_failed","forbidden","integrity_failed","record_not_found","storage_unavailable","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "MetadataProjectionResponse" },
   configureMetadataProjection: { operationId: "configure_metadata_projection", method: "PUT", path: "/api/v1/profile/metadata-projection", capabilityId: "metadata.projection.configure", authorization: "scoped", requiredScopes: ["metadata_projection_configure"], problemCodes: ["authentication_failed","forbidden","integrity_failed","malformed_json","payload_too_large","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["metadata.projection.configure.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "ConfigureMetadataProjectionRequest", responseSchema: "MetadataProjectionConfigurationResponse" },
   startTrailBaseSignIn: { operationId: "start_trailbase_sign_in", method: "POST", path: "/api/access/v1/trailbase/sign-in", capabilityId: "browser.session.create", authorization: "unauthenticated", requiredScopes: [], problemCodes: ["capacity_exceeded","forbidden","integrity_failed","malformed_json","payload_too_large","storage_unavailable","trailbase_trust_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: false, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "StartTrailBaseSignInRequest", responseSchema: "StartTrailBaseSignInResponse" },
+  readTrailBaseContinuation: { operationId: "read_trailbase_continuation", method: "GET", path: "/api/access/v1/trailbase/continuation", capabilityId: "browser.session.create", authorization: "unauthenticated", requiredScopes: [], problemCodes: ["auth_browser_binding_invalid","auth_continuation_persistence_failed","auth_subject_unaffiliated","capacity_exceeded","forbidden","identity_service_unavailable","integrity_failed","storage_unavailable","trailbase_proof_invalid","trailbase_session_cleanup_failed","trailbase_trust_unavailable","validation_failed"], exampleIds: [], authenticated: false, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ReadTrailBaseContinuationResponse" },
+  completeTrailBaseContinuation: { operationId: "complete_trailbase_continuation", method: "POST", path: "/api/access/v1/trailbase/continuation", capabilityId: "browser.session.create", authorization: "unauthenticated", requiredScopes: [], problemCodes: ["auth_browser_binding_invalid","auth_continuation_persistence_failed","auth_selection_changed","auth_subject_unaffiliated","capacity_exceeded","forbidden","identity_service_unavailable","integrity_failed","malformed_json","payload_too_large","storage_unavailable","trailbase_proof_invalid","trailbase_session_cleanup_failed","trailbase_trust_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: false, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "CompleteTrailBaseContinuationRequest", responseSchema: null },
+  cancelTrailBaseContinuation: { operationId: "cancel_trailbase_continuation", method: "DELETE", path: "/api/access/v1/trailbase/continuation", capabilityId: "browser.session.create", authorization: "unauthenticated", requiredScopes: [], problemCodes: ["auth_browser_binding_invalid","forbidden","integrity_failed","storage_unavailable","trailbase_proof_invalid","validation_failed"], exampleIds: [], authenticated: false, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: null, responseSchema: null },
   readAccessProjection: { operationId: "read_access_projection", method: "GET", path: "/api/access/v1/projection", capabilityId: "access.projection.read", authorization: "browser_session", requiredScopes: [], problemCodes: ["browser_session_expired","browser_session_revoked","integrity_failed","session_policy_changed","storage_unavailable"], exampleIds: [], authenticated: false, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "AccessProjectionResponse" },
   readBrowserSession: { operationId: "read_browser_session", method: "GET", path: "/api/access/v1/browser-session", capabilityId: "browser.session.read", authorization: "browser_session", requiredScopes: [], problemCodes: ["browser_session_expired","browser_session_revoked","integrity_failed","session_policy_changed","storage_unavailable"], exampleIds: [], authenticated: false, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ReadBrowserSessionResponse" },
   endBrowserSession: { operationId: "end_browser_session", method: "DELETE", path: "/api/access/v1/browser-session", capabilityId: "browser.session.end", authorization: "browser_session", requiredScopes: [], problemCodes: ["browser_session_expired","browser_session_revoked","forbidden","integrity_failed","session_policy_changed","storage_unavailable"], exampleIds: [], authenticated: false, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: null, responseSchema: null },
@@ -3840,6 +3948,16 @@ export function parseStartTrailBaseSignInResponse(value: unknown): StartTrailBas
 }
 
 // prettier-ignore
+export function parseReadTrailBaseContinuationResponse(value: unknown): ReadTrailBaseContinuationResponse {
+  return parseProductionDto("ReadTrailBaseContinuationResponse", value);
+}
+
+// prettier-ignore
+export function parseCompleteTrailBaseContinuationRequest(value: unknown): CompleteTrailBaseContinuationRequest {
+  return parseProductionDto("CompleteTrailBaseContinuationRequest", value);
+}
+
+// prettier-ignore
 export function parseSelectBrowserSessionProfileRequest(value: unknown): SelectBrowserSessionProfileRequest {
   return parseProductionDto("SelectBrowserSessionProfileRequest", value);
 }
@@ -3894,7 +4012,7 @@ export interface CapabilityDescriptorDto {
   readonly examples: ReadonlyArray<"client.enroll.forbidden" | "credential.revoke.capability_unavailable" | "credential.rotate.capability_unavailable" | "identity.identifier.attach.validation_failed" | "identity.namespace.register.validation_failed" | "identity.record.create.validation_failed" | "identity.record.list.forbidden" | "integration.status.success" | "listener.configure.capability_unavailable" | "metadata.claim.refresh.metadata_claim_stale" | "metadata.projection.configure.validation_failed" | "node.initialize.validation_failed" | "observation.accept.capacity_exceeded" | "observation.accept.receipt" | "observation.accept.validation_failed" | "profile.record.tracking_disposition.list.forbidden" | "profile.record.tracking_disposition.set.validation_failed" | "profile.select.capability_unavailable" | "provider.credential.configure.validation_failed" | "provider.credential.test.provider_credential_missing" | "provider.health.read.provider_unavailable" | "provider.list.forbidden" | "receipt.replay.receipt_not_found" | "receipt.stream.event" | "receipt.stream.receipt_not_found" | "system.capabilities.forbidden" | "system.capabilities.success" | "system.health.success">;
   readonly id: "access.identity.bootstrap" | "access.projection.read" | "browser.session.create" | "browser.session.end" | "browser.session.profile.select" | "browser.session.read" | "browser.session.revoke" | "browser.session.rotate" | "browser.sessions.list" | "browser.sessions.revoke_all" | "browser.sessions.revoke_others" | "client.enroll" | "correction.chain.append" | "correction.chain.inspect" | "credential.revoke" | "credential.rotate" | "identity.identifier.attach" | "identity.namespace.register" | "identity.record.create" | "identity.record.list" | "identity.review.defer" | "identity.review.inspect" | "identity.review.resolve" | "identity.review.resume" | "integration.status" | "listener.configure" | "metadata.claim.refresh" | "metadata.projection.configure" | "metadata.projection.read" | "node.initialize" | "observation.accept" | "portability.workspace.export" | "portability.workspace.restore" | "portability.workspace.verify" | "profile.nuvio_collections.clear" | "profile.nuvio_collections.get" | "profile.nuvio_collections.replace" | "profile.record.tracking_disposition.list" | "profile.record.tracking_disposition.set" | "profile.select" | "provider.credential.configure" | "provider.credential.test" | "provider.health.read" | "provider.list" | "receipt.replay" | "receipt.stream" | "system.capabilities.discover" | "system.health";
   readonly lifecycle: CapabilityLifecycleDto;
-  readonly problems: ReadonlyArray<"already_initialized" | "auth_browser_binding_invalid" | "auth_identity_conflict" | "auth_subject_unaffiliated" | "authentication_failed" | "bootstrap_closed" | "browser_session_expired" | "browser_session_revoked" | "capability_unavailable" | "capacity_exceeded" | "forbidden" | "idempotency_conflict" | "identity_conflict" | "identity_service_unavailable" | "integrity_failed" | "invalid_identifier" | "invalid_observation" | "malformed_json" | "metadata_claim_stale" | "payload_too_large" | "provider_credential_expired" | "provider_credential_invalid" | "provider_credential_missing" | "provider_rate_limited" | "provider_response_invalid" | "provider_route_unavailable" | "provider_unavailable" | "receipt_not_found" | "record_not_found" | "session_policy_changed" | "storage_unavailable" | "trailbase_proof_invalid" | "trailbase_session_cleanup_failed" | "trailbase_trust_unavailable" | "trailbase_version_unsupported" | "unsupported_media_type" | "validation_failed">;
+  readonly problems: ReadonlyArray<"already_initialized" | "auth_browser_binding_invalid" | "auth_continuation_persistence_failed" | "auth_identity_conflict" | "auth_selection_changed" | "auth_subject_unaffiliated" | "authentication_failed" | "bootstrap_closed" | "browser_session_expired" | "browser_session_revoked" | "capability_unavailable" | "capacity_exceeded" | "forbidden" | "idempotency_conflict" | "identity_conflict" | "identity_service_unavailable" | "integrity_failed" | "invalid_identifier" | "invalid_observation" | "malformed_json" | "metadata_claim_stale" | "payload_too_large" | "provider_credential_expired" | "provider_credential_invalid" | "provider_credential_missing" | "provider_rate_limited" | "provider_response_invalid" | "provider_route_unavailable" | "provider_unavailable" | "receipt_not_found" | "record_not_found" | "session_policy_changed" | "storage_unavailable" | "trailbase_proof_invalid" | "trailbase_session_cleanup_failed" | "trailbase_trust_unavailable" | "trailbase_version_unsupported" | "unsupported_media_type" | "validation_failed">;
   readonly runtime_body: "b0" | "b1" | "b2" | "b3" | "c1" | "m1" | "m2";
   readonly scopes: ReadonlyArray<"capability_read" | "client_enroll" | "correction_read" | "correction_write" | "credential_manage" | "identity_read" | "identity_write" | "listener_configure" | "metadata_claim_refresh" | "metadata_projection_configure" | "metadata_projection_read" | "observation_accept" | "profile_select" | "profile_state_read" | "profile_state_write" | "provider_credential_manage" | "provider_read" | "receipt_read" | "review_read" | "review_write" | "workspace_export" | "workspace_verify">;
   readonly surface_profile: "b1_durable_bootstrap" | "b1_http_fixture" | "b1_integration_status" | "b1_observation_accept" | "b1_receipt_replay" | "b1_receipt_stream" | "b1_records" | "b2_profile_state" | "c1_access_projection" | "c1_browser_session_foundation" | "c1_identity_bootstrap" | "health" | "later_b2" | "later_b3" | "m1_providers" | "m2_metadata";
@@ -4209,7 +4327,9 @@ const B1_CONFORMANCE_SCHEMAS = {
           "enum": [
             "already_initialized",
             "auth_browser_binding_invalid",
+            "auth_continuation_persistence_failed",
             "auth_identity_conflict",
+            "auth_selection_changed",
             "auth_subject_unaffiliated",
             "authentication_failed",
             "bootstrap_closed",
@@ -5321,7 +5441,9 @@ export type RuntimeAvailability =
 export type ProblemCode =
   | "already_initialized"
   | "auth_browser_binding_invalid"
+  | "auth_continuation_persistence_failed"
   | "auth_identity_conflict"
+  | "auth_selection_changed"
   | "auth_subject_unaffiliated"
   | "authentication_failed"
   | "bootstrap_closed"
@@ -5426,7 +5548,9 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       },
       "problems": [
         "auth_browser_binding_invalid",
+        "auth_continuation_persistence_failed",
         "auth_identity_conflict",
+        "auth_selection_changed",
         "auth_subject_unaffiliated",
         "capability_unavailable",
         "capacity_exceeded",
@@ -7587,7 +7711,7 @@ export const PUBLIC_PROBLEM_CATALOG = {
     {
       "capability_id": "access.identity.bootstrap",
       "code": "auth_browser_binding_invalid",
-      "detail": "the browser callback is not bound to one active Fasti authentication ceremony",
+      "detail": "the browser request is not bound to one active Fasti authentication ceremony",
       "next_actions": [
         {
           "id": "restart_sign_in",
@@ -7893,7 +8017,7 @@ export const PUBLIC_PROBLEM_CATALOG = {
     {
       "capability_id": "browser.session.create",
       "code": "auth_browser_binding_invalid",
-      "detail": "the browser callback is not bound to one active Fasti authentication ceremony",
+      "detail": "the browser request is not bound to one active Fasti authentication ceremony",
       "next_actions": [
         {
           "id": "restart_sign_in",
@@ -7907,6 +8031,24 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "status": 401,
       "title": "Authentication browser binding invalid",
       "type": "https://fasti.scrobble.dev/v1/problems/auth-browser-binding-invalid"
+    },
+    {
+      "capability_id": "browser.session.create",
+      "code": "auth_continuation_persistence_failed",
+      "detail": "Fasti could not persist the sign-in selection after TrailBase session cleanup, so no Fasti browser session was issued",
+      "next_actions": [
+        {
+          "id": "restart_sign_in",
+          "label": "Start a new sign-in ceremony"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 503,
+      "title": "Sign-in continuation persistence failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/auth-continuation-persistence-failed"
     },
     {
       "capability_id": "browser.session.create",
@@ -7925,6 +8067,24 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "status": 409,
       "title": "Authentication identity conflict",
       "type": "https://fasti.scrobble.dev/v1/problems/auth-identity-conflict"
+    },
+    {
+      "capability_id": "browser.session.create",
+      "code": "auth_selection_changed",
+      "detail": "the available sign-in choices changed after they were reviewed",
+      "next_actions": [
+        {
+          "id": "review_sign_in_choices",
+          "label": "Review the current sign-in choices"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 409,
+      "title": "Sign-in choices changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/auth-selection-changed"
     },
     {
       "capability_id": "browser.session.create",
@@ -13435,7 +13595,7 @@ const HEALTH_REQUIRED = ["status", "version"] as const;
 // prettier-ignore
 const CAPABILITY_IDS = ["access.identity.bootstrap", "access.projection.read", "browser.session.create", "browser.session.end", "browser.session.profile.select", "browser.session.read", "browser.session.revoke", "browser.session.rotate", "browser.sessions.list", "browser.sessions.revoke_all", "browser.sessions.revoke_others", "client.enroll", "correction.chain.append", "correction.chain.inspect", "credential.revoke", "credential.rotate", "identity.identifier.attach", "identity.namespace.register", "identity.record.create", "identity.record.list", "identity.review.defer", "identity.review.inspect", "identity.review.resolve", "identity.review.resume", "integration.status", "listener.configure", "metadata.claim.refresh", "metadata.projection.configure", "metadata.projection.read", "node.initialize", "observation.accept", "portability.workspace.export", "portability.workspace.restore", "portability.workspace.verify", "profile.nuvio_collections.clear", "profile.nuvio_collections.get", "profile.nuvio_collections.replace", "profile.record.tracking_disposition.list", "profile.record.tracking_disposition.set", "profile.select", "provider.credential.configure", "provider.credential.test", "provider.health.read", "provider.list", "receipt.replay", "receipt.stream", "system.capabilities.discover", "system.health"] as const;
 // prettier-ignore
-const PROBLEM_CODES = ["already_initialized", "auth_browser_binding_invalid", "auth_identity_conflict", "auth_subject_unaffiliated", "authentication_failed", "bootstrap_closed", "browser_session_expired", "browser_session_revoked", "capability_unavailable", "capacity_exceeded", "forbidden", "idempotency_conflict", "identity_conflict", "identity_service_unavailable", "integrity_failed", "invalid_identifier", "invalid_observation", "malformed_json", "metadata_claim_stale", "payload_too_large", "provider_credential_expired", "provider_credential_invalid", "provider_credential_missing", "provider_rate_limited", "provider_response_invalid", "provider_route_unavailable", "provider_unavailable", "receipt_not_found", "record_not_found", "session_policy_changed", "storage_unavailable", "trailbase_proof_invalid", "trailbase_session_cleanup_failed", "trailbase_trust_unavailable", "trailbase_version_unsupported", "unsupported_media_type", "validation_failed"] as const;
+const PROBLEM_CODES = ["already_initialized", "auth_browser_binding_invalid", "auth_continuation_persistence_failed", "auth_identity_conflict", "auth_selection_changed", "auth_subject_unaffiliated", "authentication_failed", "bootstrap_closed", "browser_session_expired", "browser_session_revoked", "capability_unavailable", "capacity_exceeded", "forbidden", "idempotency_conflict", "identity_conflict", "identity_service_unavailable", "integrity_failed", "invalid_identifier", "invalid_observation", "malformed_json", "metadata_claim_stale", "payload_too_large", "provider_credential_expired", "provider_credential_invalid", "provider_credential_missing", "provider_rate_limited", "provider_response_invalid", "provider_route_unavailable", "provider_unavailable", "receipt_not_found", "record_not_found", "session_policy_changed", "storage_unavailable", "trailbase_proof_invalid", "trailbase_session_cleanup_failed", "trailbase_trust_unavailable", "trailbase_version_unsupported", "unsupported_media_type", "validation_failed"] as const;
 // prettier-ignore
 const PROBLEM_ALLOWED = ["actual", "capability_id", "code", "correlation_id", "detail", "next_actions", "param", "retryability", "safe_state", "status", "title", "type", "violations"] as const;
 // prettier-ignore

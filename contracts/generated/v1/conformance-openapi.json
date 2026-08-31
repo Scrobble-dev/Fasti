@@ -185,7 +185,9 @@
               "enum": [
                 "already_initialized",
                 "auth_browser_binding_invalid",
+                "auth_continuation_persistence_failed",
                 "auth_identity_conflict",
+                "auth_selection_changed",
                 "auth_subject_unaffiliated",
                 "authentication_failed",
                 "bootstrap_closed",
@@ -1066,7 +1068,9 @@
                           },
                           "problems": [
                             "auth_browser_binding_invalid",
+                            "auth_continuation_persistence_failed",
                             "auth_identity_conflict",
+                            "auth_selection_changed",
                             "auth_subject_unaffiliated",
                             "capability_unavailable",
                             "capacity_exceeded",

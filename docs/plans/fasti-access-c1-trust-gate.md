@@ -238,7 +238,8 @@ C1.2 fails closed with the existing exact ceremony failures:
 | Exchange timeout, response loss, or malformed successful response with uncertain token creation | `cleanup_uncertain/exchange_outcome_uncertain`. |
 | Status or local authorization fails and logout succeeds | `failed/status_rejected` or `failed/local_authorization_denied`. |
 | Logout is not an exact 200 after tokens exist | `cleanup_uncertain/logout_uncertain`. |
-| Logout succeeds but the final local recheck fails | No session; `failed/local_authorization_denied`. |
+| Logout succeeds but the final local authorization or trust recheck fails | No session; the store records the exact `failed/local_authorization_denied` or `failed/trust_unavailable` evidence. |
+| Logout succeeds but the selection transition has a localized persistence failure | No session; one subsequent writable fallback transaction records `failed/local_persistence_failed`. A continuing or ambiguous database failure returns local-state failure and does not claim durable terminal evidence. |
 | Pending or claimed ceremony is recovered after restart | `failed/verifier_lost_on_restart` or `cleanup_uncertain/exchange_outcome_uncertain`; never retry. |
 | A committed session response is lost | Do not reproduce its digest-only secret; start a fresh ceremony. |
 
@@ -344,7 +345,8 @@ review the active gate and prepare the next one.
   `identity_service_unavailable`, `trailbase_version_unsupported`,
   `trailbase_trust_unavailable`, `trailbase_proof_invalid`,
   `trailbase_session_cleanup_failed`, `auth_browser_binding_invalid`,
-  `auth_subject_unaffiliated`, `auth_identity_conflict`,
+  `auth_subject_unaffiliated`, `auth_continuation_persistence_failed`,
+  `auth_identity_conflict`,
   `auth_last_sign_in_method`, `auth_assurance_insufficient`, and
   `recent_authentication_required`. Reuse existing browser-session, capacity,
   forbidden, validation, integrity, and storage problems. No problem detail
@@ -360,6 +362,7 @@ review the active gate and prepare the next one.
   | `trailbase_session_cleanup_failed` | 502 | `prior_state_retained` | `retry_after_correction` | `inspect_trailbase_cleanup` — Check TrailBase health, then start a new sign-in ceremony |
   | `auth_browser_binding_invalid` | 401 | `no_mutation` | `retry_after_correction` | `restart_sign_in` — Start a new sign-in ceremony |
   | `auth_subject_unaffiliated` | 403 | `prior_state_retained` | `retry_after_correction` | `request_workspace_membership` — Ask a workspace administrator for access |
+  | `auth_continuation_persistence_failed` | 503 | `prior_state_retained` | `retry_after_correction` | `restart_sign_in` — Start a new sign-in ceremony |
   | `auth_identity_conflict` | 409 | `prior_state_retained` | `not_retryable` | `inspect_identity_link` — Inspect the existing identity link before making changes |
   | `auth_last_sign_in_method` | 409 | `prior_state_retained` | `retry_after_correction` | `add_sign_in_method` — Add another verified sign-in method before removal |
   | `auth_assurance_insufficient` | 403 | `no_mutation` | `retry_after_correction` | `use_required_assurance` — Use a sign-in method that meets the required assurance level |

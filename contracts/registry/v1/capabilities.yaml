@@ -710,7 +710,9 @@ capabilities:
     problems:
       [
         auth_browser_binding_invalid,
+        auth_continuation_persistence_failed,
         auth_identity_conflict,
+        auth_selection_changed,
         auth_subject_unaffiliated,
         capability_unavailable,
         capacity_exceeded,

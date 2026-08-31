@@ -3,24 +3,28 @@ use crate::kernel::timestamp;
 use crate::SqliteKernel;
 use chrono::{DateTime, Duration, Utc};
 use fasti_application::{
-    AccessAdministrationPort, ApplicationResult, BrowserSessionMutationCommand,
-    CancelAuthCeremonyCommand, CapabilityKey, ChangeAuthSubjectLifecycleCommand,
+    AccessAdministrationPort, ApplicationResult, AuthSelectionChoice, AuthSelectionProjection,
+    BrowserSessionMutationCommand, CancelAuthCeremonyCommand,
+    CancelTrailBaseSignInContinuationCommand, CapabilityKey, ChangeAuthSubjectLifecycleCommand,
     ChangeMembershipLifecycleCommand, ChangeMembershipRoleCommand, ClaimAuthCeremonyCommand,
-    CompleteTrailBaseBootstrapCommand, CompleteTrailBaseSignInCommand, ConfirmedTrailBaseIdentity,
-    CreatedBrowserSession, FailAuthCeremonyCommand, FastiProblem, HumanAccessPort,
-    PreauthorizeTrailBaseBootstrapCommand, PreauthorizeTrailBaseSignInCommand, ProblemCode,
-    ReadTrailBaseInstallationQuery, SessionPolicy, StartAuthCeremonyCommand,
+    CompleteTrailBaseBootstrapCommand, CompleteTrailBaseSignInContinuationCommand,
+    ConfirmTrailBaseSignInCommand, ConfirmedTrailBaseIdentity, CreatedBrowserSession,
+    FailAuthCeremonyCommand, FastiProblem, HumanAccessPort, PreauthorizeTrailBaseBootstrapCommand,
+    PreauthorizeTrailBaseSignInCommand, ProblemCode, ReadTrailBaseInstallationQuery,
+    ReadTrailBaseSignInContinuationQuery, SessionPolicy, StartAuthCeremonyCommand,
     StartTrailBaseBootstrapCommand, VerifyTrailBaseInstallationCommand,
+    AUTH_SELECTION_CHOICE_LIMIT,
 };
 use fasti_domain::{
     AccessAuditEventKind, AccessInvalidationEffect, AccessInvariantError, AdministratorContinuity,
-    AuthCallbackPath, AuthCeremony, AuthCeremonyFailure, AuthCeremonyProtocol, AuthCeremonyPurpose,
-    AuthCeremonySelection, AuthCeremonyState, AuthReturnTarget, AuthSubject, AuthSubjectId,
-    AuthSubjectLifecycle, AuthenticationAssurance, AuthenticationMethod, AuthenticationProvenance,
-    BrowserSessionId, MembershipId, MembershipLifecycle, MembershipLifecycleAction, OperationId,
-    ProfileGrantId, RecentAuthentication, RequestCorrelationId, Sha256Digest,
-    TrailBaseActivationState, TrailBaseExternalAnchor, TrailBaseInstallation, TrailBaseInstanceId,
-    WorkspaceId, WorkspaceMembership, WorkspaceRole,
+    AuthCallbackPath, AuthCeremony, AuthCeremonyConfirmation, AuthCeremonyFailure,
+    AuthCeremonyProtocol, AuthCeremonyPurpose, AuthCeremonySelection, AuthCeremonyState,
+    AuthReturnTarget, AuthSubject, AuthSubjectId, AuthSubjectLifecycle, AuthenticationAssurance,
+    AuthenticationMethod, AuthenticationProvenance, BrowserSessionId, ClientId, MembershipId,
+    MembershipLifecycle, MembershipLifecycleAction, OperationId, ProfileGrantId, ProfileId,
+    RecentAuthentication, RequestCorrelationId, Sha256Digest, TrailBaseActivationState,
+    TrailBaseExternalAnchor, TrailBaseInstallation, TrailBaseInstanceId, WorkspaceId,
+    WorkspaceMembership, WorkspaceRole,
 };
 use rusqlite::{
     params, Connection, ErrorCode, OptionalExtension, Transaction, TransactionBehavior,
@@ -36,6 +40,8 @@ const AUDIT_RETENTION_DAYS: i64 = 90;
 pub(crate) enum HumanAccessStoreError {
     #[error("human Access storage failed")]
     Storage(#[from] rusqlite::Error),
+    #[error("human Access storage is unavailable")]
+    StorageUnavailable,
     #[error("human Access persisted state is invalid")]
     Integrity,
     #[error("human Access capacity is exhausted")]
@@ -44,6 +50,18 @@ pub(crate) enum HumanAccessStoreError {
     NotFound,
     #[error("human Access record conflicts with existing state")]
     Conflict,
+    #[error("human Access subject has no selectable affiliation")]
+    Unaffiliated,
+    #[error("human Access selection changed")]
+    SelectionChanged,
+    #[error("human Access continuation binding is invalid")]
+    BindingInvalid,
+    #[error("human Access proof expired")]
+    ProofExpired,
+    #[error("human Access trust is unavailable")]
+    TrustUnavailable,
+    #[error("human Access ceremony ended with attributable failure {0:?}")]
+    AttributableFailure(AuthCeremonyFailure),
     #[error(transparent)]
     Invariant(#[from] AccessInvariantError),
 }
@@ -57,11 +75,16 @@ struct CeremonyRow {
     trailbase_instance_id: String,
     activation_generation: i64,
     browser_binding_digest: String,
-    workspace_id: String,
-    selected_profile_grant_id: String,
+    workspace_id: Option<String>,
+    selected_profile_grant_id: Option<String>,
     bound_browser_session_id: Option<String>,
     invited_membership_id: Option<String>,
     remembered: i64,
+    confirmed_auth_subject_id: Option<String>,
+    authentication_method: Option<String>,
+    authentication_verified_at: Option<String>,
+    confirmed_auth_epoch: Option<i64>,
+    confirmed_authorization_epoch: Option<i64>,
     callback_path: String,
     return_target: String,
     correlation_id: String,
@@ -73,11 +96,47 @@ struct CeremonyRow {
     terminal_at: Option<String>,
 }
 
-struct AuthorizedSignIn {
-    ceremony: AuthCeremony,
-    subject: AuthSubject,
-    grants: Vec<ProfileGrantId>,
-    invitation: Option<WorkspaceMembership>,
+const CEREMONY_COLUMNS: &str = "operation_id, purpose, protocol, trailbase_instance_id, activation_generation, browser_binding_digest, workspace_id, selected_profile_grant_id, bound_browser_session_id, invited_membership_id, remembered, confirmed_auth_subject_id, authentication_method, authentication_verified_at, confirmed_auth_epoch, confirmed_authorization_epoch, callback_path, return_target, correlation_id, state, failure, created_at, expires_at, claimed_at, terminal_at";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SignInCandidate {
+    membership_id: MembershipId,
+    workspace_id: WorkspaceId,
+    workspace_created_at: DateTime<Utc>,
+    membership_state: MembershipLifecycle,
+    role: WorkspaceRole,
+    profile_grant_id: ProfileGrantId,
+    profile_id: ProfileId,
+    profile_created_at: DateTime<Utc>,
+    client_id: ClientId,
+    workspace_ordinal: u8,
+    profile_ordinal: u8,
+}
+
+impl SignInCandidate {
+    fn selection(self) -> StoreResult<AuthCeremonySelection> {
+        AuthCeremonySelection::try_new(
+            AuthCeremonyPurpose::SignIn,
+            self.workspace_id,
+            self.profile_grant_id,
+            None,
+            matches!(self.membership_state, MembershipLifecycle::Invited)
+                .then_some(self.membership_id),
+        )
+        .map_err(HumanAccessStoreError::Invariant)
+    }
+
+    const fn projection(self, ordinal: u8) -> AuthSelectionChoice {
+        AuthSelectionChoice::new(
+            ordinal,
+            self.workspace_ordinal,
+            self.profile_ordinal,
+            self.workspace_created_at,
+            self.profile_created_at,
+            self.membership_state,
+            self.role,
+        )
+    }
 }
 
 impl SqliteKernel {
@@ -182,17 +241,21 @@ impl SqliteKernel {
                 i64::try_from(ceremony.activation_generation())
                     .map_err(|_| HumanAccessStoreError::Integrity)?,
                 ceremony.browser_binding_digest().as_str(),
-                ceremony.selection().workspace_id().to_string(),
-                ceremony.selection().selected_profile_grant_id().to_string(),
                 ceremony
                     .selection()
-                    .bound_browser_session_id()
+                    .map(|selection| selection.workspace_id().to_string()),
+                ceremony
+                    .selection()
+                    .map(|selection| selection.selected_profile_grant_id().to_string()),
+                ceremony
+                    .selection()
+                    .and_then(AuthCeremonySelection::bound_browser_session_id)
                     .map(|id| id.to_string()),
                 ceremony
                     .selection()
-                    .invited_membership_id()
+                    .and_then(AuthCeremonySelection::invited_membership_id)
                     .map(|id| id.to_string()),
-                i64::from(ceremony.selection().remembered()),
+                i64::from(ceremony.remembered()),
                 ceremony.callback_path().as_str(),
                 ceremony.return_target().as_str(),
                 ceremony.correlation_id().to_string(),
@@ -223,7 +286,6 @@ impl SqliteKernel {
             .lock()
             .map_err(|_| HumanAccessStoreError::Integrity)?;
         let transaction = Transaction::new_unchecked(&connection, TransactionBehavior::Immediate)?;
-        require_active_installation(&transaction, instance_id, activation_generation)?;
         let mut ceremony = load_ceremony_by_binding(&transaction, browser_binding_digest)?
             .ok_or(HumanAccessStoreError::NotFound)?;
         let prior_state = ceremony.state();
@@ -234,6 +296,23 @@ impl SqliteKernel {
             callback_path,
             at,
         )?;
+        match require_active_installation(&transaction, instance_id, activation_generation) {
+            Ok(()) => {}
+            Err(HumanAccessStoreError::TrustUnavailable) => {
+                ceremony.fail(AuthCeremonyFailure::TrustUnavailable, at)?;
+                persist_ceremony_transition(&transaction, &ceremony, prior_state)?;
+                insert_ceremony_audit(
+                    &transaction,
+                    AccessAuditEventKind::CeremonyFailed,
+                    &ceremony,
+                    correlation_id,
+                    at,
+                )?;
+                transaction.commit()?;
+                return Ok(ceremony);
+            }
+            Err(error) => return Err(error),
+        }
         persist_ceremony_transition(&transaction, &ceremony, prior_state)?;
         insert_ceremony_audit(
             &transaction,
@@ -285,9 +364,312 @@ impl SqliteKernel {
             .lock()
             .map_err(|_| HumanAccessStoreError::Integrity)?;
         let transaction = Transaction::new_unchecked(&connection, TransactionBehavior::Deferred)?;
-        authorize_sign_in(&transaction, command)?;
+        preauthorize_sign_in_identity(&transaction, command).map_err(|error| {
+            if matches!(error, HumanAccessStoreError::NotFound) {
+                HumanAccessStoreError::Unaffiliated
+            } else {
+                error
+            }
+        })?;
         transaction.commit()?;
         Ok(())
+    }
+
+    pub(crate) fn confirm_trailbase_sign_in(
+        &self,
+        command: ConfirmTrailBaseSignInCommand,
+    ) -> StoreResult<AuthCeremony> {
+        let authorization = command.authorization();
+        let connection = self
+            .inner
+            .connection
+            .lock()
+            .map_err(|_| HumanAccessStoreError::Integrity)?;
+        let transaction = Transaction::new_unchecked(&connection, TransactionBehavior::Immediate)?;
+        let mut ceremony = load_ceremony(&transaction, authorization.operation_id())?
+            .ok_or(HumanAccessStoreError::BindingInvalid)?;
+        if authorization.at() >= ceremony.expires_at() {
+            return Err(HumanAccessStoreError::ProofExpired);
+        }
+        if !confirmed_ceremony_matches(
+            &ceremony,
+            authorization.identity(),
+            AuthCeremonyPurpose::SignIn,
+            authorization.at(),
+        ) {
+            return Err(HumanAccessStoreError::BindingInvalid);
+        }
+        match require_active_installation(
+            &transaction,
+            authorization.identity().instance_id(),
+            authorization
+                .identity()
+                .provenance()
+                .activation_generation(),
+        ) {
+            Ok(()) => {}
+            Err(HumanAccessStoreError::TrustUnavailable) => {
+                fail_claimed_after_logout(
+                    &transaction,
+                    &mut ceremony,
+                    AuthCeremonyFailure::TrustUnavailable,
+                    authorization.correlation_id(),
+                    authorization.at(),
+                )?;
+                transaction.commit()?;
+                return Err(HumanAccessStoreError::TrustUnavailable);
+            }
+            Err(error) => return Err(error),
+        }
+        let subject = match load_anchored_subject(&transaction, authorization.identity()) {
+            Ok(subject) => subject,
+            Err(HumanAccessStoreError::NotFound) => {
+                fail_claimed_after_logout(
+                    &transaction,
+                    &mut ceremony,
+                    AuthCeremonyFailure::LocalAuthorizationDenied,
+                    authorization.correlation_id(),
+                    authorization.at(),
+                )?;
+                transaction.commit()?;
+                return Err(HumanAccessStoreError::Unaffiliated);
+            }
+            Err(error) => return Err(error),
+        };
+        let prior_state = ceremony.state();
+        ceremony.require_selection(
+            AuthCeremonyConfirmation::new(subject, authorization.identity().provenance()),
+            authorization.at(),
+        )?;
+        persist_ceremony_transition(&transaction, &ceremony, prior_state)?;
+        insert_ceremony_audit(
+            &transaction,
+            AccessAuditEventKind::CeremonySelectionRequired,
+            &ceremony,
+            authorization.correlation_id(),
+            authorization.at(),
+        )?;
+        transaction.commit()?;
+        Ok(ceremony)
+    }
+
+    pub(crate) fn read_trailbase_sign_in_continuation(
+        &self,
+        query: ReadTrailBaseSignInContinuationQuery,
+    ) -> StoreResult<AuthSelectionProjection> {
+        let connection = self
+            .inner
+            .connection
+            .lock()
+            .map_err(|_| HumanAccessStoreError::Integrity)?;
+        let transaction = Transaction::new_unchecked(&connection, TransactionBehavior::Immediate)?;
+        maintain_ceremonies(&transaction, query.correlation_id(), query.at())?;
+        let ceremony = load_ceremony_by_binding(&transaction, query.browser_binding_digest())?
+            .ok_or(HumanAccessStoreError::BindingInvalid)?;
+        match ceremony.state() {
+            AuthCeremonyState::Expired => {
+                transaction.commit()?;
+                return Err(HumanAccessStoreError::ProofExpired);
+            }
+            AuthCeremonyState::Failed | AuthCeremonyState::CleanupUncertain => {
+                let failure = ceremony.failure().ok_or(HumanAccessStoreError::Integrity)?;
+                transaction.commit()?;
+                return Err(HumanAccessStoreError::AttributableFailure(failure));
+            }
+            AuthCeremonyState::Claimed => return Err(HumanAccessStoreError::Integrity),
+            AuthCeremonyState::SelectionRequired => {}
+            AuthCeremonyState::Pending
+            | AuthCeremonyState::Completed
+            | AuthCeremonyState::Cancelled => return Err(HumanAccessStoreError::BindingInvalid),
+        }
+        let confirmation = ceremony
+            .confirmation()
+            .ok_or(HumanAccessStoreError::Integrity)?;
+        let subject = load_subject(&transaction, confirmation.subject_id())?;
+        if !matches!(subject.lifecycle(), AuthSubjectLifecycle::Active) {
+            return Err(HumanAccessStoreError::Unaffiliated);
+        }
+        let candidates = load_sign_in_candidates(&transaction, subject.id())?;
+        let projection = project_auth_selection(&ceremony, &candidates)?;
+        transaction.commit()?;
+        Ok(projection)
+    }
+
+    pub(crate) fn complete_trailbase_sign_in_continuation(
+        &self,
+        command: CompleteTrailBaseSignInContinuationCommand,
+    ) -> StoreResult<CreatedBrowserSession> {
+        let connection = self
+            .inner
+            .connection
+            .lock()
+            .map_err(|_| HumanAccessStoreError::Integrity)?;
+        let transaction = Transaction::new_unchecked(&connection, TransactionBehavior::Immediate)?;
+        maintain_ceremonies(&transaction, command.correlation_id(), command.at())?;
+        let mut ceremony =
+            load_ceremony_by_binding(&transaction, command.browser_binding_digest())?
+                .ok_or(HumanAccessStoreError::BindingInvalid)?;
+        match ceremony.state() {
+            AuthCeremonyState::SelectionRequired => {}
+            AuthCeremonyState::Expired => {
+                transaction.commit()?;
+                return Err(HumanAccessStoreError::ProofExpired);
+            }
+            AuthCeremonyState::Failed | AuthCeremonyState::CleanupUncertain => {
+                let failure = ceremony.failure().ok_or(HumanAccessStoreError::Integrity)?;
+                transaction.commit()?;
+                return Err(HumanAccessStoreError::AttributableFailure(failure));
+            }
+            AuthCeremonyState::Pending
+            | AuthCeremonyState::Claimed
+            | AuthCeremonyState::Completed
+            | AuthCeremonyState::Cancelled => return Err(HumanAccessStoreError::BindingInvalid),
+        }
+        let confirmation = ceremony
+            .confirmation()
+            .ok_or(HumanAccessStoreError::Integrity)?;
+        require_active_installation(
+            &transaction,
+            ceremony.trailbase_instance_id(),
+            ceremony.activation_generation(),
+        )?;
+        let mut subject = load_subject(&transaction, confirmation.subject_id())?;
+        if !matches!(subject.lifecycle(), AuthSubjectLifecycle::Active)
+            || subject.auth_epoch() != confirmation.auth_epoch()
+            || subject.authorization_epoch() != confirmation.authorization_epoch()
+        {
+            return Err(HumanAccessStoreError::SelectionChanged);
+        }
+        let candidates = load_sign_in_candidates(&transaction, subject.id()).map_err(|error| {
+            if matches!(error, HumanAccessStoreError::Unaffiliated) {
+                HumanAccessStoreError::SelectionChanged
+            } else {
+                error
+            }
+        })?;
+        if &auth_selection_revision(&ceremony, &candidates)? != command.candidate_revision() {
+            return Err(HumanAccessStoreError::SelectionChanged);
+        }
+        let candidate = candidates
+            .get(usize::from(command.choice_ordinal()))
+            .copied()
+            .ok_or(HumanAccessStoreError::Invariant(
+                AccessInvariantError::InvalidCeremonySelectionBinding,
+            ))?;
+        let selection = candidate.selection()?;
+        let mut membership = load_membership(&transaction, candidate.membership_id)?
+            .ok_or(HumanAccessStoreError::SelectionChanged)?;
+        if membership.subject_id() != subject.id()
+            || membership.workspace_id() != candidate.workspace_id
+            || membership.lifecycle() != candidate.membership_state
+            || membership.role() != candidate.role
+        {
+            return Err(HumanAccessStoreError::SelectionChanged);
+        }
+        if matches!(membership.lifecycle(), MembershipLifecycle::Invited) {
+            membership.apply_lifecycle_action(
+                &mut subject,
+                MembershipLifecycleAction::AcceptInvitation,
+                0,
+                command.at(),
+            )?;
+            persist_membership_subject(&transaction, &membership, &subject)?;
+            insert_membership_audit(
+                &transaction,
+                AccessAuditEventKind::MembershipInvitationAccepted,
+                &membership,
+                subject.id(),
+                command.correlation_id(),
+                command.at(),
+            )?;
+        }
+        let grants =
+            load_active_subject_grants(&transaction, subject.id(), candidate.workspace_id)?;
+        if !grants.contains(&candidate.profile_grant_id) {
+            return Err(HumanAccessStoreError::SelectionChanged);
+        }
+        let created = crate::browser_auth::insert_session(
+            &transaction,
+            subject,
+            candidate.workspace_id,
+            &grants,
+            candidate.profile_grant_id,
+            SessionPolicy::C1,
+            ceremony.remembered(),
+            command.at(),
+            0,
+            CapabilityKey::CreateBrowserSession,
+            command.correlation_id(),
+        )
+        .map_err(|problem| session_creation_error(problem.code()))?;
+        insert_session_authentication(
+            &transaction,
+            &created,
+            ceremony.trailbase_instance_id(),
+            confirmation.provenance(),
+        )?;
+        insert_browser_session_issued_audit(
+            &transaction,
+            &created,
+            &ceremony,
+            subject.id(),
+            command.correlation_id(),
+            command.at(),
+        )?;
+        let prior_state = ceremony.state();
+        ceremony.complete_selection(selection, command.at())?;
+        persist_ceremony_transition(&transaction, &ceremony, prior_state)?;
+        insert_ceremony_audit(
+            &transaction,
+            AccessAuditEventKind::CeremonyCompleted,
+            &ceremony,
+            command.correlation_id(),
+            command.at(),
+        )?;
+        transaction.commit()?;
+        Ok(created)
+    }
+
+    pub(crate) fn cancel_trailbase_sign_in_continuation(
+        &self,
+        command: CancelTrailBaseSignInContinuationCommand,
+    ) -> StoreResult<AuthCeremony> {
+        let connection = self
+            .inner
+            .connection
+            .lock()
+            .map_err(|_| HumanAccessStoreError::Integrity)?;
+        let transaction = Transaction::new_unchecked(&connection, TransactionBehavior::Immediate)?;
+        maintain_ceremonies(&transaction, command.correlation_id(), command.at())?;
+        let mut ceremony =
+            load_ceremony_by_binding(&transaction, command.browser_binding_digest())?
+                .ok_or(HumanAccessStoreError::BindingInvalid)?;
+        match ceremony.state() {
+            AuthCeremonyState::SelectionRequired => {}
+            AuthCeremonyState::Failed
+            | AuthCeremonyState::CleanupUncertain
+            | AuthCeremonyState::Expired
+            | AuthCeremonyState::Completed
+            | AuthCeremonyState::Cancelled => {
+                transaction.commit()?;
+                return Ok(ceremony);
+            }
+            AuthCeremonyState::Pending | AuthCeremonyState::Claimed => {
+                return Err(HumanAccessStoreError::BindingInvalid)
+            }
+        }
+        let prior_state = ceremony.state();
+        ceremony.cancel(command.at())?;
+        persist_ceremony_transition(&transaction, &ceremony, prior_state)?;
+        insert_ceremony_audit(
+            &transaction,
+            AccessAuditEventKind::CeremonyCancelled,
+            &ceremony,
+            command.correlation_id(),
+            command.at(),
+        )?;
+        transaction.commit()?;
+        Ok(ceremony)
     }
 
     pub(crate) fn preauthorize_trailbase_bootstrap(
@@ -342,77 +724,6 @@ impl SqliteKernel {
         Ok(ceremony)
     }
 
-    pub(crate) fn complete_trailbase_sign_in(
-        &self,
-        command: CompleteTrailBaseSignInCommand,
-    ) -> StoreResult<CreatedBrowserSession> {
-        let authorization = command.authorization();
-        let connection = self
-            .inner
-            .connection
-            .lock()
-            .map_err(|_| HumanAccessStoreError::Integrity)?;
-        let transaction = Transaction::new_unchecked(&connection, TransactionBehavior::Immediate)?;
-        let AuthorizedSignIn {
-            mut ceremony,
-            mut subject,
-            grants,
-            mut invitation,
-        } = authorize_sign_in(&transaction, authorization)?;
-        if let Some(membership) = &mut invitation {
-            membership.apply_lifecycle_action(
-                &mut subject,
-                MembershipLifecycleAction::AcceptInvitation,
-                0,
-                authorization.at(),
-            )?;
-            persist_membership_subject(&transaction, membership, &subject)?;
-            insert_membership_audit(
-                &transaction,
-                AccessAuditEventKind::MembershipInvitationAccepted,
-                membership,
-                subject.id(),
-                authorization.correlation_id(),
-                authorization.at(),
-            )?;
-        }
-        let created = crate::browser_auth::insert_session(
-            &transaction,
-            subject,
-            ceremony.selection().workspace_id(),
-            &grants,
-            ceremony.selection().selected_profile_grant_id(),
-            SessionPolicy::C1,
-            ceremony.selection().remembered(),
-            authorization.at(),
-            0,
-            CapabilityKey::CreateBrowserSession,
-            authorization.correlation_id(),
-        )
-        .map_err(|_| HumanAccessStoreError::Integrity)?;
-        insert_session_authentication(&transaction, &created, authorization.identity())?;
-        insert_browser_session_issued_audit(
-            &transaction,
-            &created,
-            &ceremony,
-            subject.id(),
-            authorization.correlation_id(),
-            authorization.at(),
-        )?;
-        let prior_state = ceremony.state();
-        ceremony.complete(authorization.at())?;
-        persist_ceremony_transition(&transaction, &ceremony, prior_state)?;
-        insert_ceremony_audit(
-            &transaction,
-            AccessAuditEventKind::CeremonyCompleted,
-            &ceremony,
-            authorization.correlation_id(),
-            authorization.at(),
-        )?;
-        transaction.commit()?;
-        Ok(created)
-    }
-
     pub(crate) fn complete_trailbase_bootstrap(
         &self,
         command: &CompleteTrailBaseBootstrapCommand,
@@ -425,6 +736,9 @@ impl SqliteKernel {
             .map_err(|_| HumanAccessStoreError::Integrity)?;
         let transaction = Transaction::new_unchecked(&connection, TransactionBehavior::Immediate)?;
         let mut ceremony = authorize_bootstrap(&transaction, authorization)?;
+        let selection = ceremony
+            .selection()
+            .ok_or(HumanAccessStoreError::Integrity)?;
         let subject = AuthSubject::try_new(
             AuthSubjectId::new_v7(),
             AuthSubjectLifecycle::Active,
@@ -442,7 +756,7 @@ impl SqliteKernel {
         let membership = WorkspaceMembership::try_new(
             MembershipId::new_v7(),
             subject.id(),
-            ceremony.selection().workspace_id(),
+            selection.workspace_id(),
             MembershipLifecycle::Active,
             WorkspaceRole::Administrator,
             authorization.at(),
@@ -455,14 +769,14 @@ impl SqliteKernel {
             "INSERT INTO auth_subject_profile_grants(auth_subject_id, profile_grant_id) VALUES (?1, ?2)",
             params![
                 subject.id().to_string(),
-                ceremony.selection().selected_profile_grant_id().to_string(),
+                selection.selected_profile_grant_id().to_string(),
             ],
         )?;
-        let grants = [ceremony.selection().selected_profile_grant_id()];
+        let grants = [selection.selected_profile_grant_id()];
         let created = crate::browser_auth::insert_session(
             &transaction,
             subject,
-            ceremony.selection().workspace_id(),
+            selection.workspace_id(),
             &grants,
             grants[0],
             SessionPolicy::C1,
@@ -472,8 +786,13 @@ impl SqliteKernel {
             CapabilityKey::CreateBrowserSession,
             authorization.correlation_id(),
         )
-        .map_err(|_| HumanAccessStoreError::Integrity)?;
-        insert_session_authentication(&transaction, &created, authorization.identity())?;
+        .map_err(|problem| session_creation_error(problem.code()))?;
+        insert_session_authentication(
+            &transaction,
+            &created,
+            authorization.identity().instance_id(),
+            authorization.identity().provenance(),
+        )?;
         insert_anchor_audit(
             &transaction,
             &anchor,
@@ -807,7 +1126,7 @@ fn maintain_ceremonies(
     correlation_id: RequestCorrelationId,
     at: DateTime<Utc>,
 ) -> StoreResult<Vec<OperationId>> {
-    let ceremonies = load_expired_pending_ceremonies(transaction, at)?;
+    let ceremonies = load_expired_ceremonies(transaction, at)?;
     let mut expired = Vec::with_capacity(ceremonies.len());
     for mut ceremony in ceremonies {
         let prior_state = ceremony.state();
@@ -970,17 +1289,7 @@ fn validate_confirmed_ceremony(
 ) -> StoreResult<AuthCeremony> {
     let ceremony =
         load_ceremony(transaction, operation_id)?.ok_or(HumanAccessStoreError::NotFound)?;
-    if !matches!(ceremony.state(), AuthCeremonyState::Claimed)
-        || ceremony.purpose() != expected_purpose
-        || !matches!(
-            ceremony.protocol(),
-            AuthCeremonyProtocol::TrailBaseAuthorizationCodePkce
-        )
-        || ceremony.trailbase_instance_id() != identity.instance_id()
-        || ceremony.activation_generation() != identity.provenance().activation_generation()
-        || identity.provenance().verified_at()
-            < ceremony.claimed_at().unwrap_or(ceremony.created_at())
-        || identity.provenance().verified_at() > at
+    if !confirmed_ceremony_matches(&ceremony, identity, expected_purpose, at)
         || at >= ceremony.expires_at()
     {
         return Err(HumanAccessStoreError::NotFound);
@@ -991,6 +1300,44 @@ fn validate_confirmed_ceremony(
         identity.provenance().activation_generation(),
     )?;
     Ok(ceremony)
+}
+
+fn confirmed_ceremony_matches(
+    ceremony: &AuthCeremony,
+    identity: ConfirmedTrailBaseIdentity,
+    expected_purpose: AuthCeremonyPurpose,
+    at: DateTime<Utc>,
+) -> bool {
+    matches!(ceremony.state(), AuthCeremonyState::Claimed)
+        && ceremony.purpose() == expected_purpose
+        && matches!(
+            ceremony.protocol(),
+            AuthCeremonyProtocol::TrailBaseAuthorizationCodePkce
+        )
+        && ceremony.trailbase_instance_id() == identity.instance_id()
+        && ceremony.activation_generation() == identity.provenance().activation_generation()
+        && identity.provenance().verified_at()
+            >= ceremony.claimed_at().unwrap_or(ceremony.created_at())
+        && identity.provenance().verified_at() <= at
+}
+
+fn fail_claimed_after_logout(
+    transaction: &Transaction<'_>,
+    ceremony: &mut AuthCeremony,
+    failure: AuthCeremonyFailure,
+    correlation_id: RequestCorrelationId,
+    at: DateTime<Utc>,
+) -> StoreResult<()> {
+    let prior_state = ceremony.state();
+    ceremony.fail(failure, at)?;
+    persist_ceremony_transition(transaction, ceremony, prior_state)?;
+    insert_ceremony_audit(
+        transaction,
+        AccessAuditEventKind::CeremonyFailed,
+        ceremony,
+        correlation_id,
+        at,
+    )
 }
 
 fn load_anchored_subject(
@@ -1053,10 +1400,10 @@ fn load_active_subject_grants(
         .collect()
 }
 
-fn authorize_sign_in(
+fn preauthorize_sign_in_identity(
     transaction: &Transaction<'_>,
     command: PreauthorizeTrailBaseSignInCommand,
-) -> StoreResult<AuthorizedSignIn> {
+) -> StoreResult<(AuthCeremony, AuthSubject)> {
     let ceremony = validate_confirmed_ceremony(
         transaction,
         command.operation_id(),
@@ -1065,50 +1412,200 @@ fn authorize_sign_in(
         command.at(),
     )?;
     let subject = load_anchored_subject(transaction, command.identity())?;
-    let invitation = if let Some(membership_id) = ceremony.selection().invited_membership_id() {
-        let membership =
-            load_membership(transaction, membership_id)?.ok_or(HumanAccessStoreError::NotFound)?;
-        if membership.subject_id() != subject.id()
-            || membership.workspace_id() != ceremony.selection().workspace_id()
-            || !matches!(membership.lifecycle(), MembershipLifecycle::Invited)
-        {
-            return Err(HumanAccessStoreError::NotFound);
-        }
-        Some(membership)
-    } else {
-        let active: bool = transaction.query_row(
-            r#"
-            SELECT EXISTS(
-                SELECT 1 FROM workspace_memberships
-                WHERE auth_subject_id = ?1 AND workspace_id = ?2
-                  AND lifecycle = 'active'
-            )
-            "#,
-            params![
-                subject.id().to_string(),
-                ceremony.selection().workspace_id().to_string(),
-            ],
-            |row| row.get(0),
-        )?;
-        if !active {
-            return Err(HumanAccessStoreError::NotFound);
-        }
-        None
-    };
-    let grants = load_active_subject_grants(
-        transaction,
-        subject.id(),
-        ceremony.selection().workspace_id(),
+    Ok((ceremony, subject))
+}
+
+fn load_sign_in_candidates(
+    transaction: &Transaction<'_>,
+    subject_id: AuthSubjectId,
+) -> StoreResult<Vec<SignInCandidate>> {
+    let mut statement = transaction.prepare(
+        r#"
+        SELECT
+            membership.membership_id,
+            membership.workspace_id,
+            workspace.created_at,
+            membership.lifecycle,
+            membership.role,
+            grant.grant_id,
+            grant.profile_id,
+            profile.created_at,
+            grant.client_id
+        FROM workspace_memberships membership
+        JOIN workspaces workspace
+          ON workspace.workspace_id = membership.workspace_id
+        JOIN auth_subject_profile_grants subject_grant
+          ON subject_grant.auth_subject_id = membership.auth_subject_id
+        JOIN profile_grants grant
+          ON grant.grant_id = subject_grant.profile_grant_id
+         AND grant.workspace_id = membership.workspace_id
+        JOIN profiles profile
+          ON profile.profile_id = grant.profile_id
+         AND profile.workspace_id = grant.workspace_id
+        JOIN clients client
+          ON client.client_id = grant.client_id
+         AND client.workspace_id = grant.workspace_id
+        WHERE membership.auth_subject_id = ?1
+          AND membership.lifecycle IN ('active', 'invited')
+          AND grant.status = 'active'
+          AND client.status = 'active'
+        ORDER BY
+            membership.workspace_id COLLATE BINARY,
+            grant.profile_id COLLATE BINARY,
+            grant.grant_id COLLATE BINARY,
+            membership.membership_id COLLATE BINARY,
+            grant.client_id COLLATE BINARY
+        LIMIT ?2
+        "#,
     )?;
-    if !grants.contains(&ceremony.selection().selected_profile_grant_id()) {
-        return Err(HumanAccessStoreError::NotFound);
+    let rows = statement
+        .query_map(
+            params![
+                subject_id.to_string(),
+                i64::try_from(AUTH_SELECTION_CHOICE_LIMIT + 1)
+                    .map_err(|_| HumanAccessStoreError::Integrity)?
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, String>(7)?,
+                    row.get::<_, String>(8)?,
+                ))
+            },
+        )?
+        .collect::<Result<Vec<_>, _>>()?;
+    if rows.len() > AUTH_SELECTION_CHOICE_LIMIT {
+        return Err(HumanAccessStoreError::CapacityExceeded);
     }
-    Ok(AuthorizedSignIn {
-        ceremony,
-        subject,
-        grants,
-        invitation,
-    })
+
+    let mut candidates = Vec::with_capacity(rows.len());
+    let mut current_workspace = None::<String>;
+    let mut current_profile = None::<String>;
+    let mut workspace_ordinal = 0_u8;
+    let mut profile_ordinal = 0_u8;
+    for row in rows {
+        if current_workspace.as_deref() != Some(row.1.as_str()) {
+            workspace_ordinal = workspace_ordinal
+                .checked_add(1)
+                .ok_or(HumanAccessStoreError::CapacityExceeded)?;
+            profile_ordinal = 0;
+            current_workspace = Some(row.1.clone());
+            current_profile = None;
+        }
+        if current_profile.as_deref() != Some(row.6.as_str()) {
+            profile_ordinal = profile_ordinal
+                .checked_add(1)
+                .ok_or(HumanAccessStoreError::CapacityExceeded)?;
+            current_profile = Some(row.6.clone());
+        }
+        candidates.push(SignInCandidate {
+            membership_id: row
+                .0
+                .parse()
+                .map_err(|_| HumanAccessStoreError::Integrity)?,
+            workspace_id: row
+                .1
+                .parse()
+                .map_err(|_| HumanAccessStoreError::Integrity)?,
+            workspace_created_at: parse_time(&row.2)?,
+            membership_state: MembershipLifecycle::from_storage(&row.3)
+                .ok_or(HumanAccessStoreError::Integrity)?,
+            role: WorkspaceRole::from_storage(&row.4).ok_or(HumanAccessStoreError::Integrity)?,
+            profile_grant_id: row
+                .5
+                .parse()
+                .map_err(|_| HumanAccessStoreError::Integrity)?,
+            profile_id: row
+                .6
+                .parse()
+                .map_err(|_| HumanAccessStoreError::Integrity)?,
+            profile_created_at: parse_time(&row.7)?,
+            client_id: row
+                .8
+                .parse()
+                .map_err(|_| HumanAccessStoreError::Integrity)?,
+            workspace_ordinal,
+            profile_ordinal,
+        });
+    }
+    if candidates.is_empty() {
+        Err(HumanAccessStoreError::Unaffiliated)
+    } else {
+        Ok(candidates)
+    }
+}
+
+fn append_auth_selection_field(buffer: &mut Vec<u8>, value: &str) -> StoreResult<()> {
+    let length = u32::try_from(value.len()).map_err(|_| HumanAccessStoreError::Integrity)?;
+    buffer.extend_from_slice(&length.to_be_bytes());
+    buffer.extend_from_slice(value.as_bytes());
+    Ok(())
+}
+
+fn auth_selection_revision(
+    ceremony: &AuthCeremony,
+    candidates: &[SignInCandidate],
+) -> StoreResult<Sha256Digest> {
+    let confirmation = ceremony
+        .confirmation()
+        .ok_or(HumanAccessStoreError::Integrity)?;
+    let mut bytes = Vec::with_capacity(256 * candidates.len().max(1));
+    bytes.extend_from_slice(b"fasti.auth.selection.v1\0");
+    bytes.extend_from_slice(&ceremony.activation_generation().to_be_bytes());
+    bytes.extend_from_slice(&confirmation.auth_epoch().to_be_bytes());
+    bytes.extend_from_slice(&confirmation.authorization_epoch().to_be_bytes());
+    bytes.extend_from_slice(
+        &u32::try_from(candidates.len())
+            .map_err(|_| HumanAccessStoreError::CapacityExceeded)?
+            .to_be_bytes(),
+    );
+    for (index, candidate) in candidates.iter().copied().enumerate() {
+        bytes.push(u8::try_from(index).map_err(|_| HumanAccessStoreError::CapacityExceeded)?);
+        bytes.push(candidate.workspace_ordinal);
+        bytes.push(candidate.profile_ordinal);
+        for value in [
+            candidate.membership_id.to_string(),
+            candidate.workspace_id.to_string(),
+            timestamp(candidate.workspace_created_at),
+            candidate.membership_state.as_str().to_owned(),
+            candidate.role.as_str().to_owned(),
+            candidate.profile_grant_id.to_string(),
+            candidate.profile_id.to_string(),
+            timestamp(candidate.profile_created_at),
+            candidate.client_id.to_string(),
+        ] {
+            append_auth_selection_field(&mut bytes, &value)?;
+        }
+    }
+    Ok(Sha256Digest::from_bytes(&sha256_bytes(&bytes)))
+}
+
+fn project_auth_selection(
+    ceremony: &AuthCeremony,
+    candidates: &[SignInCandidate],
+) -> StoreResult<AuthSelectionProjection> {
+    let choices = candidates
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(index, candidate)| {
+            u8::try_from(index)
+                .map(|ordinal| candidate.projection(ordinal))
+                .map_err(|_| HumanAccessStoreError::CapacityExceeded)
+        })
+        .collect::<StoreResult<Vec<_>>>()?;
+    Ok(AuthSelectionProjection::new(
+        ceremony.expires_at(),
+        ceremony.remembered(),
+        auth_selection_revision(ceremony, candidates)?,
+        choices,
+    ))
 }
 
 fn authorize_bootstrap(
@@ -1122,7 +1619,10 @@ fn authorize_bootstrap(
         AuthCeremonyPurpose::FirstAdministratorBootstrap,
         command.at(),
     )?;
-    if load_initialized_workspace(transaction)? != ceremony.selection().workspace_id() {
+    let selection = ceremony
+        .selection()
+        .ok_or(HumanAccessStoreError::NotFound)?;
+    if load_initialized_workspace(transaction)? != selection.workspace_id() {
         return Err(HumanAccessStoreError::NotFound);
     }
     let membership_count: i64 =
@@ -1147,8 +1647,8 @@ fn authorize_bootstrap(
         )
         "#,
         params![
-            ceremony.selection().selected_profile_grant_id().to_string(),
-            ceremony.selection().workspace_id().to_string(),
+            selection.selected_profile_grant_id().to_string(),
+            selection.workspace_id().to_string(),
         ],
         |row| row.get(0),
     )?;
@@ -1625,7 +2125,7 @@ fn require_active_installation(
     if active {
         Ok(())
     } else {
-        Err(HumanAccessStoreError::Integrity)
+        Err(HumanAccessStoreError::TrustUnavailable)
     }
 }
 
@@ -1652,9 +2152,7 @@ fn load_ceremony_where(
     predicate: &str,
     value: String,
 ) -> StoreResult<Option<AuthCeremony>> {
-    let sql = format!(
-        "SELECT operation_id, purpose, protocol, trailbase_instance_id, activation_generation, browser_binding_digest, workspace_id, selected_profile_grant_id, bound_browser_session_id, invited_membership_id, remembered, callback_path, return_target, correlation_id, state, failure, created_at, expires_at, claimed_at, terminal_at FROM auth_ceremonies WHERE {predicate}"
-    );
+    let sql = format!("SELECT {CEREMONY_COLUMNS} FROM auth_ceremonies WHERE {predicate}");
     transaction
         .query_row(&sql, [value], read_ceremony_row)
         .optional()?
@@ -1670,13 +2168,13 @@ fn load_live_ceremonies(transaction: &Transaction<'_>) -> StoreResult<Vec<AuthCe
     )
 }
 
-fn load_expired_pending_ceremonies(
+fn load_expired_ceremonies(
     transaction: &Transaction<'_>,
     at: DateTime<Utc>,
 ) -> StoreResult<Vec<AuthCeremony>> {
     load_ceremonies(
         transaction,
-        "WHERE state = 'pending' AND expires_at <= ?1 ORDER BY expires_at, operation_id",
+        "WHERE state IN ('pending', 'selection_required') AND expires_at <= ?1 ORDER BY expires_at, operation_id",
         [timestamp(at)],
     )
 }
@@ -1689,9 +2187,7 @@ fn load_ceremonies<P>(
 where
     P: rusqlite::Params,
 {
-    let sql = format!(
-        "SELECT operation_id, purpose, protocol, trailbase_instance_id, activation_generation, browser_binding_digest, workspace_id, selected_profile_grant_id, bound_browser_session_id, invited_membership_id, remembered, callback_path, return_target, correlation_id, state, failure, created_at, expires_at, claimed_at, terminal_at FROM auth_ceremonies {suffix}"
-    );
+    let sql = format!("SELECT {CEREMONY_COLUMNS} FROM auth_ceremonies {suffix}");
     let mut statement = transaction.prepare(&sql)?;
     let rows = statement
         .query_map(params, read_ceremony_row)?
@@ -1712,19 +2208,90 @@ fn read_ceremony_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CeremonyRow> {
         bound_browser_session_id: row.get(8)?,
         invited_membership_id: row.get(9)?,
         remembered: row.get(10)?,
-        callback_path: row.get(11)?,
-        return_target: row.get(12)?,
-        correlation_id: row.get(13)?,
-        state: row.get(14)?,
-        failure: row.get(15)?,
-        created_at: row.get(16)?,
-        expires_at: row.get(17)?,
-        claimed_at: row.get(18)?,
-        terminal_at: row.get(19)?,
+        confirmed_auth_subject_id: row.get(11)?,
+        authentication_method: row.get(12)?,
+        authentication_verified_at: row.get(13)?,
+        confirmed_auth_epoch: row.get(14)?,
+        confirmed_authorization_epoch: row.get(15)?,
+        callback_path: row.get(16)?,
+        return_target: row.get(17)?,
+        correlation_id: row.get(18)?,
+        state: row.get(19)?,
+        failure: row.get(20)?,
+        created_at: row.get(21)?,
+        expires_at: row.get(22)?,
+        claimed_at: row.get(23)?,
+        terminal_at: row.get(24)?,
     })
 }
 
 fn parse_ceremony(row: CeremonyRow) -> StoreResult<AuthCeremony> {
+    let purpose =
+        AuthCeremonyPurpose::from_storage(&row.purpose).ok_or(HumanAccessStoreError::Integrity)?;
+    let activation_generation =
+        u64::try_from(row.activation_generation).map_err(|_| HumanAccessStoreError::Integrity)?;
+    let selection = match (
+        row.workspace_id.as_deref(),
+        row.selected_profile_grant_id.as_deref(),
+    ) {
+        (Some(workspace_id), Some(profile_grant_id)) => Some(
+            AuthCeremonySelection::try_new(
+                purpose,
+                workspace_id
+                    .parse::<WorkspaceId>()
+                    .map_err(|_| HumanAccessStoreError::Integrity)?,
+                profile_grant_id
+                    .parse::<ProfileGrantId>()
+                    .map_err(|_| HumanAccessStoreError::Integrity)?,
+                row.bound_browser_session_id
+                    .as_deref()
+                    .map(str::parse::<BrowserSessionId>)
+                    .transpose()
+                    .map_err(|_| HumanAccessStoreError::Integrity)?,
+                row.invited_membership_id
+                    .as_deref()
+                    .map(str::parse::<MembershipId>)
+                    .transpose()
+                    .map_err(|_| HumanAccessStoreError::Integrity)?,
+            )
+            .map_err(|_| HumanAccessStoreError::Integrity)?,
+        ),
+        (None, None)
+            if row.bound_browser_session_id.is_none() && row.invited_membership_id.is_none() =>
+        {
+            None
+        }
+        _ => return Err(HumanAccessStoreError::Integrity),
+    };
+    let confirmation = match (
+        row.confirmed_auth_subject_id.as_deref(),
+        row.authentication_method.as_deref(),
+        row.authentication_verified_at.as_deref(),
+        row.confirmed_auth_epoch,
+        row.confirmed_authorization_epoch,
+    ) {
+        (
+            Some(subject_id),
+            Some(method),
+            Some(verified_at),
+            Some(auth_epoch),
+            Some(authorization_epoch),
+        ) => Some(AuthCeremonyConfirmation::try_from_persisted(
+            subject_id
+                .parse::<AuthSubjectId>()
+                .map_err(|_| HumanAccessStoreError::Integrity)?,
+            u64::try_from(auth_epoch).map_err(|_| HumanAccessStoreError::Integrity)?,
+            u64::try_from(authorization_epoch).map_err(|_| HumanAccessStoreError::Integrity)?,
+            AuthenticationProvenance::new(
+                AuthenticationMethod::from_storage(method)
+                    .ok_or(HumanAccessStoreError::Integrity)?,
+                parse_time(verified_at)?,
+                activation_generation,
+            ),
+        )),
+        (None, None, None, None, None) => None,
+        _ => return Err(HumanAccessStoreError::Integrity),
+    };
     let failure = row
         .failure
         .as_deref()
@@ -1736,42 +2303,23 @@ fn parse_ceremony(row: CeremonyRow) -> StoreResult<AuthCeremony> {
         row.operation_id
             .parse()
             .map_err(|_| HumanAccessStoreError::Integrity)?,
-        AuthCeremonyPurpose::from_storage(&row.purpose).ok_or(HumanAccessStoreError::Integrity)?,
+        purpose,
         AuthCeremonyProtocol::from_storage(&row.protocol)
             .ok_or(HumanAccessStoreError::Integrity)?,
         row.trailbase_instance_id
             .parse()
             .map_err(|_| HumanAccessStoreError::Integrity)?,
-        u64::try_from(row.activation_generation).map_err(|_| HumanAccessStoreError::Integrity)?,
+        activation_generation,
         row.browser_binding_digest
             .parse()
             .map_err(|_| HumanAccessStoreError::Integrity)?,
-        AuthCeremonySelection::try_new(
-            AuthCeremonyPurpose::from_storage(&row.purpose)
-                .ok_or(HumanAccessStoreError::Integrity)?,
-            row.workspace_id
-                .parse::<WorkspaceId>()
-                .map_err(|_| HumanAccessStoreError::Integrity)?,
-            row.selected_profile_grant_id
-                .parse::<ProfileGrantId>()
-                .map_err(|_| HumanAccessStoreError::Integrity)?,
-            row.bound_browser_session_id
-                .as_deref()
-                .map(str::parse::<BrowserSessionId>)
-                .transpose()
-                .map_err(|_| HumanAccessStoreError::Integrity)?,
-            row.invited_membership_id
-                .as_deref()
-                .map(str::parse::<MembershipId>)
-                .transpose()
-                .map_err(|_| HumanAccessStoreError::Integrity)?,
-            match row.remembered {
-                0 => false,
-                1 => true,
-                _ => return Err(HumanAccessStoreError::Integrity),
-            },
-        )
-        .map_err(|_| HumanAccessStoreError::Integrity)?,
+        selection,
+        match row.remembered {
+            0 => false,
+            1 => true,
+            _ => return Err(HumanAccessStoreError::Integrity),
+        },
+        confirmation,
         AuthCallbackPath::parse(row.callback_path).map_err(|_| HumanAccessStoreError::Integrity)?,
         AuthReturnTarget::from_storage(&row.return_target)
             .ok_or(HumanAccessStoreError::Integrity)?,
@@ -1796,10 +2344,48 @@ fn persist_ceremony_transition(
     let changed = transaction.execute(
         r#"
         UPDATE auth_ceremonies
-        SET state = ?1, failure = ?2, claimed_at = ?3, terminal_at = ?4
-        WHERE operation_id = ?5 AND state = ?6
+        SET workspace_id = ?1, selected_profile_grant_id = ?2,
+            bound_browser_session_id = ?3, invited_membership_id = ?4,
+            confirmed_auth_subject_id = ?5, authentication_method = ?6,
+            authentication_verified_at = ?7, confirmed_auth_epoch = ?8,
+            confirmed_authorization_epoch = ?9, state = ?10, failure = ?11,
+            claimed_at = ?12, terminal_at = ?13
+        WHERE operation_id = ?14 AND state = ?15
         "#,
         params![
+            ceremony
+                .selection()
+                .map(|selection| selection.workspace_id().to_string()),
+            ceremony
+                .selection()
+                .map(|selection| selection.selected_profile_grant_id().to_string()),
+            ceremony
+                .selection()
+                .and_then(AuthCeremonySelection::bound_browser_session_id)
+                .map(|id| id.to_string()),
+            ceremony
+                .selection()
+                .and_then(AuthCeremonySelection::invited_membership_id)
+                .map(|id| id.to_string()),
+            ceremony
+                .confirmation()
+                .map(|confirmation| confirmation.subject_id().to_string()),
+            ceremony
+                .confirmation()
+                .map(|confirmation| confirmation.provenance().method().as_str()),
+            ceremony
+                .confirmation()
+                .map(|confirmation| { timestamp(confirmation.provenance().verified_at()) }),
+            ceremony
+                .confirmation()
+                .map(|confirmation| i64::try_from(confirmation.auth_epoch()))
+                .transpose()
+                .map_err(|_| HumanAccessStoreError::Integrity)?,
+            ceremony
+                .confirmation()
+                .map(|confirmation| i64::try_from(confirmation.authorization_epoch()))
+                .transpose()
+                .map_err(|_| HumanAccessStoreError::Integrity)?,
             ceremony.state().as_str(),
             ceremony.failure().map(AuthCeremonyFailure::as_str),
             ceremony.claimed_at().map(timestamp),
@@ -1961,7 +2547,8 @@ fn insert_browser_session_revocation_audit(
 fn insert_session_authentication(
     transaction: &Transaction<'_>,
     created: &CreatedBrowserSession,
-    identity: ConfirmedTrailBaseIdentity,
+    trailbase_instance_id: TrailBaseInstanceId,
+    provenance: AuthenticationProvenance,
 ) -> StoreResult<()> {
     map_insert(transaction.execute(
         r#"
@@ -1972,11 +2559,11 @@ fn insert_session_authentication(
         "#,
         params![
             created.session().id().to_string(),
-            identity.instance_id().to_string(),
-            i64::try_from(identity.provenance().activation_generation())
+            trailbase_instance_id.to_string(),
+            i64::try_from(provenance.activation_generation())
                 .map_err(|_| HumanAccessStoreError::Integrity)?,
-            identity.provenance().method().as_str(),
-            timestamp(identity.provenance().verified_at()),
+            provenance.method().as_str(),
+            timestamp(provenance.verified_at()),
         ],
     ))?;
     Ok(())
@@ -2208,6 +2795,42 @@ impl HumanAccessPort for SqliteKernel {
             .map_err(|error| access_problem(error, command.correlation_id()))
     }
 
+    fn confirm_trailbase_sign_in(
+        &self,
+        command: ConfirmTrailBaseSignInCommand,
+    ) -> ApplicationResult<AuthCeremony> {
+        let correlation_id = command.authorization().correlation_id();
+        SqliteKernel::confirm_trailbase_sign_in(self, command)
+            .map_err(|error| access_problem(error, correlation_id))
+    }
+
+    fn read_trailbase_sign_in_continuation(
+        &self,
+        query: ReadTrailBaseSignInContinuationQuery,
+    ) -> ApplicationResult<AuthSelectionProjection> {
+        let correlation_id = query.correlation_id();
+        SqliteKernel::read_trailbase_sign_in_continuation(self, query)
+            .map_err(|error| access_problem(error, correlation_id))
+    }
+
+    fn complete_trailbase_sign_in_continuation(
+        &self,
+        command: CompleteTrailBaseSignInContinuationCommand,
+    ) -> ApplicationResult<CreatedBrowserSession> {
+        let correlation_id = command.correlation_id();
+        SqliteKernel::complete_trailbase_sign_in_continuation(self, command)
+            .map_err(|error| access_problem(error, correlation_id))
+    }
+
+    fn cancel_trailbase_sign_in_continuation(
+        &self,
+        command: CancelTrailBaseSignInContinuationCommand,
+    ) -> ApplicationResult<AuthCeremony> {
+        let correlation_id = command.correlation_id();
+        SqliteKernel::cancel_trailbase_sign_in_continuation(self, command)
+            .map_err(|error| access_problem(error, correlation_id))
+    }
+
     fn preauthorize_trailbase_bootstrap(
         &self,
         command: PreauthorizeTrailBaseBootstrapCommand,
@@ -2222,15 +2845,6 @@ impl HumanAccessPort for SqliteKernel {
     ) -> ApplicationResult<AuthCeremony> {
         SqliteKernel::fail_auth_ceremony(self, command)
             .map_err(|error| access_problem(error, command.correlation_id()))
-    }
-
-    fn complete_trailbase_sign_in(
-        &self,
-        command: CompleteTrailBaseSignInCommand,
-    ) -> ApplicationResult<CreatedBrowserSession> {
-        let correlation_id = command.authorization().correlation_id();
-        SqliteKernel::complete_trailbase_sign_in(self, command)
-            .map_err(|error| access_problem(error, correlation_id))
     }
 
     fn complete_trailbase_bootstrap(
@@ -2291,12 +2905,22 @@ fn verify_bootstrap_secret(
     }
 }
 
+fn session_creation_error(code: ProblemCode) -> HumanAccessStoreError {
+    if code == ProblemCode::StorageUnavailable {
+        HumanAccessStoreError::StorageUnavailable
+    } else {
+        HumanAccessStoreError::Integrity
+    }
+}
+
 fn access_problem(
     error: HumanAccessStoreError,
     correlation_id: RequestCorrelationId,
 ) -> Box<FastiProblem> {
     let code = match error {
-        HumanAccessStoreError::Storage(_) => ProblemCode::StorageUnavailable,
+        HumanAccessStoreError::Storage(_) | HumanAccessStoreError::StorageUnavailable => {
+            ProblemCode::StorageUnavailable
+        }
         HumanAccessStoreError::Integrity
         | HumanAccessStoreError::Invariant(
             AccessInvariantError::TrailBaseInstallationBlocked
@@ -2304,6 +2928,23 @@ fn access_problem(
             | AccessInvariantError::EpochOverflow,
         ) => ProblemCode::IntegrityFailed,
         HumanAccessStoreError::CapacityExceeded => ProblemCode::CapacityExceeded,
+        HumanAccessStoreError::Unaffiliated => ProblemCode::AuthSubjectUnaffiliated,
+        HumanAccessStoreError::SelectionChanged => ProblemCode::AuthSelectionChanged,
+        HumanAccessStoreError::BindingInvalid => ProblemCode::AuthBrowserBindingInvalid,
+        HumanAccessStoreError::ProofExpired => ProblemCode::TrailBaseProofInvalid,
+        HumanAccessStoreError::TrustUnavailable => ProblemCode::TrailBaseTrustUnavailable,
+        HumanAccessStoreError::AttributableFailure(failure) => match failure {
+            AuthCeremonyFailure::VerifierLostOnRestart
+            | AuthCeremonyFailure::ExchangeOutcomeUncertain
+            | AuthCeremonyFailure::ExchangeFailed
+            | AuthCeremonyFailure::StatusRejected => ProblemCode::IdentityServiceUnavailable,
+            AuthCeremonyFailure::LogoutUncertain => ProblemCode::TrailBaseSessionCleanupFailed,
+            AuthCeremonyFailure::LocalAuthorizationDenied => ProblemCode::AuthSubjectUnaffiliated,
+            AuthCeremonyFailure::LocalPersistenceFailed => {
+                ProblemCode::AuthContinuationPersistenceFailed
+            }
+            AuthCeremonyFailure::TrustUnavailable => ProblemCode::TrailBaseTrustUnavailable,
+        },
         HumanAccessStoreError::NotFound
         | HumanAccessStoreError::Conflict
         | HumanAccessStoreError::Invariant(
@@ -2339,19 +2980,6 @@ mod tests {
             + Duration::minutes(minutes)
     }
 
-    fn ceremony_selection(purpose: AuthCeremonyPurpose) -> AuthCeremonySelection {
-        AuthCeremonySelection::try_new(
-            purpose,
-            WorkspaceId::new_v7(),
-            ProfileGrantId::new_v7(),
-            matches!(purpose, AuthCeremonyPurpose::RecentAuthentication)
-                .then(BrowserSessionId::new_v7),
-            None,
-            false,
-        )
-        .expect("ceremony selection")
-    }
-
     fn active_kernel() -> (tempfile::TempDir, SqliteKernel, TrailBaseInstallation) {
         let root = tempfile::tempdir().expect("temporary root");
         let kernel = SqliteKernel::open(root.path()).expect("kernel");
@@ -2375,7 +3003,8 @@ mod tests {
             installation.id(),
             installation.activation_generation(),
             Sha256Digest::from_bytes(&sha256_bytes(OperationId::new_v7().to_string().as_bytes())),
-            ceremony_selection(AuthCeremonyPurpose::SignIn),
+            None,
+            false,
             AuthCallbackPath::parse("/auth/trailbase/callback").expect("callback"),
             AuthReturnTarget::ApplicationHome,
             RequestCorrelationId::new_v7(),
@@ -2400,15 +3029,11 @@ mod tests {
             installation.id(),
             installation.activation_generation(),
             Sha256Digest::from_bytes(&[binding_byte; 32]),
-            AuthCeremonySelection::try_new(
-                purpose,
-                workspace_id,
-                grant_id,
-                None,
-                invitation,
-                false,
-            )
-            .expect("selected ceremony"),
+            Some(
+                AuthCeremonySelection::try_new(purpose, workspace_id, grant_id, None, invitation)
+                    .expect("selected ceremony"),
+            ),
+            false,
             AuthCallbackPath::parse("/api/access/v1/trailbase/callback").expect("callback"),
             purpose.return_target(),
             RequestCorrelationId::new_v7(),
@@ -2670,6 +3295,46 @@ mod tests {
         session
     }
 
+    fn selection_required_sign_in(
+        node: &TestNode,
+        installation: &TrailBaseInstallation,
+        subject_byte: u8,
+    ) -> (AuthCeremony, AuthSubjectId, MembershipId) {
+        let (subject_id, membership_id) = add_subject(
+            node,
+            installation,
+            node.access.workspace_id(),
+            MembershipLifecycle::Active,
+            WorkspaceRole::Member,
+            subject_byte,
+        );
+        {
+            let connection = node.kernel.inner.connection.lock().expect("connection");
+            connection
+                .execute(
+                    "INSERT INTO auth_subject_profile_grants(auth_subject_id, profile_grant_id) VALUES (?1, ?2)",
+                    params![subject_id.to_string(), node.access.grant_id().to_string()],
+                )
+                .expect("subject grant");
+        }
+        let ceremony = ceremony(installation, 1, 10);
+        claim_ceremony(&node.kernel, installation, &ceremony);
+        let authorization = PreauthorizeTrailBaseSignInCommand::new(
+            ceremony.id(),
+            confirmed_identity(installation, subject_byte),
+            RequestCorrelationId::new_v7(),
+            at(4),
+        );
+        HumanAccessPort::preauthorize_trailbase_sign_in(&node.kernel, authorization)
+            .expect("preauthorization");
+        HumanAccessPort::confirm_trailbase_sign_in(
+            &node.kernel,
+            ConfirmTrailBaseSignInCommand::new(authorization),
+        )
+        .expect("confirm after logout");
+        (ceremony, subject_id, membership_id)
+    }
+
     fn insert_pending_rows(
         kernel: &SqliteKernel,
         installation: &TrailBaseInstallation,
@@ -2677,8 +3342,6 @@ mod tests {
     ) {
         let connection = kernel.inner.connection.lock().expect("connection");
         let transaction = connection.unchecked_transaction().expect("transaction");
-        let workspace_id = WorkspaceId::new_v7().to_string();
-        let grant_id = ProfileGrantId::new_v7().to_string();
         {
             let mut statement = transaction
                 .prepare(
@@ -2691,8 +3354,8 @@ mod tests {
                         correlation_id, state, failure, created_at, expires_at,
                         claimed_at, terminal_at
                     ) VALUES (?1, 'sign_in', 'trailbase_authorization_code_pkce', ?2, ?3, ?4,
-                              ?5, ?6, NULL, NULL, 0, '/auth/trailbase/callback',
-                              'application_home', ?7, 'pending', NULL, ?8, ?9, NULL, NULL)
+                              NULL, NULL, NULL, NULL, 0, '/auth/trailbase/callback',
+                              'application_home', ?5, 'pending', NULL, ?6, ?7, NULL, NULL)
                     "#,
                 )
                 .expect("prepare insert");
@@ -2704,8 +3367,6 @@ mod tests {
                         i64::try_from(installation.activation_generation())
                             .expect("generation fits"),
                         Sha256Digest::from_bytes(&sha256_bytes(&sequence.to_be_bytes())).as_str(),
-                        workspace_id,
-                        grant_id,
                         RequestCorrelationId::new_v7().to_string(),
                         timestamp(at(1)),
                         timestamp(at(10)),
@@ -2746,14 +3407,7 @@ mod tests {
                 )
                 .expect("subject grant");
         }
-        let ceremony = selected_ceremony(
-            &installation,
-            AuthCeremonyPurpose::SignIn,
-            node.access.workspace_id(),
-            node.access.grant_id(),
-            Some(membership_id),
-            81,
-        );
+        let ceremony = ceremony(&installation, 1, 10);
         claim_ceremony(&node.kernel, &installation, &ceremony);
         let authorization = PreauthorizeTrailBaseSignInCommand::new(
             ceremony.id(),
@@ -2763,9 +3417,30 @@ mod tests {
         );
         HumanAccessPort::preauthorize_trailbase_sign_in(&node.kernel, authorization)
             .expect("preauthorization");
-        let created = HumanAccessPort::complete_trailbase_sign_in(
+        HumanAccessPort::confirm_trailbase_sign_in(
             &node.kernel,
-            CompleteTrailBaseSignInCommand::new(authorization),
+            ConfirmTrailBaseSignInCommand::new(authorization),
+        )
+        .expect("confirm after logout");
+        let projection = HumanAccessPort::read_trailbase_sign_in_continuation(
+            &node.kernel,
+            ReadTrailBaseSignInContinuationQuery::new(
+                ceremony.browser_binding_digest().clone(),
+                RequestCorrelationId::new_v7(),
+                at(5),
+            ),
+        )
+        .expect("read choices");
+        assert_eq!(projection.choices().len(), 1);
+        let created = HumanAccessPort::complete_trailbase_sign_in_continuation(
+            &node.kernel,
+            CompleteTrailBaseSignInContinuationCommand::new(
+                ceremony.browser_binding_digest().clone(),
+                0,
+                projection.candidate_revision().clone(),
+                RequestCorrelationId::new_v7(),
+                at(6),
+            ),
         )
         .expect("complete sign-in");
 
@@ -2811,6 +3486,74 @@ mod tests {
     }
 
     #[test]
+    fn invalid_in_range_choice_retains_selection_without_creating_a_session() {
+        let node = TestNode::new();
+        let installation = node
+            .kernel
+            .verify_trailbase_installation(
+                TrailBaseInstanceId::new_v7(),
+                true,
+                false,
+                RequestCorrelationId::new_v7(),
+                at(0),
+            )
+            .expect("active installation");
+        let (ceremony, _, _) = selection_required_sign_in(&node, &installation, 82);
+        let projection = HumanAccessPort::read_trailbase_sign_in_continuation(
+            &node.kernel,
+            ReadTrailBaseSignInContinuationQuery::new(
+                ceremony.browser_binding_digest().clone(),
+                RequestCorrelationId::new_v7(),
+                at(5),
+            ),
+        )
+        .expect("one sign-in choice");
+
+        let problem = match HumanAccessPort::complete_trailbase_sign_in_continuation(
+            &node.kernel,
+            CompleteTrailBaseSignInContinuationCommand::new(
+                ceremony.browser_binding_digest().clone(),
+                1,
+                projection.candidate_revision().clone(),
+                RequestCorrelationId::new_v7(),
+                at(6),
+            ),
+        ) {
+            Err(problem) => problem,
+            Ok(_) => panic!("ordinal one is invalid for one choice"),
+        };
+        assert_eq!(problem.code(), ProblemCode::ValidationFailed);
+
+        let connection = node.kernel.inner.connection.lock().expect("connection");
+        let retained: (String, i64, i64) = connection
+            .query_row(
+                r#"
+                SELECT state,
+                       (SELECT COUNT(*) FROM fasti_browser_sessions),
+                       (SELECT COUNT(*) FROM fasti_browser_session_authentication)
+                FROM auth_ceremonies WHERE operation_id = ?1
+                "#,
+                [ceremony.id().to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("retained selection state");
+        assert_eq!(retained, ("selection_required".to_owned(), 0, 0));
+        drop(connection);
+
+        HumanAccessPort::complete_trailbase_sign_in_continuation(
+            &node.kernel,
+            CompleteTrailBaseSignInContinuationCommand::new(
+                ceremony.browser_binding_digest().clone(),
+                0,
+                projection.candidate_revision().clone(),
+                RequestCorrelationId::new_v7(),
+                at(7),
+            ),
+        )
+        .expect("valid ordinal remains usable");
+    }
+
+    #[test]
     fn sign_in_audit_failure_rolls_back_invitation_session_provenance_and_ceremony() {
         let node = TestNode::new();
         let installation = node
@@ -2831,14 +3574,7 @@ mod tests {
             WorkspaceRole::Member,
             82,
         );
-        let ceremony = selected_ceremony(
-            &installation,
-            AuthCeremonyPurpose::SignIn,
-            node.access.workspace_id(),
-            node.access.grant_id(),
-            Some(membership_id),
-            82,
-        );
+        let ceremony = ceremony(&installation, 1, 10);
         claim_ceremony(&node.kernel, &installation, &ceremony);
         {
             let connection = node.kernel.inner.connection.lock().expect("connection");
@@ -2862,9 +3598,29 @@ mod tests {
         );
         HumanAccessPort::preauthorize_trailbase_sign_in(&node.kernel, authorization)
             .expect("preauthorization");
-        assert!(HumanAccessPort::complete_trailbase_sign_in(
+        HumanAccessPort::confirm_trailbase_sign_in(
             &node.kernel,
-            CompleteTrailBaseSignInCommand::new(authorization),
+            ConfirmTrailBaseSignInCommand::new(authorization),
+        )
+        .expect("confirm after logout");
+        let projection = HumanAccessPort::read_trailbase_sign_in_continuation(
+            &node.kernel,
+            ReadTrailBaseSignInContinuationQuery::new(
+                ceremony.browser_binding_digest().clone(),
+                RequestCorrelationId::new_v7(),
+                at(5),
+            ),
+        )
+        .expect("read choices");
+        assert!(HumanAccessPort::complete_trailbase_sign_in_continuation(
+            &node.kernel,
+            CompleteTrailBaseSignInContinuationCommand::new(
+                ceremony.browser_binding_digest().clone(),
+                0,
+                projection.candidate_revision().clone(),
+                RequestCorrelationId::new_v7(),
+                at(6),
+            ),
         )
         .is_err());
 
@@ -2892,7 +3648,576 @@ mod tests {
                 },
             )
             .expect("rolled-back state");
-        assert_eq!(state, ("invited".to_owned(), 0, "claimed".to_owned(), 0, 0));
+        assert_eq!(
+            state,
+            (
+                "invited".to_owned(),
+                0,
+                "selection_required".to_owned(),
+                0,
+                0
+            )
+        );
+    }
+
+    #[test]
+    fn sign_in_candidate_dependency_races_reject_the_stale_revision_without_a_session() {
+        for dependency in [
+            "auth_epoch",
+            "authorization_epoch",
+            "membership_role",
+            "grant",
+            "client",
+            "activation_generation",
+        ] {
+            let node = TestNode::new();
+            let installation = node
+                .kernel
+                .verify_trailbase_installation(
+                    TrailBaseInstanceId::new_v7(),
+                    true,
+                    false,
+                    RequestCorrelationId::new_v7(),
+                    at(0),
+                )
+                .expect("active installation");
+            let (ceremony, subject_id, membership_id) =
+                selection_required_sign_in(&node, &installation, 90);
+            let before = HumanAccessPort::read_trailbase_sign_in_continuation(
+                &node.kernel,
+                ReadTrailBaseSignInContinuationQuery::new(
+                    ceremony.browser_binding_digest().clone(),
+                    RequestCorrelationId::new_v7(),
+                    at(5),
+                ),
+            )
+            .expect("initial choices");
+            let repeated = HumanAccessPort::read_trailbase_sign_in_continuation(
+                &node.kernel,
+                ReadTrailBaseSignInContinuationQuery::new(
+                    ceremony.browser_binding_digest().clone(),
+                    RequestCorrelationId::new_v7(),
+                    at(5),
+                ),
+            )
+            .expect("repeat choices");
+            assert_eq!(before, repeated, "{dependency}");
+            if dependency == "activation_generation" {
+                node.kernel
+                    .verify_trailbase_installation(
+                        installation.id(),
+                        true,
+                        true,
+                        RequestCorrelationId::new_v7(),
+                        at(6),
+                    )
+                    .expect("advance active installation generation");
+            } else {
+                let connection = node.kernel.inner.connection.lock().expect("connection");
+                match dependency {
+                    "auth_epoch" => connection.execute(
+                        "UPDATE auth_subjects SET auth_epoch = auth_epoch + 1 WHERE auth_subject_id = ?1",
+                        [subject_id.to_string()],
+                    ),
+                    "authorization_epoch" => connection.execute(
+                        "UPDATE auth_subjects SET authorization_epoch = authorization_epoch + 1 WHERE auth_subject_id = ?1",
+                        [subject_id.to_string()],
+                    ),
+                    "membership_role" => connection.execute(
+                        "UPDATE workspace_memberships SET role = 'administrator' WHERE membership_id = ?1",
+                        [membership_id.to_string()],
+                    ),
+                    "grant" => connection.execute(
+                        "UPDATE profile_grants SET status = 'revoked' WHERE grant_id = ?1",
+                        [node.access.grant_id().to_string()],
+                    ),
+                    "client" => connection.execute(
+                        "UPDATE clients SET status = 'revoked' WHERE client_id = ?1",
+                        [node.access.client_id().to_string()],
+                    ),
+                    _ => unreachable!(),
+                }
+                .expect("mutate candidate dependency");
+            }
+            let error = HumanAccessPort::complete_trailbase_sign_in_continuation(
+                &node.kernel,
+                CompleteTrailBaseSignInContinuationCommand::new(
+                    ceremony.browser_binding_digest().clone(),
+                    0,
+                    before.candidate_revision().clone(),
+                    RequestCorrelationId::new_v7(),
+                    at(6),
+                ),
+            )
+            .err()
+            .expect("stale dependency must fail closed");
+            assert_eq!(
+                error.code(),
+                if dependency == "activation_generation" {
+                    ProblemCode::TrailBaseTrustUnavailable
+                } else {
+                    ProblemCode::AuthSelectionChanged
+                },
+                "{dependency}"
+            );
+            let connection = node.kernel.inner.connection.lock().expect("connection");
+            let state: (String, i64, i64) = connection
+                .query_row(
+                    "SELECT state, (SELECT COUNT(*) FROM fasti_browser_sessions), (SELECT COUNT(*) FROM fasti_browser_session_authentication) FROM auth_ceremonies WHERE operation_id = ?1",
+                    [ceremony.id().to_string()],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .expect("stale completion state");
+            assert_eq!(
+                state,
+                ("selection_required".to_owned(), 0, 0),
+                "{dependency}"
+            );
+        }
+    }
+
+    #[test]
+    fn concurrent_continuation_completions_issue_exactly_one_session() {
+        let node = TestNode::new();
+        let installation = node
+            .kernel
+            .verify_trailbase_installation(
+                TrailBaseInstanceId::new_v7(),
+                true,
+                false,
+                RequestCorrelationId::new_v7(),
+                at(0),
+            )
+            .expect("active installation");
+        let (ceremony, _, _) = selection_required_sign_in(&node, &installation, 93);
+        let projection = HumanAccessPort::read_trailbase_sign_in_continuation(
+            &node.kernel,
+            ReadTrailBaseSignInContinuationQuery::new(
+                ceremony.browser_binding_digest().clone(),
+                RequestCorrelationId::new_v7(),
+                at(5),
+            ),
+        )
+        .expect("sign-in choices");
+        let barrier = Arc::new(Barrier::new(3));
+        let workers = [0, 1].map(|_| {
+            let kernel = node.kernel.clone();
+            let barrier = Arc::clone(&barrier);
+            let binding = ceremony.browser_binding_digest().clone();
+            let revision = projection.candidate_revision().clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                HumanAccessPort::complete_trailbase_sign_in_continuation(
+                    &kernel,
+                    CompleteTrailBaseSignInContinuationCommand::new(
+                        binding,
+                        0,
+                        revision,
+                        RequestCorrelationId::new_v7(),
+                        at(6),
+                    ),
+                )
+            })
+        });
+        barrier.wait();
+        let results = workers.map(|worker| worker.join().expect("completion worker"));
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        assert_eq!(
+            results
+                .iter()
+                .filter(|result| {
+                    result.as_ref().is_err_and(|problem| {
+                        problem.code() == ProblemCode::AuthBrowserBindingInvalid
+                    })
+                })
+                .count(),
+            1
+        );
+
+        let connection = node.kernel.inner.connection.lock().expect("connection");
+        let state: (String, i64, i64, i64, i64) = connection
+            .query_row(
+                r#"
+                SELECT state,
+                       (SELECT COUNT(*) FROM fasti_browser_sessions),
+                       (SELECT COUNT(*) FROM fasti_browser_session_authentication),
+                       (SELECT COUNT(*) FROM access_audit_events audit
+                        WHERE audit.operation_id = ceremony.operation_id
+                          AND audit.event_kind = 'browser_session_issued'),
+                       (SELECT COUNT(*) FROM access_audit_events audit
+                        WHERE audit.operation_id = ceremony.operation_id
+                          AND audit.event_kind = 'ceremony_completed')
+                FROM auth_ceremonies ceremony
+                WHERE operation_id = ?1
+                "#,
+                [ceremony.id().to_string()],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .expect("atomic completion state");
+        assert_eq!(state, ("completed".to_owned(), 1, 1, 1, 1));
+    }
+
+    #[test]
+    fn selection_required_survives_restart_and_retains_confirmation_at_terminal_boundaries() {
+        type ConfirmationRow = (
+            String,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<i64>,
+            Option<i64>,
+        );
+        let read_row = |kernel: &SqliteKernel, operation_id: OperationId| -> ConfirmationRow {
+            let connection = kernel.inner.connection.lock().expect("connection");
+            connection
+                .query_row(
+                    r#"
+                    SELECT state, confirmed_auth_subject_id, authentication_method,
+                           authentication_verified_at, confirmed_auth_epoch,
+                           confirmed_authorization_epoch
+                    FROM auth_ceremonies WHERE operation_id = ?1
+                    "#,
+                    [operation_id.to_string()],
+                    |row| {
+                        Ok((
+                            row.get(0)?,
+                            row.get(1)?,
+                            row.get(2)?,
+                            row.get(3)?,
+                            row.get(4)?,
+                            row.get(5)?,
+                        ))
+                    },
+                )
+                .expect("ceremony row")
+        };
+
+        let node = TestNode::new();
+        let installation = node
+            .kernel
+            .verify_trailbase_installation(
+                TrailBaseInstanceId::new_v7(),
+                true,
+                false,
+                RequestCorrelationId::new_v7(),
+                at(0),
+            )
+            .expect("active installation");
+        let (expiring, _, _) = selection_required_sign_in(&node, &installation, 94);
+        let (cancelled, _, _) = selection_required_sign_in(&node, &installation, 95);
+        let expiring_projection = HumanAccessPort::read_trailbase_sign_in_continuation(
+            &node.kernel,
+            ReadTrailBaseSignInContinuationQuery::new(
+                expiring.browser_binding_digest().clone(),
+                RequestCorrelationId::new_v7(),
+                at(5),
+            ),
+        )
+        .expect("expiring projection");
+        let cancelled_projection = HumanAccessPort::read_trailbase_sign_in_continuation(
+            &node.kernel,
+            ReadTrailBaseSignInContinuationQuery::new(
+                cancelled.browser_binding_digest().clone(),
+                RequestCorrelationId::new_v7(),
+                at(5),
+            ),
+        )
+        .expect("cancel projection");
+        let expiring_before = read_row(&node.kernel, expiring.id());
+        let cancelled_before = read_row(&node.kernel, cancelled.id());
+
+        let (root, _) = node.into_stopped();
+        let reopened = SqliteKernel::open(root.path()).expect("reopen data root");
+        assert_eq!(
+            HumanAccessPort::read_trailbase_sign_in_continuation(
+                &reopened,
+                ReadTrailBaseSignInContinuationQuery::new(
+                    expiring.browser_binding_digest().clone(),
+                    RequestCorrelationId::new_v7(),
+                    at(5),
+                ),
+            )
+            .expect("restarted expiring projection"),
+            expiring_projection
+        );
+        assert_eq!(
+            HumanAccessPort::read_trailbase_sign_in_continuation(
+                &reopened,
+                ReadTrailBaseSignInContinuationQuery::new(
+                    cancelled.browser_binding_digest().clone(),
+                    RequestCorrelationId::new_v7(),
+                    at(5),
+                ),
+            )
+            .expect("restarted cancel projection"),
+            cancelled_projection
+        );
+
+        let cancelled_state = HumanAccessPort::cancel_trailbase_sign_in_continuation(
+            &reopened,
+            CancelTrailBaseSignInContinuationCommand::new(
+                cancelled.browser_binding_digest().clone(),
+                RequestCorrelationId::new_v7(),
+                at(6),
+            ),
+        )
+        .expect("cancel persisted continuation");
+        assert_eq!(cancelled_state.state(), AuthCeremonyState::Cancelled);
+        let cancelled_after = read_row(&reopened, cancelled.id());
+        assert_eq!(cancelled_after.0, "cancelled");
+        assert_eq!(
+            (
+                &cancelled_after.1,
+                &cancelled_after.2,
+                &cancelled_after.3,
+                cancelled_after.4,
+                cancelled_after.5,
+            ),
+            (
+                &cancelled_before.1,
+                &cancelled_before.2,
+                &cancelled_before.3,
+                cancelled_before.4,
+                cancelled_before.5,
+            )
+        );
+
+        assert!(HumanAccessPort::read_trailbase_sign_in_continuation(
+            &reopened,
+            ReadTrailBaseSignInContinuationQuery::new(
+                expiring.browser_binding_digest().clone(),
+                RequestCorrelationId::new_v7(),
+                at(9),
+            ),
+        )
+        .is_ok());
+        for minute in [10, 11] {
+            let error = HumanAccessPort::read_trailbase_sign_in_continuation(
+                &reopened,
+                ReadTrailBaseSignInContinuationQuery::new(
+                    expiring.browser_binding_digest().clone(),
+                    RequestCorrelationId::new_v7(),
+                    at(minute),
+                ),
+            )
+            .expect_err("expired proof");
+            assert_eq!(error.code(), ProblemCode::TrailBaseProofInvalid);
+        }
+        let expiring_after = read_row(&reopened, expiring.id());
+        assert_eq!(expiring_after.0, "expired");
+        assert_eq!(
+            (
+                &expiring_after.1,
+                &expiring_after.2,
+                &expiring_after.3,
+                expiring_after.4,
+                expiring_after.5,
+            ),
+            (
+                &expiring_before.1,
+                &expiring_before.2,
+                &expiring_before.3,
+                expiring_before.4,
+                expiring_before.5,
+            )
+        );
+
+        let connection = reopened.inner.connection.lock().expect("connection");
+        let terminal_state: (Option<String>, Option<String>, i64, i64) = connection
+            .query_row(
+                r#"
+                SELECT (SELECT terminal_at FROM auth_ceremonies WHERE operation_id = ?1),
+                       (SELECT terminal_at FROM auth_ceremonies WHERE operation_id = ?2),
+                       (SELECT COUNT(*) FROM access_audit_events WHERE operation_id = ?1 AND event_kind = 'ceremony_expired'),
+                       (SELECT COUNT(*) FROM access_audit_events WHERE operation_id = ?2 AND event_kind = 'ceremony_cancelled')
+                "#,
+                params![expiring.id().to_string(), cancelled.id().to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("terminal evidence");
+        assert_eq!(
+            terminal_state,
+            (Some(timestamp(at(10))), Some(timestamp(at(6))), 1, 1)
+        );
+    }
+
+    #[test]
+    fn attributable_post_claim_failures_remain_bound_until_dismissed() {
+        for (failure, expected) in [
+            (
+                AuthCeremonyFailure::ExchangeFailed,
+                ProblemCode::IdentityServiceUnavailable,
+            ),
+            (
+                AuthCeremonyFailure::ExchangeOutcomeUncertain,
+                ProblemCode::IdentityServiceUnavailable,
+            ),
+            (
+                AuthCeremonyFailure::StatusRejected,
+                ProblemCode::IdentityServiceUnavailable,
+            ),
+            (
+                AuthCeremonyFailure::LogoutUncertain,
+                ProblemCode::TrailBaseSessionCleanupFailed,
+            ),
+            (
+                AuthCeremonyFailure::LocalAuthorizationDenied,
+                ProblemCode::AuthSubjectUnaffiliated,
+            ),
+            (
+                AuthCeremonyFailure::LocalPersistenceFailed,
+                ProblemCode::AuthContinuationPersistenceFailed,
+            ),
+            (
+                AuthCeremonyFailure::TrustUnavailable,
+                ProblemCode::TrailBaseTrustUnavailable,
+            ),
+        ] {
+            let (_root, kernel, installation) = active_kernel();
+            let ceremony = ceremony(&installation, 1, 10);
+            claim_ceremony(&kernel, &installation, &ceremony);
+            HumanAccessPort::fail_auth_ceremony(
+                &kernel,
+                FailAuthCeremonyCommand::new(
+                    ceremony.id(),
+                    failure,
+                    RequestCorrelationId::new_v7(),
+                    at(4),
+                ),
+            )
+            .expect("persist attributable failure");
+            let error = HumanAccessPort::read_trailbase_sign_in_continuation(
+                &kernel,
+                ReadTrailBaseSignInContinuationQuery::new(
+                    ceremony.browser_binding_digest().clone(),
+                    RequestCorrelationId::new_v7(),
+                    at(5),
+                ),
+            )
+            .expect_err("terminal continuation returns governed evidence");
+            assert_eq!(error.code(), expected, "{failure:?}");
+            HumanAccessPort::cancel_trailbase_sign_in_continuation(
+                &kernel,
+                CancelTrailBaseSignInContinuationCommand::new(
+                    ceremony.browser_binding_digest().clone(),
+                    RequestCorrelationId::new_v7(),
+                    at(6),
+                ),
+            )
+            .expect("bound terminal continuation can be dismissed");
+        }
+    }
+
+    #[test]
+    fn sign_in_selection_enforces_zero_sixty_four_and_sixty_five_choice_bounds() {
+        let node = TestNode::new();
+        let installation = node
+            .kernel
+            .verify_trailbase_installation(
+                TrailBaseInstanceId::new_v7(),
+                true,
+                false,
+                RequestCorrelationId::new_v7(),
+                at(0),
+            )
+            .expect("active installation");
+        let (selected, subject_id, _) = selection_required_sign_in(&node, &installation, 91);
+        for _ in 1..AUTH_SELECTION_CHOICE_LIMIT {
+            let access = node.add_profile_with_scopes(&[]);
+            let connection = node.kernel.inner.connection.lock().expect("connection");
+            connection
+                .execute(
+                    "INSERT INTO auth_subject_profile_grants(auth_subject_id, profile_grant_id) VALUES (?1, ?2)",
+                    params![subject_id.to_string(), access.grant_id().to_string()],
+                )
+                .expect("subject grant");
+        }
+        let projection = HumanAccessPort::read_trailbase_sign_in_continuation(
+            &node.kernel,
+            ReadTrailBaseSignInContinuationQuery::new(
+                selected.browser_binding_digest().clone(),
+                RequestCorrelationId::new_v7(),
+                at(5),
+            ),
+        )
+        .expect("exactly 64 choices");
+        assert_eq!(projection.choices().len(), AUTH_SELECTION_CHOICE_LIMIT);
+        for (index, choice) in projection.choices().iter().copied().enumerate() {
+            assert_eq!(usize::from(choice.ordinal()), index);
+            assert_eq!(choice.workspace_ordinal(), 1);
+            assert_eq!(usize::from(choice.profile_ordinal()), index + 1);
+        }
+        let extra = node.add_profile_with_scopes(&[]);
+        {
+            let connection = node.kernel.inner.connection.lock().expect("connection");
+            connection
+                .execute(
+                    "INSERT INTO auth_subject_profile_grants(auth_subject_id, profile_grant_id) VALUES (?1, ?2)",
+                    params![subject_id.to_string(), extra.grant_id().to_string()],
+                )
+                .expect("sixty-fifth subject grant");
+        }
+        let capacity = HumanAccessPort::read_trailbase_sign_in_continuation(
+            &node.kernel,
+            ReadTrailBaseSignInContinuationQuery::new(
+                selected.browser_binding_digest().clone(),
+                RequestCorrelationId::new_v7(),
+                at(5),
+            ),
+        )
+        .expect_err("sixty-five choices must fail closed");
+        assert_eq!(capacity.code(), ProblemCode::CapacityExceeded);
+
+        let empty = TestNode::new();
+        let empty_installation = empty
+            .kernel
+            .verify_trailbase_installation(
+                TrailBaseInstanceId::new_v7(),
+                true,
+                false,
+                RequestCorrelationId::new_v7(),
+                at(0),
+            )
+            .expect("empty active installation");
+        let (_, _) = add_subject(
+            &empty,
+            &empty_installation,
+            empty.access.workspace_id(),
+            MembershipLifecycle::Active,
+            WorkspaceRole::Member,
+            92,
+        );
+        let empty_ceremony = ceremony(&empty_installation, 1, 10);
+        claim_ceremony(&empty.kernel, &empty_installation, &empty_ceremony);
+        let authorization = PreauthorizeTrailBaseSignInCommand::new(
+            empty_ceremony.id(),
+            confirmed_identity(&empty_installation, 92),
+            RequestCorrelationId::new_v7(),
+            at(4),
+        );
+        HumanAccessPort::confirm_trailbase_sign_in(
+            &empty.kernel,
+            ConfirmTrailBaseSignInCommand::new(authorization),
+        )
+        .expect("confirm unaffiliated identity");
+        let unaffiliated = HumanAccessPort::read_trailbase_sign_in_continuation(
+            &empty.kernel,
+            ReadTrailBaseSignInContinuationQuery::new(
+                empty_ceremony.browser_binding_digest().clone(),
+                RequestCorrelationId::new_v7(),
+                at(5),
+            ),
+        )
+        .expect_err("zero choices must not invent a selection");
+        assert_eq!(unaffiliated.code(), ProblemCode::AuthSubjectUnaffiliated);
     }
 
     #[test]
@@ -4381,7 +5706,8 @@ mod tests {
                 Sha256Digest::from_bytes(&sha256_bytes(
                     OperationId::new_v7().to_string().as_bytes(),
                 )),
-                ceremony_selection(AuthCeremonyPurpose::SignIn),
+                None,
+                false,
                 AuthCallbackPath::parse("/auth/trailbase/callback").expect("callback"),
                 AuthReturnTarget::ApplicationHome,
                 RequestCorrelationId::new_v7(),

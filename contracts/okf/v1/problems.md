@@ -8,7 +8,9 @@ status: draft
 identifiers:
   - already_initialized
   - auth_browser_binding_invalid
+  - auth_continuation_persistence_failed
   - auth_identity_conflict
+  - auth_selection_changed
   - auth_subject_unaffiliated
   - authentication_failed
   - bootstrap_closed
@@ -60,8 +62,10 @@ not claim a later-body failure path is executable.
 | Code                          | Contract meaning                                                           |
 | ----------------------------- | -------------------------------------------------------------------------- |
 | `already_initialized`         | One-time durable node initialization already completed.                    |
-| `auth_browser_binding_invalid` | The callback is not bound to one active Fasti authentication ceremony.    |
+| `auth_browser_binding_invalid` | The browser request is not bound to one active Fasti authentication ceremony. |
+| `auth_continuation_persistence_failed` | The sign-in selection was not persisted after TrailBase cleanup; no Fasti session was issued. |
 | `auth_identity_conflict`      | The proven identity conflicts with an existing Fasti identity link.        |
+| `auth_selection_changed`      | Available sign-in choices changed after the person reviewed them.          |
 | `auth_subject_unaffiliated`   | The proven subject has no active membership in the selected workspace.     |
 | `authentication_failed`       | The bearer credential is missing, malformed, or inactive.                  |
 | `bootstrap_closed`            | The enrollment proof is invalid, expired, or already consumed.             |

@@ -267,7 +267,9 @@ define_capabilities!(
         [],
         [
             AuthBrowserBindingInvalid,
+            AuthContinuationPersistenceFailed,
             AuthIdentityConflict,
+            AuthSelectionChanged,
             AuthSubjectUnaffiliated,
             CapabilityUnavailable,
             CapacityExceeded,

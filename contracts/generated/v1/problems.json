@@ -5,7 +5,7 @@
     {
       "capability_id": "access.identity.bootstrap",
       "code": "auth_browser_binding_invalid",
-      "detail": "the browser callback is not bound to one active Fasti authentication ceremony",
+      "detail": "the browser request is not bound to one active Fasti authentication ceremony",
       "next_actions": [
         {
           "id": "restart_sign_in",
@@ -311,7 +311,7 @@
     {
       "capability_id": "browser.session.create",
       "code": "auth_browser_binding_invalid",
-      "detail": "the browser callback is not bound to one active Fasti authentication ceremony",
+      "detail": "the browser request is not bound to one active Fasti authentication ceremony",
       "next_actions": [
         {
           "id": "restart_sign_in",
@@ -325,6 +325,24 @@
       "status": 401,
       "title": "Authentication browser binding invalid",
       "type": "https://fasti.scrobble.dev/v1/problems/auth-browser-binding-invalid"
+    },
+    {
+      "capability_id": "browser.session.create",
+      "code": "auth_continuation_persistence_failed",
+      "detail": "Fasti could not persist the sign-in selection after TrailBase session cleanup, so no Fasti browser session was issued",
+      "next_actions": [
+        {
+          "id": "restart_sign_in",
+          "label": "Start a new sign-in ceremony"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 503,
+      "title": "Sign-in continuation persistence failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/auth-continuation-persistence-failed"
     },
     {
       "capability_id": "browser.session.create",
@@ -343,6 +361,24 @@
       "status": 409,
       "title": "Authentication identity conflict",
       "type": "https://fasti.scrobble.dev/v1/problems/auth-identity-conflict"
+    },
+    {
+      "capability_id": "browser.session.create",
+      "code": "auth_selection_changed",
+      "detail": "the available sign-in choices changed after they were reviewed",
+      "next_actions": [
+        {
+          "id": "review_sign_in_choices",
+          "label": "Review the current sign-in choices"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 409,
+      "title": "Sign-in choices changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/auth-selection-changed"
     },
     {
       "capability_id": "browser.session.create",

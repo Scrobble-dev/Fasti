@@ -14,6 +14,7 @@ import {
   parseCreateRecordResponse,
   parseConfigureProviderCredentialRequest,
   parseConfigureMetadataProjectionRequest,
+  parseCompleteTrailBaseContinuationRequest,
   parseEnrollFirstClientRequest,
   parseEnrollFirstClientResponse,
   parseHealthResponse,
@@ -34,6 +35,7 @@ import {
   parseRefreshMetadataClaimsRequest,
   parseRefreshMetadataClaimsResponse,
   parseReadBrowserSessionResponse,
+  parseReadTrailBaseContinuationResponse,
   parseRevokeBrowserSessionsResponse,
   parseReceiptCommittedEvent,
   parseRegisterNamespaceRequest,
@@ -61,6 +63,7 @@ import {
   type CreateRecordResponse,
   type ConfigureProviderCredentialRequest,
   type ConfigureMetadataProjectionRequest,
+  type CompleteTrailBaseContinuationRequest,
   type EnrollFirstClientRequest,
   type EnrollFirstClientResponse,
   type HealthResponse,
@@ -83,6 +86,7 @@ import {
   type RefreshMetadataClaimsRequest,
   type RefreshMetadataClaimsResponse,
   type ReadBrowserSessionResponse,
+  type ReadTrailBaseContinuationResponse,
   type RevokeBrowserSessionsResponse,
   type ReceiptCommittedEnvelope,
   type RegisterNamespaceRequest,
@@ -941,6 +945,57 @@ export class FastiClient {
     });
   }
 
+  readTrailBaseContinuation(
+    options: CallOptions = {},
+  ): Promise<ReadTrailBaseContinuationResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.readTrailBaseContinuation;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      responseParser: parseReadTrailBaseContinuationResponse,
+      responseLabel: "TrailBase sign-in continuation response",
+      options,
+    });
+  }
+
+  completeTrailBaseContinuation(
+    request: CompleteTrailBaseContinuationRequest,
+    options: CallOptions = {},
+  ): Promise<void> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.completeTrailBaseContinuation;
+    const body = parseOutgoing(
+      parseCompleteTrailBaseContinuationRequest,
+      request,
+      "Complete TrailBase sign-in continuation request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "never",
+      body,
+      responseLabel: "Complete TrailBase sign-in continuation response",
+      options,
+    });
+  }
+
+  cancelTrailBaseContinuation(options: CallOptions = {}): Promise<void> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.cancelTrailBaseContinuation;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "never",
+      responseLabel: "Cancel TrailBase sign-in continuation response",
+      options,
+    });
+  }
+
   readAccessProjection(
     options: CallOptions = {},
   ): Promise<AccessProjectionResponse> {
@@ -1355,6 +1410,18 @@ export class FastiClient {
           retryPolicy.transientStatusCodes.includes(response.status) &&
           attempt < maximumAttempts
         ) {
+          if (contentTypeIs(response, "application/problem+json")) {
+            const error = await problemOrTransportError(
+              response,
+              input.problemContract,
+            );
+            if (
+              !(error instanceof FastiProblemError) ||
+              error.problem.retryability !== "retry_safe"
+            ) {
+              throw error;
+            }
+          }
           const retryAfter = retryAfterMs(response, retryPolicy.maxDelayMs);
           await response.body?.cancel();
           scope.dispose();

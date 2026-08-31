@@ -188,7 +188,7 @@ const PRODUCTION_BOOTSTRAP_OPERATIONS: [ConformanceOperation; 2] = [
 /// surface. Kept separate from `PRODUCTION_BOOTSTRAP_OPERATIONS` because that
 /// array also drives the bootstrap-only SDK slice in
 /// `render_production_bootstrap_contract`, which must not grow to include them.
-const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 33] = [
+const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 36] = [
     ConformanceOperation {
         alias: "submitObservation",
         operation_id: "submit_observation",
@@ -454,6 +454,39 @@ const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 33] = [
         retry: "never",
     },
     ConformanceOperation {
+        alias: "readTrailBaseContinuation",
+        operation_id: "read_trailbase_continuation",
+        method: "get",
+        path: "/api/access/v1/trailbase/continuation",
+        capability_id: "browser.session.create",
+        authenticated: false,
+        request: None,
+        response: Some("ReadTrailBaseContinuationResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "completeTrailBaseContinuation",
+        operation_id: "complete_trailbase_continuation",
+        method: "post",
+        path: "/api/access/v1/trailbase/continuation",
+        capability_id: "browser.session.create",
+        authenticated: false,
+        request: Some("CompleteTrailBaseContinuationRequest"),
+        response: None,
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "cancelTrailBaseContinuation",
+        operation_id: "cancel_trailbase_continuation",
+        method: "delete",
+        path: "/api/access/v1/trailbase/continuation",
+        capability_id: "browser.session.create",
+        authenticated: false,
+        request: None,
+        response: None,
+        retry: "never",
+    },
+    ConformanceOperation {
         alias: "readAccessProjection",
         operation_id: "read_access_projection",
         method: "get",
@@ -577,6 +610,46 @@ const START_TRAILBASE_SIGN_IN_PROBLEMS: [&str; 9] = [
     "unsupported_media_type",
     "validation_failed",
 ];
+const READ_TRAILBASE_CONTINUATION_PROBLEMS: [&str; 12] = [
+    "auth_browser_binding_invalid",
+    "auth_continuation_persistence_failed",
+    "auth_subject_unaffiliated",
+    "capacity_exceeded",
+    "forbidden",
+    "identity_service_unavailable",
+    "integrity_failed",
+    "storage_unavailable",
+    "trailbase_proof_invalid",
+    "trailbase_session_cleanup_failed",
+    "trailbase_trust_unavailable",
+    "validation_failed",
+];
+const COMPLETE_TRAILBASE_CONTINUATION_PROBLEMS: [&str; 16] = [
+    "auth_browser_binding_invalid",
+    "auth_continuation_persistence_failed",
+    "auth_selection_changed",
+    "auth_subject_unaffiliated",
+    "capacity_exceeded",
+    "forbidden",
+    "identity_service_unavailable",
+    "integrity_failed",
+    "malformed_json",
+    "payload_too_large",
+    "storage_unavailable",
+    "trailbase_proof_invalid",
+    "trailbase_session_cleanup_failed",
+    "trailbase_trust_unavailable",
+    "unsupported_media_type",
+    "validation_failed",
+];
+const CANCEL_TRAILBASE_CONTINUATION_PROBLEMS: [&str; 6] = [
+    "auth_browser_binding_invalid",
+    "forbidden",
+    "integrity_failed",
+    "storage_unavailable",
+    "trailbase_proof_invalid",
+    "validation_failed",
+];
 const BROWSER_SESSION_READ_PROBLEMS: [&str; 5] = [
     "browser_session_expired",
     "browser_session_revoked",
@@ -599,6 +672,9 @@ fn production_problem_codes(
 ) -> anyhow::Result<Vec<Value>> {
     let exact: Option<&[&str]> = match operation.operation_id {
         "start_trailbase_sign_in" => Some(&START_TRAILBASE_SIGN_IN_PROBLEMS),
+        "read_trailbase_continuation" => Some(&READ_TRAILBASE_CONTINUATION_PROBLEMS),
+        "complete_trailbase_continuation" => Some(&COMPLETE_TRAILBASE_CONTINUATION_PROBLEMS),
+        "cancel_trailbase_continuation" => Some(&CANCEL_TRAILBASE_CONTINUATION_PROBLEMS),
         "read_access_projection" | "read_browser_session" | "list_browser_sessions" => {
             Some(&BROWSER_SESSION_READ_PROBLEMS)
         }
@@ -769,6 +845,7 @@ fn build(workspace_root: &Path) -> anyhow::Result<Artifacts> {
         &capability_keys,
     )?;
     validate_access_contract_secrets(&production_openapi)?;
+    validate_trailbase_continuation_contract(&production_openapi)?;
     let mut conformance_openapi = serde_json::to_value(fasti_api::b1_conformance_openapi())
         .context("B1 conformance OpenAPI is not serializable")?;
     enrich_conformance_openapi(
@@ -1823,6 +1900,100 @@ fn validate_access_contract_secrets(openapi: &Value) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn validate_trailbase_continuation_contract(openapi: &Value) -> anyhow::Result<()> {
+    let schemas = object_at(openapi, "/components/schemas")?;
+    for (name, expected) in [
+        ("StartTrailBaseSignInRequest", &["remembered"][..]),
+        (
+            "StartTrailBaseSignInResponse",
+            &["authorization_url", "expires_at"][..],
+        ),
+        (
+            "TrailBaseContinuationChoiceDto",
+            &[
+                "choice_ordinal",
+                "workspace_ordinal",
+                "profile_ordinal",
+                "workspace_created_at",
+                "profile_created_at",
+                "membership_state",
+                "role",
+            ][..],
+        ),
+        (
+            "ReadTrailBaseContinuationResponse",
+            &["expires_at", "remembered", "candidate_revision", "choices"][..],
+        ),
+        (
+            "CompleteTrailBaseContinuationRequest",
+            &["choice_ordinal", "candidate_revision"][..],
+        ),
+    ] {
+        let schema = schemas
+            .get(name)
+            .with_context(|| format!("production OpenAPI omits {name}"))?;
+        ensure!(
+            schema.get("additionalProperties").and_then(Value::as_bool) == Some(false),
+            "{name} must reject unknown fields"
+        );
+        let actual: BTreeSet<_> = object_at(schema, "/properties")?
+            .keys()
+            .map(String::as_str)
+            .collect();
+        let expected: BTreeSet<_> = expected.iter().copied().collect();
+        ensure!(actual == expected, "{name} exposes unexpected properties");
+    }
+    for (pointer, minimum, maximum) in [
+        (
+            "/components/schemas/TrailBaseContinuationChoiceDto/properties/choice_ordinal",
+            0,
+            63,
+        ),
+        (
+            "/components/schemas/TrailBaseContinuationChoiceDto/properties/workspace_ordinal",
+            1,
+            64,
+        ),
+        (
+            "/components/schemas/TrailBaseContinuationChoiceDto/properties/profile_ordinal",
+            1,
+            64,
+        ),
+        (
+            "/components/schemas/CompleteTrailBaseContinuationRequest/properties/choice_ordinal",
+            0,
+            63,
+        ),
+    ] {
+        let schema = value_at(openapi, pointer)?;
+        ensure!(
+            u64_at(schema, "/minimum")? == minimum && u64_at(schema, "/maximum")? == maximum,
+            "{pointer} has the wrong numeric bounds"
+        );
+    }
+    let choices = value_at(
+        openapi,
+        "/components/schemas/ReadTrailBaseContinuationResponse/properties/choices",
+    )?;
+    ensure!(
+        u64_at(choices, "/minItems")? == 1 && u64_at(choices, "/maxItems")? == 64,
+        "TrailBase continuation choices must contain 1 to 64 entries"
+    );
+    for pointer in [
+        "/components/schemas/ReadTrailBaseContinuationResponse/properties/candidate_revision",
+        "/components/schemas/CompleteTrailBaseContinuationRequest/properties/candidate_revision",
+    ] {
+        let revision = value_at(openapi, pointer)?;
+        ensure!(
+            u64_at(revision, "/minLength")? == 71
+                && u64_at(revision, "/maxLength")? == 71
+                && string_at(revision, "/pattern")? == r"^sha256:[0-9a-f]{64}$",
+            "{pointer} must use the canonical SHA-256 revision"
+        );
+    }
+    Ok(())
+}
+
 fn validate_access_schema_node(
     openapi: &Value,
     node: &Value,
@@ -1886,6 +2057,11 @@ fn validate_production_security_schemes(openapi: &Value) -> anyhow::Result<()> {
             "cookie",
             "__Secure-fasti_auth_binding",
         ),
+        (
+            "auth_continuation_cookie",
+            "cookie",
+            "__Secure-fasti_auth_continuation",
+        ),
     ] {
         let pointer = format!("/components/securitySchemes/{name}");
         let scheme = value_at(openapi, &pointer)?;
@@ -1907,6 +2083,11 @@ fn validate_production_operation_security(
 ) -> anyhow::Result<()> {
     let access_security = match operation_id {
         "start_trailbase_sign_in" => Some(serde_json::json!(null)),
+        "read_trailbase_continuation"
+        | "complete_trailbase_continuation"
+        | "cancel_trailbase_continuation" => {
+            Some(serde_json::json!([{"auth_continuation_cookie": []}]))
+        }
         "read_access_projection" | "read_browser_session" | "list_browser_sessions" => {
             Some(serde_json::json!([{"browser_session_cookie": []}]))
         }
@@ -3094,6 +3275,9 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         "MetadataProjectionConfigurationResponse",
         "StartTrailBaseSignInRequest",
         "StartTrailBaseSignInResponse",
+        "TrailBaseContinuationChoiceDto",
+        "ReadTrailBaseContinuationResponse",
+        "CompleteTrailBaseContinuationRequest",
         "SelectBrowserSessionProfileRequest",
         "BrowserSessionDto",
         "ReadBrowserSessionResponse",
@@ -3295,6 +3479,14 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         (
             "parseStartTrailBaseSignInResponse",
             "StartTrailBaseSignInResponse",
+        ),
+        (
+            "parseReadTrailBaseContinuationResponse",
+            "ReadTrailBaseContinuationResponse",
+        ),
+        (
+            "parseCompleteTrailBaseContinuationRequest",
+            "CompleteTrailBaseContinuationRequest",
         ),
         (
             "parseSelectBrowserSessionProfileRequest",
@@ -4767,6 +4959,30 @@ mod tests {
     }
 
     #[test]
+    fn trailbase_continuation_contract_rejects_internal_identifiers() {
+        let artifacts = build(workspace_root()).expect("contract generation succeeds");
+        let mut openapi: Value = serde_json::from_slice(
+            artifacts
+                .get(Path::new(OPENAPI_PATH))
+                .expect("production OpenAPI generated"),
+        )
+        .expect("production OpenAPI JSON");
+        validate_trailbase_continuation_contract(&openapi)
+            .expect("current continuation contract is identifier-free");
+        openapi
+            .pointer_mut("/components/schemas/TrailBaseContinuationChoiceDto/properties")
+            .and_then(Value::as_object_mut)
+            .expect("continuation choice properties")
+            .insert(
+                "workspace_id".to_owned(),
+                serde_json::json!({"type": "string"}),
+            );
+        let error = validate_trailbase_continuation_contract(&openapi)
+            .expect_err("internal identifier must fail the continuation contract gate");
+        assert!(error.to_string().contains("unexpected properties"));
+    }
+
+    #[test]
     fn access_callback_is_documented_but_excluded_from_the_sdk() {
         let artifacts = build(workspace_root()).expect("contract generation succeeds");
         let sdk = std::str::from_utf8(
@@ -4776,6 +4992,9 @@ mod tests {
         )
         .expect("SDK is UTF-8");
         assert!(sdk.contains("startTrailBaseSignIn"));
+        assert!(sdk.contains("readTrailBaseContinuation"));
+        assert!(sdk.contains("completeTrailBaseContinuation"));
+        assert!(sdk.contains("cancelTrailBaseContinuation"));
         assert!(!sdk.contains("complete_trailbase_authentication"));
         assert!(!sdk.contains("completeTrailBaseAuthentication"));
     }

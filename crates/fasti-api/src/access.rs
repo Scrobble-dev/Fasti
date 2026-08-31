@@ -3,8 +3,13 @@ use crate::local::{
     SESSION_COOKIE,
 };
 use crate::problem::{application_problem, json_rejection, HttpProblem};
-use crate::trailbase::{TrailBaseOrchestrationError, TrailBaseOrchestrator};
-use crate::{FASTI_ACCESS_BINDING_COOKIE, FASTI_ACCESS_CALLBACK_PATH, FASTI_ACCESS_HOST};
+use crate::trailbase::{
+    sha256_digest, TrailBaseCallbackOutcome, TrailBaseOrchestrationError, TrailBaseOrchestrator,
+};
+use crate::{
+    FASTI_ACCESS_BINDING_COOKIE, FASTI_ACCESS_CALLBACK_PATH, FASTI_ACCESS_CONTINUATION_COOKIE,
+    FASTI_ACCESS_CONTINUATION_PATH, FASTI_ACCESS_HOST,
+};
 use axum::{
     extract::{rejection::JsonRejection, DefaultBodyLimit, Path, RawQuery, State},
     http::{header, HeaderMap, HeaderValue, Method, StatusCode},
@@ -16,8 +21,10 @@ use fasti_application::{
     AccessBrowserSessionSummary, AccessCeremonyEvidence, AccessEvidenceKind, AccessEvidenceState,
     AccessFirstRunStep, AccessFirstRunStepKey, AccessMembershipSummary, AccessProfileGrantSummary,
     AccessProjection, AccessSessionAuthenticationSummary, AccessSubjectSummary,
-    AccessTrailBaseActivationSummary, BrowserSessionSummary, CapabilityKey, CreatedBrowserSession,
-    FastiProblem, LocalKernel, ProblemCode, SelectBrowserSessionProfileCommand,
+    AccessTrailBaseActivationSummary, AuthSelectionChoice, BrowserSessionSummary,
+    CancelTrailBaseSignInContinuationCommand, CapabilityKey,
+    CompleteTrailBaseSignInContinuationCommand, CreatedBrowserSession, FastiProblem, LocalKernel,
+    ProblemCode, ReadTrailBaseSignInContinuationQuery, SelectBrowserSessionProfileCommand,
     TargetBrowserSessionCommand, Violation, C1_AUTH_CEREMONY_LIFETIME,
 };
 use fasti_contracts::{
@@ -26,18 +33,19 @@ use fasti_contracts::{
     AccessFirstRunStepKeyDto, AccessMembershipDto, AccessMembershipLifecycleDto,
     AccessProfileGrantDto, AccessProjectionResponse, AccessSessionAuthenticationDto,
     AccessSubjectDto, AccessSubjectLifecycleDto, AccessWorkspaceRoleDto, BrowserSessionDto,
-    BrowserSessionPolicyDto, CompleteTrailBaseAuthenticationQuery, ListBrowserSessionsResponse,
-    ProblemDetails, ReadBrowserSessionResponse, RecentAuthenticationDto,
+    BrowserSessionPolicyDto, CompleteTrailBaseAuthenticationQuery,
+    CompleteTrailBaseContinuationRequest, ListBrowserSessionsResponse, ProblemDetails,
+    ReadBrowserSessionResponse, ReadTrailBaseContinuationResponse, RecentAuthenticationDto,
     RevokeBrowserSessionsResponse, RotateBrowserSessionResponse,
     SelectBrowserSessionProfileRequest, SelectBrowserSessionProfileResponse,
     StartTrailBaseSignInRequest, StartTrailBaseSignInResponse, TrailBaseActivationBlockerDto,
-    TrailBaseActivationDto, TrailBaseActivationStateDto,
+    TrailBaseActivationDto, TrailBaseActivationStateDto, TrailBaseContinuationChoiceDto,
 };
 use fasti_domain::{
-    AuthCeremonyFailure, AuthCeremonyPurpose, AuthCeremonySelection, AuthCeremonyState,
-    AuthReturnTarget, AuthSubjectLifecycle, AuthenticationMethod, BrowserSessionId,
-    FastiBrowserSession, MembershipId, MembershipLifecycle, ProfileGrantId, RequestCorrelationId,
-    TrailBaseActivationBlocker, TrailBaseActivationState, WorkspaceId, WorkspaceRole,
+    AuthCeremonyFailure, AuthCeremonyState, AuthReturnTarget, AuthSubjectLifecycle,
+    AuthenticationMethod, BrowserSessionId, FastiBrowserSession, MembershipLifecycle,
+    ProfileGrantId, RequestCorrelationId, Sha256Digest, TrailBaseActivationBlocker,
+    TrailBaseActivationState, WorkspaceRole,
 };
 use std::{str::FromStr, sync::Arc};
 
@@ -149,23 +157,43 @@ fn subject_dto(subject: AccessSubjectSummary) -> AccessSubjectDto {
     }
 }
 
+fn membership_lifecycle_dto(value: MembershipLifecycle) -> AccessMembershipLifecycleDto {
+    match value {
+        MembershipLifecycle::Invited => AccessMembershipLifecycleDto::Invited,
+        MembershipLifecycle::PendingApproval => AccessMembershipLifecycleDto::PendingApproval,
+        MembershipLifecycle::Active => AccessMembershipLifecycleDto::Active,
+        MembershipLifecycle::Suspended => AccessMembershipLifecycleDto::Suspended,
+        MembershipLifecycle::Removed => AccessMembershipLifecycleDto::Removed,
+    }
+}
+
+fn workspace_role_dto(value: WorkspaceRole) -> AccessWorkspaceRoleDto {
+    match value {
+        WorkspaceRole::Member => AccessWorkspaceRoleDto::Member,
+        WorkspaceRole::Administrator => AccessWorkspaceRoleDto::Administrator,
+    }
+}
+
 fn membership_dto(membership: AccessMembershipSummary) -> AccessMembershipDto {
     AccessMembershipDto {
         membership_id: membership.id().to_string(),
         workspace_id: membership.workspace_id().to_string(),
-        lifecycle: match membership.lifecycle() {
-            MembershipLifecycle::Invited => AccessMembershipLifecycleDto::Invited,
-            MembershipLifecycle::PendingApproval => AccessMembershipLifecycleDto::PendingApproval,
-            MembershipLifecycle::Active => AccessMembershipLifecycleDto::Active,
-            MembershipLifecycle::Suspended => AccessMembershipLifecycleDto::Suspended,
-            MembershipLifecycle::Removed => AccessMembershipLifecycleDto::Removed,
-        },
-        role: match membership.role() {
-            WorkspaceRole::Member => AccessWorkspaceRoleDto::Member,
-            WorkspaceRole::Administrator => AccessWorkspaceRoleDto::Administrator,
-        },
+        lifecycle: membership_lifecycle_dto(membership.lifecycle()),
+        role: workspace_role_dto(membership.role()),
         created_at: membership.created_at().to_rfc3339(),
         updated_at: membership.updated_at().to_rfc3339(),
+    }
+}
+
+fn continuation_choice_dto(choice: AuthSelectionChoice) -> TrailBaseContinuationChoiceDto {
+    TrailBaseContinuationChoiceDto {
+        choice_ordinal: choice.ordinal(),
+        workspace_ordinal: choice.workspace_ordinal(),
+        profile_ordinal: choice.profile_ordinal(),
+        workspace_created_at: choice.workspace_created_at().to_rfc3339(),
+        profile_created_at: choice.profile_created_at().to_rfc3339(),
+        membership_state: membership_lifecycle_dto(choice.membership_state()),
+        role: workspace_role_dto(choice.role()),
     }
 }
 
@@ -254,6 +282,7 @@ fn evidence_dto(evidence: AccessCeremonyEvidence) -> AccessEvidenceDto {
         ceremony_state: evidence.ceremony_state().map(|state| match state {
             AuthCeremonyState::Pending => AccessCeremonyStateDto::Pending,
             AuthCeremonyState::Claimed => AccessCeremonyStateDto::Claimed,
+            AuthCeremonyState::SelectionRequired => AccessCeremonyStateDto::SelectionRequired,
             AuthCeremonyState::Completed => AccessCeremonyStateDto::Completed,
             AuthCeremonyState::Cancelled => AccessCeremonyStateDto::Cancelled,
             AuthCeremonyState::Failed => AccessCeremonyStateDto::Failed,
@@ -273,6 +302,10 @@ fn evidence_dto(evidence: AccessCeremonyEvidence) -> AccessEvidenceDto {
             AuthCeremonyFailure::LocalAuthorizationDenied => {
                 AccessCeremonyFailureDto::LocalAuthorizationDenied
             }
+            AuthCeremonyFailure::LocalPersistenceFailed => {
+                AccessCeremonyFailureDto::LocalPersistenceFailed
+            }
+            AuthCeremonyFailure::TrustUnavailable => AccessCeremonyFailureDto::TrustUnavailable,
         }),
         occurred_at: evidence.occurred_at().to_rfc3339(),
     }
@@ -373,6 +406,15 @@ fn clear_binding_cookie(response: &mut Response) {
     );
 }
 
+fn clear_continuation_cookie(response: &mut Response) {
+    append_cookie(
+        response,
+        format!(
+            "{FASTI_ACCESS_CONTINUATION_COOKIE}=; Domain=127.0.0.1; Path={FASTI_ACCESS_CONTINUATION_PATH}; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=Strict"
+        ),
+    );
+}
+
 fn exact_callback_code(raw_query: Option<&str>) -> Option<String> {
     let code = raw_query?.strip_prefix("code=")?;
     if code.len() == 48 && code.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
@@ -383,12 +425,19 @@ fn exact_callback_code(raw_query: Option<&str>) -> Option<String> {
 }
 
 fn exact_host(headers: &HeaderMap) -> bool {
-    let mut values = headers.get_all(header::HOST).iter();
-    matches!(values.next(), Some(value) if value.as_bytes() == FASTI_ACCESS_HOST.as_bytes())
-        && values.next().is_none()
+    exact_header(headers, header::HOST) == Some(FASTI_ACCESS_HOST)
 }
 
-fn callback_binding(headers: &HeaderMap) -> Option<fasti_application::SecretMaterial> {
+fn exact_header(headers: &HeaderMap, name: header::HeaderName) -> Option<&str> {
+    let mut values = headers.get_all(name).iter();
+    let value = values.next()?.to_str().ok()?;
+    values.next().is_none().then_some(value)
+}
+
+fn secret_cookie(
+    headers: &HeaderMap,
+    expected_name: &str,
+) -> Option<fasti_application::SecretMaterial> {
     let mut binding = None;
     for header_value in headers.get_all(header::COOKIE) {
         let value = header_value.to_str().ok()?;
@@ -396,12 +445,16 @@ fn callback_binding(headers: &HeaderMap) -> Option<fasti_application::SecretMate
             let Some((name, value)) = pair.trim().split_once('=') else {
                 continue;
             };
-            if name == FASTI_ACCESS_BINDING_COOKIE && binding.replace(value).is_some() {
+            if name == expected_name && binding.replace(value).is_some() {
                 return None;
             }
         }
     }
     fasti_application::SecretMaterial::try_from_hex(binding?).ok()
+}
+
+fn callback_binding(headers: &HeaderMap) -> Option<fasti_application::SecretMaterial> {
+    secret_cookie(headers, FASTI_ACCESS_BINDING_COOKIE)
 }
 
 fn return_path(target: AuthReturnTarget) -> &'static str {
@@ -442,6 +495,45 @@ fn callback_redirect(
     no_store(response)
 }
 
+fn callback_selection_redirect(
+    target: AuthReturnTarget,
+    binding: &fasti_application::SecretMaterial,
+    expires_at: chrono::DateTime<chrono::Utc>,
+    correlation_id: RequestCorrelationId,
+    failed: bool,
+) -> Response {
+    let max_age = (expires_at - chrono::Utc::now()).num_seconds();
+    if max_age <= 0 {
+        return callback_redirect(target, correlation_id, None);
+    }
+    let mut response = StatusCode::SEE_OTHER.into_response();
+    let location = if failed {
+        format!(
+            "{}?auth=failed&correlation_id={correlation_id}",
+            return_path(target)
+        )
+    } else {
+        format!("{}?auth=continue", return_path(target))
+    };
+    response.headers_mut().insert(
+        header::LOCATION,
+        HeaderValue::from_str(&location).expect("fixed return path is valid"),
+    );
+    response.headers_mut().insert(
+        header::REFERRER_POLICY,
+        HeaderValue::from_static("no-referrer"),
+    );
+    clear_binding_cookie(&mut response);
+    append_cookie(
+        &mut response,
+        format!(
+            "{FASTI_ACCESS_CONTINUATION_COOKIE}={}; Domain=127.0.0.1; Path={FASTI_ACCESS_CONTINUATION_PATH}; Max-Age={max_age}; Secure; HttpOnly; SameSite=Strict",
+            binding.expose_hex()
+        ),
+    );
+    no_store(response)
+}
+
 #[utoipa::path(
     post,
     path = "/api/access/v1/trailbase/sign-in",
@@ -478,12 +570,8 @@ pub(crate) async fn start_trailbase_sign_in(
     state
         .boundary
         .validate(
-            headers
-                .get(header::ORIGIN)
-                .and_then(|value| value.to_str().ok()),
-            headers
-                .get(header::HOST)
-                .and_then(|value| value.to_str().ok()),
+            exact_header(&headers, header::ORIGIN),
+            exact_header(&headers, header::HOST),
         )
         .map_err(|_| {
             application_problem(Box::new(FastiProblem::forbidden(
@@ -491,51 +579,6 @@ pub(crate) async fn start_trailbase_sign_in(
                 correlation_id,
             )))
         })?;
-    let workspace_id = WorkspaceId::from_str(&request.workspace_id).map_err(|_| {
-        invalid_request(
-            capability,
-            correlation_id,
-            "/workspace_id",
-            "a canonical Fasti workspace identifier",
-        )
-    })?;
-    let profile_grant_id = ProfileGrantId::from_str(&request.profile_grant_id).map_err(|_| {
-        invalid_request(
-            capability,
-            correlation_id,
-            "/profile_grant_id",
-            "a canonical Fasti profile-grant identifier",
-        )
-    })?;
-    let invited_membership_id = request
-        .invited_membership_id
-        .as_deref()
-        .map(MembershipId::from_str)
-        .transpose()
-        .map_err(|_| {
-            invalid_request(
-                capability,
-                correlation_id,
-                "/invited_membership_id",
-                "a canonical Fasti membership identifier",
-            )
-        })?;
-    let selection = AuthCeremonySelection::try_new(
-        AuthCeremonyPurpose::SignIn,
-        workspace_id,
-        profile_grant_id,
-        None,
-        invited_membership_id,
-        request.remembered,
-    )
-    .map_err(|_| {
-        invalid_request(
-            capability,
-            correlation_id,
-            "/",
-            "a valid TrailBase sign-in selection",
-        )
-    })?;
     let orchestrator = state.trailbase.ok_or_else(|| {
         application_problem(Box::new(FastiProblem::from_code(
             ProblemCode::TrailBaseTrustUnavailable,
@@ -548,7 +591,7 @@ pub(crate) async fn start_trailbase_sign_in(
         + chrono::Duration::from_std(C1_AUTH_CEREMONY_LIFETIME)
             .expect("C1 ceremony lifetime fits chrono");
     let started = tokio::task::spawn_blocking(move || {
-        orchestrator.start_sign_in(selection, correlation_id, created_at, expires_at)
+        orchestrator.start_sign_in(request.remembered, correlation_id, created_at, expires_at)
     })
     .await
     .map_err(|_| {
@@ -563,7 +606,6 @@ pub(crate) async fn start_trailbase_sign_in(
         .max(0);
     let mut response = Json(StartTrailBaseSignInResponse {
         authorization_url: started.authorization_url,
-        ceremony_id: started.operation_id.to_string(),
         expires_at: started.expires_at.to_rfc3339(),
     })
     .into_response();
@@ -611,20 +653,255 @@ pub(crate) async fn complete_trailbase_authentication(
     };
     let at = chrono::Utc::now();
     match orchestrator
-        .callback_for_browser(code, binding, correlation_id, at)
+        .callback_for_browser(code, &binding, correlation_id, at)
         .await
     {
-        Ok(outcome) => callback_redirect(
-            outcome.return_target,
-            correlation_id,
-            Some(&outcome.created),
-        ),
-        Err(failure) => callback_redirect(
-            failure.return_target.unwrap_or(fallback_target),
-            correlation_id,
-            None,
-        ),
+        Ok(TrailBaseCallbackOutcome::SessionCreated {
+            created,
+            return_target,
+        }) => callback_redirect(return_target, correlation_id, Some(created.as_ref())),
+        Ok(TrailBaseCallbackOutcome::SelectionRequired {
+            expires_at,
+            return_target,
+        }) => {
+            callback_selection_redirect(return_target, &binding, expires_at, correlation_id, false)
+        }
+        Err(failure) => match (failure.return_target, failure.continuation_expires_at) {
+            (Some(return_target), Some(expires_at)) => callback_selection_redirect(
+                return_target,
+                &binding,
+                expires_at,
+                correlation_id,
+                true,
+            ),
+            (return_target, _) => callback_redirect(
+                return_target.unwrap_or(fallback_target),
+                correlation_id,
+                None,
+            ),
+        },
     }
+}
+
+fn continuation_binding_digest(
+    headers: &HeaderMap,
+    boundary: &fasti_application::BrowserRequestBoundaryPolicy,
+    require_origin: bool,
+    correlation_id: RequestCorrelationId,
+) -> Result<Sha256Digest, HttpProblem> {
+    let capability = CapabilityKey::CreateBrowserSession;
+    if headers.contains_key(header::AUTHORIZATION) || !exact_host(headers) {
+        return Err(application_problem(Box::new(FastiProblem::forbidden(
+            capability,
+            correlation_id,
+        ))));
+    }
+    let boundary_result = if require_origin {
+        boundary
+            .validate(
+                exact_header(headers, header::ORIGIN),
+                exact_header(headers, header::HOST),
+            )
+            .map(|_| ())
+    } else {
+        boundary
+            .validate_read(exact_header(headers, header::HOST))
+            .map(|_| ())
+    };
+    boundary_result.map_err(|_| {
+        application_problem(Box::new(FastiProblem::forbidden(
+            capability,
+            correlation_id,
+        )))
+    })?;
+    let binding = secret_cookie(headers, FASTI_ACCESS_CONTINUATION_COOKIE).ok_or_else(|| {
+        application_problem(Box::new(FastiProblem::from_code(
+            ProblemCode::AuthBrowserBindingInvalid,
+            capability,
+            correlation_id,
+        )))
+    })?;
+    Ok(sha256_digest(binding.expose_bytes()))
+}
+
+fn continuation_problem(problem: HttpProblem) -> HttpResponse {
+    if matches!(
+        problem.code(),
+        "auth_browser_binding_invalid" | "trailbase_proof_invalid"
+    ) {
+        let mut response = problem.into_response();
+        clear_continuation_cookie(&mut response);
+        Ok(no_store(response))
+    } else {
+        Err(problem)
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/access/v1/trailbase/continuation",
+    operation_id = "read_trailbase_continuation",
+    tag = "access",
+    security(("auth_continuation_cookie" = [])),
+    responses(
+        (status = 200, description = "Bounded identifier-free sign-in choices", body = ReadTrailBaseContinuationResponse),
+        (status = 401, description = "Continuation binding or proof is invalid", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "No selectable Fasti affiliation", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "Continuation input is invalid", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 502, description = "TrailBase session cleanup was not confirmed", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 500, description = "Stored continuation state failed integrity checks", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 503, description = "TrailBase identity, trust, or local storage is unavailable", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 507, description = "The bounded selection capacity was exceeded", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub(crate) async fn read_trailbase_continuation(
+    State(state): State<AccessApiState>,
+    headers: HeaderMap,
+) -> HttpResponse {
+    let capability = CapabilityKey::CreateBrowserSession;
+    let correlation_id = RequestCorrelationId::new_v7();
+    let digest = match continuation_binding_digest(&headers, &state.boundary, false, correlation_id)
+    {
+        Ok(digest) => digest,
+        Err(problem) => return continuation_problem(problem),
+    };
+    let kernel = state.kernel;
+    let result = run_kernel(capability, correlation_id, move || {
+        kernel.read_trailbase_sign_in_continuation(ReadTrailBaseSignInContinuationQuery::new(
+            digest,
+            correlation_id,
+            chrono::Utc::now(),
+        ))
+    })
+    .await;
+    match result {
+        Ok(projection) => Ok(no_store(
+            Json(ReadTrailBaseContinuationResponse {
+                expires_at: projection.expires_at().to_rfc3339(),
+                remembered: projection.remembered(),
+                candidate_revision: projection.candidate_revision().to_string(),
+                choices: projection
+                    .choices()
+                    .iter()
+                    .copied()
+                    .map(continuation_choice_dto)
+                    .collect(),
+            })
+            .into_response(),
+        )),
+        Err(problem) => continuation_problem(problem),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/access/v1/trailbase/continuation",
+    operation_id = "complete_trailbase_continuation",
+    tag = "access",
+    security(("auth_continuation_cookie" = [])),
+    request_body = CompleteTrailBaseContinuationRequest,
+    responses(
+        (status = 204, description = "Opaque Fasti browser session issued"),
+        (status = 400, description = "Malformed request body", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 401, description = "Continuation binding or proof is invalid", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "Continuation request is not authorized", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "Sign-in choices changed", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 413, description = "Request body is too large", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 415, description = "Request media type is unsupported", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "Choice or revision is invalid", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 502, description = "TrailBase session cleanup was not confirmed", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 500, description = "Stored continuation state failed integrity checks", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 503, description = "TrailBase identity, trust, or local storage is unavailable", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 507, description = "The bounded selection capacity was exceeded", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub(crate) async fn complete_trailbase_continuation(
+    State(state): State<AccessApiState>,
+    headers: HeaderMap,
+    payload: Result<Json<CompleteTrailBaseContinuationRequest>, JsonRejection>,
+) -> HttpResponse {
+    let capability = CapabilityKey::CreateBrowserSession;
+    let correlation_id = RequestCorrelationId::new_v7();
+    let digest = match continuation_binding_digest(&headers, &state.boundary, true, correlation_id)
+    {
+        Ok(digest) => digest,
+        Err(problem) => return continuation_problem(problem),
+    };
+    let request = payload
+        .map_err(|error| json_rejection(capability, correlation_id, error))?
+        .0;
+    let candidate_revision = Sha256Digest::parse(&request.candidate_revision).map_err(|_| {
+        invalid_request(
+            capability,
+            correlation_id,
+            "/candidate_revision",
+            "a canonical SHA-256 candidate revision",
+        )
+    })?;
+    let kernel = state.kernel;
+    let created = match run_kernel(capability, correlation_id, move || {
+        kernel.complete_trailbase_sign_in_continuation(
+            CompleteTrailBaseSignInContinuationCommand::new(
+                digest,
+                request.choice_ordinal,
+                candidate_revision,
+                correlation_id,
+                chrono::Utc::now(),
+            ),
+        )
+    })
+    .await
+    {
+        Ok(created) => created,
+        Err(problem) => return continuation_problem(problem),
+    };
+    let mut response = StatusCode::NO_CONTENT.into_response();
+    clear_continuation_cookie(&mut response);
+    set_session_cookies(&mut response, &created);
+    Ok(no_store(response))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/access/v1/trailbase/continuation",
+    operation_id = "cancel_trailbase_continuation",
+    tag = "access",
+    security(("auth_continuation_cookie" = [])),
+    responses(
+        (status = 204, description = "Sign-in continuation cancelled"),
+        (status = 401, description = "Continuation binding or proof is invalid", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "Continuation request is not authorized", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "Continuation input is invalid", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 500, description = "Stored continuation state failed integrity checks", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 503, description = "Local storage is unavailable", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub(crate) async fn cancel_trailbase_continuation(
+    State(state): State<AccessApiState>,
+    headers: HeaderMap,
+) -> HttpResponse {
+    let capability = CapabilityKey::CreateBrowserSession;
+    let correlation_id = RequestCorrelationId::new_v7();
+    let digest = match continuation_binding_digest(&headers, &state.boundary, true, correlation_id)
+    {
+        Ok(digest) => digest,
+        Err(problem) => return continuation_problem(problem),
+    };
+    let kernel = state.kernel;
+    if let Err(problem) = run_kernel(capability, correlation_id, move || {
+        kernel.cancel_trailbase_sign_in_continuation(CancelTrailBaseSignInContinuationCommand::new(
+            digest,
+            correlation_id,
+            chrono::Utc::now(),
+        ))
+    })
+    .await
+    {
+        return continuation_problem(problem);
+    }
+    let mut response = StatusCode::NO_CONTENT.into_response();
+    clear_continuation_cookie(&mut response);
+    Ok(no_store(response))
 }
 
 #[utoipa::path(
@@ -987,6 +1264,12 @@ pub(crate) fn router(
             FASTI_ACCESS_CALLBACK_PATH,
             any(complete_trailbase_authentication),
         )
+        .route(
+            FASTI_ACCESS_CONTINUATION_PATH,
+            get(read_trailbase_continuation)
+                .post(complete_trailbase_continuation)
+                .delete(cancel_trailbase_continuation),
+        )
         .route("/api/access/v1/projection", get(read_access_projection))
         .route(
             "/api/access/v1/browser-session",
@@ -1082,6 +1365,205 @@ mod tests {
             .to_str()
             .expect("cookie")
             .starts_with("__Secure-fasti_auth_binding=;"));
+    }
+
+    #[test]
+    fn continuation_binding_rejects_ambiguous_or_missing_browser_authority() {
+        let boundary = fasti_application::BrowserRequestBoundaryPolicy::try_new(
+            crate::FASTI_ACCESS_ORIGIN,
+            FASTI_ACCESS_HOST,
+        )
+        .expect("fixed browser boundary");
+        let exact = || {
+            let mut headers = HeaderMap::new();
+            headers.insert(header::HOST, HeaderValue::from_static(FASTI_ACCESS_HOST));
+            headers.insert(
+                header::ORIGIN,
+                HeaderValue::from_static(crate::FASTI_ACCESS_ORIGIN),
+            );
+            headers.insert(
+                header::COOKIE,
+                HeaderValue::from_str(&format!(
+                    "{FASTI_ACCESS_CONTINUATION_COOKIE}={}",
+                    "a".repeat(64)
+                ))
+                .expect("cookie header"),
+            );
+            headers
+        };
+
+        let mut exact_read = exact();
+        exact_read.remove(header::ORIGIN);
+        assert!(continuation_binding_digest(
+            &exact_read,
+            &boundary,
+            false,
+            RequestCorrelationId::new_v7(),
+        )
+        .is_ok());
+        assert!(continuation_binding_digest(
+            &exact(),
+            &boundary,
+            true,
+            RequestCorrelationId::new_v7(),
+        )
+        .is_ok());
+
+        let mut cases = Vec::new();
+        let mut headers = exact();
+        headers.remove(header::HOST);
+        cases.push(("missing Host", true, headers, "forbidden"));
+        let mut headers = exact();
+        headers.insert(header::HOST, HeaderValue::from_static("127.0.0.1:8421"));
+        cases.push(("wrong Host", true, headers, "forbidden"));
+        let mut headers = exact();
+        headers.append(header::HOST, HeaderValue::from_static(FASTI_ACCESS_HOST));
+        cases.push(("duplicate Host", true, headers, "forbidden"));
+        let mut headers = exact();
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer forbidden"),
+        );
+        cases.push(("bearer credential", true, headers, "forbidden"));
+        let mut headers = exact();
+        headers.remove(header::ORIGIN);
+        cases.push(("missing Origin", true, headers, "forbidden"));
+        let mut headers = exact();
+        headers.insert(
+            header::ORIGIN,
+            HeaderValue::from_static("https://example.test"),
+        );
+        cases.push(("wrong Origin", true, headers, "forbidden"));
+        let mut headers = exact();
+        headers.append(
+            header::ORIGIN,
+            HeaderValue::from_static(crate::FASTI_ACCESS_ORIGIN),
+        );
+        cases.push(("duplicate Origin", true, headers, "forbidden"));
+        let mut headers = exact();
+        headers.remove(header::COOKIE);
+        cases.push((
+            "missing continuation cookie",
+            false,
+            headers,
+            "auth_browser_binding_invalid",
+        ));
+        let mut headers = exact();
+        headers.insert(
+            header::COOKIE,
+            HeaderValue::from_static("__Secure-fasti_auth_continuation=not-hex"),
+        );
+        cases.push((
+            "malformed continuation cookie",
+            false,
+            headers,
+            "auth_browser_binding_invalid",
+        ));
+        let mut headers = exact();
+        headers.append(
+            header::COOKIE,
+            HeaderValue::from_str(&format!(
+                "{FASTI_ACCESS_CONTINUATION_COOKIE}={}",
+                "b".repeat(64)
+            ))
+            .expect("duplicate cookie header"),
+        );
+        cases.push((
+            "duplicate continuation cookie",
+            false,
+            headers,
+            "auth_browser_binding_invalid",
+        ));
+
+        for (label, require_origin, headers, expected) in cases {
+            let error = continuation_binding_digest(
+                &headers,
+                &boundary,
+                require_origin,
+                RequestCorrelationId::new_v7(),
+            )
+            .expect_err(label);
+            assert_eq!(error.code(), expected, "{label}");
+        }
+    }
+
+    #[test]
+    fn terminal_continuation_problem_clears_the_path_scoped_cookie() {
+        let problem = application_problem(Box::new(FastiProblem::from_code(
+            ProblemCode::AuthBrowserBindingInvalid,
+            CapabilityKey::CreateBrowserSession,
+            RequestCorrelationId::new_v7(),
+        )));
+        let response = match continuation_problem(problem) {
+            Ok(response) => response,
+            Err(_) => panic!("terminal continuation problem must be an HTTP response"),
+        };
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            response
+                .headers()
+                .get(header::SET_COOKIE)
+                .and_then(|value| value.to_str().ok()),
+            Some("__Secure-fasti_auth_continuation=; Domain=127.0.0.1; Path=/api/access/v1/trailbase/continuation; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=Strict")
+        );
+    }
+
+    #[test]
+    fn attributable_continuation_problem_keeps_the_cookie_for_dismissal() {
+        let problem = application_problem(Box::new(FastiProblem::from_code(
+            ProblemCode::IdentityServiceUnavailable,
+            CapabilityKey::CreateBrowserSession,
+            RequestCorrelationId::new_v7(),
+        )));
+        let response = match continuation_problem(problem) {
+            Err(problem) => problem.into_response(),
+            Ok(_) => panic!("attributable evidence must retain continuation authority"),
+        };
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert!(!response.headers().contains_key(header::SET_COOKIE));
+    }
+
+    #[test]
+    fn attributable_callback_rotates_the_same_binding_with_exact_cookie_scope() {
+        let binding = fasti_application::SecretMaterial::from_bytes([7; 32]);
+        let correlation_id = RequestCorrelationId::new_v7();
+        let response = callback_selection_redirect(
+            AuthReturnTarget::ApplicationHome,
+            &binding,
+            chrono::Utc::now() + chrono::Duration::minutes(5),
+            correlation_id,
+            true,
+        );
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert_eq!(
+            response
+                .headers()
+                .get(header::LOCATION)
+                .and_then(|value| value.to_str().ok()),
+            Some(format!("/?auth=failed&correlation_id={correlation_id}").as_str())
+        );
+        let cookies: Vec<_> = response
+            .headers()
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .map(|value| value.to_str().expect("cookie header"))
+            .collect();
+        assert_eq!(cookies.len(), 2);
+        assert!(cookies[0].starts_with("__Secure-fasti_auth_binding=;"));
+        assert!(cookies[1].starts_with(&format!(
+            "{FASTI_ACCESS_CONTINUATION_COOKIE}={};",
+            binding.expose_hex()
+        )));
+        assert!(
+            cookies[1].contains("Domain=127.0.0.1; Path=/api/access/v1/trailbase/continuation;")
+        );
+        let max_age = cookies[1]
+            .split("; ")
+            .find_map(|part| part.strip_prefix("Max-Age="))
+            .and_then(|value| value.parse::<u64>().ok())
+            .expect("numeric continuation Max-Age");
+        assert!(max_age > 0 && max_age <= 300);
+        assert!(cookies[1].contains("Secure; HttpOnly; SameSite=Strict"));
     }
 
     #[tokio::test]

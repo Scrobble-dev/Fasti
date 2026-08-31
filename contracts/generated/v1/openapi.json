@@ -15,7 +15,9 @@
           "exchange_failed",
           "status_rejected",
           "logout_uncertain",
-          "local_authorization_denied"
+          "local_authorization_denied",
+          "local_persistence_failed",
+          "trust_unavailable"
         ],
         "type": "string"
       },
@@ -23,6 +25,7 @@
         "enum": [
           "pending",
           "claimed",
+          "selection_required",
           "completed",
           "cancelled",
           "failed",
@@ -568,6 +571,30 @@
         "required": [
           "credential_scheme",
           "credential"
+        ],
+        "type": "object"
+      },
+      "CompleteTrailBaseContinuationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate_revision": {
+            "description": "Candidate revision returned by the continuation read, echoed unchanged.",
+            "maxLength": 71,
+            "minLength": 71,
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "choice_ordinal": {
+            "description": "Zero-based opaque choice submitted with the unchanged candidate revision.",
+            "format": "int32",
+            "maximum": 63,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "choice_ordinal",
+          "candidate_revision"
         ],
         "type": "object"
       },
@@ -2273,6 +2300,42 @@
         ],
         "type": "object"
       },
+      "ReadTrailBaseContinuationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate_revision": {
+            "description": "Revision submitted unchanged with the chosen zero-based choice ordinal.",
+            "maxLength": 71,
+            "minLength": 71,
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "choices": {
+            "items": {
+              "$ref": "#/components/schemas/TrailBaseContinuationChoiceDto"
+            },
+            "maxItems": 64,
+            "minItems": 1,
+            "type": "array"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "maxLength": 35,
+            "minLength": 20,
+            "type": "string"
+          },
+          "remembered": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "expires_at",
+          "remembered",
+          "candidate_revision",
+          "choices"
+        ],
+        "type": "object"
+      },
       "RecentAuthenticationDto": {
         "additionalProperties": false,
         "properties": {
@@ -2676,34 +2739,11 @@
       "StartTrailBaseSignInRequest": {
         "additionalProperties": false,
         "properties": {
-          "invited_membership_id": {
-            "maxLength": 36,
-            "minLength": 36,
-            "pattern": "^mem_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "profile_grant_id": {
-            "maxLength": 36,
-            "minLength": 36,
-            "pattern": "^grt_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
-            "type": "string"
-          },
           "remembered": {
             "type": "boolean"
-          },
-          "workspace_id": {
-            "maxLength": 36,
-            "minLength": 36,
-            "pattern": "^wsp_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
-            "type": "string"
           }
         },
         "required": [
-          "workspace_id",
-          "profile_grant_id",
           "remembered"
         ],
         "type": "object"
@@ -2716,12 +2756,6 @@
             "minLength": 1,
             "type": "string"
           },
-          "ceremony_id": {
-            "maxLength": 35,
-            "minLength": 35,
-            "pattern": "^op_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
-            "type": "string"
-          },
           "expires_at": {
             "format": "date-time",
             "maxLength": 35,
@@ -2731,7 +2765,6 @@
         },
         "required": [
           "authorization_url",
-          "ceremony_id",
           "expires_at"
         ],
         "type": "object"
@@ -3003,6 +3036,60 @@
         ],
         "type": "string"
       },
+      "TrailBaseContinuationChoiceDto": {
+        "additionalProperties": false,
+        "properties": {
+          "choice_ordinal": {
+            "description": "Zero-based opaque choice submitted with the unchanged candidate revision.",
+            "format": "int32",
+            "maximum": 63,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "membership_state": {
+            "$ref": "#/components/schemas/AccessMembershipLifecycleDto"
+          },
+          "profile_created_at": {
+            "format": "date-time",
+            "maxLength": 35,
+            "minLength": 20,
+            "type": "string"
+          },
+          "profile_ordinal": {
+            "description": "One-based profile number for display only.",
+            "format": "int32",
+            "maximum": 64,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "role": {
+            "$ref": "#/components/schemas/AccessWorkspaceRoleDto"
+          },
+          "workspace_created_at": {
+            "format": "date-time",
+            "maxLength": 35,
+            "minLength": 20,
+            "type": "string"
+          },
+          "workspace_ordinal": {
+            "description": "One-based workspace number for display only.",
+            "format": "int32",
+            "maximum": 64,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "choice_ordinal",
+          "workspace_ordinal",
+          "profile_ordinal",
+          "workspace_created_at",
+          "profile_created_at",
+          "membership_state",
+          "role"
+        ],
+        "type": "object"
+      },
       "ViolationDto": {
         "additionalProperties": false,
         "properties": {
@@ -3037,6 +3124,12 @@
         "description": "One-use, callback-path-scoped browser binding for a TrailBase ceremony.",
         "in": "cookie",
         "name": "__Secure-fasti_auth_binding",
+        "type": "apiKey"
+      },
+      "auth_continuation_cookie": {
+        "description": "One-use, continuation-path-scoped binding for explicit Fasti sign-in selection.",
+        "in": "cookie",
+        "name": "__Secure-fasti_auth_continuation",
         "type": "apiKey"
       },
       "bootstrap_bearer": {
@@ -3865,6 +3958,358 @@
         "x-fasti-capability-id": "browser.session.create",
         "x-fasti-example-ids": [],
         "x-fasti-problem-codes": [],
+        "x-fasti-required-scopes": [],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/access/v1/trailbase/continuation": {
+      "delete": {
+        "operationId": "cancel_trailbase_continuation",
+        "responses": {
+          "204": {
+            "description": "Sign-in continuation cancelled"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Continuation binding or proof is invalid"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Continuation request is not authorized"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Continuation input is invalid"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Stored continuation state failed integrity checks"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "auth_continuation_cookie": []
+          }
+        ],
+        "tags": [
+          "access"
+        ],
+        "x-fasti-authorization": "unauthenticated",
+        "x-fasti-capability-id": "browser.session.create",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "auth_browser_binding_invalid",
+          "forbidden",
+          "integrity_failed",
+          "storage_unavailable",
+          "trailbase_proof_invalid",
+          "validation_failed"
+        ],
+        "x-fasti-required-scopes": [],
+        "x-fasti-runtime-availability": "implemented"
+      },
+      "get": {
+        "operationId": "read_trailbase_continuation",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadTrailBaseContinuationResponse"
+                }
+              }
+            },
+            "description": "Bounded identifier-free sign-in choices"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Continuation binding or proof is invalid"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "No selectable Fasti affiliation"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Continuation input is invalid"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Stored continuation state failed integrity checks"
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "TrailBase session cleanup was not confirmed"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "TrailBase identity, trust, or local storage is unavailable"
+          },
+          "507": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The bounded selection capacity was exceeded"
+          }
+        },
+        "security": [
+          {
+            "auth_continuation_cookie": []
+          }
+        ],
+        "tags": [
+          "access"
+        ],
+        "x-fasti-authorization": "unauthenticated",
+        "x-fasti-capability-id": "browser.session.create",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "auth_browser_binding_invalid",
+          "auth_continuation_persistence_failed",
+          "auth_subject_unaffiliated",
+          "capacity_exceeded",
+          "forbidden",
+          "identity_service_unavailable",
+          "integrity_failed",
+          "storage_unavailable",
+          "trailbase_proof_invalid",
+          "trailbase_session_cleanup_failed",
+          "trailbase_trust_unavailable",
+          "validation_failed"
+        ],
+        "x-fasti-required-scopes": [],
+        "x-fasti-runtime-availability": "implemented"
+      },
+      "post": {
+        "operationId": "complete_trailbase_continuation",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteTrailBaseContinuationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Opaque Fasti browser session issued"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Malformed request body"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Continuation binding or proof is invalid"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Continuation request is not authorized"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Sign-in choices changed"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Request body is too large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Request media type is unsupported"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Choice or revision is invalid"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Stored continuation state failed integrity checks"
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "TrailBase session cleanup was not confirmed"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "TrailBase identity, trust, or local storage is unavailable"
+          },
+          "507": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The bounded selection capacity was exceeded"
+          }
+        },
+        "security": [
+          {
+            "auth_continuation_cookie": []
+          }
+        ],
+        "tags": [
+          "access"
+        ],
+        "x-fasti-authorization": "unauthenticated",
+        "x-fasti-capability-id": "browser.session.create",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "auth_browser_binding_invalid",
+          "auth_continuation_persistence_failed",
+          "auth_selection_changed",
+          "auth_subject_unaffiliated",
+          "capacity_exceeded",
+          "forbidden",
+          "identity_service_unavailable",
+          "integrity_failed",
+          "malformed_json",
+          "payload_too_large",
+          "storage_unavailable",
+          "trailbase_proof_invalid",
+          "trailbase_session_cleanup_failed",
+          "trailbase_trust_unavailable",
+          "unsupported_media_type",
+          "validation_failed"
+        ],
         "x-fasti-required-scopes": [],
         "x-fasti-runtime-availability": "implemented"
       }

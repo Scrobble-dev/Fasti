@@ -811,6 +811,7 @@ impl WorkspaceMembership {
 pub enum AuthCeremonyState {
     Pending,
     Claimed,
+    SelectionRequired,
     Completed,
     Cancelled,
     Failed,
@@ -823,6 +824,7 @@ impl AuthCeremonyState {
         match self {
             Self::Pending => "pending",
             Self::Claimed => "claimed",
+            Self::SelectionRequired => "selection_required",
             Self::Completed => "completed",
             Self::Cancelled => "cancelled",
             Self::Failed => "failed",
@@ -835,6 +837,7 @@ impl AuthCeremonyState {
         match value {
             "pending" => Some(Self::Pending),
             "claimed" => Some(Self::Claimed),
+            "selection_required" => Some(Self::SelectionRequired),
             "completed" => Some(Self::Completed),
             "cancelled" => Some(Self::Cancelled),
             "failed" => Some(Self::Failed),
@@ -944,6 +947,8 @@ pub enum AuthCeremonyFailure {
     StatusRejected,
     LogoutUncertain,
     LocalAuthorizationDenied,
+    LocalPersistenceFailed,
+    TrustUnavailable,
 }
 
 impl AuthCeremonyFailure {
@@ -955,6 +960,8 @@ impl AuthCeremonyFailure {
             Self::StatusRejected => "status_rejected",
             Self::LogoutUncertain => "logout_uncertain",
             Self::LocalAuthorizationDenied => "local_authorization_denied",
+            Self::LocalPersistenceFailed => "local_persistence_failed",
+            Self::TrustUnavailable => "trust_unavailable",
         }
     }
 
@@ -966,6 +973,8 @@ impl AuthCeremonyFailure {
             "status_rejected" => Some(Self::StatusRejected),
             "logout_uncertain" => Some(Self::LogoutUncertain),
             "local_authorization_denied" => Some(Self::LocalAuthorizationDenied),
+            "local_persistence_failed" => Some(Self::LocalPersistenceFailed),
+            "trust_unavailable" => Some(Self::TrustUnavailable),
             _ => None,
         }
     }
@@ -1003,7 +1012,6 @@ pub struct AuthCeremonySelection {
     selected_profile_grant_id: ProfileGrantId,
     bound_browser_session_id: Option<BrowserSessionId>,
     invited_membership_id: Option<MembershipId>,
-    remembered: bool,
 }
 
 impl AuthCeremonySelection {
@@ -1013,14 +1021,12 @@ impl AuthCeremonySelection {
         selected_profile_grant_id: ProfileGrantId,
         bound_browser_session_id: Option<BrowserSessionId>,
         invited_membership_id: Option<MembershipId>,
-        remembered: bool,
     ) -> Result<Self, AccessInvariantError> {
         let selection = Self {
             workspace_id,
             selected_profile_grant_id,
             bound_browser_session_id,
             invited_membership_id,
-            remembered,
         };
         if !selection.valid_for(purpose) {
             return Err(AccessInvariantError::InvalidCeremonySelectionBinding);
@@ -1032,14 +1038,10 @@ impl AuthCeremonySelection {
         match purpose {
             AuthCeremonyPurpose::SignIn => self.bound_browser_session_id.is_none(),
             AuthCeremonyPurpose::RecentAuthentication => {
-                self.bound_browser_session_id.is_some()
-                    && self.invited_membership_id.is_none()
-                    && !self.remembered
+                self.bound_browser_session_id.is_some() && self.invited_membership_id.is_none()
             }
             AuthCeremonyPurpose::FirstAdministratorBootstrap => {
-                self.bound_browser_session_id.is_none()
-                    && self.invited_membership_id.is_none()
-                    && !self.remembered
+                self.bound_browser_session_id.is_none() && self.invited_membership_id.is_none()
             }
         }
     }
@@ -1059,9 +1061,54 @@ impl AuthCeremonySelection {
     pub const fn invited_membership_id(self) -> Option<MembershipId> {
         self.invited_membership_id
     }
+}
 
-    pub const fn remembered(self) -> bool {
-        self.remembered
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AuthCeremonyConfirmation {
+    subject_id: AuthSubjectId,
+    auth_epoch: u64,
+    authorization_epoch: u64,
+    provenance: AuthenticationProvenance,
+}
+
+impl AuthCeremonyConfirmation {
+    pub const fn new(subject: AuthSubject, provenance: AuthenticationProvenance) -> Self {
+        Self {
+            subject_id: subject.id(),
+            auth_epoch: subject.auth_epoch(),
+            authorization_epoch: subject.authorization_epoch(),
+            provenance,
+        }
+    }
+
+    pub const fn try_from_persisted(
+        subject_id: AuthSubjectId,
+        auth_epoch: u64,
+        authorization_epoch: u64,
+        provenance: AuthenticationProvenance,
+    ) -> Self {
+        Self {
+            subject_id,
+            auth_epoch,
+            authorization_epoch,
+            provenance,
+        }
+    }
+
+    pub const fn subject_id(self) -> AuthSubjectId {
+        self.subject_id
+    }
+
+    pub const fn auth_epoch(self) -> u64 {
+        self.auth_epoch
+    }
+
+    pub const fn authorization_epoch(self) -> u64 {
+        self.authorization_epoch
+    }
+
+    pub const fn provenance(self) -> AuthenticationProvenance {
+        self.provenance
     }
 }
 
@@ -1073,7 +1120,9 @@ pub struct AuthCeremony {
     trailbase_instance_id: TrailBaseInstanceId,
     activation_generation: u64,
     browser_binding_digest: Sha256Digest,
-    selection: AuthCeremonySelection,
+    selection: Option<AuthCeremonySelection>,
+    remembered: bool,
+    confirmation: Option<AuthCeremonyConfirmation>,
     callback_path: AuthCallbackPath,
     return_target: AuthReturnTarget,
     correlation_id: RequestCorrelationId,
@@ -1094,7 +1143,8 @@ impl AuthCeremony {
         trailbase_instance_id: TrailBaseInstanceId,
         activation_generation: u64,
         browser_binding_digest: Sha256Digest,
-        selection: AuthCeremonySelection,
+        selection: Option<AuthCeremonySelection>,
+        remembered: bool,
         callback_path: AuthCallbackPath,
         return_target: AuthReturnTarget,
         correlation_id: RequestCorrelationId,
@@ -1110,7 +1160,7 @@ impl AuthCeremony {
         if purpose.return_target() != return_target {
             return Err(AccessInvariantError::InvalidCeremonyPurposeTarget);
         }
-        if !selection.valid_for(purpose) {
+        if !Self::initial_binding_is_valid(purpose, selection, remembered) {
             return Err(AccessInvariantError::InvalidCeremonySelectionBinding);
         }
         Ok(Self {
@@ -1121,6 +1171,8 @@ impl AuthCeremony {
             activation_generation,
             browser_binding_digest,
             selection,
+            remembered,
+            confirmation: None,
             callback_path,
             return_target,
             correlation_id,
@@ -1141,7 +1193,9 @@ impl AuthCeremony {
         trailbase_instance_id: TrailBaseInstanceId,
         activation_generation: u64,
         browser_binding_digest: Sha256Digest,
-        selection: AuthCeremonySelection,
+        selection: Option<AuthCeremonySelection>,
+        remembered: bool,
+        confirmation: Option<AuthCeremonyConfirmation>,
         callback_path: AuthCallbackPath,
         return_target: AuthReturnTarget,
         correlation_id: RequestCorrelationId,
@@ -1160,6 +1214,8 @@ impl AuthCeremony {
             activation_generation,
             browser_binding_digest,
             selection,
+            remembered,
+            confirmation,
             callback_path,
             return_target,
             correlation_id,
@@ -1170,9 +1226,6 @@ impl AuthCeremony {
             claimed_at,
             terminal_at,
         };
-        if !ceremony.selection.valid_for(ceremony.purpose) {
-            return Err(AccessInvariantError::InvalidCeremonySelectionBinding);
-        }
         ceremony.validate_persisted_state()?;
         Ok(ceremony)
     }
@@ -1195,8 +1248,14 @@ impl AuthCeremony {
     pub const fn browser_binding_digest(&self) -> &Sha256Digest {
         &self.browser_binding_digest
     }
-    pub const fn selection(&self) -> AuthCeremonySelection {
+    pub const fn selection(&self) -> Option<AuthCeremonySelection> {
         self.selection
+    }
+    pub const fn remembered(&self) -> bool {
+        self.remembered
+    }
+    pub const fn confirmation(&self) -> Option<AuthCeremonyConfirmation> {
+        self.confirmation
     }
     pub const fn callback_path(&self) -> &AuthCallbackPath {
         &self.callback_path
@@ -1258,14 +1317,66 @@ impl AuthCeremony {
     }
 
     pub fn complete(&mut self, at: DateTime<Utc>) -> Result<(), AccessInvariantError> {
+        if matches!(self.purpose, AuthCeremonyPurpose::SignIn) {
+            return Err(AccessInvariantError::InvalidCeremonyTransition);
+        }
         self.validate_claimed_transition(at)?;
+        if at >= self.expires_at {
+            return Err(AccessInvariantError::CeremonyExpired);
+        }
+        self.state = AuthCeremonyState::Completed;
+        self.terminal_at = Some(at);
+        Ok(())
+    }
+
+    pub fn require_selection(
+        &mut self,
+        confirmation: AuthCeremonyConfirmation,
+        at: DateTime<Utc>,
+    ) -> Result<(), AccessInvariantError> {
+        self.validate_claimed_transition(at)?;
+        if !matches!(self.purpose, AuthCeremonyPurpose::SignIn)
+            || self.selection.is_some()
+            || confirmation.provenance().activation_generation() != self.activation_generation
+            || confirmation.provenance().verified_at() < self.claimed_at.unwrap_or(self.created_at)
+            || confirmation.provenance().verified_at() > at
+        {
+            return Err(AccessInvariantError::InvalidCeremonyTransition);
+        }
+        if at >= self.expires_at {
+            return Err(AccessInvariantError::CeremonyExpired);
+        }
+        self.state = AuthCeremonyState::SelectionRequired;
+        self.confirmation = Some(confirmation);
+        Ok(())
+    }
+
+    pub fn complete_selection(
+        &mut self,
+        selection: AuthCeremonySelection,
+        at: DateTime<Utc>,
+    ) -> Result<(), AccessInvariantError> {
+        if !matches!(self.state, AuthCeremonyState::SelectionRequired)
+            || !selection.valid_for(AuthCeremonyPurpose::SignIn)
+            || self.confirmation.is_none()
+        {
+            return Err(AccessInvariantError::InvalidCeremonyTransition);
+        }
+        self.validate_transition_time(at)?;
+        if at >= self.expires_at {
+            return Err(AccessInvariantError::CeremonyExpired);
+        }
+        self.selection = Some(selection);
         self.state = AuthCeremonyState::Completed;
         self.terminal_at = Some(at);
         Ok(())
     }
 
     pub fn cancel(&mut self, at: DateTime<Utc>) -> Result<(), AccessInvariantError> {
-        if !matches!(self.state, AuthCeremonyState::Pending) {
+        if !matches!(
+            self.state,
+            AuthCeremonyState::Pending | AuthCeremonyState::SelectionRequired
+        ) {
             return Err(AccessInvariantError::InvalidCeremonyTransition);
         }
         if self.expire(at)? {
@@ -1277,7 +1388,10 @@ impl AuthCeremony {
     }
 
     pub fn expire(&mut self, at: DateTime<Utc>) -> Result<bool, AccessInvariantError> {
-        if !matches!(self.state, AuthCeremonyState::Pending) {
+        if !matches!(
+            self.state,
+            AuthCeremonyState::Pending | AuthCeremonyState::SelectionRequired
+        ) {
             return Ok(false);
         }
         if at < self.created_at {
@@ -1337,6 +1451,7 @@ impl AuthCeremony {
                 self.mark_cleanup_uncertain(AuthCeremonyFailure::ExchangeOutcomeUncertain, at)?;
                 Ok(true)
             }
+            AuthCeremonyState::SelectionRequired => Ok(false),
             _ => Ok(false),
         }
     }
@@ -1375,6 +1490,38 @@ impl AuthCeremony {
             return Err(AccessInvariantError::InvalidTimestampOrder);
         }
 
+        let binding_is_valid = match self.purpose {
+            AuthCeremonyPurpose::SignIn => match self.state {
+                AuthCeremonyState::Pending | AuthCeremonyState::Claimed => {
+                    self.selection.is_none() && self.confirmation.is_none()
+                }
+                AuthCeremonyState::SelectionRequired => {
+                    self.selection.is_none() && self.confirmation.is_some()
+                }
+                AuthCeremonyState::Completed => {
+                    self.selection
+                        .is_some_and(|selection| selection.valid_for(self.purpose))
+                        && self.confirmation.is_some()
+                }
+                AuthCeremonyState::Cancelled | AuthCeremonyState::Expired => {
+                    self.selection.is_none()
+                        && (self.confirmation.is_some() == self.claimed_at.is_some())
+                }
+                _ => self.selection.is_none() && self.confirmation.is_none(),
+            },
+            AuthCeremonyPurpose::RecentAuthentication
+            | AuthCeremonyPurpose::FirstAdministratorBootstrap => {
+                !self.remembered
+                    && self.confirmation.is_none()
+                    && self
+                        .selection
+                        .is_some_and(|selection| selection.valid_for(self.purpose))
+            }
+        };
+        if !binding_is_valid {
+            return Err(AccessInvariantError::InvalidCeremonySelectionBinding);
+        }
+
         let valid = match self.state {
             AuthCeremonyState::Pending => {
                 self.failure.is_none() && self.claimed_at.is_none() && self.terminal_at.is_none()
@@ -1382,12 +1529,18 @@ impl AuthCeremony {
             AuthCeremonyState::Claimed => {
                 self.failure.is_none() && self.claimed_at.is_some() && self.terminal_at.is_none()
             }
+            AuthCeremonyState::SelectionRequired => {
+                self.failure.is_none() && self.claimed_at.is_some() && self.terminal_at.is_none()
+            }
             AuthCeremonyState::Completed => {
-                self.failure.is_none() && self.claimed_at.is_some() && self.terminal_at.is_some()
+                self.failure.is_none()
+                    && self.claimed_at.is_some()
+                    && self
+                        .terminal_at
+                        .is_some_and(|terminal_at| terminal_at < self.expires_at)
             }
             AuthCeremonyState::Cancelled => {
                 self.failure.is_none()
-                    && self.claimed_at.is_none()
                     && self
                         .terminal_at
                         .is_some_and(|terminal_at| terminal_at < self.expires_at)
@@ -1417,7 +1570,6 @@ impl AuthCeremony {
             }
             AuthCeremonyState::Expired => {
                 self.failure.is_none()
-                    && self.claimed_at.is_none()
                     && self
                         .terminal_at
                         .is_some_and(|terminal_at| terminal_at >= self.expires_at)
@@ -1440,8 +1592,24 @@ impl AuthCeremony {
                 AuthCeremonyFailure::ExchangeFailed
                     | AuthCeremonyFailure::StatusRejected
                     | AuthCeremonyFailure::LocalAuthorizationDenied
+                    | AuthCeremonyFailure::LocalPersistenceFailed
+                    | AuthCeremonyFailure::TrustUnavailable
             ),
             _ => false,
+        }
+    }
+
+    fn initial_binding_is_valid(
+        purpose: AuthCeremonyPurpose,
+        selection: Option<AuthCeremonySelection>,
+        remembered: bool,
+    ) -> bool {
+        match purpose {
+            AuthCeremonyPurpose::SignIn => selection.is_none(),
+            AuthCeremonyPurpose::RecentAuthentication
+            | AuthCeremonyPurpose::FirstAdministratorBootstrap => {
+                !remembered && selection.is_some_and(|selection| selection.valid_for(purpose))
+            }
         }
     }
 }
@@ -1514,6 +1682,7 @@ pub enum AccessAuditEventKind {
     MembershipPromoted,
     MembershipDemoted,
     CeremonyClaimed,
+    CeremonySelectionRequired,
     CeremonyCompleted,
     CeremonyCancelled,
     CeremonyExpired,
@@ -1544,6 +1713,7 @@ impl AccessAuditEventKind {
             Self::MembershipPromoted => "membership_promoted",
             Self::MembershipDemoted => "membership_demoted",
             Self::CeremonyClaimed => "ceremony_claimed",
+            Self::CeremonySelectionRequired => "ceremony_selection_required",
             Self::CeremonyCompleted => "ceremony_completed",
             Self::CeremonyCancelled => "ceremony_cancelled",
             Self::CeremonyExpired => "ceremony_expired",
@@ -1574,6 +1744,7 @@ impl AccessAuditEventKind {
             "membership_promoted" => Some(Self::MembershipPromoted),
             "membership_demoted" => Some(Self::MembershipDemoted),
             "ceremony_claimed" => Some(Self::CeremonyClaimed),
+            "ceremony_selection_required" => Some(Self::CeremonySelectionRequired),
             "ceremony_completed" => Some(Self::CeremonyCompleted),
             "ceremony_cancelled" => Some(Self::CeremonyCancelled),
             "ceremony_expired" => Some(Self::CeremonyExpired),
@@ -1857,9 +2028,12 @@ mod tests {
             matches!(purpose, AuthCeremonyPurpose::RecentAuthentication)
                 .then(BrowserSessionId::new_v7),
             None,
-            false,
         )
         .expect("ceremony selection")
+    }
+
+    fn ceremony_start_selection(purpose: AuthCeremonyPurpose) -> Option<AuthCeremonySelection> {
+        (!matches!(purpose, AuthCeremonyPurpose::SignIn)).then(|| ceremony_selection(purpose))
     }
 
     fn membership(subject: &AuthSubject, role: WorkspaceRole) -> WorkspaceMembership {
@@ -2236,6 +2410,7 @@ mod tests {
         for value in [
             AuthCeremonyState::Pending,
             AuthCeremonyState::Claimed,
+            AuthCeremonyState::SelectionRequired,
             AuthCeremonyState::Completed,
             AuthCeremonyState::Cancelled,
             AuthCeremonyState::Failed,
@@ -2243,6 +2418,21 @@ mod tests {
             AuthCeremonyState::Expired,
         ] {
             assert_eq!(AuthCeremonyState::from_storage(value.as_str()), Some(value));
+        }
+        for value in [
+            AuthCeremonyFailure::VerifierLostOnRestart,
+            AuthCeremonyFailure::ExchangeOutcomeUncertain,
+            AuthCeremonyFailure::ExchangeFailed,
+            AuthCeremonyFailure::StatusRejected,
+            AuthCeremonyFailure::LogoutUncertain,
+            AuthCeremonyFailure::LocalAuthorizationDenied,
+            AuthCeremonyFailure::LocalPersistenceFailed,
+            AuthCeremonyFailure::TrustUnavailable,
+        ] {
+            assert_eq!(
+                AuthCeremonyFailure::from_storage(value.as_str()),
+                Some(value)
+            );
         }
         for value in [
             AuthenticationMethod::TrailBasePassword,
@@ -2257,6 +2447,7 @@ mod tests {
         assert_eq!(WorkspaceRole::from_storage("owner"), None);
         assert_eq!(MembershipLifecycle::from_storage("unknown"), None);
         assert_eq!(AuthCeremonyState::from_storage("retryable"), None);
+        assert_eq!(AuthCeremonyFailure::from_storage("database_error"), None);
         assert_eq!(AuthenticationMethod::from_storage("totp_enrolled"), None);
         assert_eq!(
             AuthenticationMethod::from_storage("trailbase_password_totp"),
@@ -2608,7 +2799,8 @@ mod tests {
             instance_id,
             7,
             binding.clone(),
-            ceremony_selection(AuthCeremonyPurpose::SignIn),
+            ceremony_start_selection(AuthCeremonyPurpose::SignIn),
+            false,
             callback.clone(),
             AuthReturnTarget::ApplicationHome,
             RequestCorrelationId::new_v7(),
@@ -2627,7 +2819,43 @@ mod tests {
             ceremony.cancel(at(2)),
             Err(AccessInvariantError::InvalidCeremonyTransition)
         );
-        ceremony.complete(at(2)).expect("complete");
+        let subject = active_subject();
+        ceremony
+            .require_selection(
+                AuthCeremonyConfirmation::new(
+                    subject,
+                    AuthenticationProvenance::new(
+                        AuthenticationMethod::TrailBasePassword,
+                        at(1),
+                        7,
+                    ),
+                ),
+                at(2),
+            )
+            .expect("require selection");
+        assert!(!ceremony
+            .recover_after_restart(at(2))
+            .expect("selection survives restart"));
+        let confirmation = ceremony.confirmation();
+        let mut cancelled_selection = ceremony.clone();
+        cancelled_selection
+            .cancel(at(3))
+            .expect("cancel selected sign-in");
+        assert_eq!(cancelled_selection.confirmation(), confirmation);
+        let mut expired_selection = ceremony.clone();
+        assert!(expired_selection
+            .expire(at(30))
+            .expect("expire selected sign-in at boundary"));
+        assert_eq!(expired_selection.confirmation(), confirmation);
+        assert_eq!(
+            ceremony
+                .clone()
+                .complete_selection(ceremony_selection(AuthCeremonyPurpose::SignIn), at(30)),
+            Err(AccessInvariantError::CeremonyExpired)
+        );
+        ceremony
+            .complete_selection(ceremony_selection(AuthCeremonyPurpose::SignIn), at(3))
+            .expect("complete selected sign-in");
         assert!(ceremony.state().is_terminal());
         assert_eq!(
             ceremony.fail(AuthCeremonyFailure::ExchangeFailed, at(3)),
@@ -2641,7 +2869,8 @@ mod tests {
             instance_id,
             7,
             binding.clone(),
-            ceremony_selection(AuthCeremonyPurpose::RecentAuthentication),
+            ceremony_start_selection(AuthCeremonyPurpose::RecentAuthentication),
+            false,
             callback.clone(),
             AuthReturnTarget::AccountSecurity,
             RequestCorrelationId::new_v7(),
@@ -2665,7 +2894,8 @@ mod tests {
             instance_id,
             7,
             binding.clone(),
-            ceremony_selection(AuthCeremonyPurpose::FirstAdministratorBootstrap),
+            ceremony_start_selection(AuthCeremonyPurpose::FirstAdministratorBootstrap),
+            false,
             callback.clone(),
             AuthReturnTarget::FirstRun,
             RequestCorrelationId::new_v7(),
@@ -2691,7 +2921,8 @@ mod tests {
             instance_id,
             7,
             binding.clone(),
-            ceremony_selection(AuthCeremonyPurpose::SignIn),
+            ceremony_start_selection(AuthCeremonyPurpose::SignIn),
+            false,
             callback.clone(),
             AuthReturnTarget::ApplicationHome,
             RequestCorrelationId::new_v7(),
@@ -2712,7 +2943,8 @@ mod tests {
             instance_id,
             7,
             binding,
-            ceremony_selection(AuthCeremonyPurpose::SignIn),
+            ceremony_start_selection(AuthCeremonyPurpose::SignIn),
+            false,
             callback,
             AuthReturnTarget::ApplicationHome,
             RequestCorrelationId::new_v7(),
@@ -2738,7 +2970,8 @@ mod tests {
             TrailBaseInstanceId::new_v7(),
             1,
             Sha256Digest::from_bytes(&[2; 32]),
-            ceremony_selection(AuthCeremonyPurpose::SignIn),
+            ceremony_start_selection(AuthCeremonyPurpose::SignIn),
+            false,
             AuthCallbackPath::parse("/auth/trailbase/callback").expect("callback"),
             AuthReturnTarget::ApplicationHome,
             RequestCorrelationId::new_v7(),
@@ -2773,7 +3006,8 @@ mod tests {
                 instance_id,
                 7,
                 binding.clone(),
-                ceremony_selection(AuthCeremonyPurpose::SignIn),
+                ceremony_start_selection(AuthCeremonyPurpose::SignIn),
+                false,
                 callback.clone(),
                 AuthReturnTarget::ApplicationHome,
                 RequestCorrelationId::new_v7(),
@@ -2851,7 +3085,8 @@ mod tests {
                 instance_id,
                 1,
                 binding.clone(),
-                ceremony_selection(purpose),
+                ceremony_start_selection(purpose),
+                false,
                 callback.clone(),
                 target,
                 RequestCorrelationId::new_v7(),
@@ -2873,7 +3108,8 @@ mod tests {
                             instance_id,
                             1,
                             binding.clone(),
-                            ceremony_selection(purpose),
+                            ceremony_start_selection(purpose),
+                            false,
                             callback.clone(),
                             mismatched,
                             RequestCorrelationId::new_v7(),
@@ -2915,7 +3151,6 @@ mod tests {
             grant_id,
             None,
             Some(invitation_id),
-            true,
         )
         .is_ok());
         assert_eq!(
@@ -2925,7 +3160,6 @@ mod tests {
                 grant_id,
                 Some(BrowserSessionId::new_v7()),
                 Some(invitation_id),
-                false,
             ),
             Err(AccessInvariantError::InvalidCeremonySelectionBinding)
         );
@@ -2936,7 +3170,6 @@ mod tests {
                 grant_id,
                 None,
                 Some(invitation_id),
-                false,
             ),
             Err(AccessInvariantError::InvalidCeremonySelectionBinding)
         );
@@ -2947,7 +3180,19 @@ mod tests {
         let instance_id = TrailBaseInstanceId::new_v7();
         let binding = Sha256Digest::from_bytes(&[6; 32]);
         let callback = AuthCallbackPath::parse("/auth/trailbase/callback").expect("callback");
+        let confirmation = AuthCeremonyConfirmation::new(
+            active_subject(),
+            AuthenticationProvenance::new(AuthenticationMethod::TrailBasePassword, at(1), 2),
+        );
         let restore = |state, failure, claimed_at, terminal_at| {
+            let (selection, confirmation) = match state {
+                AuthCeremonyState::SelectionRequired => (None, Some(confirmation)),
+                AuthCeremonyState::Completed => (
+                    Some(ceremony_selection(AuthCeremonyPurpose::SignIn)),
+                    Some(confirmation),
+                ),
+                _ => (None, None),
+            };
             AuthCeremony::try_from_persisted(
                 OperationId::new_v7(),
                 AuthCeremonyPurpose::SignIn,
@@ -2955,7 +3200,9 @@ mod tests {
                 instance_id,
                 2,
                 binding.clone(),
-                ceremony_selection(AuthCeremonyPurpose::SignIn),
+                selection,
+                false,
+                confirmation,
                 callback.clone(),
                 AuthReturnTarget::ApplicationHome,
                 RequestCorrelationId::new_v7(),
@@ -2970,6 +3217,13 @@ mod tests {
 
         assert!(restore(AuthCeremonyState::Pending, None, None, None).is_ok());
         assert!(restore(AuthCeremonyState::Claimed, None, Some(at(1)), None).is_ok());
+        assert!(restore(
+            AuthCeremonyState::SelectionRequired,
+            None,
+            Some(at(1)),
+            None,
+        )
+        .is_ok());
         assert!(restore(AuthCeremonyState::Completed, None, Some(at(1)), Some(at(2)),).is_ok());
         assert!(restore(
             AuthCeremonyState::Failed,
@@ -3038,7 +3292,8 @@ mod tests {
                 instance_id,
                 0,
                 binding,
-                ceremony_selection(AuthCeremonyPurpose::SignIn),
+                ceremony_start_selection(AuthCeremonyPurpose::SignIn),
+                false,
                 callback,
                 AuthReturnTarget::ApplicationHome,
                 RequestCorrelationId::new_v7(),
@@ -3061,7 +3316,8 @@ mod tests {
             instance_id,
             1,
             binding.clone(),
-            ceremony_selection(AuthCeremonyPurpose::SignIn),
+            ceremony_start_selection(AuthCeremonyPurpose::SignIn),
+            false,
             callback.clone(),
             AuthReturnTarget::ApplicationHome,
             RequestCorrelationId::new_v7(),

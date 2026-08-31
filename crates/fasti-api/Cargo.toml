@@ -42,6 +42,7 @@ required-features = ["conformance-fixture"]
 
 [dev-dependencies]
 fasti-store = { workspace = true }
+rusqlite = { workspace = true }
 static_assertions = { workspace = true }
 tempfile = "3.27.0"
 tokio = { workspace = true }

@@ -11,28 +11,7 @@ use utoipa::{IntoParams, ToSchema};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct StartTrailBaseSignInRequest {
-    #[schemars(length(equal = 36), regex(pattern = r"^wsp_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"), extend("format" = "fasti-workspace-id"))]
-    #[schema(
-        min_length = 36,
-        max_length = 36,
-        pattern = r"^wsp_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-    )]
-    pub workspace_id: String,
-    #[schemars(length(equal = 36), regex(pattern = r"^grt_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"), extend("format" = "fasti-profile-grant-id"))]
-    #[schema(
-        min_length = 36,
-        max_length = 36,
-        pattern = r"^grt_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-    )]
-    pub profile_grant_id: String,
     pub remembered: bool,
-    #[schemars(length(equal = 36), regex(pattern = r"^mem_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"), extend("format" = "fasti-membership-id"))]
-    #[schema(
-        min_length = 36,
-        max_length = 36,
-        pattern = r"^mem_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-    )]
-    pub invited_membership_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
@@ -41,13 +20,6 @@ pub struct StartTrailBaseSignInResponse {
     #[schemars(length(min = 1, max = 4096))]
     #[schema(min_length = 1, max_length = 4096)]
     pub authorization_url: String,
-    #[schemars(length(equal = 35), regex(pattern = r"^op_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"), extend("format" = "fasti-operation-id"))]
-    #[schema(
-        min_length = 35,
-        max_length = 35,
-        pattern = r"^op_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-    )]
-    pub ceremony_id: String,
     #[schemars(length(min = 20, max = 35), extend("format" = "date-time"))]
     #[schema(min_length = 20, max_length = 35, format = DateTime)]
     pub expires_at: String,
@@ -61,6 +33,60 @@ pub struct CompleteTrailBaseAuthenticationQuery {
     #[schema(min_length = 48, max_length = 48)]
     #[param(min_length = 48, max_length = 48, pattern = "^[A-Za-z0-9]{48}$")]
     pub code: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TrailBaseContinuationChoiceDto {
+    /// Zero-based opaque choice submitted with the unchanged candidate revision.
+    #[schemars(range(min = 0, max = 63))]
+    #[schema(minimum = 0, maximum = 63)]
+    pub choice_ordinal: u8,
+    /// One-based workspace number for display only.
+    #[schemars(range(min = 1, max = 64))]
+    #[schema(minimum = 1, maximum = 64)]
+    pub workspace_ordinal: u8,
+    /// One-based profile number for display only.
+    #[schemars(range(min = 1, max = 64))]
+    #[schema(minimum = 1, maximum = 64)]
+    pub profile_ordinal: u8,
+    #[schemars(length(min = 20, max = 35), extend("format" = "date-time"))]
+    #[schema(min_length = 20, max_length = 35, format = DateTime)]
+    pub workspace_created_at: String,
+    #[schemars(length(min = 20, max = 35), extend("format" = "date-time"))]
+    #[schema(min_length = 20, max_length = 35, format = DateTime)]
+    pub profile_created_at: String,
+    pub membership_state: AccessMembershipLifecycleDto,
+    pub role: AccessWorkspaceRoleDto,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ReadTrailBaseContinuationResponse {
+    #[schemars(length(min = 20, max = 35), extend("format" = "date-time"))]
+    #[schema(min_length = 20, max_length = 35, format = DateTime)]
+    pub expires_at: String,
+    pub remembered: bool,
+    /// Revision submitted unchanged with the chosen zero-based choice ordinal.
+    #[schemars(length(equal = 71), regex(pattern = r"^sha256:[0-9a-f]{64}$"), extend("format" = "sha256"))]
+    #[schema(min_length = 71, max_length = 71, pattern = r"^sha256:[0-9a-f]{64}$")]
+    pub candidate_revision: String,
+    #[schemars(length(min = 1, max = 64))]
+    #[schema(min_items = 1, max_items = 64)]
+    pub choices: Vec<TrailBaseContinuationChoiceDto>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CompleteTrailBaseContinuationRequest {
+    /// Zero-based opaque choice submitted with the unchanged candidate revision.
+    #[schemars(range(min = 0, max = 63))]
+    #[schema(minimum = 0, maximum = 63)]
+    pub choice_ordinal: u8,
+    /// Candidate revision returned by the continuation read, echoed unchanged.
+    #[schemars(length(equal = 71), regex(pattern = r"^sha256:[0-9a-f]{64}$"), extend("format" = "sha256"))]
+    #[schema(min_length = 71, max_length = 71, pattern = r"^sha256:[0-9a-f]{64}$")]
+    pub candidate_revision: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
@@ -220,6 +246,7 @@ pub enum AccessEvidenceKindDto {
 pub enum AccessCeremonyStateDto {
     Pending,
     Claimed,
+    SelectionRequired,
     Completed,
     Cancelled,
     Failed,
@@ -236,6 +263,8 @@ pub enum AccessCeremonyFailureDto {
     StatusRejected,
     LogoutUncertain,
     LocalAuthorizationDenied,
+    LocalPersistenceFailed,
+    TrustUnavailable,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
@@ -452,7 +481,7 @@ mod tests {
     #[test]
     fn access_requests_and_nested_projection_reject_unknown_fields() {
         assert!(serde_json::from_str::<StartTrailBaseSignInRequest>(
-            r#"{"workspace_id":"wsp_018f0e0e7f7b70008000000000000000","profile_grant_id":"grt_018f0e0e7f7b70008000000000000000","remembered":false,"invited_membership_id":null,"return_url":"https://attacker.example"}"#,
+            r#"{"remembered":false,"return_url":"https://attacker.example"}"#,
         )
         .is_err());
         assert!(serde_json::from_str::<SelectBrowserSessionProfileRequest>(
