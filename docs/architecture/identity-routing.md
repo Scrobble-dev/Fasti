@@ -150,7 +150,8 @@ The preview reports:
 - a keyset cursor for the next bounded impact page.
 
 Each page must advance beyond the requested cursor and must not exceed the
-exact requested page limit.
+exact requested page limit. Its aggregate affected, unresolved, and possible
+season-regrouping counts cannot be lower than the rows already returned.
 
 Apply uses an operation ID, a semantic digest, and the expected policy
 revision. Its result is built from that exact command and must retain the same

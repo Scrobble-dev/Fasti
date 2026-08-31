@@ -482,6 +482,15 @@ impl AnimeGroupingPolicyImpact {
             record.previous_preference() == policy.preference()
                 && record.proposed_preference() == proposed_preference
         });
+        let page_affected = records
+            .iter()
+            .filter(|record| record.route_changed())
+            .count() as u64;
+        let page_unresolved = records.iter().filter(|record| record.unresolved()).count() as u64;
+        let page_season_regroupings = records
+            .iter()
+            .filter(|record| record.possible_season_regrouping())
+            .count() as u64;
         if policy.profile_id() != query.access().profile_id()
             || policy.scope() != query.scope()
             || !policy_state_matches_change(
@@ -495,6 +504,9 @@ impl AnimeGroupingPolicyImpact {
             || affected_records > total_records
             || unresolved_routes > total_records
             || possible_season_regroupings > affected_records
+            || page_affected > affected_records
+            || page_unresolved > unresolved_routes
+            || page_season_regroupings > possible_season_regroupings
             || !records_are_strictly_ordered
             || !page_advances
             || !cursor_is_valid
@@ -1129,7 +1141,7 @@ mod tests {
             AnimeGroupingPolicySource::ProfileDefault,
             1,
             0,
-            0,
+            1,
             0,
             vec![matching_record],
             None,
@@ -1159,13 +1171,78 @@ mod tests {
                 AnimeGroupingPolicySource::ProfileDefault,
                 1,
                 0,
-                0,
+                1,
                 0,
                 vec![record],
                 None,
             )
             .is_err());
         }
+    }
+
+    #[test]
+    fn impact_result_rejects_counts_below_the_returned_page() {
+        let policy = AnimeGroupingPolicyView::try_new(
+            ProfileId::new_v7(),
+            AnimeGroupingPolicyScope::Profile,
+            AnimeGroupingPolicySource::ProfileDefault,
+            AnimeGroupingPreference::Automatic,
+            1,
+        )
+        .expect("valid profile policy");
+        let query = preview_query(
+            policy,
+            AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::KeepMalReleasesSeparate),
+            None,
+            MAX_IDENTITY_IMPACT_PAGE,
+        );
+        let mut records = vec![
+            crate::preview_anime_grouping_change_for_record(
+                RecordId::new_v7(),
+                AnimeGroupingPreference::Automatic,
+                AnimeGroupingPreference::KeepMalReleasesSeparate,
+                &[
+                    fasti_domain::ExternalIdentifierClaim::try_new(
+                        "imdb.title",
+                        fasti_domain::Grain::Series,
+                        "tt28254942",
+                    )
+                    .expect("IMDb identifier"),
+                    fasti_domain::ExternalIdentifierClaim::try_new(
+                        "mal.anime",
+                        fasti_domain::Grain::Release,
+                        "49894",
+                    )
+                    .expect("MAL identifier"),
+                ],
+            ),
+            crate::preview_anime_grouping_change_for_record(
+                RecordId::new_v7(),
+                AnimeGroupingPreference::Automatic,
+                AnimeGroupingPreference::KeepMalReleasesSeparate,
+                &[],
+            ),
+        ];
+        records.sort_by_key(|record| record.record_id().uuid());
+        let impact = |affected, unresolved, regroupings| {
+            AnimeGroupingPolicyImpact::try_new(
+                &query,
+                policy,
+                AnimeGroupingPreference::KeepMalReleasesSeparate,
+                AnimeGroupingPolicySource::ProfileDefault,
+                2,
+                affected,
+                unresolved,
+                regroupings,
+                records.clone(),
+                None,
+            )
+        };
+
+        assert!(impact(1, 1, 1).is_ok());
+        assert!(impact(0, 1, 0).is_err());
+        assert!(impact(1, 0, 1).is_err());
+        assert!(impact(1, 1, 0).is_err());
     }
 
     #[test]
