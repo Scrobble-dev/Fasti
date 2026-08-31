@@ -767,10 +767,11 @@ deployed.
   verified TrailBase release, artifact, and physical root. The native and
   Desktop launchers auto-start only an already initialized TrailBase root. They
   never initialize it.
-- Commit `0873e227027ff713a5fb40671cf40088e625a018` adds
+- Historical commit `0873e227027ff713a5fb40671cf40088e625a018` added
   `cargo xtask test milestone --body C1`. It writes the gate-suite receipt at
   `target/fasti-receipts/access-c1.json`. It does not write or accept a C1
-  closure manifest.
+  closure manifest. Section 2.10 and the current runner supersede that receipt's
+  delivery scope.
 - Commit `0b14bd69c8d00bcc25fd8d63119e2e79106f10ec` binds the implemented Access
   projection to the A+C UI evidence owner without claiming package smoke.
 - Commit `dde753d77aa5022cdcffc7b284f2abf78c94af79` preserves exact installation
@@ -1429,7 +1430,7 @@ C1 reuses these owners. It does not rebuild them.
 - [x] **T5 (P1, human: ~3 days / Codex: ~1 day)** — Gate 10 A+C source — Implement permanent A, resumable C, and shared B evidence from one projection.
   - Surfaced by: UI test review; the earlier truthful unavailable shells required one implemented projection and separate A and C purposes.
   - Files: existing runtime settings owner, host, types, and `access-c1.spec.ts` after M2 handoff.
-  - Verify: focused browser, theme, reflow, automated Axe, Tabler-policy, and Impeccable source checks. Packaged and manual acceptance stays in T6.
+  - Verify: focused browser, theme, reflow, automated Axe, Tabler-policy, and Impeccable source checks. Ordinary-browser manual acceptance stays in T6; packaged acceptance belongs to `C1-TAURI-AUTH`.
 - [ ] **T6 (P1, human: ~2 days / Codex: ~6 hours)** — Delivery — Run the C1 milestone, open one PR, merge the green exact head, and verify merged `dev`.
   - Surfaced by: test and delivery review; the in-scope runner exists, but its exact-head receipt and delivery evidence are pending.
   - Files: existing xtask/test/evidence/documentation owners after M2 handoff.
@@ -1462,7 +1463,7 @@ C1 reuses these owners. It does not rebuild them.
 | Codex Review  | `/codex review`       | Independent 2nd opinion         | 0    | CLEAR BY EQUIVALENT READ-ONLY REVIEWS | Independent C1.3d review found and closed shared-runtime, Android-capability, two-start, PKCE-capacity, and shutdown-drain defects. Three continuation reviews then converged on the existing-row design. Platform evidence remains pending. |
 | Eng Review    | `/plan-eng-review`    | Architecture & tests (required) | 3    | CLEAR                                 | The identity-first state machine, persisted confirmation, expiry/restart rules, cookie rotation, bounded candidates, final transaction, and lean test matrix are frozen in section 2.8.                                                      |
 | Design Review | `/plan-design-review` | UI/UX gaps                      | 0    | —                                     | Existing approved Gate 10 A+C review and artifact hashes remain binding. Runtime design evidence stays in C1.4.                                                                                                                              |
-| DX Review     | `/plan-devex-review`  | Developer experience gaps       | 1    | CONTRACT CLEAR; LIVE AUDIT DEFERRED   | The request/response, SDK, cookie, retry, Workbench host, copy, and no-display-name limitation are frozen. The skill's required live product audit runs after the packaged C1.4 surface exists.                                              |
+| DX Review     | `/plan-devex-review`  | Developer experience gaps       | 1    | CONTRACT CLEAR; LIVE AUDIT DEFERRED   | The request/response, SDK, cookie, retry, Workbench host, copy, and no-display-name limitation are frozen. The skill's required live product audit runs against the ordinary-browser C1 surface.                                             |
 
 **OUTSIDE REVIEW:** Read-only subagents support direct backchannel C1 plus
 separate upstream hardening and identified the callback, association,
