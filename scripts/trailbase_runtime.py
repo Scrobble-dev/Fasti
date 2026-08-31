@@ -1519,6 +1519,7 @@ def verify_oci_container(root: Path, runtime: str, name: str) -> None:
     user = str(config.get("User", "")).split(":", 1)[0]
     command = config.get("Cmd", [])
     entrypoint = config.get("Entrypoint", [])
+    environment = config.get("Env", [])
     required_pairs = [
         ["--depot", "/app/trailroot/depot"],
         ["--public-url", "http://127.0.0.1:4000"],
@@ -1527,10 +1528,21 @@ def verify_oci_container(root: Path, runtime: str, name: str) -> None:
         ["--cors-allowed-origins", "http://127.0.0.1:4000"],
         ["--runtime-threads", "1"],
     ]
+    required_prefix = [
+        "/app/trailroot/runtime.lock",
+        "/bin/sh",
+        "-c",
+        'umask 077; exec "$@"',
+        "sh",
+        "/app/trail",
+    ]
     if (
         user in {"", "0", "root"}
         or entrypoint not in (["/usr/bin/flock"], "/usr/bin/flock")
         or not isinstance(command, list)
+        or not isinstance(environment, list)
+        or environment.count("XDG_CACHE_HOME=/app/trailroot/.cache") != 1
+        or command[: len(required_prefix)] != required_prefix
         or not all(
             any(command[index : index + 2] == pair for index in range(len(command) - 1))
             for pair in required_pairs

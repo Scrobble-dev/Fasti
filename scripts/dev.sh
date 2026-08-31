@@ -495,6 +495,12 @@ _trailbase_start_container() {
     return 1
   fi
   python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" prepare-runtime-lock "$TRAILBASE_ROOT" >/dev/null
+  if [[ -L "$TRAILBASE_ROOT/.cache" ]] || [[ -e "$TRAILBASE_ROOT/.cache" && ! -d "$TRAILBASE_ROOT/.cache" ]]; then
+    echo "TrailBase OCI cache must be a private directory inside the TrailBase root" >&2
+    return 1
+  fi
+  (umask 077; mkdir -p "$TRAILBASE_ROOT/.cache")
+  chmod 700 -- "$TRAILBASE_ROOT/.cache"
   python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" verify-root "$TRAILBASE_ROOT" >/dev/null
   reference="$(python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" prepare-oci "$TRAILBASE_ROOT" --runtime "$runtime" --offline)"
   local port_probe_result=0
@@ -514,6 +520,7 @@ _trailbase_start_container() {
   container_id="$("$runtime" run -d --name "$TRAILBASE_CONTAINER_NAME" --rm --pull never \
     --log-driver none \
     "${user_args[@]}" \
+    --env XDG_CACHE_HOME=/app/trailroot/.cache \
     --memory 192m --memory-swap 192m --cpus 1 --pids-limit 128 \
     --read-only --security-opt no-new-privileges --cap-drop ALL \
     --publish 127.0.0.1:4000:4000 \
@@ -521,6 +528,7 @@ _trailbase_start_container() {
     --entrypoint /usr/bin/flock \
     "$reference" \
     /app/trailroot/runtime.lock \
+    /bin/sh -c 'umask 077; exec "$@"' sh \
     /app/trail \
     --depot /app/trailroot/depot \
     --public-url "$TRAILBASE_PUBLIC_URL" \

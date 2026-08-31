@@ -85,9 +85,21 @@ if host.get("PortBindings") != {"4000/tcp": [{"HostIp": "127.0.0.1", "HostPort":
     raise SystemExit("OCI public port boundary drifted")
 if config.get("Image") != expected_image:
     raise SystemExit("OCI image is not the exact release digest")
+if config.get("Env", []).count("XDG_CACHE_HOME=/app/trailroot/.cache") != 1:
+    raise SystemExit("OCI runtime cache is not confined to the private TrailBase root")
 if config.get("User", "").split(":", 1)[0] in ("", "0", "root"):
     raise SystemExit("OCI runtime user is root")
 command = config.get("Cmd", [])
+expected_prefix = [
+    "/app/trailroot/runtime.lock",
+    "/bin/sh",
+    "-c",
+    'umask 077; exec "$@"',
+    "sh",
+    "/app/trail",
+]
+if command[:len(expected_prefix)] != expected_prefix:
+    raise SystemExit("OCI command does not set a private umask before TrailBase")
 for pair in (["--admin-address", "127.0.0.1:4001"], ["--runtime-threads", "1"]):
     if not any(command[index:index + 2] == pair for index in range(len(command) - 1)):
         raise SystemExit(f"OCI command omits {' '.join(pair)}")
