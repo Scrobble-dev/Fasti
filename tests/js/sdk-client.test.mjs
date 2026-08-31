@@ -133,14 +133,13 @@ test("identity routing SDK binds queries, policy bodies, and response identity",
     fetch: async (url, init) => {
       requests.push({ url: String(url), init });
       const path = new URL(String(url)).pathname;
-      const response =
-        path.endsWith("/identity-route")
-          ? route
-          : path.endsWith("/preview")
-            ? preview
-            : init.method === "PUT"
-              ? applied
-              : { policy };
+      const response = path.endsWith("/identity-route")
+        ? route
+        : path.endsWith("/preview")
+          ? preview
+          : init.method === "PUT"
+            ? applied
+            : { policy };
       return new Response(JSON.stringify(response), {
         headers: { "content-type": "application/json" },
       });
@@ -154,10 +153,9 @@ test("identity routing SDK binds queries, policy bodies, and response identity",
     }),
     route,
   );
-  assert.deepEqual(
-    await client.readAnimeGroupingPolicy({ scope: "profile" }),
-    { policy },
-  );
+  assert.deepEqual(await client.readAnimeGroupingPolicy({ scope: "profile" }), {
+    policy,
+  });
   assert.deepEqual(
     await client.previewAnimeGroupingPolicyChange(previewRequest),
     preview,
@@ -213,10 +211,9 @@ test("identity routing SDK binds queries, policy bodies, and response identity",
     baseUrl: "http://127.0.0.1:8420",
     credential: "credential",
     fetch: async () =>
-      new Response(
-        JSON.stringify({ ...route, record_id: v7("rec", "f") }),
-        { headers: { "content-type": "application/json" } },
-      ),
+      new Response(JSON.stringify({ ...route, record_id: v7("rec", "f") }), {
+        headers: { "content-type": "application/json" },
+      }),
   });
   await assert.rejects(
     mismatched.resolveIdentityRoute(contractIds.record, {
