@@ -1998,6 +1998,7 @@ def restore_depot(
     release_version = release_version or str(
         (_release or load_release())["version"]
     )
+    selected_release = _release or _locked_release(release_version)
     target = Path(os.path.abspath(target))
     if target.exists() or target.is_symlink():
         raise ReleaseError("isolated restore target already exists")
@@ -2127,10 +2128,15 @@ def restore_depot(
         prepare_runtime_lock(temporary)
         verify_runtime_lock(temporary)
         verify_private_root(temporary, release_version)
+        if "auth_ui" in selected_release:
+            _verify_installed_auth_ui(
+                temporary / selected_release["auth_ui"]["install_path"],
+                selected_release,
+            )
         restored_receipt = _declare_restored_installation(
             temporary,
             release_version,
-            _release=_release,
+            _release=selected_release,
             _release_lock_identity_override=_release_lock_identity_override,
         )
         current_parent = _validate_restore_parent(parent)
@@ -2280,6 +2286,36 @@ def _backup_restore_self_test() -> None:
             _release=release,
             _release_lock_identity_override=release_lock_identity,
         )
+
+        tampered_auth_ui = base / "tampered-auth-ui.zip"
+        with zipfile.ZipFile(backup) as source, zipfile.ZipFile(
+            tampered_auth_ui,
+            "w",
+            compression=zipfile.ZIP_DEFLATED,
+        ) as destination:
+            manifest = json.loads(source.read("manifest.json"))
+            component_name = release["auth_ui"]["install_path"]
+            component_payload = b"tampered"
+            component_entry = next(
+                entry for entry in manifest["entries"] if entry["path"] == component_name
+            )
+            component_entry["bytes"] = len(component_payload)
+            component_entry["sha256"] = hashlib.sha256(component_payload).hexdigest()
+            for info in source.infolist():
+                if info.filename == "manifest.json":
+                    payload = json.dumps(manifest, indent=2, sort_keys=True).encode()
+                elif info.filename == component_name:
+                    payload = component_payload
+                else:
+                    payload = source.read(info.filename)
+                destination.writestr(info, payload)
+        os.chmod(tampered_auth_ui, 0o600)
+        try:
+            restore_fixture(tampered_auth_ui, base / "tampered-auth-ui-restore")
+        except ReleaseError:
+            pass
+        else:
+            raise ReleaseError("restore accepted a tampered Auth UI component")
 
         def rewrite_backup_lock(destination: Path, identity: str) -> None:
             with zipfile.ZipFile(backup) as source:
