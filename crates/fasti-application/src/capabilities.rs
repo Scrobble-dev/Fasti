@@ -51,6 +51,7 @@ pub enum AuthorizationKind {
     LocalOperator,
     BrowserSession,
     Scoped,
+    ScopedOrBrowserSession,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -236,10 +237,12 @@ define_capabilities!(
         B2,
         Finalized,
         Implemented,
-        Scoped,
+        ScopedOrBrowserSession,
         [ObservationAccept],
         [
             AuthenticationFailed,
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
             CapacityExceeded,
             Forbidden,
             IdempotencyConflict,
@@ -247,6 +250,7 @@ define_capabilities!(
             InvalidObservation,
             MalformedJson,
             PayloadTooLarge,
+            SessionPolicyChanged,
             StorageUnavailable,
             UnsupportedMediaType,
             ValidationFailed
@@ -258,19 +262,68 @@ define_capabilities!(
         C1,
         C1,
         Finalized,
-        LaterBody,
+        Implemented,
         Unauthenticated,
         [],
         [
+            AuthBrowserBindingInvalid,
+            AuthIdentityConflict,
+            AuthSubjectUnaffiliated,
             CapabilityUnavailable,
             CapacityExceeded,
             Forbidden,
+            IdentityServiceUnavailable,
             IntegrityFailed,
             MalformedJson,
             PayloadTooLarge,
             StorageUnavailable,
+            TrailBaseProofInvalid,
+            TrailBaseSessionCleanupFailed,
+            TrailBaseTrustUnavailable,
+            TrailBaseVersionUnsupported,
             UnsupportedMediaType,
             ValidationFailed
+        ],
+        []
+    ),
+    (
+        AccessIdentityBootstrap,
+        C1,
+        C1,
+        Finalized,
+        LaterBody,
+        LocalOperator,
+        [],
+        [
+            AuthBrowserBindingInvalid,
+            AuthIdentityConflict,
+            CapacityExceeded,
+            Forbidden,
+            IdentityServiceUnavailable,
+            IntegrityFailed,
+            StorageUnavailable,
+            TrailBaseProofInvalid,
+            TrailBaseSessionCleanupFailed,
+            TrailBaseTrustUnavailable,
+            TrailBaseVersionUnsupported
+        ],
+        []
+    ),
+    (
+        ReadAccessProjection,
+        C1,
+        C1,
+        Finalized,
+        Implemented,
+        BrowserSession,
+        [],
+        [
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
+            CapabilityUnavailable,
+            IntegrityFailed,
+            SessionPolicyChanged,
+            StorageUnavailable
         ],
         []
     ),
@@ -279,7 +332,7 @@ define_capabilities!(
         C1,
         C1,
         Finalized,
-        LaterBody,
+        Implemented,
         BrowserSession,
         [],
         [
@@ -297,7 +350,7 @@ define_capabilities!(
         C1,
         C1,
         Finalized,
-        LaterBody,
+        Implemented,
         BrowserSession,
         [],
         [
@@ -316,7 +369,7 @@ define_capabilities!(
         C1,
         C1,
         Finalized,
-        LaterBody,
+        Implemented,
         BrowserSession,
         [],
         [
@@ -334,7 +387,7 @@ define_capabilities!(
         C1,
         C1,
         Finalized,
-        LaterBody,
+        Implemented,
         BrowserSession,
         [],
         [
@@ -354,7 +407,7 @@ define_capabilities!(
         C1,
         C1,
         Finalized,
-        LaterBody,
+        Implemented,
         BrowserSession,
         [],
         [
@@ -374,7 +427,7 @@ define_capabilities!(
         C1,
         C1,
         Finalized,
-        LaterBody,
+        Implemented,
         BrowserSession,
         [],
         [
@@ -393,7 +446,7 @@ define_capabilities!(
         C1,
         C1,
         Finalized,
-        LaterBody,
+        Implemented,
         BrowserSession,
         [],
         [
@@ -412,7 +465,7 @@ define_capabilities!(
         C1,
         C1,
         Finalized,
-        LaterBody,
+        Implemented,
         BrowserSession,
         [],
         [
@@ -421,8 +474,11 @@ define_capabilities!(
             CapabilityUnavailable,
             Forbidden,
             IntegrityFailed,
+            MalformedJson,
+            PayloadTooLarge,
             SessionPolicyChanged,
             StorageUnavailable,
+            UnsupportedMediaType,
             ValidationFailed
         ],
         []
@@ -460,16 +516,19 @@ define_capabilities!(
         B2,
         Finalized,
         Implemented,
-        Scoped,
+        ScopedOrBrowserSession,
         [IdentityWrite],
         [
             AuthenticationFailed,
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
             CapabilityUnavailable,
             Forbidden,
             IntegrityFailed,
             InvalidIdentifier,
             MalformedJson,
             PayloadTooLarge,
+            SessionPolicyChanged,
             StorageUnavailable,
             UnsupportedMediaType,
             ValidationFailed
@@ -482,10 +541,12 @@ define_capabilities!(
         B2,
         Finalized,
         Implemented,
-        Scoped,
+        ScopedOrBrowserSession,
         [IdentityWrite],
         [
             AuthenticationFailed,
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
             CapabilityUnavailable,
             Forbidden,
             IdentityConflict,
@@ -494,6 +555,7 @@ define_capabilities!(
             MalformedJson,
             PayloadTooLarge,
             RecordNotFound,
+            SessionPolicyChanged,
             StorageUnavailable,
             UnsupportedMediaType,
             ValidationFailed
@@ -506,13 +568,16 @@ define_capabilities!(
         B2,
         Finalized,
         Implemented,
-        Scoped,
+        ScopedOrBrowserSession,
         [IdentityRead],
         [
             AuthenticationFailed,
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
             CapabilityUnavailable,
             Forbidden,
             IntegrityFailed,
+            SessionPolicyChanged,
             StorageUnavailable
         ],
         []
@@ -523,15 +588,18 @@ define_capabilities!(
         B2,
         Finalized,
         Implemented,
-        Scoped,
+        ScopedOrBrowserSession,
         [IdentityWrite],
         [
             AuthenticationFailed,
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
             CapabilityUnavailable,
             Forbidden,
             IntegrityFailed,
             MalformedJson,
             PayloadTooLarge,
+            SessionPolicyChanged,
             StorageUnavailable,
             UnsupportedMediaType,
             ValidationFailed
@@ -544,13 +612,16 @@ define_capabilities!(
         B2,
         Finalized,
         Implemented,
-        Scoped,
+        ScopedOrBrowserSession,
         [ProfileStateRead],
         [
             AuthenticationFailed,
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
             CapabilityUnavailable,
             Forbidden,
             IntegrityFailed,
+            SessionPolicyChanged,
             StorageUnavailable
         ],
         []
@@ -561,15 +632,18 @@ define_capabilities!(
         B2,
         Finalized,
         Implemented,
-        Scoped,
+        ScopedOrBrowserSession,
         [ProfileStateWrite],
         [
             AuthenticationFailed,
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
             CapabilityUnavailable,
             Forbidden,
             IntegrityFailed,
             MalformedJson,
             PayloadTooLarge,
+            SessionPolicyChanged,
             StorageUnavailable,
             UnsupportedMediaType,
             ValidationFailed
@@ -582,13 +656,16 @@ define_capabilities!(
         B2,
         Finalized,
         Implemented,
-        Scoped,
+        ScopedOrBrowserSession,
         [ProfileStateWrite],
         [
             AuthenticationFailed,
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
             CapabilityUnavailable,
             Forbidden,
             IntegrityFailed,
+            SessionPolicyChanged,
             StorageUnavailable
         ],
         []
@@ -599,13 +676,16 @@ define_capabilities!(
         B2,
         Finalized,
         Implemented,
-        Scoped,
+        ScopedOrBrowserSession,
         [ProfileStateRead],
         [
             AuthenticationFailed,
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
             CapabilityUnavailable,
             Forbidden,
             IntegrityFailed,
+            SessionPolicyChanged,
             StorageUnavailable
         ],
         []
@@ -616,16 +696,19 @@ define_capabilities!(
         B2,
         Finalized,
         Implemented,
-        Scoped,
+        ScopedOrBrowserSession,
         [ProfileStateWrite],
         [
             AuthenticationFailed,
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
             CapabilityUnavailable,
             Forbidden,
             IntegrityFailed,
             MalformedJson,
             PayloadTooLarge,
             RecordNotFound,
+            SessionPolicyChanged,
             StorageUnavailable,
             UnsupportedMediaType,
             ValidationFailed
@@ -1022,7 +1105,10 @@ mod tests {
             .collect();
         assert_eq!(
             local_operator_capabilities,
-            [CapabilityKey::RestoreWorkspace]
+            [
+                CapabilityKey::AccessIdentityBootstrap,
+                CapabilityKey::RestoreWorkspace
+            ]
         );
     }
 
@@ -1108,8 +1194,10 @@ mod tests {
             .any(|code| *code == ProblemCode::AuthenticationFailed));
 
         for capability in CapabilityKey::ALL.iter().copied().filter(|capability| {
-            capability.authorization_kind() == AuthorizationKind::Scoped
-                && *capability != CapabilityKey::EnrollFirstClient
+            matches!(
+                capability.authorization_kind(),
+                AuthorizationKind::Scoped | AuthorizationKind::ScopedOrBrowserSession
+            ) && *capability != CapabilityKey::EnrollFirstClient
         }) {
             assert!(
                 capability
@@ -1155,6 +1243,62 @@ mod tests {
         assert!(!verify
             .iter()
             .any(|published| *published == ProblemCode::DataRootLocked));
+    }
+
+    #[test]
+    fn browser_application_access_is_limited_to_the_frozen_ten_capabilities() {
+        let hybrid: Vec<_> = CapabilityKey::ALL
+            .iter()
+            .copied()
+            .filter(|capability| {
+                capability.authorization_kind() == AuthorizationKind::ScopedOrBrowserSession
+            })
+            .collect();
+        assert_eq!(
+            hybrid,
+            [
+                CapabilityKey::AcceptObservation,
+                CapabilityKey::CreateRecord,
+                CapabilityKey::AttachIdentifier,
+                CapabilityKey::ListRecords,
+                CapabilityKey::RegisterNamespace,
+                CapabilityKey::GetNuvioCollections,
+                CapabilityKey::ReplaceNuvioCollections,
+                CapabilityKey::ClearNuvioCollections,
+                CapabilityKey::ListTrackingDispositions,
+                CapabilityKey::SetTrackingDisposition,
+            ]
+        );
+        assert!(hybrid
+            .iter()
+            .all(|capability| !capability.required_scopes().is_empty()));
+        for capability in hybrid {
+            for problem in [
+                ProblemCode::BrowserSessionExpired,
+                ProblemCode::BrowserSessionRevoked,
+                ProblemCode::SessionPolicyChanged,
+            ] {
+                assert!(
+                    capability.allowed_problem_codes().contains(&problem),
+                    "{capability:?} must declare {} for its browser-session branch",
+                    problem.as_str()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn c1_projection_and_identity_bootstrap_keep_distinct_authority() {
+        assert_eq!(
+            CapabilityKey::AccessIdentityBootstrap.authorization_kind(),
+            AuthorizationKind::LocalOperator
+        );
+        assert_eq!(
+            CapabilityKey::ReadAccessProjection.authorization_kind(),
+            AuthorizationKind::BrowserSession
+        );
+        assert!(!CapabilityKey::AccessIdentityBootstrap.is_production_executable());
+        assert!(CapabilityKey::ReadAccessProjection.is_production_executable());
     }
 
     #[test]

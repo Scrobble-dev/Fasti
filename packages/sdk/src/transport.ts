@@ -5,6 +5,7 @@ import {
   FastiContractParseError,
   parseAcceptObservationRequest,
   parseAcceptObservationResponse,
+  parseAccessProjectionResponse,
   parseAttachIdentifierRequest,
   parseAttachIdentifierResponse,
   parseCapabilityDiscoveryResponse,
@@ -19,6 +20,7 @@ import {
   parseInitializeNodeRequest,
   parseInitializeNodeResponse,
   parseListRecordsResponse,
+  parseListBrowserSessionsResponse,
   parseListProvidersResponse,
   parseListTrackingDispositionsResponse,
   parseMetadataProjectionConfigurationResponse,
@@ -31,17 +33,25 @@ import {
   parseProviderHealthResponse,
   parseRefreshMetadataClaimsRequest,
   parseRefreshMetadataClaimsResponse,
+  parseReadBrowserSessionResponse,
+  parseRevokeBrowserSessionsResponse,
   parseReceiptCommittedEvent,
   parseRegisterNamespaceRequest,
   parseRegisterNamespaceResponse,
   parseSetTrackingDispositionRequest,
+  parseSelectBrowserSessionProfileRequest,
+  parseSelectBrowserSessionProfileResponse,
+  parseStartTrailBaseSignInRequest,
+  parseStartTrailBaseSignInResponse,
   parseTrackingDispositionStateDto,
   parseReplayReceiptResponse,
   parseSubmitObservationRequest,
   parseSubmitObservationResponse,
+  parseRotateBrowserSessionResponse,
   RECEIPT_STREAM_CONTRACT,
   type AcceptObservationRequest,
   type AcceptObservationResponse,
+  type AccessProjectionResponse,
   type AttachIdentifierRequest,
   type AttachIdentifierResponse,
   type CapabilityDiscoveryResponse,
@@ -57,6 +67,7 @@ import {
   type InitializeNodeRequest,
   type InitializeNodeResponse,
   type ListRecordsResponse,
+  type ListBrowserSessionsResponse,
   type ListProvidersResponse,
   type ListTrackingDispositionsResponse,
   type MetadataProjectionConfigurationResponse,
@@ -71,13 +82,20 @@ import {
   type ProviderHealthResponse,
   type RefreshMetadataClaimsRequest,
   type RefreshMetadataClaimsResponse,
+  type ReadBrowserSessionResponse,
+  type RevokeBrowserSessionsResponse,
   type ReceiptCommittedEnvelope,
   type RegisterNamespaceRequest,
   type RegisterNamespaceResponse,
   type SetTrackingDispositionRequest,
+  type SelectBrowserSessionProfileRequest,
+  type SelectBrowserSessionProfileResponse,
+  type StartTrailBaseSignInRequest,
+  type StartTrailBaseSignInResponse,
   type ReplayReceiptResponse,
   type SubmitObservationRequest,
   type SubmitObservationResponse,
+  type RotateBrowserSessionResponse,
   type TrackingDispositionStateDto,
 } from "./generated.js";
 
@@ -239,6 +257,7 @@ const MAX_SSE_EVENT_LINES = 256;
 const MAX_SSE_CURSOR_CHARACTERS = 512;
 const RECEIPT_ID = /^rcp_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/;
 const RECORD_ID = /^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/;
+const BROWSER_SESSION_ID = /^ses_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/;
 const PROVIDER_PATH_ID = /^[a-z0-9][a-z0-9._-]{0,127}$/;
 const HEALTH_PROBLEM_CONTRACT = {
   capabilityId: "system.health",
@@ -899,6 +918,192 @@ export class FastiClient {
     });
   }
 
+  startTrailBaseSignIn(
+    request: StartTrailBaseSignInRequest,
+    options: CallOptions = {},
+  ): Promise<StartTrailBaseSignInResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.startTrailBaseSignIn;
+    const body = parseOutgoing(
+      parseStartTrailBaseSignInRequest,
+      request,
+      "TrailBase sign-in request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "never",
+      body,
+      responseParser: parseStartTrailBaseSignInResponse,
+      responseLabel: "TrailBase sign-in response",
+      options,
+    });
+  }
+
+  readAccessProjection(
+    options: CallOptions = {},
+  ): Promise<AccessProjectionResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.readAccessProjection;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      responseParser: parseAccessProjectionResponse,
+      responseLabel: "Access projection response",
+      options,
+    });
+  }
+
+  readBrowserSession(
+    options: CallOptions = {},
+  ): Promise<ReadBrowserSessionResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.readBrowserSession;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      responseParser: parseReadBrowserSessionResponse,
+      responseLabel: "Browser session response",
+      options,
+    });
+  }
+
+  endBrowserSession(options: CallOptions = {}): Promise<void> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.endBrowserSession;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      browserMutation: true,
+      problemContract: operation,
+      retryMode: "never",
+      responseLabel: "End browser session response",
+      options,
+    });
+  }
+
+  listBrowserSessions(
+    options: CallOptions = {},
+  ): Promise<ListBrowserSessionsResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.listBrowserSessions;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      responseParser: parseListBrowserSessionsResponse,
+      responseLabel: "Browser session inventory response",
+      options,
+    });
+  }
+
+  revokeBrowserSession(
+    browserSessionId: string,
+    options: CallOptions = {},
+  ): Promise<RevokeBrowserSessionsResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.revokeBrowserSession;
+    const safeBrowserSessionId = contractPathIdentifier(
+      browserSessionId,
+      BROWSER_SESSION_ID,
+      "browserSessionId",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path.replace(
+        "{browser_session_id}",
+        encodeURIComponent(safeBrowserSessionId),
+      ),
+      authenticated: operation.authenticated,
+      browserMutation: true,
+      problemContract: operation,
+      retryMode: "never",
+      responseParser: parseRevokeBrowserSessionsResponse,
+      responseLabel: "Browser session revocation response",
+      options,
+    });
+  }
+
+  revokeOtherBrowserSessions(
+    options: CallOptions = {},
+  ): Promise<RevokeBrowserSessionsResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.revokeOtherBrowserSessions;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      browserMutation: true,
+      problemContract: operation,
+      retryMode: "never",
+      responseParser: parseRevokeBrowserSessionsResponse,
+      responseLabel: "Other browser session revocation response",
+      options,
+    });
+  }
+
+  revokeAllBrowserSessions(
+    options: CallOptions = {},
+  ): Promise<RevokeBrowserSessionsResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.revokeAllBrowserSessions;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      browserMutation: true,
+      problemContract: operation,
+      retryMode: "never",
+      responseParser: parseRevokeBrowserSessionsResponse,
+      responseLabel: "All browser session revocation response",
+      options,
+    });
+  }
+
+  rotateBrowserSession(
+    options: CallOptions = {},
+  ): Promise<RotateBrowserSessionResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.rotateBrowserSession;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      browserMutation: true,
+      problemContract: operation,
+      retryMode: "never",
+      responseParser: parseRotateBrowserSessionResponse,
+      responseLabel: "Browser session rotation response",
+      options,
+    });
+  }
+
+  selectBrowserSessionProfile(
+    request: SelectBrowserSessionProfileRequest,
+    options: CallOptions = {},
+  ): Promise<SelectBrowserSessionProfileResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.selectBrowserSessionProfile;
+    const body = parseOutgoing(
+      parseSelectBrowserSessionProfileRequest,
+      request,
+      "Browser session profile selection request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      browserMutation: true,
+      problemContract: operation,
+      retryMode: "never",
+      body,
+      responseParser: parseSelectBrowserSessionProfileResponse,
+      responseLabel: "Browser session profile selection response",
+      options,
+    });
+  }
+
   listIntegrations(
     options: CallOptions = {},
   ): Promise<{ integrations: Array<Record<string, unknown>> }> {
@@ -1097,6 +1302,7 @@ export class FastiClient {
     readonly method: "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
     readonly path: string;
     readonly authenticated: boolean;
+    readonly browserMutation?: boolean;
     readonly problemContract: ProblemContractBinding;
     readonly retryMode: RetryMode;
     readonly body?: unknown;
@@ -1127,6 +1333,9 @@ export class FastiClient {
         );
         if (serializedBody !== undefined) {
           headers.set("Content-Type", "application/json");
+        }
+        if (input.browserMutation) {
+          headers.set("X-CSRF-Token", browserCsrfToken());
         }
 
         let response: Response;
@@ -1261,6 +1470,25 @@ function parseOutgoing<T>(
   } catch (error) {
     throw protocolError(error, `${label} violates the generated contract`);
   }
+}
+
+function browserCsrfToken(): string {
+  if (typeof document === "undefined") {
+    throw new FastiProtocolError(
+      "Browser session mutations require a browser CSRF cookie",
+    );
+  }
+  const values = document.cookie
+    .split(";")
+    .map((pair) => pair.trim().split("=", 2))
+    .filter(([name]) => name === "__Host-fasti_csrf")
+    .map(([, value]) => value);
+  if (values.length !== 1 || !/^[0-9a-f]{64}$/.test(values[0] ?? "")) {
+    throw new FastiProtocolError(
+      "Browser session mutations require one valid CSRF cookie",
+    );
+  }
+  return values[0];
 }
 
 /**

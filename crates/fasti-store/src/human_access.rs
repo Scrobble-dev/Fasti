@@ -9,8 +9,8 @@ use fasti_application::{
     CompleteTrailBaseBootstrapCommand, CompleteTrailBaseSignInCommand, ConfirmedTrailBaseIdentity,
     CreatedBrowserSession, FailAuthCeremonyCommand, FastiProblem, HumanAccessPort,
     PreauthorizeTrailBaseBootstrapCommand, PreauthorizeTrailBaseSignInCommand, ProblemCode,
-    SessionPolicy, StartAuthCeremonyCommand, StartTrailBaseBootstrapCommand,
-    VerifyTrailBaseInstallationCommand,
+    ReadTrailBaseInstallationQuery, SessionPolicy, StartAuthCeremonyCommand,
+    StartTrailBaseBootstrapCommand, VerifyTrailBaseInstallationCommand,
 };
 use fasti_domain::{
     AccessAuditEventKind, AccessInvalidationEffect, AccessInvariantError, AdministratorContinuity,
@@ -829,8 +829,8 @@ fn maintain_ceremonies(
     Ok(expired)
 }
 
-fn load_installation(transaction: &Transaction<'_>) -> StoreResult<Option<TrailBaseInstallation>> {
-    let row = transaction
+fn load_installation(connection: &Connection) -> StoreResult<Option<TrailBaseInstallation>> {
+    let row = connection
         .query_row(
             r#"
             SELECT trailbase_instance_id, physical_root_identity, activation_state,
@@ -2128,6 +2128,16 @@ fn parse_time(value: &str) -> StoreResult<DateTime<Utc>> {
 }
 
 impl HumanAccessPort for SqliteKernel {
+    fn read_trailbase_installation(
+        &self,
+        query: ReadTrailBaseInstallationQuery,
+    ) -> ApplicationResult<Option<TrailBaseInstallation>> {
+        let correlation_id = query.correlation_id();
+        let connection =
+            self.lock_connection(CapabilityKey::ReadAccessProjection, correlation_id)?;
+        load_installation(&connection).map_err(|error| access_problem(error, correlation_id))
+    }
+
     fn verify_trailbase_installation(
         &self,
         command: VerifyTrailBaseInstallationCommand,

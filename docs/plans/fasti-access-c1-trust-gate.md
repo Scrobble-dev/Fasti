@@ -365,6 +365,12 @@ review the active gate and prepare the next one.
   | `auth_assurance_insufficient` | 403 | `no_mutation` | `retry_after_correction` | `use_required_assurance` — Use a sign-in method that meets the required assurance level |
   | `recent_authentication_required` | 403 | `no_mutation` | `retry_after_correction` | `authenticate_again` — Authenticate again before this sensitive action |
 
+- `auth_last_sign_in_method`, `auth_assurance_insufficient`, and
+  `recent_authentication_required` keep these frozen descriptors but remain
+  reserved outside the generated callable-capability problem catalog until
+  their unavailable controls gain an implementing capability. Do not attach an
+  impossible error to an unrelated active route merely to satisfy catalog
+  coverage.
 - Correct the existing `register_namespace_definition` authorization key from
   `AttachIdentifier` to `RegisterNamespace` before enabling the mixed-auth
   matrix. This is a pre-existing root-cause defect, not a reason to retain the
@@ -794,6 +800,10 @@ configuration keys in C1.
 | Remembered browser absolute lifetime | 30 days     | Idle timeout still applies.                            |
 | Last-seen write interval             | 60 seconds  | Bounds write amplification.                            |
 | Recent-authentication window         | 10 minutes  | Derived only from a proven fresh authentication event. |
+
+The one-use browser authentication ceremony expires after 10 minutes. This
+fixed C1 lifetime is owned beside the session policy in the application layer;
+it is not an operator configuration key and does not extend on activity.
 
 A more restrictive future policy takes effect on the next authentication
 check. A less restrictive policy never extends an existing credential without

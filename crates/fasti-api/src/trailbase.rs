@@ -6,14 +6,14 @@ use chrono::{DateTime, TimeDelta, Utc};
 use fasti_application::{
     CancelAuthCeremonyCommand, CompleteTrailBaseBootstrapCommand, CompleteTrailBaseSignInCommand,
     ConfirmedTrailBaseIdentity, CreatedBrowserSession, FailAuthCeremonyCommand, HumanAccessPort,
-    PreauthorizeTrailBaseBootstrapCommand, PreauthorizeTrailBaseSignInCommand, SecretMaterial,
-    StartAuthCeremonyCommand, StartTrailBaseBootstrapCommand,
+    PreauthorizeTrailBaseBootstrapCommand, PreauthorizeTrailBaseSignInCommand, ProblemCode,
+    SecretMaterial, StartAuthCeremonyCommand, StartTrailBaseBootstrapCommand,
 };
 use fasti_domain::{
     AuthCallbackPath, AuthCeremony, AuthCeremonyFailure, AuthCeremonyProtocol, AuthCeremonyPurpose,
-    AuthCeremonySelection, AuthenticationMethod, AuthenticationProvenance, OperationId,
-    RequestCorrelationId, Sha256Digest, TrailBaseActivationState, TrailBaseInstallation,
-    TrailBaseInstanceId, TrailBaseSubject,
+    AuthCeremonySelection, AuthReturnTarget, AuthenticationMethod, AuthenticationProvenance,
+    OperationId, RequestCorrelationId, Sha256Digest, TrailBaseActivationState,
+    TrailBaseInstallation, TrailBaseInstanceId, TrailBaseSubject,
 };
 use fasti_provider_runtime::{bounded_body, pinned_client_with_timeouts};
 use reqwest::{
@@ -31,6 +31,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use zeroize::Zeroizing;
 
 const PRODUCTION_TRAILBASE_ADDR: &str = "127.0.0.1:4000";
+const AUTHORIZATION_UI_PATH: &str = "/_/auth/login";
 const TOKEN_PATH: &str = "/api/auth/v1/token";
 const STATUS_PATH: &str = "/api/auth/v1/status";
 const LOGOUT_PATH: &str = "/api/auth/v1/logout";
@@ -46,6 +47,7 @@ const TOTAL_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_FUTURE_SKEW: TimeDelta = TimeDelta::seconds(60);
 const MAX_TOKEN_LIFETIME: TimeDelta = TimeDelta::hours(2);
 const CALLBACK_PATH: &str = "/api/access/v1/trailbase/callback";
+const CALLBACK_URL: &str = "http://127.0.0.1:8420/api/access/v1/trailbase/callback";
 
 pub(super) struct TrailBaseClient {
     client: Client,
@@ -63,12 +65,24 @@ pub(super) struct TrailBaseOrchestrator {
 
 pub(super) struct StartedTrailBaseCeremony {
     pub(super) operation_id: OperationId,
-    pub(super) pkce_challenge: String,
+    pub(super) authorization_url: String,
+    pub(super) expires_at: DateTime<Utc>,
     pub(super) browser_binding: SecretMaterial,
+}
+
+pub(super) struct TrailBaseCallbackOutcome {
+    pub(super) created: CreatedBrowserSession,
+    pub(super) return_target: AuthReturnTarget,
+}
+
+pub(super) struct TrailBaseCallbackFailure {
+    pub(super) error: TrailBaseOrchestrationError,
+    pub(super) return_target: Option<AuthReturnTarget>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum TrailBaseOrchestrationError {
+    ApplicationProblem(ProblemCode),
     InvalidInput,
     LocalState,
     ExchangeFailed,
@@ -229,13 +243,14 @@ impl TrailBaseOrchestrator {
         created_at: DateTime<Utc>,
         expires_at: DateTime<Utc>,
     ) -> Result<StartedTrailBaseCeremony, TrailBaseOrchestrationError> {
-        let reservation = self
-            .vault
-            .reserve()
-            .map_err(|_| TrailBaseOrchestrationError::LocalState)?;
+        let reservation = self.vault.reserve()?;
         let verifier =
             PkceVerifier::generate().map_err(|_| TrailBaseOrchestrationError::LocalState)?;
         let pkce_challenge = verifier.challenge();
+        let authorization_url = self
+            .client
+            .authorization_url(&pkce_challenge)
+            .map_err(|_| TrailBaseOrchestrationError::InvalidInput)?;
         let mut binding_bytes = Zeroizing::new([0_u8; 32]);
         getrandom::fill(binding_bytes.as_mut())
             .map_err(|_| TrailBaseOrchestrationError::LocalState)?;
@@ -273,13 +288,16 @@ impl TrailBaseOrchestrator {
                 return Err(TrailBaseOrchestrationError::InvalidInput);
             }
         };
-        if persisted.is_err() {
+        if let Err(problem) = persisted {
             self.vault.remove(operation_id);
-            return Err(TrailBaseOrchestrationError::LocalState);
+            return Err(TrailBaseOrchestrationError::ApplicationProblem(
+                problem.code(),
+            ));
         }
         Ok(StartedTrailBaseCeremony {
             operation_id,
-            pkce_challenge,
+            authorization_url,
+            expires_at,
             browser_binding,
         })
     }
@@ -305,24 +323,84 @@ impl TrailBaseOrchestrator {
         correlation_id: RequestCorrelationId,
         at: DateTime<Utc>,
     ) -> Result<CreatedBrowserSession, TrailBaseOrchestrationError> {
-        let code = AuthorizationCode::parse(authorization_code)
-            .map_err(|_| TrailBaseOrchestrationError::InvalidInput)?;
+        self.callback_for_browser(
+            authorization_code,
+            browser_binding,
+            bootstrap_secret,
+            correlation_id,
+            at,
+        )
+        .await
+        .map(|outcome| outcome.created)
+        .map_err(|failure| failure.error)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) async fn callback_for_browser(
+        &self,
+        authorization_code: String,
+        browser_binding: SecretMaterial,
+        bootstrap_secret: Option<SecretMaterial>,
+        correlation_id: RequestCorrelationId,
+        at: DateTime<Utc>,
+    ) -> Result<TrailBaseCallbackOutcome, TrailBaseCallbackFailure> {
+        let code =
+            AuthorizationCode::parse(authorization_code).map_err(|_| TrailBaseCallbackFailure {
+                error: TrailBaseOrchestrationError::InvalidInput,
+                return_target: None,
+            })?;
+        let callback_path =
+            AuthCallbackPath::parse(CALLBACK_PATH).map_err(|_| TrailBaseCallbackFailure {
+                error: TrailBaseOrchestrationError::InvalidInput,
+                return_target: None,
+            })?;
         let claimed = self
             .access
             .claim_auth_ceremony(fasti_application::ClaimAuthCeremonyCommand::new(
                 sha256_digest(browser_binding.expose_bytes()),
                 self.instance_id,
                 self.activation_generation,
-                AuthCallbackPath::parse(CALLBACK_PATH)
-                    .map_err(|_| TrailBaseOrchestrationError::InvalidInput)?,
+                callback_path,
                 correlation_id,
                 at,
             ))
-            .map_err(|_| TrailBaseOrchestrationError::LocalState)?;
-        let verifier = self
-            .vault
-            .take(claimed.id())
-            .ok_or(TrailBaseOrchestrationError::LocalState)?;
+            .map_err(|_| TrailBaseCallbackFailure {
+                error: TrailBaseOrchestrationError::LocalState,
+                return_target: None,
+            })?;
+        let return_target = claimed.return_target();
+        self.finish_claimed_callback(code, claimed, bootstrap_secret, correlation_id, at)
+            .await
+            .map(|created| TrailBaseCallbackOutcome {
+                created,
+                return_target,
+            })
+            .map_err(|error| TrailBaseCallbackFailure {
+                error,
+                return_target: Some(return_target),
+            })
+    }
+
+    async fn finish_claimed_callback(
+        &self,
+        code: AuthorizationCode,
+        claimed: AuthCeremony,
+        bootstrap_secret: Option<SecretMaterial>,
+        correlation_id: RequestCorrelationId,
+        at: DateTime<Utc>,
+    ) -> Result<CreatedBrowserSession, TrailBaseOrchestrationError> {
+        let verifier = match self.vault.take(claimed.id()) {
+            Some(verifier) => verifier,
+            None => {
+                self.record_failure(
+                    claimed.id(),
+                    AuthCeremonyFailure::VerifierLostOnRestart,
+                    correlation_id,
+                    at,
+                )?;
+                return Err(TrailBaseOrchestrationError::LocalState);
+            }
+        };
         let mut session = match self.client.exchange(&code, &verifier).await {
             Ok(session) => session,
             Err(TrailBaseFailure::ExchangeFailed) => {
@@ -659,6 +737,16 @@ impl TrailBaseClient {
         debug_assert!(matches!(path, TOKEN_PATH | STATUS_PATH | LOGOUT_PATH));
         format!("{}{path}", self.origin)
     }
+
+    fn authorization_url(&self, pkce_challenge: &str) -> Result<String, ()> {
+        let mut url = reqwest::Url::parse(&format!("{}{AUTHORIZATION_UI_PATH}", self.origin))
+            .map_err(|_| ())?;
+        url.query_pairs_mut()
+            .append_pair("redirect_uri", CALLBACK_URL)
+            .append_pair("response_type", "code")
+            .append_pair("pkce_code_challenge", pkce_challenge);
+        Ok(url.into())
+    }
 }
 
 impl AuthorizationCode {
@@ -692,13 +780,15 @@ impl PkceVerifier {
 }
 
 impl PkceVault {
-    pub(super) fn reserve(&self) -> Result<PkceReservation, &'static str> {
+    pub(super) fn reserve(&self) -> Result<PkceReservation, TrailBaseOrchestrationError> {
         let mut state = self
             .inner
             .lock()
-            .map_err(|_| "The PKCE verifier vault is unavailable.")?;
+            .map_err(|_| TrailBaseOrchestrationError::LocalState)?;
         if state.reserved.saturating_add(state.verifiers.len()) >= PKCE_VAULT_LIMIT {
-            return Err("The PKCE verifier vault is at capacity.");
+            return Err(TrailBaseOrchestrationError::ApplicationProblem(
+                ProblemCode::CapacityExceeded,
+            ));
         }
         state.reserved += 1;
         drop(state);
@@ -1203,7 +1293,17 @@ mod tests {
         let (client, task) = spawn_fixture(router).await;
         let orchestrator = Arc::new(test_orchestrator(client, &kernel, &installation));
         let started = start_bootstrap_ceremony(&orchestrator, &kernel, access, callback_at);
-        assert_eq!(started.pkce_challenge.len(), 43);
+        let authorization_url = reqwest::Url::parse(&started.authorization_url)
+            .expect("fixed TrailBase authorization URL");
+        assert_eq!(authorization_url.path(), AUTHORIZATION_UI_PATH);
+        let query: HashMap<_, _> = authorization_url.query_pairs().into_owned().collect();
+        assert_eq!(
+            query.get("redirect_uri").map(String::as_str),
+            Some(CALLBACK_URL)
+        );
+        assert_eq!(query.get("response_type").map(String::as_str), Some("code"));
+        assert_eq!(query.get("pkce_code_challenge").map(String::len), Some(43));
+        assert_eq!(started.expires_at, callback_at + TimeDelta::minutes(8));
         assert!(started.operation_id.to_string().starts_with("op_"));
         let binding = Zeroizing::new(*started.browser_binding.expose_bytes());
         let first_binding = started.browser_binding;
@@ -1799,7 +1899,12 @@ mod tests {
             operations.push(operation_id);
         }
         assert_eq!(vault.live_len(), PKCE_VAULT_LIMIT);
-        assert!(vault.reserve().is_err());
+        assert_eq!(
+            vault.reserve().err(),
+            Some(TrailBaseOrchestrationError::ApplicationProblem(
+                ProblemCode::CapacityExceeded
+            ))
+        );
         assert!(vault.remove(operations[0]));
         let reservation = vault.reserve().expect("released capacity");
         drop(reservation);

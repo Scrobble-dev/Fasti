@@ -49,6 +49,7 @@ const contractIds = {
   observation: v7("obs", "6"),
   evidence: v7("evd", "7"),
   record: v7("rec", "8"),
+  browserSession: v7("ses", "9"),
 };
 
 test("metadata refresh parser enforces canonical operation IDs", () => {
@@ -72,19 +73,75 @@ test("metadata refresh parser enforces canonical operation IDs", () => {
   );
 });
 
-test("browser authentication SDK methods are absent until C1", () => {
+test("browser authentication SDK exposes callable operations but never the callback", () => {
   const client = new FastiClient({
     baseUrl: "http://127.0.0.1:8420",
   });
   for (const method of [
-    "createBrowserSession",
+    "startTrailBaseSignIn",
+    "readAccessProjection",
     "readBrowserSession",
     "endBrowserSession",
     "listBrowserSessions",
-    "listBrowserUsers",
+    "revokeBrowserSession",
+    "revokeOtherBrowserSessions",
+    "revokeAllBrowserSessions",
+    "rotateBrowserSession",
+    "selectBrowserSessionProfile",
   ]) {
-    assert.equal(client[method], undefined);
+    assert.equal(typeof client[method], "function", method);
   }
+  assert.equal(client.completeTrailBaseAuthentication, undefined);
+});
+
+test("browser mutations copy the exact CSRF cookie and omit bearer credentials", async () => {
+  const csrf = "a".repeat(64);
+  const original = Object.getOwnPropertyDescriptor(globalThis, "document");
+  Object.defineProperty(globalThis, "document", {
+    configurable: true,
+    value: { cookie: `unrelated=1; __Host-fasti_csrf=${csrf}` },
+  });
+  try {
+    let request;
+    const client = new FastiClient({
+      baseUrl: "http://127.0.0.1:8420",
+      credential: "must-not-be-sent",
+      fetch: async (url, init) => {
+        request = { url: String(url), init };
+        return new Response(JSON.stringify({ revoked_count: 1 }), {
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+    assert.deepEqual(
+      await client.revokeBrowserSession(contractIds.browserSession),
+      { revoked_count: 1 },
+    );
+    const headers = new Headers(request.init.headers);
+    assert.equal(
+      request.url,
+      `http://127.0.0.1:8420/api/access/v1/browser-sessions/${contractIds.browserSession}`,
+    );
+    assert.equal(request.init.credentials, "same-origin");
+    assert.equal(headers.get("x-csrf-token"), csrf);
+    assert.equal(headers.get("authorization"), null);
+  } finally {
+    if (original) Object.defineProperty(globalThis, "document", original);
+    else delete globalThis.document;
+  }
+});
+
+test("browser mutations fail locally without one valid CSRF cookie", async () => {
+  let called = false;
+  const client = new FastiClient({
+    baseUrl: "http://127.0.0.1:8420",
+    fetch: async () => {
+      called = true;
+      throw new Error("must not call fetch");
+    },
+  });
+  await assert.rejects(client.endBrowserSession(), FastiProtocolError);
+  assert.equal(called, false);
 });
 
 test("health omits credentials and returns the exact public contract", async () => {
@@ -524,16 +581,20 @@ test("credentials are header-only on authenticated surfaces and no offline queue
           "constructor",
           "createRecord",
           "discoverCapabilities",
+          "endBrowserSession",
           "enrollDurableFirstClient",
           "enrollFirstClient",
           "getNuvioCollections",
           "health",
           "initializeDurableNode",
           "initializeNode",
+          "listBrowserSessions",
           "listIntegrations",
           "listProviders",
           "listRecords",
           "listTrackingDispositions",
+          "readAccessProjection",
+          "readBrowserSession",
           "readMetadataProjection",
           "readProviderHealth",
           "receiptEvents",
@@ -542,10 +603,16 @@ test("credentials are header-only on authenticated surfaces and no offline queue
           "removeProviderCredential",
           "replaceNuvioCollections",
           "replayReceipt",
+          "revokeAllBrowserSessions",
+          "revokeBrowserSession",
           "revokeCredential",
+          "revokeOtherBrowserSessions",
+          "rotateBrowserSession",
           "rotateCredential",
+          "selectBrowserSessionProfile",
           "selectProfile",
           "setTrackingDisposition",
+          "startTrailBaseSignIn",
           "submitObservation",
           "testProviderCredential",
         ]);
@@ -843,10 +910,10 @@ test("connection endpoints reject unsafe origins", () => {
   }
 });
 test("generated public metadata preserves complete registry and surface dispositions", () => {
-  assert.equal(PUBLIC_CAPABILITY_REGISTRY.capabilities.length, 46);
+  assert.equal(PUBLIC_CAPABILITY_REGISTRY.capabilities.length, 48);
   assert.equal(
     Object.keys(PUBLIC_CAPABILITY_REGISTRY.surface_profiles).length,
-    14,
+    16,
   );
   const stream = PUBLIC_CAPABILITY_REGISTRY.capabilities.find(
     (capability) => capability.id === "receipt.stream",
@@ -1380,7 +1447,7 @@ test("all implemented contract routes complete against the loopback Rust fixture
       discovery.surface_profiles,
       PUBLIC_CAPABILITY_REGISTRY.surface_profiles,
     );
-    assert.equal(discovery.capabilities.length, 46);
+    assert.equal(discovery.capabilities.length, 48);
     assert.ok(
       discovery.capabilities.some(
         (capability) =>

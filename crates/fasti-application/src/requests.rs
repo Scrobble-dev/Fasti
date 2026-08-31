@@ -3,17 +3,63 @@
 //! Transport DTOs map into these values. Server timestamps, source client
 //! identity, commit state, and receipt outcomes are never request fields.
 
-use crate::RequestAccessContext;
+use crate::{derive_deterministic_operation_id, ApplicationAccessContext, RequestAccessContext};
 use fasti_domain::{
-    EvidenceReference, ExternalIdentifierClaim, Grain, ObservedAt, OccurredAt, OperationId,
-    ReceiptId, RequestCorrelationId,
+    ClientId, EvidenceReference, ExternalIdentifierClaim, Grain, ObservedAt, OccurredAt,
+    OperationId, ReceiptId, RequestCorrelationId,
 };
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceEventError {
+    InvalidSource,
+    InvalidSourceEventId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceEvent {
+    source: String,
+    source_event_id: String,
+}
+
+impl SourceEvent {
+    pub fn try_new(
+        source: impl Into<String>,
+        source_event_id: impl Into<String>,
+    ) -> Result<Self, SourceEventError> {
+        let source = source.into();
+        let source_event_id = source_event_id.into();
+        if source.is_empty() || source.len() > 64 {
+            return Err(SourceEventError::InvalidSource);
+        }
+        if source_event_id.is_empty() || source_event_id.len() > 256 {
+            return Err(SourceEventError::InvalidSourceEventId);
+        }
+        Ok(Self {
+            source,
+            source_event_id,
+        })
+    }
+
+    pub fn source(&self) -> &str {
+        &self.source
+    }
+
+    pub fn source_event_id(&self) -> &str {
+        &self.source_event_id
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ObservationOperationIdentity {
+    Resolved(OperationId),
+    SourceEvent(SourceEvent),
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AcceptObservationCommand {
     correlation_id: RequestCorrelationId,
-    access: RequestAccessContext,
-    operation_id: OperationId,
+    access: ApplicationAccessContext,
+    operation: ObservationOperationIdentity,
     occurred_at: Option<OccurredAt>,
     observed_at: ObservedAt,
     prepared_evidence: EvidenceReference,
@@ -24,7 +70,7 @@ pub struct AcceptObservationCommand {
 impl AcceptObservationCommand {
     pub fn new(
         correlation_id: RequestCorrelationId,
-        access: RequestAccessContext,
+        access: impl Into<ApplicationAccessContext>,
         operation_id: OperationId,
         occurred_at: Option<OccurredAt>,
         observed_at: ObservedAt,
@@ -32,8 +78,29 @@ impl AcceptObservationCommand {
     ) -> Self {
         Self {
             correlation_id,
-            access,
-            operation_id,
+            access: access.into(),
+            operation: ObservationOperationIdentity::Resolved(operation_id),
+            occurred_at,
+            observed_at,
+            prepared_evidence,
+            identity_clues: Vec::new(),
+            target_grain: None,
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_source_event(
+        correlation_id: RequestCorrelationId,
+        access: impl Into<ApplicationAccessContext>,
+        source_event: SourceEvent,
+        occurred_at: Option<OccurredAt>,
+        observed_at: ObservedAt,
+        prepared_evidence: EvidenceReference,
+    ) -> Self {
+        Self {
+            correlation_id,
+            access: access.into(),
+            operation: ObservationOperationIdentity::SourceEvent(source_event),
             occurred_at,
             observed_at,
             prepared_evidence,
@@ -56,12 +123,31 @@ impl AcceptObservationCommand {
         self.correlation_id
     }
 
-    pub const fn access(&self) -> &RequestAccessContext {
+    pub const fn access(&self) -> &ApplicationAccessContext {
         &self.access
     }
 
-    pub const fn operation_id(&self) -> OperationId {
-        self.operation_id
+    pub const fn operation_id(&self) -> Option<OperationId> {
+        match &self.operation {
+            ObservationOperationIdentity::Resolved(operation_id) => Some(*operation_id),
+            ObservationOperationIdentity::SourceEvent(_) => None,
+        }
+    }
+
+    pub fn resolve_operation_id(&self, source_client_id: ClientId) -> OperationId {
+        match &self.operation {
+            ObservationOperationIdentity::Resolved(operation_id) => *operation_id,
+            ObservationOperationIdentity::SourceEvent(source_event) => {
+                let material = serde_json::to_string(&(
+                    "observation",
+                    source_client_id.to_string(),
+                    source_event.source(),
+                    source_event.source_event_id(),
+                ))
+                .expect("bounded strings always serialize");
+                derive_deterministic_operation_id(&material)
+            }
+        }
     }
 
     pub const fn occurred_at(&self) -> Option<&OccurredAt> {
@@ -156,8 +242,33 @@ mod tests {
             evidence.clone(),
         );
 
-        assert_eq!(command.access().client_id(), access.client_id());
+        assert_eq!(
+            command.access(),
+            &ApplicationAccessContext::Credential(access)
+        );
         assert_eq!(command.prepared_evidence(), &evidence);
         assert!(command.identity_clues().is_empty());
+    }
+
+    #[test]
+    fn source_event_enforces_the_public_identity_bounds() {
+        assert_eq!(
+            SourceEvent::try_new("", "event"),
+            Err(SourceEventError::InvalidSource)
+        );
+        assert_eq!(
+            SourceEvent::try_new("x".repeat(65), "event"),
+            Err(SourceEventError::InvalidSource)
+        );
+        assert_eq!(
+            SourceEvent::try_new("source", ""),
+            Err(SourceEventError::InvalidSourceEventId)
+        );
+        assert_eq!(
+            SourceEvent::try_new("source", "x".repeat(257)),
+            Err(SourceEventError::InvalidSourceEventId)
+        );
+        assert!(SourceEvent::try_new("x", "y").is_ok());
+        assert!(SourceEvent::try_new("x".repeat(64), "y".repeat(256)).is_ok());
     }
 }

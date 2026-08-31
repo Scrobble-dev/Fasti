@@ -337,12 +337,7 @@ surface_profiles:
   c1_browser_session_foundation:
     domain_application:
       { state: required, binding: "application:{application_key}" }
-    http_openapi:
-      {
-        state: later_body,
-        body: c1,
-        reason: Browser session HTTP routes require the TrailBase-backed C1 runtime.,
-      }
+    http_openapi: { state: required, binding: "openapi:{capability_id}" }
     sse_asyncapi:
       {
         state: not_applicable,
@@ -355,9 +350,8 @@ surface_profiles:
       }
     json_schema:
       {
-        state: later_body,
-        body: c1,
-        reason: Browser session request and response schemas require the C1 runtime contract.,
+        state: required,
+        binding: "schema:production-openapi-operation:{capability_id}",
       }
     json_ld:
       {
@@ -365,12 +359,7 @@ surface_profiles:
         reason: Private browser authentication state is not linked data.,
       }
     okf: { state: required, binding: "okf:capability-catalog" }
-    sdk:
-      {
-        state: later_body,
-        body: c1,
-        reason: Browser session SDK methods require the C1 HTTP contract.,
-      }
+    sdk: { state: required, binding: "sdk:{capability_id}" }
     knowledge: { state: required, binding: "knowledge:problem-catalog" }
     package_smoke:
       {
@@ -383,6 +372,94 @@ surface_profiles:
         state: later_body,
         body: c1,
         reason: PR A keeps the Account and security controls visibly unavailable until C1.,
+      }
+
+  c1_identity_bootstrap:
+    domain_application:
+      { state: required, binding: "application:{application_key}" }
+    http_openapi:
+      {
+        state: not_applicable,
+        reason: First-administrator bootstrap is an in-process packaged-host operation and has no HTTP route.,
+      }
+    sse_asyncapi:
+      {
+        state: not_applicable,
+        reason: First-administrator bootstrap is a finite operation and has no event stream.,
+      }
+    cli:
+      {
+        state: not_applicable,
+        reason: C1 assigns first-administrator bootstrap to the packaged host.,
+      }
+    json_schema:
+      {
+        state: not_applicable,
+        reason: No public transport represents the host-owned bootstrap command.,
+      }
+    json_ld:
+      {
+        state: not_applicable,
+        reason: Private authentication bootstrap state is not linked data.,
+      }
+    okf: { state: required, binding: "okf:capability-catalog" }
+    sdk:
+      {
+        state: not_applicable,
+        reason: Browser and third-party SDK callers cannot invoke local-operator bootstrap.,
+      }
+    knowledge: { state: required, binding: "knowledge:problem-catalog" }
+    package_smoke:
+      {
+        state: later_body,
+        body: c1,
+        reason: Packaged-host bootstrap smoke is delivered with C1 host composition.,
+      }
+    ui:
+      {
+        state: later_body,
+        body: c1,
+        reason: The approved resumable first-run UI is delivered in C1.4.,
+      }
+
+  c1_access_projection:
+    domain_application:
+      { state: required, binding: "application:{application_key}" }
+    http_openapi: { state: required, binding: "openapi:{capability_id}" }
+    sse_asyncapi:
+      {
+        state: not_applicable,
+        reason: The Access projection is a finite request and has no event stream.,
+      }
+    cli:
+      {
+        state: not_applicable,
+        reason: The Account and Security projection is a first-party browser surface.,
+      }
+    json_schema:
+      {
+        state: required,
+        binding: "schema:production-openapi-operation:{capability_id}",
+      }
+    json_ld:
+      {
+        state: not_applicable,
+        reason: Private account and session security state is not linked data.,
+      }
+    okf: { state: required, binding: "okf:capability-catalog" }
+    sdk: { state: required, binding: "sdk:{capability_id}" }
+    knowledge: { state: required, binding: "knowledge:problem-catalog" }
+    package_smoke:
+      {
+        state: later_body,
+        body: c1,
+        reason: Authenticated projection smoke is delivered after the route is active.,
+      }
+    ui:
+      {
+        state: later_body,
+        body: c1,
+        reason: Gate 10 Account and Security and first-run UI are delivered in C1.4.,
       }
 
   later_b2:
@@ -626,21 +703,86 @@ capabilities:
       {
         introduced_in: c1,
         contract_state: finalized,
-        runtime_availability: later_body,
+        runtime_availability: implemented,
       }
     surface_profile: c1_browser_session_foundation
     scopes: []
     problems:
       [
+        auth_browser_binding_invalid,
+        auth_identity_conflict,
+        auth_subject_unaffiliated,
         capability_unavailable,
         capacity_exceeded,
         forbidden,
+        identity_service_unavailable,
         integrity_failed,
         malformed_json,
         payload_too_large,
         storage_unavailable,
+        trailbase_proof_invalid,
+        trailbase_session_cleanup_failed,
+        trailbase_trust_unavailable,
+        trailbase_version_unsupported,
         unsupported_media_type,
         validation_failed,
+      ]
+    examples: []
+    uat: []
+
+  - application_key: access_identity_bootstrap
+    id: access.identity.bootstrap
+    bounded_context: access.identity
+    contract_body: c1
+    runtime_body: c1
+    authorization: local_operator
+    lifecycle:
+      {
+        introduced_in: c1,
+        contract_state: finalized,
+        runtime_availability: later_body,
+      }
+    surface_profile: c1_identity_bootstrap
+    scopes: []
+    problems:
+      [
+        auth_browser_binding_invalid,
+        auth_identity_conflict,
+        capacity_exceeded,
+        forbidden,
+        identity_service_unavailable,
+        integrity_failed,
+        storage_unavailable,
+        trailbase_proof_invalid,
+        trailbase_session_cleanup_failed,
+        trailbase_trust_unavailable,
+        trailbase_version_unsupported,
+      ]
+    examples: []
+    uat: []
+
+  - application_key: read_access_projection
+    id: access.projection.read
+    bounded_context: access.projection
+    contract_body: c1
+    runtime_body: c1
+    authorization: browser_session
+    lifecycle:
+      {
+        introduced_in: c1,
+        contract_state: finalized,
+        runtime_availability: implemented,
+      }
+    surface_profile: c1_access_projection
+    scopes: []
+    problems:
+      [
+        browser_session_expired,
+        browser_session_revoked,
+        capability_unavailable,
+        integrity_failed,
+        session_policy_changed,
+        storage_unavailable,
       ]
     examples: []
     uat: []
@@ -655,7 +797,7 @@ capabilities:
       {
         introduced_in: c1,
         contract_state: finalized,
-        runtime_availability: later_body,
+        runtime_availability: implemented,
       }
     surface_profile: c1_browser_session_foundation
     scopes: []
@@ -681,7 +823,7 @@ capabilities:
       {
         introduced_in: c1,
         contract_state: finalized,
-        runtime_availability: later_body,
+        runtime_availability: implemented,
       }
     surface_profile: c1_browser_session_foundation
     scopes: []
@@ -708,7 +850,7 @@ capabilities:
       {
         introduced_in: c1,
         contract_state: finalized,
-        runtime_availability: later_body,
+        runtime_availability: implemented,
       }
     surface_profile: c1_browser_session_foundation
     scopes: []
@@ -734,7 +876,7 @@ capabilities:
       {
         introduced_in: c1,
         contract_state: finalized,
-        runtime_availability: later_body,
+        runtime_availability: implemented,
       }
     surface_profile: c1_browser_session_foundation
     scopes: []
@@ -762,7 +904,7 @@ capabilities:
       {
         introduced_in: c1,
         contract_state: finalized,
-        runtime_availability: later_body,
+        runtime_availability: implemented,
       }
     surface_profile: c1_browser_session_foundation
     scopes: []
@@ -790,7 +932,7 @@ capabilities:
       {
         introduced_in: c1,
         contract_state: finalized,
-        runtime_availability: later_body,
+        runtime_availability: implemented,
       }
     surface_profile: c1_browser_session_foundation
     scopes: []
@@ -817,7 +959,7 @@ capabilities:
       {
         introduced_in: c1,
         contract_state: finalized,
-        runtime_availability: later_body,
+        runtime_availability: implemented,
       }
     surface_profile: c1_browser_session_foundation
     scopes: []
@@ -844,7 +986,7 @@ capabilities:
       {
         introduced_in: c1,
         contract_state: finalized,
-        runtime_availability: later_body,
+        runtime_availability: implemented,
       }
     surface_profile: c1_browser_session_foundation
     scopes: []
@@ -855,8 +997,11 @@ capabilities:
         capability_unavailable,
         forbidden,
         integrity_failed,
+        malformed_json,
+        payload_too_large,
         session_policy_changed,
         storage_unavailable,
+        unsupported_media_type,
         validation_failed,
       ]
     examples: []
@@ -921,7 +1066,7 @@ capabilities:
     bounded_context: observation.ingress
     contract_body: b1
     runtime_body: b2
-    authorization: scoped
+    authorization: scoped_or_browser_session
     lifecycle:
       {
         introduced_in: b1,
@@ -933,6 +1078,8 @@ capabilities:
     problems:
       [
         authentication_failed,
+        browser_session_expired,
+        browser_session_revoked,
         capacity_exceeded,
         forbidden,
         idempotency_conflict,
@@ -940,6 +1087,7 @@ capabilities:
         invalid_observation,
         malformed_json,
         payload_too_large,
+        session_policy_changed,
         storage_unavailable,
         unsupported_media_type,
         validation_failed,
@@ -1035,7 +1183,7 @@ capabilities:
     bounded_context: identity.records
     contract_body: b1
     runtime_body: b2
-    authorization: scoped
+    authorization: scoped_or_browser_session
     lifecycle:
       {
         introduced_in: b1,
@@ -1047,12 +1195,15 @@ capabilities:
     problems:
       [
         authentication_failed,
+        browser_session_expired,
+        browser_session_revoked,
         capability_unavailable,
         forbidden,
         integrity_failed,
         invalid_identifier,
         malformed_json,
         payload_too_large,
+        session_policy_changed,
         storage_unavailable,
         unsupported_media_type,
         validation_failed,
@@ -1065,7 +1216,7 @@ capabilities:
     bounded_context: identity.identifiers
     contract_body: b1
     runtime_body: b2
-    authorization: scoped
+    authorization: scoped_or_browser_session
     lifecycle:
       {
         introduced_in: b1,
@@ -1077,6 +1228,8 @@ capabilities:
     problems:
       [
         authentication_failed,
+        browser_session_expired,
+        browser_session_revoked,
         capability_unavailable,
         forbidden,
         identity_conflict,
@@ -1085,6 +1238,7 @@ capabilities:
         malformed_json,
         payload_too_large,
         record_not_found,
+        session_policy_changed,
         storage_unavailable,
         unsupported_media_type,
         validation_failed,
@@ -1097,7 +1251,7 @@ capabilities:
     bounded_context: identity.records
     contract_body: b1
     runtime_body: b2
-    authorization: scoped
+    authorization: scoped_or_browser_session
     lifecycle:
       {
         introduced_in: b1,
@@ -1109,9 +1263,12 @@ capabilities:
     problems:
       [
         authentication_failed,
+        browser_session_expired,
+        browser_session_revoked,
         capability_unavailable,
         forbidden,
         integrity_failed,
+        session_policy_changed,
         storage_unavailable,
       ]
     examples: [identity.record.list.forbidden]
@@ -1122,7 +1279,7 @@ capabilities:
     bounded_context: identity.identifiers
     contract_body: b1
     runtime_body: b2
-    authorization: scoped
+    authorization: scoped_or_browser_session
     lifecycle:
       {
         introduced_in: b1,
@@ -1134,11 +1291,14 @@ capabilities:
     problems:
       [
         authentication_failed,
+        browser_session_expired,
+        browser_session_revoked,
         capability_unavailable,
         forbidden,
         integrity_failed,
         malformed_json,
         payload_too_large,
+        session_policy_changed,
         storage_unavailable,
         unsupported_media_type,
         validation_failed,
@@ -1151,7 +1311,7 @@ capabilities:
     bounded_context: profile.tracking
     contract_body: b2
     runtime_body: b2
-    authorization: scoped
+    authorization: scoped_or_browser_session
     lifecycle:
       {
         introduced_in: b2,
@@ -1163,9 +1323,12 @@ capabilities:
     problems:
       [
         authentication_failed,
+        browser_session_expired,
+        browser_session_revoked,
         capability_unavailable,
         forbidden,
         integrity_failed,
+        session_policy_changed,
         storage_unavailable,
       ]
     examples: [profile.record.tracking_disposition.list.forbidden]
@@ -1176,7 +1339,7 @@ capabilities:
     bounded_context: profile.tracking
     contract_body: b2
     runtime_body: b2
-    authorization: scoped
+    authorization: scoped_or_browser_session
     lifecycle:
       {
         introduced_in: b2,
@@ -1188,12 +1351,15 @@ capabilities:
     problems:
       [
         authentication_failed,
+        browser_session_expired,
+        browser_session_revoked,
         capability_unavailable,
         forbidden,
         integrity_failed,
         malformed_json,
         payload_too_large,
         record_not_found,
+        session_policy_changed,
         storage_unavailable,
         unsupported_media_type,
         validation_failed,
@@ -1206,7 +1372,7 @@ capabilities:
     bounded_context: profile.catalog_configuration
     contract_body: b2
     runtime_body: b2
-    authorization: scoped
+    authorization: scoped_or_browser_session
     lifecycle:
       {
         introduced_in: b2,
@@ -1218,9 +1384,12 @@ capabilities:
     problems:
       [
         authentication_failed,
+        browser_session_expired,
+        browser_session_revoked,
         capability_unavailable,
         forbidden,
         integrity_failed,
+        session_policy_changed,
         storage_unavailable,
       ]
     examples: []
@@ -1231,7 +1400,7 @@ capabilities:
     bounded_context: profile.catalog_configuration
     contract_body: b2
     runtime_body: b2
-    authorization: scoped
+    authorization: scoped_or_browser_session
     lifecycle:
       {
         introduced_in: b2,
@@ -1243,11 +1412,14 @@ capabilities:
     problems:
       [
         authentication_failed,
+        browser_session_expired,
+        browser_session_revoked,
         capability_unavailable,
         forbidden,
         integrity_failed,
         malformed_json,
         payload_too_large,
+        session_policy_changed,
         storage_unavailable,
         unsupported_media_type,
         validation_failed,
@@ -1260,7 +1432,7 @@ capabilities:
     bounded_context: profile.catalog_configuration
     contract_body: b2
     runtime_body: b2
-    authorization: scoped
+    authorization: scoped_or_browser_session
     lifecycle:
       {
         introduced_in: b2,
@@ -1272,9 +1444,12 @@ capabilities:
     problems:
       [
         authentication_failed,
+        browser_session_expired,
+        browser_session_revoked,
         capability_unavailable,
         forbidden,
         integrity_failed,
+        session_policy_changed,
         storage_unavailable,
       ]
     examples: []

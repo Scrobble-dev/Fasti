@@ -3,10 +3,11 @@ use crate::kernel::{
 };
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use fasti_application::{
-    ApplicationResult, AuthenticatedBrowserSession, BrowserSessionMutationCommand,
-    BrowserSessionPort, BrowserSessionQuery, BrowserSessionSummary, CapabilityKey,
-    CreateAuthSubjectCommand, CreateBrowserSessionCommand, CreatedBrowserSession, FastiProblem,
-    ProblemCode, SelectBrowserSessionProfileCommand, SessionPolicy, TargetBrowserSessionCommand,
+    ApplicationResult, AuthenticatedBrowserSession, BrowserSessionInventory,
+    BrowserSessionMutationCommand, BrowserSessionPort, BrowserSessionQuery, BrowserSessionSummary,
+    CapabilityKey, CreateAuthSubjectCommand, CreateBrowserSessionCommand, CreatedBrowserSession,
+    FastiProblem, ProblemCode, RevokeBrowserSessionOutcome, SelectBrowserSessionProfileCommand,
+    SessionPolicy, TargetBrowserSessionCommand,
 };
 use fasti_domain::{
     AuthSubject, AuthSubjectId, AuthSubjectLifecycle, BrowserSessionId, BrowserSessionState,
@@ -755,7 +756,7 @@ impl BrowserSessionPort for SqliteKernel {
     fn list_browser_sessions(
         &self,
         query: BrowserSessionQuery,
-    ) -> ApplicationResult<Vec<BrowserSessionSummary>> {
+    ) -> ApplicationResult<BrowserSessionInventory> {
         let capability = CapabilityKey::ListBrowserSessions;
         let correlation_id = query.correlation_id();
         let connection = self.lock_connection(capability, correlation_id)?;
@@ -779,6 +780,7 @@ impl BrowserSessionPort for SqliteKernel {
                 WHERE auth_subject_id = ?1 AND revoked_at IS NULL
                   AND idle_expires_at > ?2 AND absolute_expires_at > ?2
                 ORDER BY created_at, browser_session_id
+                LIMIT 33
                 "#,
             ),
             capability,
@@ -818,7 +820,9 @@ impl BrowserSessionPort for SqliteKernel {
                 session.id() == current.session().id(),
             ));
         }
-        Ok(sessions)
+        let truncated = sessions.len() > 32;
+        sessions.truncate(32);
+        Ok(BrowserSessionInventory::new(sessions, truncated))
     }
 
     fn revoke_current_browser_session(
@@ -827,9 +831,14 @@ impl BrowserSessionPort for SqliteKernel {
     ) -> ApplicationResult<bool> {
         let capability = CapabilityKey::EndBrowserSession;
         let correlation_id = command.correlation_id();
-        let connection = self.lock_connection(capability, correlation_id)?;
+        let mut connection = self.lock_connection(capability, correlation_id)?;
+        let transaction = map_sql(
+            connection.transaction_with_behavior(TransactionBehavior::Immediate),
+            capability,
+            correlation_id,
+        )?;
         let current = authenticate_session(
-            &connection,
+            &transaction,
             command.session_secret(),
             Some(command.csrf_secret()),
             command.now(),
@@ -837,25 +846,31 @@ impl BrowserSessionPort for SqliteKernel {
             correlation_id,
         )?;
         let changed = map_sql(
-            connection.execute(
+            transaction.execute(
                 "UPDATE fasti_browser_sessions SET revoked_at = ?1 WHERE browser_session_id = ?2 AND revoked_at IS NULL",
                 params![timestamp(command.now()), current.session().id().to_string()],
             ),
             capability,
             correlation_id,
         )?;
+        map_sql(transaction.commit(), capability, correlation_id)?;
         Ok(changed == 1)
     }
 
     fn revoke_browser_session(
         &self,
         command: TargetBrowserSessionCommand,
-    ) -> ApplicationResult<bool> {
+    ) -> ApplicationResult<RevokeBrowserSessionOutcome> {
         let capability = CapabilityKey::RevokeBrowserSession;
         let correlation_id = command.proof().correlation_id();
-        let connection = self.lock_connection(capability, correlation_id)?;
+        let mut connection = self.lock_connection(capability, correlation_id)?;
+        let transaction = map_sql(
+            connection.transaction_with_behavior(TransactionBehavior::Immediate),
+            capability,
+            correlation_id,
+        )?;
         let current = authenticate_session(
-            &connection,
+            &transaction,
             command.proof().session_secret(),
             Some(command.proof().csrf_secret()),
             command.proof().now(),
@@ -863,7 +878,7 @@ impl BrowserSessionPort for SqliteKernel {
             correlation_id,
         )?;
         let changed = map_sql(
-            connection.execute(
+            transaction.execute(
                 "UPDATE fasti_browser_sessions SET revoked_at = ?1 WHERE browser_session_id = ?2 AND auth_subject_id = ?3 AND revoked_at IS NULL",
                 params![
                     timestamp(command.proof().now()),
@@ -874,7 +889,14 @@ impl BrowserSessionPort for SqliteKernel {
             capability,
             correlation_id,
         )?;
-        Ok(changed == 1)
+        let revoked = changed == 1;
+        let current_session_revoked =
+            revoked && current.session().id() == command.target_session_id();
+        map_sql(transaction.commit(), capability, correlation_id)?;
+        Ok(RevokeBrowserSessionOutcome::new(
+            revoked,
+            current_session_revoked,
+        ))
     }
 
     fn revoke_other_browser_sessions(
@@ -883,9 +905,14 @@ impl BrowserSessionPort for SqliteKernel {
     ) -> ApplicationResult<u64> {
         let capability = CapabilityKey::RevokeOtherBrowserSessions;
         let correlation_id = command.correlation_id();
-        let connection = self.lock_connection(capability, correlation_id)?;
+        let mut connection = self.lock_connection(capability, correlation_id)?;
+        let transaction = map_sql(
+            connection.transaction_with_behavior(TransactionBehavior::Immediate),
+            capability,
+            correlation_id,
+        )?;
         let current = authenticate_session(
-            &connection,
+            &transaction,
             command.session_secret(),
             Some(command.csrf_secret()),
             command.now(),
@@ -893,7 +920,7 @@ impl BrowserSessionPort for SqliteKernel {
             correlation_id,
         )?;
         let changed = map_sql(
-            connection.execute(
+            transaction.execute(
                 "UPDATE fasti_browser_sessions SET revoked_at = ?1 WHERE auth_subject_id = ?2 AND browser_session_id <> ?3 AND revoked_at IS NULL",
                 params![
                     timestamp(command.now()),
@@ -904,6 +931,7 @@ impl BrowserSessionPort for SqliteKernel {
             capability,
             correlation_id,
         )?;
+        map_sql(transaction.commit(), capability, correlation_id)?;
         u64::try_from(changed)
             .map_err(|_| problem(ProblemCode::IntegrityFailed, capability, correlation_id))
     }
@@ -914,9 +942,14 @@ impl BrowserSessionPort for SqliteKernel {
     ) -> ApplicationResult<u64> {
         let capability = CapabilityKey::RevokeAllBrowserSessions;
         let correlation_id = command.correlation_id();
-        let connection = self.lock_connection(capability, correlation_id)?;
+        let mut connection = self.lock_connection(capability, correlation_id)?;
+        let transaction = map_sql(
+            connection.transaction_with_behavior(TransactionBehavior::Immediate),
+            capability,
+            correlation_id,
+        )?;
         let current = authenticate_session(
-            &connection,
+            &transaction,
             command.session_secret(),
             Some(command.csrf_secret()),
             command.now(),
@@ -924,13 +957,14 @@ impl BrowserSessionPort for SqliteKernel {
             correlation_id,
         )?;
         let changed = map_sql(
-            connection.execute(
+            transaction.execute(
                 "UPDATE fasti_browser_sessions SET revoked_at = ?1 WHERE auth_subject_id = ?2 AND revoked_at IS NULL",
                 params![timestamp(command.now()), current.subject().id().to_string()],
             ),
             capability,
             correlation_id,
         )?;
+        map_sql(transaction.commit(), capability, correlation_id)?;
         u64::try_from(changed)
             .map_err(|_| problem(ProblemCode::IntegrityFailed, capability, correlation_id))
     }
@@ -1371,7 +1405,8 @@ mod tests {
                 ),
                 second.session().id(),
             ))
-            .expect("revoke exact"));
+            .expect("revoke exact")
+            .revoked());
         assert_problem(
             fixture
                 .kernel
@@ -1740,7 +1775,7 @@ mod tests {
         let wins = threads
             .into_iter()
             .map(|thread| thread.join().expect("thread"))
-            .filter(|won| *won)
+            .filter(|outcome| outcome.revoked())
             .count();
         assert_eq!(wins, 1);
 

@@ -3,6 +3,7 @@
 //! This layer coordinates domain work and owns public capability and problem
 //! semantics. It does not import Axum, rusqlite, Tokio, provider, or UI types.
 
+pub mod access_projection;
 pub mod authorization;
 pub mod browser_auth;
 pub mod capabilities;
@@ -28,6 +29,7 @@ pub mod receipts;
 pub mod requests;
 pub mod scopes;
 
+pub use access_projection::*;
 pub use authorization::*;
 pub use browser_auth::*;
 pub use capabilities::*;

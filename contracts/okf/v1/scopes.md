@@ -17,6 +17,8 @@ identifiers:
   - metadata_projection_read
   - observation_accept
   - profile_select
+  - profile_state_read
+  - profile_state_write
   - provider_credential_manage
   - provider_read
   - receipt_read
@@ -28,7 +30,8 @@ sources:
 
 # Governed authorization scopes
 
-Scopes apply only to capabilities whose authorization posture is `scoped`.
+Scopes apply to capabilities whose authorization posture is `scoped` or
+`scoped_or_browser_session`.
 They are capability-specific grants, not roles and not proof that a runtime
 exists. The authorization decision also evaluates workspace, profile, client,
 credential, grant, and capability context; possession of a scope string alone
@@ -48,6 +51,8 @@ does not authorize a request. `system.health` is `unauthenticated`, and
 | `metadata_projection_configure` | Configure the current profile policy and field overrides.   |
 | `observation_accept`         | Submit an observation for governed acceptance.                 |
 | `profile_select`             | Select a profile explicitly.                                   |
+| `profile_state_read`         | Read profile tracking and Nuvio collection state.              |
+| `profile_state_write`        | Replace or clear profile tracking and Nuvio collection state.  |
 | `provider_credential_manage` | Store, replace, remove, or test a provider credential.         |
 | `provider_read`              | Read provider capabilities and health.                         |
 | `receipt_read`               | Replay receipts or subscribe to their authorized event stream. |

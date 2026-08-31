@@ -5,9 +5,13 @@ use axum::{
     routing::post,
     Json, Router,
 };
+use chrono::Utc;
 use fasti_application::{
-    ApplicationResult, AuthenticateCredentialQuery, CapabilityKey, EnrollFirstClientCommand,
-    FastiProblem, InitializeNodeCommand, LocalKernel, RequestAccessContext, SecretMaterial,
+    ApplicationAccessContext, ApplicationResult, AuthenticateCredentialQuery,
+    BrowserRequestBoundaryPolicy, BrowserSessionAccessContext, BrowserSessionMutationCommand,
+    BrowserSessionQuery, CapabilityKey, EnrollFirstClientCommand, FastiProblem,
+    InitializeNodeCommand, LocalKernel, ProblemCode, RequestAccessContext, SecretMaterial,
+    ValidatedBrowserReadBoundary,
 };
 use fasti_contracts::{
     ClientEnrollmentResponse, CredentialSchemeDto, EnrollFirstClientRequest, InitializeNodeRequest,
@@ -25,11 +29,21 @@ const MAX_RECORDS_JSON_BODY_BYTES: usize = 8 * 1024;
 #[derive(Clone)]
 pub(crate) struct LocalApiState {
     pub(crate) kernel: Arc<dyn LocalKernel>,
+    pub(crate) browser_boundary: Option<BrowserRequestBoundaryPolicy>,
 }
 
 pub(crate) enum RequestAuthentication {
     Bearer(SecretMaterial),
 }
+
+pub(crate) enum ApplicationRequestAuthentication {
+    Bearer(SecretMaterial),
+    BrowserSession(BrowserSessionAccessContext),
+}
+
+pub(crate) const SESSION_COOKIE: &str = "__Host-fasti_session";
+pub(crate) const CSRF_COOKIE: &str = "__Host-fasti_csrf";
+pub(crate) const CSRF_HEADER: &str = "X-CSRF-Token";
 
 type HttpResult<T> = Result<Json<T>, HttpProblem>;
 
@@ -73,6 +87,9 @@ pub(crate) fn bearer_secret(
     capability: CapabilityKey,
     correlation_id: RequestCorrelationId,
 ) -> Result<SecretMaterial, HttpProblem> {
+    if cookie_value(headers, SESSION_COOKIE, capability, correlation_id)?.is_some() {
+        return Err(authentication_failed(capability, correlation_id));
+    }
     let token = headers
         .get(header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
@@ -90,6 +107,175 @@ pub(crate) fn bearer_secret(
             correlation_id,
         )))
     })
+}
+
+pub(crate) fn authentication_failed(
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+) -> HttpProblem {
+    application_problem(Box::new(FastiProblem::authentication_failed(
+        capability,
+        correlation_id,
+    )))
+}
+
+fn browser_authentication_problem(
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+    mutation: bool,
+) -> HttpProblem {
+    let code = if mutation {
+        ProblemCode::Forbidden
+    } else {
+        ProblemCode::BrowserSessionRevoked
+    };
+    application_problem(Box::new(FastiProblem::from_code(
+        code,
+        capability,
+        correlation_id,
+    )))
+}
+
+fn raw_cookie_value<'a>(headers: &'a HeaderMap, name: &str) -> Result<Option<&'a str>, ()> {
+    let mut found = None;
+    for header_value in headers.get_all(header::COOKIE) {
+        let value = header_value.to_str().map_err(|_| ())?;
+        for pair in value.split(';') {
+            let Some((cookie_name, cookie_value)) = pair.trim().split_once('=') else {
+                continue;
+            };
+            if cookie_name == name && found.replace(cookie_value).is_some() {
+                return Err(());
+            }
+        }
+    }
+    Ok(found)
+}
+
+pub(crate) fn cookie_value<'a>(
+    headers: &'a HeaderMap,
+    name: &str,
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+) -> Result<Option<&'a str>, HttpProblem> {
+    raw_cookie_value(headers, name).map_err(|()| authentication_failed(capability, correlation_id))
+}
+
+fn browser_cookie_value<'a>(
+    headers: &'a HeaderMap,
+    name: &str,
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+    mutation: bool,
+) -> Result<Option<&'a str>, HttpProblem> {
+    raw_cookie_value(headers, name)
+        .map_err(|()| browser_authentication_problem(capability, correlation_id, mutation))
+}
+
+pub(crate) fn browser_session_query(
+    headers: &HeaderMap,
+    boundary: &BrowserRequestBoundaryPolicy,
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+) -> Result<(BrowserSessionQuery, ValidatedBrowserReadBoundary), HttpProblem> {
+    if headers.contains_key(header::AUTHORIZATION) {
+        return Err(authentication_failed(capability, correlation_id));
+    }
+    let session = browser_cookie_value(headers, SESSION_COOKIE, capability, correlation_id, false)?
+        .ok_or_else(|| browser_authentication_problem(capability, correlation_id, false))?;
+    let session_secret = SecretMaterial::try_from_hex(session)
+        .map_err(|_| browser_authentication_problem(capability, correlation_id, false))?;
+    let host = headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok());
+    let validated = boundary
+        .validate_read(host)
+        .map_err(|_| browser_authentication_problem(capability, correlation_id, false))?;
+    Ok((
+        BrowserSessionQuery::new(correlation_id, session_secret, Utc::now()),
+        validated,
+    ))
+}
+
+pub(crate) fn browser_session_mutation_command(
+    headers: &HeaderMap,
+    boundary: &BrowserRequestBoundaryPolicy,
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+) -> Result<BrowserSessionMutationCommand, HttpProblem> {
+    if headers.contains_key(header::AUTHORIZATION) {
+        return Err(authentication_failed(capability, correlation_id));
+    }
+    let session = browser_cookie_value(headers, SESSION_COOKIE, capability, correlation_id, true)?
+        .ok_or_else(|| browser_authentication_problem(capability, correlation_id, true))?;
+    let session_secret = SecretMaterial::try_from_hex(session)
+        .map_err(|_| browser_authentication_problem(capability, correlation_id, true))?;
+    let host = headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok());
+    let origin = headers
+        .get(header::ORIGIN)
+        .and_then(|value| value.to_str().ok());
+    let validated = boundary
+        .validate(origin, host)
+        .map_err(|_| browser_authentication_problem(capability, correlation_id, true))?;
+    let csrf_cookie = browser_cookie_value(headers, CSRF_COOKIE, capability, correlation_id, true)?
+        .ok_or_else(|| browser_authentication_problem(capability, correlation_id, true))?;
+    let csrf_header = headers
+        .get(CSRF_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| browser_authentication_problem(capability, correlation_id, true))?;
+    let csrf_cookie = SecretMaterial::try_from_hex(csrf_cookie)
+        .map_err(|_| browser_authentication_problem(capability, correlation_id, true))?;
+    let csrf_header = SecretMaterial::try_from_hex(csrf_header)
+        .map_err(|_| browser_authentication_problem(capability, correlation_id, true))?;
+    if !csrf_cookie.constant_time_eq(&csrf_header) {
+        return Err(browser_authentication_problem(
+            capability,
+            correlation_id,
+            true,
+        ));
+    }
+    Ok(BrowserSessionMutationCommand::new(
+        correlation_id,
+        session_secret,
+        csrf_header,
+        validated,
+        Utc::now(),
+    ))
+}
+
+pub(crate) fn application_request_authentication(
+    headers: &HeaderMap,
+    browser_boundary: Option<&BrowserRequestBoundaryPolicy>,
+    mutation: bool,
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+) -> Result<ApplicationRequestAuthentication, HttpProblem> {
+    let session = cookie_value(headers, SESSION_COOKIE, capability, correlation_id)?;
+    let bearer_present = headers.contains_key(header::AUTHORIZATION);
+    if bearer_present && session.is_some() {
+        return Err(authentication_failed(capability, correlation_id));
+    }
+    if bearer_present {
+        return bearer_secret(headers, capability, correlation_id)
+            .map(ApplicationRequestAuthentication::Bearer);
+    }
+    let boundary =
+        browser_boundary.ok_or_else(|| authentication_failed(capability, correlation_id))?;
+    let access = if mutation {
+        BrowserSessionAccessContext::mutation(browser_session_mutation_command(
+            headers,
+            boundary,
+            capability,
+            correlation_id,
+        )?)
+    } else {
+        let (query, validated) =
+            browser_session_query(headers, boundary, capability, correlation_id)?;
+        BrowserSessionAccessContext::read(query, validated)
+    };
+    Ok(ApplicationRequestAuthentication::BrowserSession(access))
 }
 pub(crate) fn request_authentication(
     headers: &HeaderMap,
@@ -109,6 +295,24 @@ pub(crate) fn authenticate_request(
         RequestAuthentication::Bearer(secret) => kernel.authenticate_credential(
             AuthenticateCredentialQuery::new(correlation_id, capability, secret),
         ),
+    }
+}
+
+pub(crate) fn authenticate_application_request(
+    kernel: &dyn LocalKernel,
+    authentication: ApplicationRequestAuthentication,
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+) -> ApplicationResult<ApplicationAccessContext> {
+    match authentication {
+        ApplicationRequestAuthentication::Bearer(secret) => kernel
+            .authenticate_credential(AuthenticateCredentialQuery::new(
+                correlation_id,
+                capability,
+                secret,
+            ))
+            .map(Into::into),
+        ApplicationRequestAuthentication::BrowserSession(access) => Ok(access.into()),
     }
 }
 
@@ -219,8 +423,15 @@ where
         .map_err(application_problem)
 }
 
-pub(crate) fn router(kernel: Arc<dyn LocalKernel>, include_bootstrap: bool) -> Router {
-    let state = LocalApiState { kernel };
+pub(crate) fn router(
+    kernel: Arc<dyn LocalKernel>,
+    include_bootstrap: bool,
+    browser_boundary: Option<BrowserRequestBoundaryPolicy>,
+) -> Router {
+    let state = LocalApiState {
+        kernel,
+        browser_boundary,
+    };
     let bootstrap = Router::new()
         .route("/api/v1/node/initialization", post(initialize_node))
         .route("/api/v1/client-enrollments", post(enroll_first_client))

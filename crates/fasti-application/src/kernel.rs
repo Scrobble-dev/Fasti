@@ -1,6 +1,6 @@
 //! B2 local-kernel commands, queries, outcomes, and adapter ports.
 
-use crate::{ApplicationResult, RequestAccessContext};
+use crate::{ApplicationAccessContext, ApplicationResult, RequestAccessContext};
 use fasti_domain::{
     EvidenceReference, ExternalIdentifierClaim, ExternalIdentifierId, Grain, InterpretationId,
     InterpretationState, OccurredAt, ProfileId, RecordId, RecordStatus, ResolvedField,
@@ -430,22 +430,22 @@ pub trait AccessAdministrationPort: Send + Sync {
     ) -> ApplicationResult<ListenerConfiguration>;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EvidenceUploadRequest {
     correlation_id: fasti_domain::RequestCorrelationId,
-    access: RequestAccessContext,
+    access: ApplicationAccessContext,
     declared_size: Option<u64>,
 }
 
 impl EvidenceUploadRequest {
-    pub const fn new(
+    pub fn new(
         correlation_id: fasti_domain::RequestCorrelationId,
-        access: RequestAccessContext,
+        access: impl Into<ApplicationAccessContext>,
         declared_size: Option<u64>,
     ) -> Self {
         Self {
             correlation_id,
-            access,
+            access: access.into(),
             declared_size,
         }
     }
@@ -454,7 +454,7 @@ impl EvidenceUploadRequest {
         self.correlation_id
     }
 
-    pub const fn access(&self) -> &RequestAccessContext {
+    pub const fn access(&self) -> &ApplicationAccessContext {
         &self.access
     }
 
@@ -476,22 +476,22 @@ pub trait EvidenceUploadPort: Send + Sync {
     ) -> ApplicationResult<Box<dyn EvidenceUploadSession>>;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreateRecordCommand {
     correlation_id: fasti_domain::RequestCorrelationId,
-    access: RequestAccessContext,
+    access: ApplicationAccessContext,
     grain: Grain,
 }
 
 impl CreateRecordCommand {
-    pub const fn new(
+    pub fn new(
         correlation_id: fasti_domain::RequestCorrelationId,
-        access: RequestAccessContext,
+        access: impl Into<ApplicationAccessContext>,
         grain: Grain,
     ) -> Self {
         Self {
             correlation_id,
-            access,
+            access: access.into(),
             grain,
         }
     }
@@ -500,7 +500,7 @@ impl CreateRecordCommand {
         self.correlation_id
     }
 
-    pub const fn access(&self) -> &RequestAccessContext {
+    pub const fn access(&self) -> &ApplicationAccessContext {
         &self.access
     }
 
@@ -541,21 +541,21 @@ impl CreateRecordOutcome {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AttachIdentifierCommand {
     correlation_id: fasti_domain::RequestCorrelationId,
-    access: RequestAccessContext,
+    access: ApplicationAccessContext,
     record_id: RecordId,
     claim: ExternalIdentifierClaim,
 }
 
 impl AttachIdentifierCommand {
-    pub const fn new(
+    pub fn new(
         correlation_id: fasti_domain::RequestCorrelationId,
-        access: RequestAccessContext,
+        access: impl Into<ApplicationAccessContext>,
         record_id: RecordId,
         claim: ExternalIdentifierClaim,
     ) -> Self {
         Self {
             correlation_id,
-            access,
+            access: access.into(),
             record_id,
             claim,
         }
@@ -565,7 +565,7 @@ impl AttachIdentifierCommand {
         self.correlation_id
     }
 
-    pub const fn access(&self) -> &RequestAccessContext {
+    pub const fn access(&self) -> &ApplicationAccessContext {
         &self.access
     }
 
@@ -614,19 +614,19 @@ impl AttachIdentifierOutcome {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RegisterNamespaceDefinitionCommand {
     correlation_id: fasti_domain::RequestCorrelationId,
-    access: RequestAccessContext,
+    access: ApplicationAccessContext,
     definition: fasti_domain::NamespaceDefinition,
 }
 
 impl RegisterNamespaceDefinitionCommand {
-    pub const fn new(
+    pub fn new(
         correlation_id: fasti_domain::RequestCorrelationId,
-        access: RequestAccessContext,
+        access: impl Into<ApplicationAccessContext>,
         definition: fasti_domain::NamespaceDefinition,
     ) -> Self {
         Self {
             correlation_id,
-            access,
+            access: access.into(),
             definition,
         }
     }
@@ -635,7 +635,7 @@ impl RegisterNamespaceDefinitionCommand {
         self.correlation_id
     }
 
-    pub const fn access(&self) -> &RequestAccessContext {
+    pub const fn access(&self) -> &ApplicationAccessContext {
         &self.access
     }
 
@@ -664,20 +664,20 @@ impl RegisterNamespaceDefinitionOutcome {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListRecordsQuery {
     correlation_id: fasti_domain::RequestCorrelationId,
-    access: RequestAccessContext,
+    access: ApplicationAccessContext,
 }
 
 impl ListRecordsQuery {
-    pub const fn new(
+    pub fn new(
         correlation_id: fasti_domain::RequestCorrelationId,
-        access: RequestAccessContext,
+        access: impl Into<ApplicationAccessContext>,
     ) -> Self {
         Self {
             correlation_id,
-            access,
+            access: access.into(),
         }
     }
 
@@ -685,7 +685,7 @@ impl ListRecordsQuery {
         self.correlation_id
     }
 
-    pub const fn access(&self) -> &RequestAccessContext {
+    pub const fn access(&self) -> &ApplicationAccessContext {
         &self.access
     }
 }
@@ -1287,6 +1287,7 @@ pub trait IdentitySeedPort: Send + Sync {
 
 pub trait LocalKernel:
     AccessAdministrationPort
+    + crate::AccessProjectionPort
     + crate::BrowserSessionPort
     + crate::HumanAccessPort
     + EvidenceUploadPort
@@ -1304,6 +1305,7 @@ pub trait LocalKernel:
 
 impl<T> LocalKernel for T where
     T: AccessAdministrationPort
+        + crate::AccessProjectionPort
         + crate::BrowserSessionPort
         + crate::HumanAccessPort
         + EvidenceUploadPort

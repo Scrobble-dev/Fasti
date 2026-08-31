@@ -449,7 +449,7 @@ async function validateOkf(registry) {
 
   const finalizedCatalog = registry.capabilities.filter(
     ({ contract_body: contractBody, lifecycle }) =>
-      ["b1", "m1", "m2"].includes(contractBody) &&
+      ["b1", "b2", "c1", "m1", "m2"].includes(contractBody) &&
       lifecycle.contract_state === "finalized",
   );
   const catalogueDefinitions = [

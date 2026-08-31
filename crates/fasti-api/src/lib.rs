@@ -7,7 +7,7 @@ use axum::{
     routing::get,
     Json, Router,
 };
-use fasti_application::LocalKernel;
+use fasti_application::{BrowserRequestBoundaryPolicy, LocalKernel};
 use fasti_contracts::{HealthResponse, ProblemActionDto, ProblemDetails, ViolationDto};
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
@@ -17,12 +17,13 @@ use tower_http::services::{ServeDir, ServeFile};
 use utoipa::{
     openapi::{
         schema::{AdditionalProperties, Schema},
-        security::{HttpAuthScheme, HttpBuilder, SecurityScheme},
+        security::{ApiKey, ApiKeyValue, HttpAuthScheme, HttpBuilder, SecurityScheme},
         RefOr,
     },
     Modify, OpenApi,
 };
 
+mod access;
 mod integrations;
 mod local;
 mod metadata;
@@ -109,6 +110,34 @@ impl Modify for ProductionSecurityAddon {
                         .build(),
                 ),
             );
+            components.add_security_scheme(
+                "browser_session_cookie",
+                SecurityScheme::ApiKey(ApiKey::Cookie(ApiKeyValue::with_description(
+                    "__Host-fasti_session",
+                    "Opaque Fasti browser session. The browser supplies this Secure, HttpOnly, SameSite=Strict cookie.",
+                ))),
+            );
+            components.add_security_scheme(
+                "csrf_cookie",
+                SecurityScheme::ApiKey(ApiKey::Cookie(ApiKeyValue::with_description(
+                    "__Host-fasti_csrf",
+                    "First-party CSRF value copied by the browser SDK into X-CSRF-Token.",
+                ))),
+            );
+            components.add_security_scheme(
+                "csrf_header",
+                SecurityScheme::ApiKey(ApiKey::Header(ApiKeyValue::with_description(
+                    "X-CSRF-Token",
+                    "Exact value of the __Host-fasti_csrf cookie for browser mutations.",
+                ))),
+            );
+            components.add_security_scheme(
+                "auth_binding_cookie",
+                SecurityScheme::ApiKey(ApiKey::Cookie(ApiKeyValue::with_description(
+                    "__Secure-fasti_auth_binding",
+                    "One-use, callback-path-scoped browser binding for a TrailBase ceremony.",
+                ))),
+            );
             let Some(RefOr::T(Schema::OneOf(override_schema))) =
                 components.schemas.get_mut("MetadataOverrideMutationDto")
             else {
@@ -129,6 +158,17 @@ impl Modify for ProductionSecurityAddon {
 #[openapi(
     paths(
         health_check,
+        access::start_trailbase_sign_in,
+        access::complete_trailbase_authentication,
+        access::read_access_projection,
+        access::read_browser_session,
+        access::end_browser_session,
+        access::list_browser_sessions,
+        access::revoke_browser_session,
+        access::revoke_other_browser_sessions,
+        access::revoke_all_browser_sessions,
+        access::rotate_browser_session,
+        access::select_browser_session_profile,
         local::initialize_node,
         local::enroll_first_client,
         nuvio_collections::clear_nuvio_collections,
@@ -158,6 +198,36 @@ impl Modify for ProductionSecurityAddon {
     ),
     components(schemas(
         HealthResponse,
+        fasti_contracts::StartTrailBaseSignInRequest,
+        fasti_contracts::StartTrailBaseSignInResponse,
+        fasti_contracts::SelectBrowserSessionProfileRequest,
+        fasti_contracts::BrowserSessionDto,
+        fasti_contracts::ReadBrowserSessionResponse,
+        fasti_contracts::ListBrowserSessionsResponse,
+        fasti_contracts::RevokeBrowserSessionsResponse,
+        fasti_contracts::RotateBrowserSessionResponse,
+        fasti_contracts::SelectBrowserSessionProfileResponse,
+        fasti_contracts::AccessEvidenceStateDto,
+        fasti_contracts::AccessSubjectLifecycleDto,
+        fasti_contracts::AccessMembershipLifecycleDto,
+        fasti_contracts::AccessWorkspaceRoleDto,
+        fasti_contracts::TrailBaseActivationStateDto,
+        fasti_contracts::TrailBaseActivationBlockerDto,
+        fasti_contracts::AccessAuthenticationMethodDto,
+        fasti_contracts::AccessEvidenceKindDto,
+        fasti_contracts::AccessCeremonyStateDto,
+        fasti_contracts::AccessCeremonyFailureDto,
+        fasti_contracts::AccessFirstRunStepKeyDto,
+        fasti_contracts::AccessSubjectDto,
+        fasti_contracts::AccessMembershipDto,
+        fasti_contracts::AccessProfileGrantDto,
+        fasti_contracts::BrowserSessionPolicyDto,
+        fasti_contracts::RecentAuthenticationDto,
+        fasti_contracts::AccessSessionAuthenticationDto,
+        fasti_contracts::TrailBaseActivationDto,
+        fasti_contracts::AccessFirstRunStepDto,
+        fasti_contracts::AccessEvidenceDto,
+        fasti_contracts::AccessProjectionResponse,
         fasti_contracts::AttachIdentifierRequest,
         fasti_contracts::AttachIdentifierResponse,
         fasti_contracts::ClientEnrollmentResponse,
@@ -257,7 +327,10 @@ pub fn health_router() -> Router {
 /// provider adapters. Node bootstrap, generic record mutation, and the generic
 /// observation endpoint are never mounted here.
 pub fn integration_router(kernel: Arc<dyn LocalKernel>) -> Router {
-    let state = local::LocalApiState { kernel };
+    let state = local::LocalApiState {
+        kernel,
+        browser_boundary: None,
+    };
     health_router().merge(integrations::router().with_state(state))
 }
 
@@ -325,6 +398,38 @@ pub fn api_router(
         local_exposure_addr.ip().is_loopback(),
         "api_router requires loopback client exposure, got non-loopback {local_exposure_addr}"
     );
+    durable_loopback_router(kernel, data_root, None)
+}
+
+/// Constructs the only C1 browser-enabled application router.
+///
+/// The caller must pass the actual bound address and fallback result. A
+/// requested address is not proof that the fixed origin was obtained.
+pub fn direct_loopback_api_router(
+    kernel: Arc<dyn LocalKernel>,
+    bound_addr: SocketAddr,
+    used_fallback: bool,
+    data_root: &Path,
+) -> Router {
+    assert_eq!(
+        bound_addr,
+        "127.0.0.1:8420".parse().expect("fixed C1 address"),
+        "browser authentication requires the exact direct 127.0.0.1:8420 listener"
+    );
+    assert!(
+        !used_fallback,
+        "browser authentication is unavailable on a fallback listener"
+    );
+    let boundary = BrowserRequestBoundaryPolicy::try_new("http://127.0.0.1:8420", "127.0.0.1:8420")
+        .expect("fixed C1 browser boundary is valid");
+    durable_loopback_router(kernel, data_root, Some(boundary))
+}
+
+fn durable_loopback_router(
+    kernel: Arc<dyn LocalKernel>,
+    data_root: &Path,
+    browser_boundary: Option<BrowserRequestBoundaryPolicy>,
+) -> Router {
     assert!(
         !data_root.as_os_str().is_empty(),
         "api_router requires non-empty data_root"
@@ -336,11 +441,40 @@ pub fn api_router(
     kernel
         .ensure_bootstrap_secret()
         .expect("bootstrap secret must be preparable before serving any route");
+    let browser_runtime = browser_boundary.and_then(|boundary| {
+        let correlation_id = fasti_domain::RequestCorrelationId::new_v7();
+        let installation = kernel
+            .read_trailbase_installation(fasti_application::ReadTrailBaseInstallationQuery::new(
+                correlation_id,
+            ))
+            .expect("TrailBase activation state must be readable before mounting Access");
+        installation.and_then(|installation| {
+            (installation.activation_state() == fasti_domain::TrailBaseActivationState::Active)
+                .then(|| {
+                    let trailbase = Arc::new(
+                        trailbase::TrailBaseOrchestrator::production(
+                            Arc::clone(&kernel) as Arc<dyn fasti_application::HumanAccessPort>,
+                            &installation,
+                        )
+                        .expect("active TrailBase installation must satisfy the fixed C1 client"),
+                    );
+                    (boundary, trailbase)
+                })
+        })
+    });
+    let active_browser_boundary = browser_runtime
+        .as_ref()
+        .map(|(boundary, _)| boundary.clone());
+    let access = browser_runtime.map_or_else(Router::new, |(boundary, trailbase)| {
+        access::router(Arc::clone(&kernel), boundary, Some(trailbase))
+    });
     let integration_state = local::LocalApiState {
         kernel: Arc::clone(&kernel),
+        browser_boundary: None,
     };
     health_router()
-        .merge(local::router(kernel, true))
+        .merge(local::router(kernel, true, active_browser_boundary))
+        .merge(access)
         .merge(integrations::router().with_state(integration_state))
 }
 
@@ -361,9 +495,10 @@ pub fn remote_api_router(
     );
     let integration_state = local::LocalApiState {
         kernel: Arc::clone(&kernel),
+        browser_boundary: None,
     };
     health_router()
-        .merge(local::router(kernel, false))
+        .merge(local::router(kernel, false, None))
         .merge(integrations::router().with_state(integration_state))
 }
 
@@ -597,10 +732,19 @@ mod tests {
             "/api/v1/metadata/claims/refresh",
             "/api/v1/records/{record_id}/metadata-projection",
             "/api/v1/profile/metadata-projection",
+            "/api/access/v1/trailbase/sign-in",
+            "/api/access/v1/trailbase/callback",
+            "/api/access/v1/projection",
+            "/api/access/v1/browser-session",
+            "/api/access/v1/browser-sessions",
+            "/api/access/v1/browser-sessions/others",
+            "/api/access/v1/browser-sessions/{browser_session_id}",
+            "/api/access/v1/browser-session/rotation",
+            "/api/access/v1/browser-session/profile",
         ] {
             assert!(document.paths.paths.contains_key(path), "missing {path}");
         }
-        assert_eq!(document.paths.paths.len(), 23);
+        assert_eq!(document.paths.paths.len(), 32);
 
         let serialized = serde_json::to_string(&document).expect("serializable OpenAPI document");
         assert!(serialized.contains("#/components/schemas/HealthResponse"));
@@ -614,11 +758,55 @@ mod tests {
             Some(&serde_json::json!("bearer"))
         );
         assert_eq!(
+            value.pointer("/components/securitySchemes/browser_session_cookie"),
+            Some(&serde_json::json!({
+                "type": "apiKey",
+                "in": "cookie",
+                "name": "__Host-fasti_session",
+                "description": "Opaque Fasti browser session. The browser supplies this Secure, HttpOnly, SameSite=Strict cookie."
+            }))
+        );
+        assert_eq!(
+            value.pointer("/components/securitySchemes/csrf_cookie/name"),
+            Some(&serde_json::json!("__Host-fasti_csrf"))
+        );
+        assert_eq!(
+            value.pointer("/components/securitySchemes/csrf_header/name"),
+            Some(&serde_json::json!("X-CSRF-Token"))
+        );
+        assert_eq!(
+            value.pointer("/components/securitySchemes/auth_binding_cookie/name"),
+            Some(&serde_json::json!("__Secure-fasti_auth_binding"))
+        );
+        assert_eq!(
+            value.pointer("/paths/~1api~1access~1v1~1projection/get/security"),
+            Some(&serde_json::json!([{"browser_session_cookie": []}]))
+        );
+        assert_eq!(
+            value.pointer("/paths/~1api~1access~1v1~1browser-session/delete/security"),
+            Some(&serde_json::json!([{
+                "browser_session_cookie": [],
+                "csrf_cookie": [],
+                "csrf_header": []
+            }]))
+        );
+        assert_eq!(
+            value.pointer("/paths/~1api~1access~1v1~1trailbase~1callback/get/security"),
+            Some(&serde_json::json!([{"auth_binding_cookie": []}]))
+        );
+        assert_eq!(
             value
                 .pointer("/paths/~1api~1v1~1records/get/security")
                 .and_then(serde_json::Value::as_array)
                 .map(Vec::len),
-            Some(1)
+            Some(2)
+        );
+        assert_eq!(
+            value.pointer("/paths/~1api~1v1~1records/get/security"),
+            Some(&serde_json::json!([
+                {"credential_bearer": []},
+                {"browser_session_cookie": []}
+            ]))
         );
         assert!(value
             .pointer("/paths/~1api~1v1~1health/get/security")
@@ -651,6 +839,12 @@ mod tests {
         let schemas = &document.components.expect("OpenAPI components").schemas;
         for schema in [
             "HealthResponse",
+            "StartTrailBaseSignInRequest",
+            "StartTrailBaseSignInResponse",
+            "BrowserSessionDto",
+            "AccessProjectionResponse",
+            "ListBrowserSessionsResponse",
+            "RevokeBrowserSessionsResponse",
             "NodeInitializationResponse",
             "NuvioCatalogSourceDto",
             "NuvioCollectionDto",
@@ -877,6 +1071,101 @@ mod tests {
                 .await
                 .expect("router response");
             assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    async fn assert_access_routes_are_absent(router: Router) {
+        for path in [
+            "/api/access/v1/projection",
+            "/api/access/v1/trailbase/callback?code=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        ] {
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::get(path)
+                        .body(Body::empty())
+                        .expect("Access request"),
+                )
+                .await
+                .expect("router response");
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn access_routes_exist_only_on_the_exact_direct_listener() {
+        let (root, kernel) = test_kernel();
+        let inactive = direct_loopback_api_router(
+            kernel.clone(),
+            "127.0.0.1:8420".parse().expect("fixed listener"),
+            false,
+            root.path(),
+        );
+        assert_access_routes_are_absent(inactive).await;
+
+        fasti_application::HumanAccessPort::verify_trailbase_installation(
+            kernel.as_ref(),
+            fasti_application::VerifyTrailBaseInstallationCommand::new(
+                fasti_domain::TrailBaseInstanceId::new_v7(),
+                true,
+                false,
+                fasti_domain::RequestCorrelationId::new_v7(),
+                chrono::Utc::now(),
+            ),
+        )
+        .expect("activate TrailBase");
+        let direct = direct_loopback_api_router(
+            kernel.clone(),
+            "127.0.0.1:8420".parse().expect("fixed listener"),
+            false,
+            root.path(),
+        );
+        let generic = api_router(kernel.clone(), test_bind_addr(), root.path());
+        let integration = integration_router(kernel.clone());
+        let remote = remote_api_router(
+            kernel,
+            "0.0.0.0:8420".parse().expect("remote listener"),
+            root.path(),
+        );
+
+        let direct_projection = direct
+            .clone()
+            .oneshot(
+                Request::get("/api/access/v1/projection")
+                    .header(header::HOST, "127.0.0.1:8420")
+                    .body(Body::empty())
+                    .expect("Access request"),
+            )
+            .await
+            .expect("direct response");
+        assert_eq!(direct_projection.status(), StatusCode::UNAUTHORIZED);
+
+        let callback = direct
+            .oneshot(
+                Request::get(format!(
+                    "/api/access/v1/trailbase/callback?code={}",
+                    "a".repeat(48)
+                ))
+                .header(header::HOST, "127.0.0.1:8420")
+                .body(Body::empty())
+                .expect("callback request"),
+            )
+            .await
+            .expect("callback response");
+        assert_eq!(callback.status(), StatusCode::SEE_OTHER);
+        assert!(callback
+            .headers()
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .any(|value| value
+                .to_str()
+                .expect("cookie")
+                .starts_with("__Secure-fasti_auth_binding=;")));
+
+        for router in [generic, integration, remote] {
+            assert_access_routes_are_absent(router).await;
         }
     }
 

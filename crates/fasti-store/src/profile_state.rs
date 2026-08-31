@@ -1,5 +1,5 @@
 use crate::identity::load_record_grain;
-use crate::kernel::{authorize_transaction, map_sql, now, timestamp, SqliteKernel};
+use crate::kernel::{authorize_application_transaction, map_sql, now, timestamp, SqliteKernel};
 use fasti_application::{
     ApplicationResult, CapabilityKey, FastiProblem, ListTrackingDispositionsQuery,
     ProfileRecordStatePort, SetTrackingDispositionCommand, TrackingDispositionListView,
@@ -24,7 +24,12 @@ impl ProfileRecordStatePort for SqliteKernel {
             capability,
             correlation_id,
         )?;
-        authorize_transaction(&transaction, capability, query.access(), correlation_id)?;
+        let authorized = authorize_application_transaction(
+            &transaction,
+            capability,
+            query.access(),
+            correlation_id,
+        )?;
 
         let mut statement = map_sql(
             transaction.prepare(
@@ -42,8 +47,8 @@ impl ProfileRecordStatePort for SqliteKernel {
         let rows = map_sql(
             statement.query_map(
                 params![
-                    query.access().workspace_id().to_string(),
-                    query.access().profile_id().to_string(),
+                    authorized.workspace_id().to_string(),
+                    authorized.profile_id().to_string(),
                     MAX_TRACKING_DISPOSITIONS_PAGE + 1
                 ],
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
@@ -82,10 +87,15 @@ impl ProfileRecordStatePort for SqliteKernel {
             capability,
             correlation_id,
         )?;
-        authorize_transaction(&transaction, capability, command.access(), correlation_id)?;
+        let authorized = authorize_application_transaction(
+            &transaction,
+            capability,
+            command.access(),
+            correlation_id,
+        )?;
         load_record_grain(
             &transaction,
-            command.access().workspace_id(),
+            authorized.workspace_id(),
             command.record_id(),
             capability,
             correlation_id,
@@ -104,8 +114,8 @@ impl ProfileRecordStatePort for SqliteKernel {
                             updated_at = excluded.updated_at
                         "#,
                         params![
-                            command.access().workspace_id().to_string(),
-                            command.access().profile_id().to_string(),
+                            authorized.workspace_id().to_string(),
+                            authorized.profile_id().to_string(),
                             command.record_id().to_string(),
                             disposition.as_str(),
                             timestamp(now())
@@ -123,8 +133,8 @@ impl ProfileRecordStatePort for SqliteKernel {
                         WHERE workspace_id = ?1 AND profile_id = ?2 AND record_id = ?3
                         "#,
                         params![
-                            command.access().workspace_id().to_string(),
-                            command.access().profile_id().to_string(),
+                            authorized.workspace_id().to_string(),
+                            authorized.profile_id().to_string(),
                             command.record_id().to_string()
                         ],
                     ),

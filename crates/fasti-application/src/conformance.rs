@@ -8,10 +8,10 @@
 
 use crate::{
     authorize, AcceptObservationCommand, AcceptObservationOutcome, AcceptObservationReceipt,
-    AccessSnapshot, ApplicationResult, AuthorizationRequirement, CapabilityKey, CredentialStatus,
-    FastiProblem, GrantStatus, ObservationAcceptancePort, ReceiptStreamBatch, ReceiptStreamEvent,
-    ReceiptStreamPort, ReplayReceiptQuery, RequestAccessContext, ScopeKey, StreamReceiptsQuery,
-    MAX_RECEIPT_STREAM_REPLAY,
+    AccessSnapshot, ApplicationAccessContext, ApplicationResult, AuthorizationRequirement,
+    CapabilityKey, CredentialStatus, FastiProblem, GrantStatus, ObservationAcceptancePort,
+    ReceiptStreamBatch, ReceiptStreamEvent, ReceiptStreamPort, ReplayReceiptQuery,
+    RequestAccessContext, ScopeKey, StreamReceiptsQuery, MAX_RECEIPT_STREAM_REPLAY,
 };
 use chrono::Utc;
 use fasti_domain::{
@@ -481,14 +481,26 @@ impl B1ConformanceFixture {
             CapabilityKey::AcceptObservation,
             command.correlation_id(),
         )?;
+        let ApplicationAccessContext::Credential(access) = command.access() else {
+            return Err(Box::new(FastiProblem::forbidden(
+                CapabilityKey::AcceptObservation,
+                command.correlation_id(),
+            )));
+        };
+        let operation_id = command.operation_id().ok_or_else(|| {
+            Box::new(FastiProblem::integrity_failed(
+                CapabilityKey::AcceptObservation,
+                command.correlation_id(),
+            ))
+        })?;
         authorize_capability(
             CapabilityKey::AcceptObservation,
-            Some(command.access()),
+            Some(access),
             &enrolled.access_snapshot,
             command.correlation_id(),
         )?;
 
-        if let Some(stored) = enrolled.operations.get(&command.operation_id()) {
+        if let Some(stored) = enrolled.operations.get(&operation_id) {
             if stored.capability == CapabilityKey::AcceptObservation
                 && stored.digest == *command.prepared_evidence().digest()
             {
@@ -513,9 +525,9 @@ impl B1ConformanceFixture {
         let received_at = fasti_domain::ReceivedAt::from_application_clock(Utc::now());
         let (observation, _) = Observation::new_unresolved(
             ObservationId::new_v7(),
-            command.access().workspace_id(),
-            command.access().profile_id(),
-            command.access().client_id(),
+            access.workspace_id(),
+            access.profile_id(),
+            access.client_id(),
             command.prepared_evidence().clone(),
             command.occurred_at().cloned(),
             command.observed_at().clone(),
@@ -525,13 +537,13 @@ impl B1ConformanceFixture {
         // FixtureOnly wrapper above explicitly makes no durability claim.
         let receipt = AcceptObservationReceipt::try_from_observation(
             ReceiptId::new_v7(),
-            command.operation_id(),
+            operation_id,
             &observation,
             CommittedAt::from_durability_boundary(received_at.value()),
         )
         .expect("a monotonic fixture transition cannot precede its receive instant");
         enrolled.operations.insert(
-            command.operation_id(),
+            operation_id,
             StoredOperation {
                 capability: CapabilityKey::AcceptObservation,
                 digest: command.prepared_evidence().digest().clone(),

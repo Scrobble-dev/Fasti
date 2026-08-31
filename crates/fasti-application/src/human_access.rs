@@ -16,6 +16,21 @@ pub struct VerifyTrailBaseInstallationCommand {
     at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct ReadTrailBaseInstallationQuery {
+    correlation_id: RequestCorrelationId,
+}
+
+impl ReadTrailBaseInstallationQuery {
+    pub const fn new(correlation_id: RequestCorrelationId) -> Self {
+        Self { correlation_id }
+    }
+
+    pub const fn correlation_id(self) -> RequestCorrelationId {
+        self.correlation_id
+    }
+}
+
 impl VerifyTrailBaseInstallationCommand {
     pub const fn new(
         instance_id: TrailBaseInstanceId,
@@ -460,6 +475,10 @@ impl FailAuthCeremonyCommand {
 }
 
 pub trait HumanAccessPort: Send + Sync {
+    fn read_trailbase_installation(
+        &self,
+        query: ReadTrailBaseInstallationQuery,
+    ) -> ApplicationResult<Option<TrailBaseInstallation>>;
     fn verify_trailbase_installation(
         &self,
         command: VerifyTrailBaseInstallationCommand,

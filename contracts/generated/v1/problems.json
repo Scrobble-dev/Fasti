@@ -3,6 +3,366 @@
   "documentation_base": "https://fasti.scrobble.dev",
   "problems": [
     {
+      "capability_id": "access.identity.bootstrap",
+      "code": "auth_browser_binding_invalid",
+      "detail": "the browser callback is not bound to one active Fasti authentication ceremony",
+      "next_actions": [
+        {
+          "id": "restart_sign_in",
+          "label": "Start a new sign-in ceremony"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication browser binding invalid",
+      "type": "https://fasti.scrobble.dev/v1/problems/auth-browser-binding-invalid"
+    },
+    {
+      "capability_id": "access.identity.bootstrap",
+      "code": "auth_identity_conflict",
+      "detail": "the proven identity conflicts with an existing Fasti identity link",
+      "next_actions": [
+        {
+          "id": "inspect_identity_link",
+          "label": "Inspect the existing identity link before making changes"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 409,
+      "title": "Authentication identity conflict",
+      "type": "https://fasti.scrobble.dev/v1/problems/auth-identity-conflict"
+    },
+    {
+      "capability_id": "access.identity.bootstrap",
+      "code": "capacity_exceeded",
+      "detail": "bounded application capacity has been reached",
+      "next_actions": [
+        {
+          "id": "release_capacity",
+          "label": "Release retained capacity before retrying"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 507,
+      "title": "Capacity exceeded",
+      "type": "https://fasti.scrobble.dev/v1/problems/capacity-exceeded"
+    },
+    {
+      "capability_id": "access.identity.bootstrap",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "access.identity.bootstrap",
+      "code": "identity_service_unavailable",
+      "detail": "the pinned human identity service did not complete the requested operation",
+      "next_actions": [
+        {
+          "id": "retry_identity_service",
+          "label": "Check TrailBase health and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "prior_state_retained",
+      "status": 503,
+      "title": "Identity service unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/identity-service-unavailable"
+    },
+    {
+      "capability_id": "access.identity.bootstrap",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "access.identity.bootstrap",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "access.identity.bootstrap",
+      "code": "trailbase_proof_invalid",
+      "detail": "the TrailBase authentication proof did not satisfy the active ceremony",
+      "next_actions": [
+        {
+          "id": "restart_sign_in",
+          "label": "Start a new sign-in ceremony"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 401,
+      "title": "TrailBase proof invalid",
+      "type": "https://fasti.scrobble.dev/v1/problems/trailbase-proof-invalid"
+    },
+    {
+      "capability_id": "access.identity.bootstrap",
+      "code": "trailbase_session_cleanup_failed",
+      "detail": "TrailBase did not confirm refresh-session cleanup, so Fasti did not issue a browser session",
+      "next_actions": [
+        {
+          "id": "inspect_trailbase_cleanup",
+          "label": "Check TrailBase health, then start a new sign-in ceremony"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 502,
+      "title": "TrailBase session cleanup failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/trailbase-session-cleanup-failed"
+    },
+    {
+      "capability_id": "access.identity.bootstrap",
+      "code": "trailbase_trust_unavailable",
+      "detail": "the active TrailBase installation does not satisfy the pinned trust contract",
+      "next_actions": [
+        {
+          "id": "repair_trailbase_activation",
+          "label": "Repair the pinned TrailBase activation before retrying"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "TrailBase trust unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/trailbase-trust-unavailable"
+    },
+    {
+      "capability_id": "access.identity.bootstrap",
+      "code": "trailbase_version_unsupported",
+      "detail": "the active TrailBase release is not the pinned supported release",
+      "next_actions": [
+        {
+          "id": "install_supported_trailbase",
+          "label": "Install the pinned supported TrailBase release"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "TrailBase version unsupported",
+      "type": "https://fasti.scrobble.dev/v1/problems/trailbase-version-unsupported"
+    },
+    {
+      "capability_id": "access.projection.read",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "access.projection.read",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
+    },
+    {
+      "capability_id": "access.projection.read",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by c1",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "access.projection.read",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "access.projection.read",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
+    },
+    {
+      "capability_id": "access.projection.read",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "browser.session.create",
+      "code": "auth_browser_binding_invalid",
+      "detail": "the browser callback is not bound to one active Fasti authentication ceremony",
+      "next_actions": [
+        {
+          "id": "restart_sign_in",
+          "label": "Start a new sign-in ceremony"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication browser binding invalid",
+      "type": "https://fasti.scrobble.dev/v1/problems/auth-browser-binding-invalid"
+    },
+    {
+      "capability_id": "browser.session.create",
+      "code": "auth_identity_conflict",
+      "detail": "the proven identity conflicts with an existing Fasti identity link",
+      "next_actions": [
+        {
+          "id": "inspect_identity_link",
+          "label": "Inspect the existing identity link before making changes"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 409,
+      "title": "Authentication identity conflict",
+      "type": "https://fasti.scrobble.dev/v1/problems/auth-identity-conflict"
+    },
+    {
+      "capability_id": "browser.session.create",
+      "code": "auth_subject_unaffiliated",
+      "detail": "the authenticated subject does not have active access to the requested workspace",
+      "next_actions": [
+        {
+          "id": "request_workspace_membership",
+          "label": "Ask a workspace administrator for access"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 403,
+      "title": "Authentication subject unaffiliated",
+      "type": "https://fasti.scrobble.dev/v1/problems/auth-subject-unaffiliated"
+    },
+    {
       "capability_id": "browser.session.create",
       "code": "capability_unavailable",
       "detail": "requested capability is not available in this body; it is owned by c1",
@@ -55,6 +415,24 @@
       "status": 403,
       "title": "Forbidden",
       "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "browser.session.create",
+      "code": "identity_service_unavailable",
+      "detail": "the pinned human identity service did not complete the requested operation",
+      "next_actions": [
+        {
+          "id": "retry_identity_service",
+          "label": "Check TrailBase health and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "prior_state_retained",
+      "status": 503,
+      "title": "Identity service unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/identity-service-unavailable"
     },
     {
       "capability_id": "browser.session.create",
@@ -127,6 +505,78 @@
       "status": 503,
       "title": "Storage unavailable",
       "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "browser.session.create",
+      "code": "trailbase_proof_invalid",
+      "detail": "the TrailBase authentication proof did not satisfy the active ceremony",
+      "next_actions": [
+        {
+          "id": "restart_sign_in",
+          "label": "Start a new sign-in ceremony"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 401,
+      "title": "TrailBase proof invalid",
+      "type": "https://fasti.scrobble.dev/v1/problems/trailbase-proof-invalid"
+    },
+    {
+      "capability_id": "browser.session.create",
+      "code": "trailbase_session_cleanup_failed",
+      "detail": "TrailBase did not confirm refresh-session cleanup, so Fasti did not issue a browser session",
+      "next_actions": [
+        {
+          "id": "inspect_trailbase_cleanup",
+          "label": "Check TrailBase health, then start a new sign-in ceremony"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 502,
+      "title": "TrailBase session cleanup failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/trailbase-session-cleanup-failed"
+    },
+    {
+      "capability_id": "browser.session.create",
+      "code": "trailbase_trust_unavailable",
+      "detail": "the active TrailBase installation does not satisfy the pinned trust contract",
+      "next_actions": [
+        {
+          "id": "repair_trailbase_activation",
+          "label": "Repair the pinned TrailBase activation before retrying"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "TrailBase trust unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/trailbase-trust-unavailable"
+    },
+    {
+      "capability_id": "browser.session.create",
+      "code": "trailbase_version_unsupported",
+      "detail": "the active TrailBase release is not the pinned supported release",
+      "next_actions": [
+        {
+          "id": "install_supported_trailbase",
+          "label": "Install the pinned supported TrailBase release"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "TrailBase version unsupported",
+      "type": "https://fasti.scrobble.dev/v1/problems/trailbase-version-unsupported"
     },
     {
       "capability_id": "browser.session.create",
@@ -382,6 +832,42 @@
     },
     {
       "capability_id": "browser.session.profile.select",
+      "code": "malformed_json",
+      "detail": "request JSON is malformed",
+      "next_actions": [
+        {
+          "id": "correct_json",
+          "label": "Correct the JSON syntax and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 400,
+      "title": "Malformed JSON",
+      "type": "https://fasti.scrobble.dev/v1/problems/malformed-json"
+    },
+    {
+      "capability_id": "browser.session.profile.select",
+      "code": "payload_too_large",
+      "detail": "request body exceeds the bounded transport limit",
+      "next_actions": [
+        {
+          "id": "reduce_request_body",
+          "label": "Reduce the request body and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 413,
+      "title": "Payload too large",
+      "type": "https://fasti.scrobble.dev/v1/problems/payload-too-large"
+    },
+    {
+      "capability_id": "browser.session.profile.select",
       "code": "session_policy_changed",
       "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
       "next_actions": [
@@ -415,6 +901,24 @@
       "status": 503,
       "title": "Storage unavailable",
       "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "browser.session.profile.select",
+      "code": "unsupported_media_type",
+      "detail": "request media type is unsupported",
+      "next_actions": [
+        {
+          "id": "use_supported_media_type",
+          "label": "Use the documented media type and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 415,
+      "title": "Unsupported media type",
+      "type": "https://fasti.scrobble.dev/v1/problems/unsupported-media-type"
     },
     {
       "capability_id": "browser.session.profile.select",
@@ -1516,6 +2020,42 @@
     },
     {
       "capability_id": "identity.identifier.attach",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "identity.identifier.attach",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
+    },
+    {
+      "capability_id": "identity.identifier.attach",
       "code": "capability_unavailable",
       "detail": "requested capability is not available in this body; it is owned by b2",
       "next_actions": [
@@ -1660,6 +2200,24 @@
     },
     {
       "capability_id": "identity.identifier.attach",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
+    },
+    {
+      "capability_id": "identity.identifier.attach",
       "code": "storage_unavailable",
       "detail": "the local durability boundary is temporarily unavailable",
       "next_actions": [
@@ -1729,6 +2287,42 @@
       "status": 401,
       "title": "Authentication failed",
       "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "identity.namespace.register",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "identity.namespace.register",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
     },
     {
       "capability_id": "identity.namespace.register",
@@ -1822,6 +2416,24 @@
     },
     {
       "capability_id": "identity.namespace.register",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
+    },
+    {
+      "capability_id": "identity.namespace.register",
       "code": "storage_unavailable",
       "detail": "the local durability boundary is temporarily unavailable",
       "next_actions": [
@@ -1891,6 +2503,42 @@
       "status": 401,
       "title": "Authentication failed",
       "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "identity.record.create",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "identity.record.create",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
     },
     {
       "capability_id": "identity.record.create",
@@ -2002,6 +2650,24 @@
     },
     {
       "capability_id": "identity.record.create",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
+    },
+    {
+      "capability_id": "identity.record.create",
       "code": "storage_unavailable",
       "detail": "the local durability boundary is temporarily unavailable",
       "next_actions": [
@@ -2074,6 +2740,42 @@
     },
     {
       "capability_id": "identity.record.list",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "identity.record.list",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
+    },
+    {
+      "capability_id": "identity.record.list",
       "code": "capability_unavailable",
       "detail": "requested capability is not available in this body; it is owned by b2",
       "next_actions": [
@@ -2125,6 +2827,24 @@
       "status": 500,
       "title": "Integrity check failed",
       "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "identity.record.list",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
     },
     {
       "capability_id": "identity.record.list",
@@ -3118,6 +3838,42 @@
     },
     {
       "capability_id": "observation.accept",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "observation.accept",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
+    },
+    {
+      "capability_id": "observation.accept",
       "code": "capacity_exceeded",
       "detail": "bounded application capacity has been reached",
       "next_actions": [
@@ -3244,6 +4000,24 @@
     },
     {
       "capability_id": "observation.accept",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
+    },
+    {
+      "capability_id": "observation.accept",
       "code": "storage_unavailable",
       "detail": "the local durability boundary is temporarily unavailable",
       "next_actions": [
@@ -3460,6 +4234,42 @@
     },
     {
       "capability_id": "profile.nuvio_collections.clear",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "profile.nuvio_collections.clear",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
+    },
+    {
+      "capability_id": "profile.nuvio_collections.clear",
       "code": "capability_unavailable",
       "detail": "requested capability is not available in this body; it is owned by b2",
       "next_actions": [
@@ -3511,6 +4321,24 @@
       "status": 500,
       "title": "Integrity check failed",
       "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "profile.nuvio_collections.clear",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
     },
     {
       "capability_id": "profile.nuvio_collections.clear",
@@ -3550,6 +4378,42 @@
     },
     {
       "capability_id": "profile.nuvio_collections.get",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "profile.nuvio_collections.get",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
+    },
+    {
+      "capability_id": "profile.nuvio_collections.get",
       "code": "capability_unavailable",
       "detail": "requested capability is not available in this body; it is owned by b2",
       "next_actions": [
@@ -3601,6 +4465,24 @@
       "status": 500,
       "title": "Integrity check failed",
       "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "profile.nuvio_collections.get",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
     },
     {
       "capability_id": "profile.nuvio_collections.get",
@@ -3637,6 +4519,42 @@
       "status": 401,
       "title": "Authentication failed",
       "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "profile.nuvio_collections.replace",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "profile.nuvio_collections.replace",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
     },
     {
       "capability_id": "profile.nuvio_collections.replace",
@@ -3730,6 +4648,24 @@
     },
     {
       "capability_id": "profile.nuvio_collections.replace",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
+    },
+    {
+      "capability_id": "profile.nuvio_collections.replace",
       "code": "storage_unavailable",
       "detail": "the local durability boundary is temporarily unavailable",
       "next_actions": [
@@ -3802,6 +4738,42 @@
     },
     {
       "capability_id": "profile.record.tracking_disposition.list",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.list",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.list",
       "code": "capability_unavailable",
       "detail": "requested capability is not available in this body; it is owned by b2",
       "next_actions": [
@@ -3856,6 +4828,24 @@
     },
     {
       "capability_id": "profile.record.tracking_disposition.list",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.list",
       "code": "storage_unavailable",
       "detail": "the local durability boundary is temporarily unavailable",
       "next_actions": [
@@ -3889,6 +4879,42 @@
       "status": 401,
       "title": "Authentication failed",
       "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.set",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.set",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
     },
     {
       "capability_id": "profile.record.tracking_disposition.set",
@@ -3997,6 +5023,24 @@
       "status": 404,
       "title": "Record not found",
       "type": "https://fasti.scrobble.dev/v1/problems/record-not-found"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.set",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
     },
     {
       "capability_id": "profile.record.tracking_disposition.set",

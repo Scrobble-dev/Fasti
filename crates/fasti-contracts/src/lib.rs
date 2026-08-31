@@ -15,6 +15,7 @@ fn explicit_null_openapi() -> utoipa::openapi::schema::Object {
         .build()
 }
 
+mod access;
 mod bootstrap;
 mod conformance;
 mod generated_capability_ids;
@@ -27,6 +28,7 @@ mod profile_state;
 mod providers;
 mod records;
 
+pub use access::*;
 pub use bootstrap::*;
 pub use conformance::*;
 pub use generated_capability_ids::public_capability_id;

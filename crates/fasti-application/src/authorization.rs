@@ -4,8 +4,10 @@
 //! [`RequestAccessContext`]. This module decides only whether the capability
 //! may proceed; it deliberately does not know how either value was obtained.
 
-use crate::{AuthorizationKind, CapabilityKey, ScopeKey};
-use fasti_domain::{ClientId, CredentialId, ProfileGrantId, ProfileId, WorkspaceId};
+use crate::{AuthorizationKind, BrowserSessionAccessContext, CapabilityKey, ScopeKey};
+use fasti_domain::{
+    AuthSubjectId, BrowserSessionId, ClientId, CredentialId, ProfileGrantId, ProfileId, WorkspaceId,
+};
 use std::{collections::HashSet, error::Error, fmt};
 
 /// Current credential state loaded from the source of truth.
@@ -74,6 +76,98 @@ impl RequestAccessContext {
 
     pub const fn presented_credential_epoch(&self) -> u64 {
         self.presented_credential_epoch
+    }
+}
+
+/// Authentication proof accepted by first-party application operations.
+///
+/// Credential callers retain their existing context. Browser callers carry
+/// only the opaque session proof; workspace, profile, grant, and actor IDs are
+/// resolved from current durable state inside the operation transaction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ApplicationAccessContext {
+    Credential(RequestAccessContext),
+    BrowserSession(BrowserSessionAccessContext),
+}
+
+impl From<RequestAccessContext> for ApplicationAccessContext {
+    fn from(access: RequestAccessContext) -> Self {
+        Self::Credential(access)
+    }
+}
+
+impl From<BrowserSessionAccessContext> for ApplicationAccessContext {
+    fn from(access: BrowserSessionAccessContext) -> Self {
+        Self::BrowserSession(access)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthorizedActor {
+    Credential {
+        presented_client_id: ClientId,
+        credential_id: CredentialId,
+    },
+    BrowserSession {
+        auth_subject_id: AuthSubjectId,
+        browser_session_id: BrowserSessionId,
+        grant_owner_client_id: ClientId,
+    },
+}
+
+/// Current application scope resolved atomically with an operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AuthorizedApplicationAccess {
+    workspace_id: WorkspaceId,
+    profile_id: ProfileId,
+    grant_id: ProfileGrantId,
+    actor: AuthorizedActor,
+}
+
+impl AuthorizedApplicationAccess {
+    pub const fn new(
+        workspace_id: WorkspaceId,
+        profile_id: ProfileId,
+        grant_id: ProfileGrantId,
+        actor: AuthorizedActor,
+    ) -> Self {
+        Self {
+            workspace_id,
+            profile_id,
+            grant_id,
+            actor,
+        }
+    }
+
+    pub const fn workspace_id(self) -> WorkspaceId {
+        self.workspace_id
+    }
+
+    pub const fn profile_id(self) -> ProfileId {
+        self.profile_id
+    }
+
+    pub const fn grant_id(self) -> ProfileGrantId {
+        self.grant_id
+    }
+
+    pub const fn actor(self) -> AuthorizedActor {
+        self.actor
+    }
+
+    /// Client attribution used only by durable domain records that require a
+    /// source client. Audit and provenance must retain [`Self::actor`].
+    pub const fn attribution_client_id(self) -> ClientId {
+        match self.actor {
+            AuthorizedActor::Credential {
+                presented_client_id,
+                ..
+            } => presented_client_id,
+            AuthorizedActor::BrowserSession {
+                grant_owner_client_id,
+                ..
+            } => grant_owner_client_id,
+        }
     }
 }
 
@@ -267,9 +361,28 @@ impl AuthorizationRequirement {
         matches!(self.kind, AuthorizationKind::BrowserSession)
     }
 
+    pub const fn is_scoped_or_browser_session(&self) -> bool {
+        matches!(self.kind, AuthorizationKind::ScopedOrBrowserSession)
+    }
+
+    pub const fn requires_browser_mutation_proof(&self) -> bool {
+        matches!(
+            self.capability,
+            CapabilityKey::AcceptObservation
+                | CapabilityKey::CreateRecord
+                | CapabilityKey::AttachIdentifier
+                | CapabilityKey::RegisterNamespace
+                | CapabilityKey::SetTrackingDisposition
+                | CapabilityKey::ReplaceNuvioCollections
+                | CapabilityKey::ClearNuvioCollections
+        )
+    }
+
     pub const fn required_scopes(&self) -> &'static [ScopeKey] {
         match self.kind {
-            AuthorizationKind::Scoped => self.capability.required_scopes(),
+            AuthorizationKind::Scoped | AuthorizationKind::ScopedOrBrowserSession => {
+                self.capability.required_scopes()
+            }
             AuthorizationKind::Unauthenticated
             | AuthorizationKind::BootstrapOnly
             | AuthorizationKind::LocalOperator
@@ -319,7 +432,7 @@ pub fn authorize(
         // digest, CSRF value, expiry, revocation, and current subject epochs.
         // A client credential snapshot cannot satisfy it.
         AuthorizationKind::BrowserSession => false,
-        AuthorizationKind::Scoped => {
+        AuthorizationKind::Scoped | AuthorizationKind::ScopedOrBrowserSession => {
             let required_scopes = requirement.capability.required_scopes();
             match (
                 request,
@@ -453,6 +566,7 @@ mod tests {
                     | CapabilityKey::IntegrationStatus
                     | CapabilityKey::CreateBrowserSession
                     | CapabilityKey::InitializeNode
+                    | CapabilityKey::AccessIdentityBootstrap
                     | CapabilityKey::RestoreWorkspace
             )
         }) {
@@ -491,6 +605,70 @@ mod tests {
             assert!(authorize(&requirement, Some(&request), snapshot).is_err());
             assert!(authorize(&requirement, None, snapshot).is_err());
         }
+    }
+
+    #[test]
+    fn hybrid_capability_preserves_the_existing_credential_policy() {
+        let ids = Identities::distinct();
+        let requirement =
+            AuthorizationRequirement::for_capability(CapabilityKey::AcceptObservation);
+        assert!(requirement.is_scoped_or_browser_session());
+        assert_eq!(
+            requirement.required_scopes(),
+            &[ScopeKey::ObservationAccept]
+        );
+
+        let request = request(ids, [true; 5], 7);
+        let allowed = AccessSnapshot::established(
+            ids.workspace,
+            ids.profile,
+            ids.client,
+            ids.credential,
+            ids.grant,
+            CredentialStatus::Active,
+            GrantStatus::Active,
+            7,
+            [ScopeKey::ObservationAccept],
+        );
+        assert!(authorize(&requirement, Some(&request), Some(&allowed)).is_ok());
+
+        let no_scope = AccessSnapshot::established(
+            ids.workspace,
+            ids.profile,
+            ids.client,
+            ids.credential,
+            ids.grant,
+            CredentialStatus::Active,
+            GrantStatus::Active,
+            7,
+            [],
+        );
+        assert!(authorize(&requirement, Some(&request), Some(&no_scope)).is_err());
+        assert!(authorize(&requirement, None, Some(&allowed)).is_err());
+    }
+
+    #[test]
+    fn hybrid_browser_proof_kind_is_frozen_by_application_policy() {
+        let mutations = [
+            CapabilityKey::AcceptObservation,
+            CapabilityKey::CreateRecord,
+            CapabilityKey::AttachIdentifier,
+            CapabilityKey::RegisterNamespace,
+            CapabilityKey::SetTrackingDisposition,
+            CapabilityKey::ReplaceNuvioCollections,
+            CapabilityKey::ClearNuvioCollections,
+        ];
+        let reads = [
+            CapabilityKey::ListRecords,
+            CapabilityKey::ListTrackingDispositions,
+            CapabilityKey::GetNuvioCollections,
+        ];
+        assert!(mutations.into_iter().all(|capability| {
+            AuthorizationRequirement::for_capability(capability).requires_browser_mutation_proof()
+        }));
+        assert!(reads.into_iter().all(|capability| {
+            !AuthorizationRequirement::for_capability(capability).requires_browser_mutation_proof()
+        }));
     }
 
     #[test]

@@ -7,13 +7,19 @@ tags: [fasti, contracts, problems]
 status: draft
 identifiers:
   - already_initialized
+  - auth_browser_binding_invalid
+  - auth_identity_conflict
+  - auth_subject_unaffiliated
   - authentication_failed
   - bootstrap_closed
+  - browser_session_expired
+  - browser_session_revoked
   - capacity_exceeded
   - capability_unavailable
   - forbidden
   - idempotency_conflict
   - identity_conflict
+  - identity_service_unavailable
   - integrity_failed
   - invalid_identifier
   - invalid_observation
@@ -30,6 +36,11 @@ identifiers:
   - receipt_not_found
   - record_not_found
   - storage_unavailable
+  - session_policy_changed
+  - trailbase_proof_invalid
+  - trailbase_session_cleanup_failed
+  - trailbase_trust_unavailable
+  - trailbase_version_unsupported
   - unsupported_media_type
   - validation_failed
 sources:
@@ -49,13 +60,19 @@ not claim a later-body failure path is executable.
 | Code                          | Contract meaning                                                           |
 | ----------------------------- | -------------------------------------------------------------------------- |
 | `already_initialized`         | One-time durable node initialization already completed.                    |
+| `auth_browser_binding_invalid` | The callback is not bound to one active Fasti authentication ceremony.    |
+| `auth_identity_conflict`      | The proven identity conflicts with an existing Fasti identity link.        |
+| `auth_subject_unaffiliated`   | The proven subject has no active membership in the selected workspace.     |
 | `authentication_failed`       | The bearer credential is missing, malformed, or inactive.                  |
 | `bootstrap_closed`            | The enrollment proof is invalid, expired, or already consumed.             |
+| `browser_session_expired`     | The opaque browser session reached its idle or absolute expiry.            |
+| `browser_session_revoked`     | The opaque browser session is no longer active.                            |
 | `capacity_exceeded`           | A bounded application resource rejected work without mutation.             |
 | `capability_unavailable`      | The requested capability is owned by another runtime body.                 |
 | `forbidden`                   | The request context is not authorized for the capability.                  |
 | `idempotency_conflict`        | An operation identifier was reused with different semantics.               |
 | `identity_conflict`           | An exact external identifier is already attached to another active record. |
+| `identity_service_unavailable` | The pinned human identity service did not complete the operation.         |
 | `integrity_failed`            | Durable local state failed a recorded integrity invariant.                 |
 | `invalid_identifier`          | An identifier or grain does not satisfy the governed format.               |
 | `invalid_observation`         | An observation violates the governed input contract.                       |
@@ -71,7 +88,12 @@ not claim a later-body failure path is executable.
 | `provider_unavailable`        | The provider or requested capability is unavailable in this runtime.       |
 | `receipt_not_found`           | No visible receipt matches the requested identifier and context.           |
 | `record_not_found`            | No active record is available for the requested identifier.                |
+| `session_policy_changed`      | The browser session no longer satisfies current authorization policy.      |
 | `storage_unavailable`         | The local durability boundary is temporarily unavailable.                  |
+| `trailbase_proof_invalid`     | The TrailBase proof did not satisfy the active ceremony.                   |
+| `trailbase_session_cleanup_failed` | TrailBase refresh-session cleanup was not confirmed.                 |
+| `trailbase_trust_unavailable` | The active installation does not satisfy the pinned trust contract.        |
+| `trailbase_version_unsupported` | The active TrailBase release is not the pinned supported release.        |
 | `unsupported_media_type`      | The request did not use the required JSON media type.                      |
 | `validation_failed`           | One or more public fields fail contract validation.                        |
 

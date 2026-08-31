@@ -446,6 +446,94 @@ define_problem_catalog!(
         default_next_action: ("inspect_review_queue", "Inspect the current review queue"),
         param_policy: ProblemParamPolicy::Fixed("/review_item_id")
     },
+    IdentityServiceUnavailable => "identity_service_unavailable" {
+        title: "Identity service unavailable", status: 503,
+        detail: ProblemDetail::Static("the pinned human identity service did not complete the requested operation"),
+        documentation_path: "v1/problems/identity-service-unavailable", safe_state: PriorStateRetained,
+        retryability: RetrySafe,
+        default_next_action: ("retry_identity_service", "Check TrailBase health and retry the same safe operation"),
+        param_policy: ProblemParamPolicy::None
+    },
+    TrailBaseVersionUnsupported => "trailbase_version_unsupported" {
+        title: "TrailBase version unsupported", status: 503,
+        detail: ProblemDetail::Static("the active TrailBase release is not the pinned supported release"),
+        documentation_path: "v1/problems/trailbase-version-unsupported", safe_state: NoMutation,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("install_supported_trailbase", "Install the pinned supported TrailBase release"),
+        param_policy: ProblemParamPolicy::None
+    },
+    TrailBaseTrustUnavailable => "trailbase_trust_unavailable" {
+        title: "TrailBase trust unavailable", status: 503,
+        detail: ProblemDetail::Static("the active TrailBase installation does not satisfy the pinned trust contract"),
+        documentation_path: "v1/problems/trailbase-trust-unavailable", safe_state: NoMutation,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("repair_trailbase_activation", "Repair the pinned TrailBase activation before retrying"),
+        param_policy: ProblemParamPolicy::None
+    },
+    TrailBaseProofInvalid => "trailbase_proof_invalid" {
+        title: "TrailBase proof invalid", status: 401,
+        detail: ProblemDetail::Static("the TrailBase authentication proof did not satisfy the active ceremony"),
+        documentation_path: "v1/problems/trailbase-proof-invalid", safe_state: PriorStateRetained,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("restart_sign_in", "Start a new sign-in ceremony"),
+        param_policy: ProblemParamPolicy::None
+    },
+    TrailBaseSessionCleanupFailed => "trailbase_session_cleanup_failed" {
+        title: "TrailBase session cleanup failed", status: 502,
+        detail: ProblemDetail::Static("TrailBase did not confirm refresh-session cleanup, so Fasti did not issue a browser session"),
+        documentation_path: "v1/problems/trailbase-session-cleanup-failed", safe_state: PriorStateRetained,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("inspect_trailbase_cleanup", "Check TrailBase health, then start a new sign-in ceremony"),
+        param_policy: ProblemParamPolicy::None
+    },
+    AuthBrowserBindingInvalid => "auth_browser_binding_invalid" {
+        title: "Authentication browser binding invalid", status: 401,
+        detail: ProblemDetail::Static("the browser callback is not bound to one active Fasti authentication ceremony"),
+        documentation_path: "v1/problems/auth-browser-binding-invalid", safe_state: NoMutation,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("restart_sign_in", "Start a new sign-in ceremony"),
+        param_policy: ProblemParamPolicy::None
+    },
+    AuthSubjectUnaffiliated => "auth_subject_unaffiliated" {
+        title: "Authentication subject unaffiliated", status: 403,
+        detail: ProblemDetail::Static("the authenticated subject does not have active access to the requested workspace"),
+        documentation_path: "v1/problems/auth-subject-unaffiliated", safe_state: PriorStateRetained,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("request_workspace_membership", "Ask a workspace administrator for access"),
+        param_policy: ProblemParamPolicy::None
+    },
+    AuthIdentityConflict => "auth_identity_conflict" {
+        title: "Authentication identity conflict", status: 409,
+        detail: ProblemDetail::Static("the proven identity conflicts with an existing Fasti identity link"),
+        documentation_path: "v1/problems/auth-identity-conflict", safe_state: PriorStateRetained,
+        retryability: NotRetryable,
+        default_next_action: ("inspect_identity_link", "Inspect the existing identity link before making changes"),
+        param_policy: ProblemParamPolicy::None
+    },
+    AuthLastSignInMethod => "auth_last_sign_in_method" {
+        title: "Last sign-in method", status: 409,
+        detail: ProblemDetail::Static("the requested change would remove the account's last verified sign-in method"),
+        documentation_path: "v1/problems/auth-last-sign-in-method", safe_state: PriorStateRetained,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("add_sign_in_method", "Add another verified sign-in method before removal"),
+        param_policy: ProblemParamPolicy::None
+    },
+    AuthAssuranceInsufficient => "auth_assurance_insufficient" {
+        title: "Authentication assurance insufficient", status: 403,
+        detail: ProblemDetail::Static("the current authentication proof does not meet this action's required assurance"),
+        documentation_path: "v1/problems/auth-assurance-insufficient", safe_state: NoMutation,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("use_required_assurance", "Use a sign-in method that meets the required assurance level"),
+        param_policy: ProblemParamPolicy::None
+    },
+    RecentAuthenticationRequired => "recent_authentication_required" {
+        title: "Recent authentication required", status: 403,
+        detail: ProblemDetail::Static("this sensitive action requires a current recent-authentication proof"),
+        documentation_path: "v1/problems/recent-authentication-required", safe_state: NoMutation,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("authenticate_again", "Authenticate again before this sensitive action"),
+        param_policy: ProblemParamPolicy::None
+    },
     BrowserSessionExpired => "browser_session_expired" {
         title: "Browser session expired", status: 401,
         detail: ProblemDetail::Static("the Fasti browser session reached its idle or absolute expiry"),
@@ -534,7 +622,18 @@ impl ProblemCode {
             | Self::ReviewNotFound
             | Self::StorageUnavailable
             | Self::UnsupportedListener => CapabilityBody::B2,
-            Self::BrowserSessionExpired
+            Self::IdentityServiceUnavailable
+            | Self::TrailBaseVersionUnsupported
+            | Self::TrailBaseTrustUnavailable
+            | Self::TrailBaseProofInvalid
+            | Self::TrailBaseSessionCleanupFailed
+            | Self::AuthBrowserBindingInvalid
+            | Self::AuthSubjectUnaffiliated
+            | Self::AuthIdentityConflict
+            | Self::AuthLastSignInMethod
+            | Self::AuthAssuranceInsufficient
+            | Self::RecentAuthenticationRequired
+            | Self::BrowserSessionExpired
             | Self::BrowserSessionRevoked
             | Self::SessionPolicyChanged => CapabilityBody::C1,
             Self::ProviderUnavailable
@@ -557,7 +656,15 @@ impl ProblemCode {
 
     pub const fn contract_state(self) -> ContractState {
         match self {
-            Self::AlreadyInitialized
+            Self::IdentityServiceUnavailable
+            | Self::TrailBaseVersionUnsupported
+            | Self::TrailBaseTrustUnavailable
+            | Self::TrailBaseProofInvalid
+            | Self::TrailBaseSessionCleanupFailed
+            | Self::AuthBrowserBindingInvalid
+            | Self::AuthSubjectUnaffiliated
+            | Self::AuthIdentityConflict
+            | Self::AlreadyInitialized
             | Self::AuthenticationFailed
             | Self::BootstrapClosed
             | Self::IdentityConflict
@@ -1044,12 +1151,29 @@ mod tests {
         }
 
         for code in [
+            ProblemCode::IdentityServiceUnavailable,
+            ProblemCode::TrailBaseVersionUnsupported,
+            ProblemCode::TrailBaseTrustUnavailable,
+            ProblemCode::TrailBaseProofInvalid,
+            ProblemCode::TrailBaseSessionCleanupFailed,
+            ProblemCode::AuthBrowserBindingInvalid,
+            ProblemCode::AuthSubjectUnaffiliated,
+            ProblemCode::AuthIdentityConflict,
             ProblemCode::BrowserSessionExpired,
             ProblemCode::BrowserSessionRevoked,
             ProblemCode::SessionPolicyChanged,
         ] {
             assert_eq!(code.introduced_in(), CapabilityBody::C1);
             assert_eq!(code.contract_state(), ContractState::Finalized);
+        }
+
+        for code in [
+            ProblemCode::AuthLastSignInMethod,
+            ProblemCode::AuthAssuranceInsufficient,
+            ProblemCode::RecentAuthenticationRequired,
+        ] {
+            assert_eq!(code.introduced_in(), CapabilityBody::C1);
+            assert_eq!(code.contract_state(), ContractState::Reserved);
         }
 
         for code in [
@@ -1100,6 +1224,27 @@ mod tests {
             assert_eq!(code.introduced_in(), CapabilityBody::B3);
             assert_eq!(code.contract_state(), ContractState::Reserved);
         }
+    }
+
+    #[test]
+    fn c1_identity_problem_contracts_preserve_the_frozen_wire_semantics() {
+        let cleanup = ProblemCode::TrailBaseSessionCleanupFailed.contract();
+        assert_eq!(cleanup.status(), 502);
+        assert_eq!(cleanup.safe_state(), SafeState::PriorStateRetained);
+        assert_eq!(cleanup.retryability(), Retryability::RetryAfterCorrection);
+        assert_eq!(
+            cleanup.default_next_action().id(),
+            "inspect_trailbase_cleanup"
+        );
+
+        let binding = ProblemCode::AuthBrowserBindingInvalid.contract();
+        assert_eq!(binding.status(), 401);
+        assert_eq!(binding.safe_state(), SafeState::NoMutation);
+        assert_eq!(binding.param_policy(), ProblemParamPolicy::None);
+
+        let conflict = ProblemCode::AuthIdentityConflict.contract();
+        assert_eq!(conflict.status(), 409);
+        assert_eq!(conflict.retryability(), Retryability::NotRetryable);
     }
 
     #[test]
