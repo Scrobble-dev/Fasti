@@ -223,7 +223,13 @@ Run the local C1 gate suite with:
 cargo xtask test milestone --body C1
 ```
 
+Run it from an active local Linux Wayland or X11 session on a host that permits
+unprivileged user and network namespaces. Its release-host smoke uses private
+data and XDG roots inside a route-less namespace. It cannot run on a headless,
+macOS, or Windows host.
+
 The command writes `target/fasti-receipts/access-c1.json`. That file is a gate-
-suite receipt, not a C1 closure manifest. Package smoke, packaged WebView,
-cross-platform, assistive-technology, final review, exact-head CI, merge, and
-release evidence remain pending.
+suite receipt, not a C1 closure manifest. The Linux release-host check proves
+embedded routes and Wry process composition only. Authenticated package smoke,
+packaged WebView, cross-platform, assistive-technology, final review,
+exact-head CI, merge, and release evidence remain pending.

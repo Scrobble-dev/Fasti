@@ -60,7 +60,7 @@ pub(crate) fn run_access_c1(root: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub(crate) fn access_c1_gates() -> [CommandGate; 4] {
+pub(crate) fn access_c1_gates() -> [CommandGate; 5] {
     [
         CommandGate::new(
             "access.prepared_machine",
@@ -85,6 +85,12 @@ pub(crate) fn access_c1_gates() -> [CommandGate; 4] {
                 "apps/desktop/src-tauri/Cargo.toml",
             ],
             "install the locked desktop prerequisites and repair the packaged-host Access boundary",
+        ),
+        CommandGate::new(
+            "access.desktop_release_host_smoke",
+            "bash",
+            ["scripts/smoke-desktop-access.sh"],
+            "run the copied Linux release desktop in a local display session and repair its embedded Access composition",
         ),
         CommandGate::new(
             "access.browser_fixture",
@@ -393,6 +399,7 @@ mod tests {
                 "access.prepared_machine",
                 "access.contract_profile",
                 "access.desktop_host",
+                "access.desktop_release_host_smoke",
                 "access.browser_fixture",
             ]
         );
@@ -407,8 +414,12 @@ mod tests {
         assert!(gates[2]
             .display()
             .contains("apps/desktop/src-tauri/Cargo.toml"));
-        assert!(gates[3].display().contains("tests/e2e/access-c1.spec.ts"));
-        assert!(gates[3].display().contains("--project=chrome"));
+        assert_eq!(
+            gates[3].display(),
+            "\"bash\" \"scripts/smoke-desktop-access.sh\""
+        );
+        assert!(gates[4].display().contains("tests/e2e/access-c1.spec.ts"));
+        assert!(gates[4].display().contains("--project=chrome"));
     }
 
     #[test]
