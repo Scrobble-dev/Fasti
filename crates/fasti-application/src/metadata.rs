@@ -783,6 +783,14 @@ pub fn preview_anime_grouping_change_for_record_with_evidence(
     );
     let route_changed =
         previous.status != proposed.status || previous.selected_route != proposed.selected_route;
+    let can_regroup_seasons = |route: Option<&PurposeIdentityRoute>| {
+        route.is_some_and(|route| {
+            matches!(route.identifier().grain(), Grain::Series | Grain::Release)
+        })
+    };
+    let possible_season_regrouping = route_changed
+        && (can_regroup_seasons(previous.selected_route())
+            || can_regroup_seasons(proposed.selected_route()));
 
     AnimeGroupingRecordPreview {
         record_id,
@@ -791,8 +799,7 @@ pub fn preview_anime_grouping_change_for_record_with_evidence(
         previous_route: previous.selected_route,
         proposed_route: proposed.selected_route,
         route_changed,
-        possible_season_regrouping: route_changed
-            && groups_by_tv_work(previous_preference) != groups_by_tv_work(proposed_preference),
+        possible_season_regrouping,
     }
 }
 
@@ -2926,6 +2933,18 @@ mod tests {
                 .namespace(),
             "mal.anime"
         );
+
+        let release_change = preview_anime_grouping_change_for_record(
+            record_id,
+            AnimeGroupingPreference::KeepMalReleasesSeparate,
+            AnimeGroupingPreference::KeepKitsuReleasesSeparate,
+            &[
+                identity_claim("mal.anime", "49894"),
+                identity_claim("kitsu.anime", "7442"),
+            ],
+        );
+        assert!(release_change.route_changed());
+        assert!(release_change.possible_season_regrouping());
     }
 
     #[test]
