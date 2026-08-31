@@ -740,7 +740,7 @@ capabilities:
       {
         introduced_in: c1,
         contract_state: finalized,
-        runtime_availability: later_body,
+        runtime_availability: implemented,
       }
     surface_profile: c1_identity_bootstrap
     scopes: []

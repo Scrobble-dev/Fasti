@@ -1,0 +1,9 @@
+{
+  "$schema": "../gen/schemas/android-schema.json",
+  "identifier": "main-android-local",
+  "description": "Preserves the existing trusted-host commands for Android's packaged local WebView.",
+  "platforms": ["android"],
+  "local": true,
+  "windows": ["main"],
+  "permissions": ["main-runtime"]
+}

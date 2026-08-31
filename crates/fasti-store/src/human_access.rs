@@ -3071,7 +3071,7 @@ mod tests {
     }
 
     #[test]
-    fn concurrent_post_cleanup_bootstrap_has_one_atomic_winner() {
+    fn concurrent_post_cleanup_bootstrap_replay_has_one_atomic_winner() {
         let node = TestNode::new();
         let installation = node
             .kernel
@@ -3083,28 +3083,25 @@ mod tests {
                 at(0),
             )
             .expect("active installation");
-        let ceremonies = [85, 86].map(|subject_byte| {
-            let ceremony = selected_ceremony(
-                &installation,
-                AuthCeremonyPurpose::FirstAdministratorBootstrap,
-                node.access.workspace_id(),
-                node.access.grant_id(),
-                None,
-                subject_byte,
-            );
-            claim_ceremony(&node.kernel, &installation, &ceremony);
-            let authorization = PreauthorizeTrailBaseBootstrapCommand::new(
-                ceremony.id(),
-                confirmed_identity(&installation, subject_byte),
-                RequestCorrelationId::new_v7(),
-                at(4),
-            );
-            HumanAccessPort::preauthorize_trailbase_bootstrap(&node.kernel, authorization)
-                .expect("bootstrap preauthorization");
-            authorization
-        });
+        let ceremony = selected_ceremony(
+            &installation,
+            AuthCeremonyPurpose::FirstAdministratorBootstrap,
+            node.access.workspace_id(),
+            node.access.grant_id(),
+            None,
+            85,
+        );
+        claim_ceremony(&node.kernel, &installation, &ceremony);
+        let authorization = PreauthorizeTrailBaseBootstrapCommand::new(
+            ceremony.id(),
+            confirmed_identity(&installation, 85),
+            RequestCorrelationId::new_v7(),
+            at(4),
+        );
+        HumanAccessPort::preauthorize_trailbase_bootstrap(&node.kernel, authorization)
+            .expect("bootstrap preauthorization");
         let barrier = Arc::new(Barrier::new(3));
-        let workers = ceremonies.map(|authorization| {
+        let workers = [authorization; 2].map(|authorization| {
             let kernel = node.kernel.clone();
             let barrier = Arc::clone(&barrier);
             std::thread::spawn(move || {

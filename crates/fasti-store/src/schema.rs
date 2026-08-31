@@ -2100,6 +2100,10 @@ fn migrate_v14(connection: &Connection) -> Result<()> {
         CREATE INDEX auth_ceremonies_terminal_idx
             ON auth_ceremonies(terminal_at, operation_id)
             WHERE terminal_at IS NOT NULL;
+        CREATE UNIQUE INDEX auth_ceremonies_active_bootstrap_idx
+            ON auth_ceremonies(purpose)
+            WHERE purpose = 'first_administrator_bootstrap'
+                AND state IN ('pending', 'claimed');
 
         CREATE TABLE fasti_browser_session_authentication (
             browser_session_id TEXT PRIMARY KEY
@@ -3320,6 +3324,14 @@ mod tests {
             )
             .expect("count Access revision triggers");
         assert_eq!(revision_triggers, 0);
+        let active_bootstrap_index: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_schema WHERE type = 'index' AND name = 'auth_ceremonies_active_bootstrap_idx'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count active bootstrap index");
+        assert_eq!(active_bootstrap_index, 1);
     }
 
     #[test]

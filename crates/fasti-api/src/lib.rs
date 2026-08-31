@@ -7,8 +7,12 @@ use axum::{
     routing::get,
     Json, Router,
 };
-use fasti_application::{BrowserRequestBoundaryPolicy, LocalKernel};
+use fasti_application::{
+    BrowserRequestBoundaryPolicy, LocalKernel, ProblemCode, SecretMaterial,
+    C1_AUTH_CEREMONY_LIFETIME,
+};
 use fasti_contracts::{HealthResponse, ProblemActionDto, ProblemDetails, ViolationDto};
+use fasti_domain::{AuthCeremonySelection, RequestCorrelationId, TrailBaseActivationState};
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::path::Path;
@@ -22,6 +26,13 @@ use utoipa::{
     },
     Modify, OpenApi,
 };
+
+pub const FASTI_ACCESS_ORIGIN: &str = "http://127.0.0.1:8420";
+pub const FASTI_ACCESS_HOST: &str = "127.0.0.1:8420";
+pub const FASTI_ACCESS_CALLBACK_PATH: &str = "/api/access/v1/trailbase/callback";
+pub const FASTI_ACCESS_CALLBACK_URL: &str =
+    "http://127.0.0.1:8420/api/access/v1/trailbase/callback";
+pub const FASTI_ACCESS_BINDING_COOKIE: &str = "__Secure-fasti_auth_binding";
 
 mod access;
 mod integrations;
@@ -411,24 +422,168 @@ pub fn direct_loopback_api_router(
     used_fallback: bool,
     data_root: &Path,
 ) -> Router {
-    assert_eq!(
-        bound_addr,
-        "127.0.0.1:8420".parse().expect("fixed C1 address"),
-        "browser authentication requires the exact direct 127.0.0.1:8420 listener"
-    );
-    assert!(
-        !used_fallback,
-        "browser authentication is unavailable on a fallback listener"
-    );
-    let boundary = BrowserRequestBoundaryPolicy::try_new("http://127.0.0.1:8420", "127.0.0.1:8420")
-        .expect("fixed C1 browser boundary is valid");
-    durable_loopback_router(kernel, data_root, Some(boundary))
+    DirectLoopbackAccessRuntime::new(kernel, bound_addr, used_fallback, data_root).router()
+}
+
+/// One fixed-origin Access runtime shared by its router and packaged host.
+pub struct DirectLoopbackAccessRuntime {
+    router: Router,
+    trailbase: Option<Arc<trailbase::TrailBaseOrchestrator>>,
+}
+
+/// First-administrator ceremony material kept inside trusted Rust host code.
+pub struct StartedFirstAdministratorBootstrap {
+    operation_id: fasti_domain::OperationId,
+    authorization_url: String,
+    expires_at: chrono::DateTime<chrono::Utc>,
+    browser_binding: SecretMaterial,
+}
+
+impl StartedFirstAdministratorBootstrap {
+    pub fn authorization_url(&self) -> &str {
+        &self.authorization_url
+    }
+
+    pub const fn expires_at(&self) -> chrono::DateTime<chrono::Utc> {
+        self.expires_at
+    }
+
+    pub const fn browser_binding(&self) -> &SecretMaterial {
+        &self.browser_binding
+    }
+}
+
+impl DirectLoopbackAccessRuntime {
+    pub fn new(
+        kernel: Arc<dyn LocalKernel>,
+        bound_addr: SocketAddr,
+        used_fallback: bool,
+        data_root: &Path,
+    ) -> Self {
+        assert_eq!(
+            bound_addr,
+            FASTI_ACCESS_HOST.parse().expect("fixed C1 address"),
+            "browser authentication requires the exact direct 127.0.0.1:8420 listener"
+        );
+        assert!(
+            !used_fallback,
+            "browser authentication is unavailable on a fallback listener"
+        );
+        let boundary =
+            BrowserRequestBoundaryPolicy::try_new(FASTI_ACCESS_ORIGIN, FASTI_ACCESS_HOST)
+                .expect("fixed C1 browser boundary is valid");
+        let installation = kernel
+            .read_trailbase_installation(fasti_application::ReadTrailBaseInstallationQuery::new(
+                RequestCorrelationId::new_v7(),
+            ))
+            .expect("TrailBase activation state must be readable before mounting Access");
+        let trailbase = installation.and_then(|installation| {
+            (installation.activation_state() == TrailBaseActivationState::Active).then(|| {
+                Arc::new(
+                    trailbase::TrailBaseOrchestrator::production(
+                        Arc::clone(&kernel),
+                        &installation,
+                    )
+                    .expect("active TrailBase installation must satisfy the fixed C1 client"),
+                )
+            })
+        });
+        let browser_runtime = trailbase
+            .as_ref()
+            .map(|trailbase| (boundary, Arc::clone(trailbase)));
+        let router = durable_loopback_router(kernel, data_root, browser_runtime);
+        Self { router, trailbase }
+    }
+
+    pub fn router(&self) -> Router {
+        self.router.clone()
+    }
+
+    #[cfg(test)]
+    fn from_test_orchestrator(
+        kernel: Arc<dyn LocalKernel>,
+        data_root: &Path,
+        trailbase: Arc<trailbase::TrailBaseOrchestrator>,
+    ) -> Self {
+        let boundary =
+            BrowserRequestBoundaryPolicy::try_new(FASTI_ACCESS_ORIGIN, FASTI_ACCESS_HOST)
+                .expect("fixed C1 browser boundary is valid");
+        let router =
+            durable_loopback_router(kernel, data_root, Some((boundary, Arc::clone(&trailbase))));
+        Self {
+            router,
+            trailbase: Some(trailbase),
+        }
+    }
+
+    pub fn start_first_administrator_bootstrap(
+        &self,
+        selection: AuthCeremonySelection,
+        bootstrap_secret: SecretMaterial,
+    ) -> Result<StartedFirstAdministratorBootstrap, ProblemCode> {
+        let trailbase = self
+            .trailbase
+            .as_ref()
+            .ok_or(ProblemCode::TrailBaseTrustUnavailable)?;
+        let created_at = chrono::Utc::now();
+        let expires_at = created_at
+            + chrono::Duration::from_std(C1_AUTH_CEREMONY_LIFETIME)
+                .expect("C1 ceremony lifetime fits chrono");
+        let started = trailbase
+            .start_bootstrap(
+                selection,
+                bootstrap_secret,
+                RequestCorrelationId::new_v7(),
+                created_at,
+                expires_at,
+            )
+            .map_err(|error| match error {
+                trailbase::TrailBaseOrchestrationError::ApplicationProblem(code) => code,
+                trailbase::TrailBaseOrchestrationError::InvalidInput => {
+                    ProblemCode::IntegrityFailed
+                }
+                trailbase::TrailBaseOrchestrationError::LocalState => {
+                    ProblemCode::StorageUnavailable
+                }
+                _ => ProblemCode::TrailBaseTrustUnavailable,
+            })?;
+        Ok(StartedFirstAdministratorBootstrap {
+            operation_id: started.operation_id,
+            authorization_url: started.authorization_url,
+            expires_at: started.expires_at,
+            browser_binding: started.browser_binding,
+        })
+    }
+
+    pub fn cancel_first_administrator_bootstrap(
+        &self,
+        started: StartedFirstAdministratorBootstrap,
+    ) -> Result<(), ProblemCode> {
+        self.trailbase
+            .as_ref()
+            .ok_or(ProblemCode::TrailBaseTrustUnavailable)?
+            .cancel(fasti_application::CancelAuthCeremonyCommand::new(
+                started.operation_id,
+                RequestCorrelationId::new_v7(),
+                chrono::Utc::now(),
+            ))
+            .map_err(|error| match error {
+                trailbase::TrailBaseOrchestrationError::ApplicationProblem(code) => code,
+                trailbase::TrailBaseOrchestrationError::LocalState => {
+                    ProblemCode::StorageUnavailable
+                }
+                _ => ProblemCode::TrailBaseTrustUnavailable,
+            })
+    }
 }
 
 fn durable_loopback_router(
     kernel: Arc<dyn LocalKernel>,
     data_root: &Path,
-    browser_boundary: Option<BrowserRequestBoundaryPolicy>,
+    browser_runtime: Option<(
+        BrowserRequestBoundaryPolicy,
+        Arc<trailbase::TrailBaseOrchestrator>,
+    )>,
 ) -> Router {
     assert!(
         !data_root.as_os_str().is_empty(),
@@ -441,27 +596,6 @@ fn durable_loopback_router(
     kernel
         .ensure_bootstrap_secret()
         .expect("bootstrap secret must be preparable before serving any route");
-    let browser_runtime = browser_boundary.and_then(|boundary| {
-        let correlation_id = fasti_domain::RequestCorrelationId::new_v7();
-        let installation = kernel
-            .read_trailbase_installation(fasti_application::ReadTrailBaseInstallationQuery::new(
-                correlation_id,
-            ))
-            .expect("TrailBase activation state must be readable before mounting Access");
-        installation.and_then(|installation| {
-            (installation.activation_state() == fasti_domain::TrailBaseActivationState::Active)
-                .then(|| {
-                    let trailbase = Arc::new(
-                        trailbase::TrailBaseOrchestrator::production(
-                            Arc::clone(&kernel) as Arc<dyn fasti_application::HumanAccessPort>,
-                            &installation,
-                        )
-                        .expect("active TrailBase installation must satisfy the fixed C1 client"),
-                    );
-                    (boundary, trailbase)
-                })
-        })
-    });
     let active_browser_boundary = browser_runtime
         .as_ref()
         .map(|(boundary, _)| boundary.clone());

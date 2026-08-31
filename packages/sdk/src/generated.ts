@@ -5369,7 +5369,7 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       "lifecycle": {
         "contract_state": "finalized",
         "introduced_in": "c1",
-        "runtime_availability": "later_body"
+        "runtime_availability": "implemented"
       },
       "problems": [
         "auth_browser_binding_invalid",

@@ -5,7 +5,7 @@ use base64::{engine::general_purpose::URL_SAFE, engine::general_purpose::URL_SAF
 use chrono::{DateTime, TimeDelta, Utc};
 use fasti_application::{
     CancelAuthCeremonyCommand, CompleteTrailBaseBootstrapCommand, CompleteTrailBaseSignInCommand,
-    ConfirmedTrailBaseIdentity, CreatedBrowserSession, FailAuthCeremonyCommand, HumanAccessPort,
+    ConfirmedTrailBaseIdentity, CreatedBrowserSession, FailAuthCeremonyCommand, LocalKernel,
     PreauthorizeTrailBaseBootstrapCommand, PreauthorizeTrailBaseSignInCommand, ProblemCode,
     SecretMaterial, StartAuthCeremonyCommand, StartTrailBaseBootstrapCommand,
 };
@@ -30,6 +30,8 @@ use std::{
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use zeroize::Zeroizing;
 
+use crate::{FASTI_ACCESS_CALLBACK_PATH, FASTI_ACCESS_CALLBACK_URL};
+
 const PRODUCTION_TRAILBASE_ADDR: &str = "127.0.0.1:4000";
 const AUTHORIZATION_UI_PATH: &str = "/_/auth/login";
 const TOKEN_PATH: &str = "/api/auth/v1/token";
@@ -46,8 +48,6 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 const TOTAL_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_FUTURE_SKEW: TimeDelta = TimeDelta::seconds(60);
 const MAX_TOKEN_LIFETIME: TimeDelta = TimeDelta::hours(2);
-const CALLBACK_PATH: &str = "/api/access/v1/trailbase/callback";
-const CALLBACK_URL: &str = "http://127.0.0.1:8420/api/access/v1/trailbase/callback";
 
 pub(super) struct TrailBaseClient {
     client: Client,
@@ -58,7 +58,7 @@ pub(super) struct TrailBaseClient {
 pub(super) struct TrailBaseOrchestrator {
     client: TrailBaseClient,
     vault: PkceVault,
-    access: Arc<dyn HumanAccessPort>,
+    access: Arc<dyn LocalKernel>,
     instance_id: TrailBaseInstanceId,
     activation_generation: u64,
 }
@@ -112,7 +112,7 @@ pub(super) struct PkceVault {
 #[derive(Default)]
 struct PkceVaultState {
     reserved: usize,
-    verifiers: HashMap<OperationId, PkceVerifier>,
+    verifiers: HashMap<OperationId, (DateTime<Utc>, PkceVerifier)>,
 }
 
 pub(super) struct PkceReservation {
@@ -173,7 +173,7 @@ struct StatusTokenClaims {
 
 impl TrailBaseOrchestrator {
     pub(super) fn production(
-        access: Arc<dyn HumanAccessPort>,
+        access: Arc<dyn LocalKernel>,
         installation: &TrailBaseInstallation,
     ) -> Result<Self, TrailBaseOrchestrationError> {
         if installation.activation_state() != TrailBaseActivationState::Active
@@ -243,7 +243,7 @@ impl TrailBaseOrchestrator {
         created_at: DateTime<Utc>,
         expires_at: DateTime<Utc>,
     ) -> Result<StartedTrailBaseCeremony, TrailBaseOrchestrationError> {
-        let reservation = self.vault.reserve()?;
+        let reservation = self.vault.reserve(created_at)?;
         let verifier =
             PkceVerifier::generate().map_err(|_| TrailBaseOrchestrationError::LocalState)?;
         let pkce_challenge = verifier.challenge();
@@ -265,7 +265,7 @@ impl TrailBaseOrchestrator {
             activation_generation,
             browser_binding_digest,
             selection,
-            AuthCallbackPath::parse(CALLBACK_PATH)
+            AuthCallbackPath::parse(FASTI_ACCESS_CALLBACK_PATH)
                 .map_err(|_| TrailBaseOrchestrationError::InvalidInput)?,
             purpose.return_target(),
             correlation_id,
@@ -274,7 +274,7 @@ impl TrailBaseOrchestrator {
         )
         .map_err(|_| TrailBaseOrchestrationError::InvalidInput)?;
         reservation
-            .commit(operation_id, verifier)
+            .commit(operation_id, expires_at, verifier)
             .map_err(|_| TrailBaseOrchestrationError::LocalState)?;
         let persisted = match (purpose, bootstrap_secret) {
             (AuthCeremonyPurpose::SignIn, None) => self
@@ -319,20 +319,13 @@ impl TrailBaseOrchestrator {
         &self,
         authorization_code: String,
         browser_binding: SecretMaterial,
-        bootstrap_secret: Option<SecretMaterial>,
         correlation_id: RequestCorrelationId,
         at: DateTime<Utc>,
     ) -> Result<CreatedBrowserSession, TrailBaseOrchestrationError> {
-        self.callback_for_browser(
-            authorization_code,
-            browser_binding,
-            bootstrap_secret,
-            correlation_id,
-            at,
-        )
-        .await
-        .map(|outcome| outcome.created)
-        .map_err(|failure| failure.error)
+        self.callback_for_browser(authorization_code, browser_binding, correlation_id, at)
+            .await
+            .map(|outcome| outcome.created)
+            .map_err(|failure| failure.error)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -340,7 +333,6 @@ impl TrailBaseOrchestrator {
         &self,
         authorization_code: String,
         browser_binding: SecretMaterial,
-        bootstrap_secret: Option<SecretMaterial>,
         correlation_id: RequestCorrelationId,
         at: DateTime<Utc>,
     ) -> Result<TrailBaseCallbackOutcome, TrailBaseCallbackFailure> {
@@ -349,11 +341,12 @@ impl TrailBaseOrchestrator {
                 error: TrailBaseOrchestrationError::InvalidInput,
                 return_target: None,
             })?;
-        let callback_path =
-            AuthCallbackPath::parse(CALLBACK_PATH).map_err(|_| TrailBaseCallbackFailure {
+        let callback_path = AuthCallbackPath::parse(FASTI_ACCESS_CALLBACK_PATH).map_err(|_| {
+            TrailBaseCallbackFailure {
                 error: TrailBaseOrchestrationError::InvalidInput,
                 return_target: None,
-            })?;
+            }
+        })?;
         let claimed = self
             .access
             .claim_auth_ceremony(fasti_application::ClaimAuthCeremonyCommand::new(
@@ -369,7 +362,7 @@ impl TrailBaseOrchestrator {
                 return_target: None,
             })?;
         let return_target = claimed.return_target();
-        self.finish_claimed_callback(code, claimed, bootstrap_secret, correlation_id, at)
+        self.finish_claimed_callback(code, claimed, correlation_id, at)
             .await
             .map(|created| TrailBaseCallbackOutcome {
                 created,
@@ -385,7 +378,6 @@ impl TrailBaseOrchestrator {
         &self,
         code: AuthorizationCode,
         claimed: AuthCeremony,
-        bootstrap_secret: Option<SecretMaterial>,
         correlation_id: RequestCorrelationId,
         at: DateTime<Utc>,
     ) -> Result<CreatedBrowserSession, TrailBaseOrchestrationError> {
@@ -447,15 +439,16 @@ impl TrailBaseOrchestrator {
             }
         };
         let local_authorization = match claimed.purpose() {
-            AuthCeremonyPurpose::SignIn if bootstrap_secret.is_none() => self
-                .access
-                .preauthorize_trailbase_sign_in(PreauthorizeTrailBaseSignInCommand::new(
-                    claimed.id(),
-                    identity,
-                    correlation_id,
-                    at,
-                )),
-            AuthCeremonyPurpose::FirstAdministratorBootstrap if bootstrap_secret.is_some() => self
+            AuthCeremonyPurpose::SignIn => {
+                self.access
+                    .preauthorize_trailbase_sign_in(PreauthorizeTrailBaseSignInCommand::new(
+                        claimed.id(),
+                        identity,
+                        correlation_id,
+                        at,
+                    ))
+            }
+            AuthCeremonyPurpose::FirstAdministratorBootstrap => self
                 .access
                 .preauthorize_trailbase_bootstrap(PreauthorizeTrailBaseBootstrapCommand::new(
                     claimed.id(),
@@ -501,17 +494,30 @@ impl TrailBaseOrchestrator {
                         ),
                     ))
             }
-            AuthCeremonyPurpose::FirstAdministratorBootstrap => self
-                .access
-                .complete_trailbase_bootstrap(CompleteTrailBaseBootstrapCommand::new(
-                    PreauthorizeTrailBaseBootstrapCommand::new(
-                        claimed.id(),
-                        identity,
-                        correlation_id,
-                        at,
-                    ),
-                    bootstrap_secret.ok_or(TrailBaseOrchestrationError::LocalState)?,
-                )),
+            AuthCeremonyPurpose::FirstAdministratorBootstrap => {
+                let bootstrap_secret = match self.access.ensure_bootstrap_secret() {
+                    Ok(secret) => secret,
+                    Err(_) => {
+                        self.record_failure(
+                            claimed.id(),
+                            AuthCeremonyFailure::LocalAuthorizationDenied,
+                            correlation_id,
+                            at,
+                        )?;
+                        return Err(TrailBaseOrchestrationError::LocalState);
+                    }
+                };
+                self.access
+                    .complete_trailbase_bootstrap(CompleteTrailBaseBootstrapCommand::new(
+                        PreauthorizeTrailBaseBootstrapCommand::new(
+                            claimed.id(),
+                            identity,
+                            correlation_id,
+                            at,
+                        ),
+                        bootstrap_secret,
+                    ))
+            }
             AuthCeremonyPurpose::RecentAuthentication => {
                 return Err(TrailBaseOrchestrationError::LocalAuthorizationDenied);
             }
@@ -742,7 +748,7 @@ impl TrailBaseClient {
         let mut url = reqwest::Url::parse(&format!("{}{AUTHORIZATION_UI_PATH}", self.origin))
             .map_err(|_| ())?;
         url.query_pairs_mut()
-            .append_pair("redirect_uri", CALLBACK_URL)
+            .append_pair("redirect_uri", FASTI_ACCESS_CALLBACK_URL)
             .append_pair("response_type", "code")
             .append_pair("pkce_code_challenge", pkce_challenge);
         Ok(url.into())
@@ -780,11 +786,17 @@ impl PkceVerifier {
 }
 
 impl PkceVault {
-    pub(super) fn reserve(&self) -> Result<PkceReservation, TrailBaseOrchestrationError> {
+    pub(super) fn reserve(
+        &self,
+        at: DateTime<Utc>,
+    ) -> Result<PkceReservation, TrailBaseOrchestrationError> {
         let mut state = self
             .inner
             .lock()
             .map_err(|_| TrailBaseOrchestrationError::LocalState)?;
+        state
+            .verifiers
+            .retain(|_, (expires_at, _)| *expires_at > at);
         if state.reserved.saturating_add(state.verifiers.len()) >= PKCE_VAULT_LIMIT {
             return Err(TrailBaseOrchestrationError::ApplicationProblem(
                 ProblemCode::CapacityExceeded,
@@ -799,7 +811,12 @@ impl PkceVault {
     }
 
     pub(super) fn take(&self, operation_id: OperationId) -> Option<PkceVerifier> {
-        self.inner.lock().ok()?.verifiers.remove(&operation_id)
+        self.inner
+            .lock()
+            .ok()?
+            .verifiers
+            .remove(&operation_id)
+            .map(|(_, verifier)| verifier)
     }
 
     pub(super) fn remove(&self, operation_id: OperationId) -> bool {
@@ -816,6 +833,7 @@ impl PkceReservation {
     pub(super) fn commit(
         mut self,
         operation_id: OperationId,
+        expires_at: DateTime<Utc>,
         verifier: PkceVerifier,
     ) -> Result<(), &'static str> {
         let mut state = self
@@ -829,7 +847,7 @@ impl PkceReservation {
             .reserved
             .checked_sub(1)
             .ok_or("The PKCE verifier reservation is invalid.")?;
-        state.verifiers.insert(operation_id, verifier);
+        state.verifiers.insert(operation_id, (expires_at, verifier));
         self.active = false;
         Ok(())
     }
@@ -970,18 +988,23 @@ fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
 mod tests {
     use super::*;
     use axum::{
+        body::{to_bytes, Body},
         extract::{Request, State},
-        http::{header::HeaderName, HeaderValue},
+        http::{
+            header::{self, HeaderName},
+            HeaderValue,
+        },
         routing::{get, post},
         Router,
     };
     use fasti_application::{
-        AccessAdministrationPort, EnrollFirstClientCommand, InitializeNodeCommand,
+        AccessAdministrationPort, EnrollFirstClientCommand, HumanAccessPort, InitializeNodeCommand,
         VerifyTrailBaseInstallationCommand,
     };
     use fasti_store::SqliteKernel;
     use serde_json::json;
     use tokio::net::TcpListener;
+    use tower::ServiceExt;
 
     static_assertions::assert_not_impl_any!(
         AuthorizationCode: Clone, std::fmt::Debug, Serialize
@@ -1007,6 +1030,52 @@ mod tests {
             TrailBaseClient::from_loopback(address).expect("test TrailBase client"),
             task,
         )
+    }
+
+    async fn spawn_successful_auth_fixture(
+        at: DateTime<Utc>,
+    ) -> (TrailBaseClient, FixtureState, tokio::task::JoinHandle<()>) {
+        let state = FixtureState::default();
+        let router = Router::new()
+            .route(
+                TOKEN_PATH,
+                post(|State(state): State<FixtureState>| async move {
+                    state.requests.lock().expect("requests").push((
+                        "token".to_owned(),
+                        "POST".to_owned(),
+                        TOKEN_PATH.to_owned(),
+                    ));
+                    axum::Json(token_response("exchange.token.signature"))
+                }),
+            )
+            .route(
+                STATUS_PATH,
+                get(move |State(state): State<FixtureState>| {
+                    let claims = jwt(0, Some("person@example.test"), &"c".repeat(20), at);
+                    async move {
+                        state.requests.lock().expect("requests").push((
+                            "status".to_owned(),
+                            "GET".to_owned(),
+                            STATUS_PATH.to_owned(),
+                        ));
+                        axum::Json(token_response(claims))
+                    }
+                }),
+            )
+            .route(
+                LOGOUT_PATH,
+                post(|State(state): State<FixtureState>| async move {
+                    state.requests.lock().expect("requests").push((
+                        "logout".to_owned(),
+                        "POST".to_owned(),
+                        LOGOUT_PATH.to_owned(),
+                    ));
+                    StatusCode::OK
+                }),
+            )
+            .with_state(state.clone());
+        let (client, task) = spawn_fixture(router).await;
+        (client, state, task)
     }
 
     fn jwt(provider: u8, email: Option<&str>, csrf: &str, now: DateTime<Utc>) -> String {
@@ -1055,7 +1124,7 @@ mod tests {
                 SecretMaterial::from_bytes(*initialized.initialization_proof().expose_bytes()),
             ))
             .expect("enroll client");
-        let installation = HumanAccessPort::verify_trailbase_installation(
+        let installation = fasti_application::HumanAccessPort::verify_trailbase_installation(
             kernel.as_ref(),
             VerifyTrailBaseInstallationCommand::new(
                 TrailBaseInstanceId::new_v7(),
@@ -1244,6 +1313,270 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn packaged_runtime_bootstrap_start_and_http_callback_share_one_pkce_vault() {
+        let (root, kernel, installation, access) = initialized_access_node();
+        let callback_at = Utc::now();
+        let (client, state, task) = spawn_successful_auth_fixture(callback_at).await;
+        let orchestrator = Arc::new(test_orchestrator(client, &kernel, &installation));
+        let runtime = crate::DirectLoopbackAccessRuntime::from_test_orchestrator(
+            kernel.clone(),
+            root.path(),
+            orchestrator,
+        );
+        let started = runtime
+            .start_first_administrator_bootstrap(
+                AuthCeremonySelection::try_new(
+                    AuthCeremonyPurpose::FirstAdministratorBootstrap,
+                    access.workspace_id(),
+                    access.grant_id(),
+                    None,
+                    None,
+                    false,
+                )
+                .expect("bootstrap selection"),
+                kernel.ensure_bootstrap_secret().expect("bootstrap secret"),
+            )
+            .expect("start bootstrap through packaged runtime");
+        let second_start = runtime.start_first_administrator_bootstrap(
+            AuthCeremonySelection::try_new(
+                AuthCeremonyPurpose::FirstAdministratorBootstrap,
+                access.workspace_id(),
+                access.grant_id(),
+                None,
+                None,
+                false,
+            )
+            .expect("second bootstrap selection"),
+            kernel.ensure_bootstrap_secret().expect("bootstrap secret"),
+        );
+        assert_eq!(second_start.err(), Some(ProblemCode::Forbidden));
+        let response = runtime
+            .router()
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "{FASTI_ACCESS_CALLBACK_PATH}?code={}",
+                        "a".repeat(48)
+                    ))
+                    .header(header::HOST, "127.0.0.1:8420")
+                    .header(
+                        header::COOKIE,
+                        format!(
+                            "__Secure-fasti_auth_binding={}",
+                            started.browser_binding().expose_hex()
+                        ),
+                    )
+                    .body(Body::empty())
+                    .expect("callback request"),
+            )
+            .await
+            .expect("callback response");
+
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert_eq!(
+            response.headers().get(header::LOCATION),
+            Some(&HeaderValue::from_static("/first-run"))
+        );
+        let cookies = response
+            .headers()
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .map(|value| value.to_str().expect("Set-Cookie"))
+            .collect::<Vec<_>>();
+        assert_eq!(cookies.len(), 3);
+        let session_cookie = cookies
+            .iter()
+            .find(|cookie| cookie.starts_with("__Host-fasti_session="))
+            .expect("session cookie");
+        let session_attributes = session_cookie.split("; ").collect::<Vec<_>>();
+        assert_eq!(session_attributes.len(), 6);
+        assert!(session_attributes[0]
+            .strip_prefix("__Host-fasti_session=")
+            .is_some_and(|value| value.len() == 64));
+        assert_eq!(session_attributes[1], "Path=/");
+        assert!(session_attributes[2]
+            .strip_prefix("Max-Age=")
+            .is_some_and(|value| value.parse::<u64>().is_ok_and(|value| value > 0)));
+        assert_eq!(&session_attributes[3..5], ["Secure", "HttpOnly"]);
+        assert_eq!(session_attributes[5], "SameSite=Strict");
+        let csrf_cookie = cookies
+            .iter()
+            .find(|cookie| cookie.starts_with("__Host-fasti_csrf="))
+            .expect("CSRF cookie");
+        let csrf_attributes = csrf_cookie.split("; ").collect::<Vec<_>>();
+        assert_eq!(csrf_attributes.len(), 5);
+        assert!(csrf_attributes[0]
+            .strip_prefix("__Host-fasti_csrf=")
+            .is_some_and(|value| value.len() == 64));
+        assert_eq!(csrf_attributes[1], "Path=/");
+        assert!(csrf_attributes[2]
+            .strip_prefix("Max-Age=")
+            .is_some_and(|value| value.parse::<u64>().is_ok_and(|value| value > 0)));
+        assert_eq!(&csrf_attributes[3..], ["Secure", "SameSite=Strict"]);
+        assert!(cookies.iter().any(|cookie| {
+            *cookie
+                == "__Secure-fasti_auth_binding=; Domain=127.0.0.1; Path=/api/access/v1/trailbase/callback; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=Lax"
+        }));
+        assert!(to_bytes(response.into_body(), 1)
+            .await
+            .expect("empty callback body")
+            .is_empty());
+        assert_eq!(
+            state.requests.lock().expect("requests").as_slice(),
+            [
+                ("token".to_owned(), "POST".to_owned(), TOKEN_PATH.to_owned()),
+                (
+                    "status".to_owned(),
+                    "GET".to_owned(),
+                    STATUS_PATH.to_owned()
+                ),
+                (
+                    "logout".to_owned(),
+                    "POST".to_owned(),
+                    LOGOUT_PATH.to_owned()
+                ),
+            ]
+        );
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn packaged_runtime_cancellation_removes_the_durable_ceremony_and_pkce_verifier() {
+        let (root, kernel, installation, access) = initialized_access_node();
+        let callback_at = Utc::now();
+        let (client, state, task) = spawn_successful_auth_fixture(callback_at).await;
+        let orchestrator = Arc::new(test_orchestrator(client, &kernel, &installation));
+        let runtime = crate::DirectLoopbackAccessRuntime::from_test_orchestrator(
+            kernel.clone(),
+            root.path(),
+            Arc::clone(&orchestrator),
+        );
+        let started = runtime
+            .start_first_administrator_bootstrap(
+                AuthCeremonySelection::try_new(
+                    AuthCeremonyPurpose::FirstAdministratorBootstrap,
+                    access.workspace_id(),
+                    access.grant_id(),
+                    None,
+                    None,
+                    false,
+                )
+                .expect("bootstrap selection"),
+                kernel.ensure_bootstrap_secret().expect("bootstrap secret"),
+            )
+            .expect("start bootstrap through packaged runtime");
+        let operation_id = started.operation_id;
+        let binding = started.browser_binding().expose_hex();
+
+        runtime
+            .cancel_first_administrator_bootstrap(started)
+            .expect("cancel bootstrap after native cookie failure");
+        assert!(orchestrator.vault.take(operation_id).is_none());
+
+        let response = runtime
+            .router()
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "{FASTI_ACCESS_CALLBACK_PATH}?code={}",
+                        "a".repeat(48)
+                    ))
+                    .header(header::HOST, crate::FASTI_ACCESS_HOST)
+                    .header(
+                        header::COOKIE,
+                        format!("{}={binding}", crate::FASTI_ACCESS_BINDING_COOKIE),
+                    )
+                    .body(Body::empty())
+                    .expect("cancelled callback request"),
+            )
+            .await
+            .expect("cancelled callback response");
+
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert!(state.requests.lock().expect("requests").is_empty());
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn bootstrap_secret_reload_failure_terminalizes_the_claimed_ceremony() {
+        let (_root, kernel, installation, access) = initialized_access_node();
+        let callback_at = Utc::now();
+        let (client, state, task) = spawn_successful_auth_fixture(callback_at).await;
+        let orchestrator = test_orchestrator(client, &kernel, &installation);
+        let started = start_bootstrap_ceremony(&orchestrator, &kernel, access, callback_at);
+        let binding = Zeroizing::new(*started.browser_binding.expose_bytes());
+        let bootstrap_secret_path = kernel.data_root().join("bootstrap.secret");
+        std::fs::remove_file(&bootstrap_secret_path).expect("remove bootstrap secret");
+        std::fs::create_dir(&bootstrap_secret_path)
+            .expect("make bootstrap secret unavailable as a file");
+
+        let result = orchestrator
+            .callback(
+                "a".repeat(48),
+                started.browser_binding,
+                RequestCorrelationId::new_v7(),
+                callback_at,
+            )
+            .await;
+        assert_eq!(result.err(), Some(TrailBaseOrchestrationError::LocalState));
+        let requests_after_failure = state.requests.lock().expect("requests").clone();
+        assert_eq!(
+            requests_after_failure,
+            [
+                ("token".to_owned(), "POST".to_owned(), TOKEN_PATH.to_owned()),
+                (
+                    "status".to_owned(),
+                    "GET".to_owned(),
+                    STATUS_PATH.to_owned()
+                ),
+                (
+                    "logout".to_owned(),
+                    "POST".to_owned(),
+                    LOGOUT_PATH.to_owned()
+                ),
+            ]
+        );
+
+        let replay = orchestrator
+            .callback(
+                "a".repeat(48),
+                SecretMaterial::from_bytes(*binding),
+                RequestCorrelationId::new_v7(),
+                callback_at,
+            )
+            .await;
+        assert_eq!(replay.err(), Some(TrailBaseOrchestrationError::LocalState));
+        assert_eq!(
+            *state.requests.lock().expect("requests"),
+            requests_after_failure
+        );
+        assert!(kernel
+            .fail_auth_ceremony(FailAuthCeremonyCommand::new(
+                started.operation_id,
+                AuthCeremonyFailure::LocalAuthorizationDenied,
+                RequestCorrelationId::new_v7(),
+                callback_at,
+            ))
+            .is_err());
+
+        std::fs::remove_dir(&bootstrap_secret_path).expect("remove blocking directory");
+        let fresh = start_bootstrap_ceremony(
+            &orchestrator,
+            &kernel,
+            access,
+            callback_at + TimeDelta::seconds(1),
+        );
+        orchestrator
+            .cancel(CancelAuthCeremonyCommand::new(
+                fresh.operation_id,
+                RequestCorrelationId::new_v7(),
+                callback_at + TimeDelta::seconds(2),
+            ))
+            .expect("fresh bootstrap remains available");
+        task.abort();
+    }
+
+    #[tokio::test]
     async fn callback_has_one_exchange_winner_and_completes_only_after_logout() {
         let (_root, kernel, installation, access) = initialized_access_node();
         let callback_at = DateTime::parse_from_rfc3339("2026-08-30T00:02:00Z")
@@ -1299,7 +1632,7 @@ mod tests {
         let query: HashMap<_, _> = authorization_url.query_pairs().into_owned().collect();
         assert_eq!(
             query.get("redirect_uri").map(String::as_str),
-            Some(CALLBACK_URL)
+            Some(FASTI_ACCESS_CALLBACK_URL)
         );
         assert_eq!(query.get("response_type").map(String::as_str), Some("code"));
         assert_eq!(query.get("pkce_code_challenge").map(String::len), Some(43));
@@ -1314,14 +1647,12 @@ mod tests {
             first.callback(
                 "a".repeat(48),
                 first_binding,
-                Some(kernel.ensure_bootstrap_secret().expect("bootstrap secret")),
                 RequestCorrelationId::new_v7(),
                 callback_at,
             ),
             second.callback(
                 "a".repeat(48),
                 second_binding,
-                Some(kernel.ensure_bootstrap_secret().expect("bootstrap secret")),
                 RequestCorrelationId::new_v7(),
                 callback_at,
             ),
@@ -1350,7 +1681,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn local_authorization_denial_logs_out_once_and_replay_makes_no_remote_call() {
+    async fn normal_sign_in_never_loads_bootstrap_secret_and_denial_logs_out_once() {
         let (_root, kernel, installation, access) = initialized_access_node();
         let callback_at = DateTime::parse_from_rfc3339("2026-08-30T00:02:00Z")
             .expect("time")
@@ -1395,11 +1726,10 @@ mod tests {
             )
             .with_state(state.clone());
         let (client, task) = spawn_fixture(router).await;
-        let access_port: Arc<dyn HumanAccessPort> = kernel.clone();
         let orchestrator = TrailBaseOrchestrator {
             client,
             vault: PkceVault::default(),
-            access: access_port,
+            access: kernel.clone(),
             instance_id: installation.id(),
             activation_generation: installation.activation_generation(),
         };
@@ -1419,13 +1749,15 @@ mod tests {
                 callback_at + TimeDelta::minutes(8),
             )
             .expect("start sign-in");
+        let bootstrap_secret_path = kernel.data_root().join("bootstrap.secret");
+        std::fs::create_dir(bootstrap_secret_path)
+            .expect("make bootstrap secret unreadable as a file");
         let binding = Zeroizing::new(*started.browser_binding.expose_bytes());
         let replay_binding = SecretMaterial::from_bytes(*binding);
         let result = orchestrator
             .callback(
                 "a".repeat(48),
                 started.browser_binding,
-                None,
                 RequestCorrelationId::new_v7(),
                 callback_at,
             )
@@ -1438,7 +1770,6 @@ mod tests {
             .callback(
                 "a".repeat(48),
                 replay_binding,
-                None,
                 RequestCorrelationId::new_v7(),
                 callback_at,
             )
@@ -1494,7 +1825,6 @@ mod tests {
             .callback(
                 "a".repeat(48),
                 started.browser_binding,
-                Some(kernel.ensure_bootstrap_secret().expect("bootstrap secret")),
                 RequestCorrelationId::new_v7(),
                 callback_at,
             )
@@ -1507,7 +1837,6 @@ mod tests {
             .callback(
                 "a".repeat(48),
                 SecretMaterial::from_bytes(*binding),
-                Some(kernel.ensure_bootstrap_secret().expect("bootstrap secret")),
                 RequestCorrelationId::new_v7(),
                 callback_at,
             )
@@ -1573,7 +1902,6 @@ mod tests {
             .callback(
                 "a".repeat(48),
                 started.browser_binding,
-                Some(kernel.ensure_bootstrap_secret().expect("bootstrap secret")),
                 RequestCorrelationId::new_v7(),
                 callback_at,
             )
@@ -1586,7 +1914,6 @@ mod tests {
             .callback(
                 "a".repeat(48),
                 SecretMaterial::from_bytes(*binding),
-                Some(kernel.ensure_bootstrap_secret().expect("bootstrap secret")),
                 RequestCorrelationId::new_v7(),
                 callback_at,
             )
@@ -1664,7 +1991,6 @@ mod tests {
             .callback(
                 "a".repeat(48),
                 started.browser_binding,
-                Some(kernel.ensure_bootstrap_secret().expect("bootstrap secret")),
                 RequestCorrelationId::new_v7(),
                 callback_at,
             )
@@ -1889,25 +2215,53 @@ mod tests {
     #[test]
     fn pkce_vault_reserves_before_generation_and_never_exceeds_sixty_four() {
         let vault = PkceVault::default();
+        let now = Utc::now();
         let mut operations = Vec::new();
         for _ in 0..PKCE_VAULT_LIMIT {
-            let reservation = vault.reserve().expect("capacity");
+            let reservation = vault.reserve(now).expect("capacity");
             let operation_id = OperationId::new_v7();
             reservation
-                .commit(operation_id, PkceVerifier::generate().expect("verifier"))
+                .commit(
+                    operation_id,
+                    now + fasti_application::C1_AUTH_CEREMONY_LIFETIME,
+                    PkceVerifier::generate().expect("verifier"),
+                )
                 .expect("commit reservation");
             operations.push(operation_id);
         }
         assert_eq!(vault.live_len(), PKCE_VAULT_LIMIT);
         assert_eq!(
-            vault.reserve().err(),
+            vault.reserve(now).err(),
             Some(TrailBaseOrchestrationError::ApplicationProblem(
                 ProblemCode::CapacityExceeded
             ))
         );
         assert!(vault.remove(operations[0]));
-        let reservation = vault.reserve().expect("released capacity");
+        let reservation = vault.reserve(now).expect("released capacity");
         drop(reservation);
         assert_eq!(vault.live_len(), PKCE_VAULT_LIMIT - 1);
+    }
+
+    #[test]
+    fn pkce_vault_reclaims_abandoned_entries_after_ceremony_expiry() {
+        let vault = PkceVault::default();
+        let now = Utc::now();
+        for _ in 0..PKCE_VAULT_LIMIT {
+            vault
+                .reserve(now)
+                .expect("capacity")
+                .commit(
+                    OperationId::new_v7(),
+                    now + TimeDelta::seconds(1),
+                    PkceVerifier::generate().expect("verifier"),
+                )
+                .expect("commit reservation");
+        }
+
+        let reservation = vault
+            .reserve(now + TimeDelta::seconds(1))
+            .expect("expired entries release capacity");
+        assert_eq!(vault.live_len(), 0);
+        drop(reservation);
     }
 }

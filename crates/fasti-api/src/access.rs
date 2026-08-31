@@ -4,6 +4,7 @@ use crate::local::{
 };
 use crate::problem::{application_problem, json_rejection, HttpProblem};
 use crate::trailbase::{TrailBaseOrchestrationError, TrailBaseOrchestrator};
+use crate::{FASTI_ACCESS_BINDING_COOKIE, FASTI_ACCESS_CALLBACK_PATH, FASTI_ACCESS_HOST};
 use axum::{
     extract::{rejection::JsonRejection, DefaultBodyLimit, Path, RawQuery, State},
     http::{header, HeaderMap, HeaderValue, Method, StatusCode},
@@ -41,8 +42,6 @@ use fasti_domain::{
 use std::{str::FromStr, sync::Arc};
 
 const MAX_ACCESS_JSON_BODY_BYTES: usize = 4 * 1024;
-const BINDING_COOKIE: &str = "__Secure-fasti_auth_binding";
-const CALLBACK_PATH: &str = "/api/access/v1/trailbase/callback";
 
 type HttpResponse = Result<Response, HttpProblem>;
 
@@ -369,7 +368,7 @@ fn clear_binding_cookie(response: &mut Response) {
     append_cookie(
         response,
         format!(
-            "{BINDING_COOKIE}=; Domain=127.0.0.1; Path={CALLBACK_PATH}; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=Lax"
+            "{FASTI_ACCESS_BINDING_COOKIE}=; Domain=127.0.0.1; Path={FASTI_ACCESS_CALLBACK_PATH}; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=Lax"
         ),
     );
 }
@@ -385,7 +384,7 @@ fn exact_callback_code(raw_query: Option<&str>) -> Option<String> {
 
 fn exact_host(headers: &HeaderMap) -> bool {
     let mut values = headers.get_all(header::HOST).iter();
-    matches!(values.next(), Some(value) if value.as_bytes() == b"127.0.0.1:8420")
+    matches!(values.next(), Some(value) if value.as_bytes() == FASTI_ACCESS_HOST.as_bytes())
         && values.next().is_none()
 }
 
@@ -397,7 +396,7 @@ fn callback_binding(headers: &HeaderMap) -> Option<fasti_application::SecretMate
             let Some((name, value)) = pair.trim().split_once('=') else {
                 continue;
             };
-            if name == BINDING_COOKIE && binding.replace(value).is_some() {
+            if name == FASTI_ACCESS_BINDING_COOKIE && binding.replace(value).is_some() {
                 return None;
             }
         }
@@ -612,7 +611,7 @@ pub(crate) async fn complete_trailbase_authentication(
     };
     let at = chrono::Utc::now();
     match orchestrator
-        .callback_for_browser(code, binding, None, correlation_id, at)
+        .callback_for_browser(code, binding, correlation_id, at)
         .await
     {
         Ok(outcome) => callback_redirect(
@@ -984,7 +983,10 @@ pub(crate) fn router(
             "/api/access/v1/trailbase/sign-in",
             post(start_trailbase_sign_in),
         )
-        .route(CALLBACK_PATH, any(complete_trailbase_authentication))
+        .route(
+            FASTI_ACCESS_CALLBACK_PATH,
+            any(complete_trailbase_authentication),
+        )
         .route("/api/access/v1/projection", get(read_access_projection))
         .route(
             "/api/access/v1/browser-session",

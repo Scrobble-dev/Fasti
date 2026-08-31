@@ -291,7 +291,7 @@ define_capabilities!(
         C1,
         C1,
         Finalized,
-        LaterBody,
+        Implemented,
         LocalOperator,
         [],
         [
@@ -1297,7 +1297,7 @@ mod tests {
             CapabilityKey::ReadAccessProjection.authorization_kind(),
             AuthorizationKind::BrowserSession
         );
-        assert!(!CapabilityKey::AccessIdentityBootstrap.is_production_executable());
+        assert!(CapabilityKey::AccessIdentityBootstrap.is_production_executable());
         assert!(CapabilityKey::ReadAccessProjection.is_production_executable());
     }
 
