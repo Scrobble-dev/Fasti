@@ -23,24 +23,30 @@ tests. Do not add presentation-only fields.
 None of these credentials authenticates a person or satisfies recent human
 authentication.
 
-## PR A dormant session foundation
+## Fasti browser sessions
 
-PR A defines the final Fasti `AuthSubject`, `FastiBrowserSession`,
-`BrowserSessionId`, and `SessionPolicy` ownership. It keeps the session model
-dormant. It mounts no production human-account, sign-in, session-issuance,
-inventory, or revocation route.
+PR A defined the Fasti `AuthSubject`, `FastiBrowserSession`,
+`BrowserSessionId`, and `SessionPolicy` ownership. C1 now implements the Access
+operations and generated contracts in local source.
 
-The dormant model must use opaque random session secrets, digest-only storage,
+The model uses opaque random session secrets, digest-only storage,
 exact opaque public identifiers, idle and absolute expiry, rotation, bounded
 activity updates, Origin and Host validation, strict cross-site request
 forgery protection, and session-local selection of an existing authorized
-profile grant. Direct domain, application, and store fixtures can verify this
-model. They do not make browser authentication available.
+profile grant.
 
-Production browser sessions remain `Unavailable until C1`. C1 must prove the
-pinned TrailBase exchange, durable TrailBase anchor, membership and role
-authorization, administrator continuity, browser binding, session issuance,
-refresh-session cleanup, and exact-head negative controls.
+Only the exact requested-and-bound `127.0.0.1:8420` durable listener mounts the
+C1 route set. It does so even without a TrailBase root, which lets the
+Workbench report the exact unavailable state. Code exchange and new session
+issuance require a verified installation receipt and persisted active
+activation. Port fallback, alternate loopback, generic local, integration,
+container-forwarded, wildcard, and remote routers omit C1 routes.
+
+This source state is not a supported release. C1 review, exact-head CI, merge,
+and merged-tree evidence remain pending. Packaged Tauri authentication,
+cross-platform WebView behavior, and packaged assistive-technology proof are
+deferred to `C1-TAURI-AUTH`; no packaged desktop authentication support is
+claimed.
 
 ## Required sign-in methods
 
@@ -50,11 +56,12 @@ next action. It does not generate or store placeholder security state.
 
 | Method                                                                                    | Owner and activation gate                                                                                                                                                          |
 | ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| TrailBase password, registration, verification, reset, social sign-in, and supported TOTP | TrailBase in B, then Fasti exchange in C1. Fasti does not store the human password or TOTP secret.                                                                                 |
-| Fasti browser session                                                                     | Fasti Access. Dormant in A; production issuance, inventory, rotation, and revocation activate only after C1.                                                                       |
-| Passkey and Fasti recovery code                                                           | Fasti Access in D, linked to `AuthSubject` with a verified WebAuthn ceremony and active TrailBase-anchor check.                                                                    |
-| Generic OpenID Connect and Authentik sign-in                                              | Identity Integration in E1/E3. Require discovery, state, nonce, S256 Proof Key for Code Exchange, exact issuer and subject, token validation, linking policy, and logout evidence. |
-| Fasti OAuth and Nuvio or command-line device approval                                     | Fasti Access in E2. Require approved clients, scopes, profile consent, bounded codes, polling, rotation, revocation, and replay tests.                                             |
+| TrailBase password, registration, verification, reset, and supported social sign-in | TrailBase in B, then Fasti exchange in C1. Fasti does not store the human password.                                                                                               |
+| TrailBase password plus TOTP                                                        | Unavailable in C1 because v0.33.5 loses the original PKCE ceremony. Fasti does not store the TOTP secret or simulate the missing transition.                                      |
+| Fasti browser session                                                               | Fasti Access. C1 implements fixed-origin sign-in, issuance, inventory, rotation, profile selection, and revocation in local source. Package and delivery evidence remains pending. |
+| Passkey and Fasti recovery code                                                     | Fasti Access in D, linked to `AuthSubject` with a verified WebAuthn ceremony and active TrailBase-anchor check.                                                                    |
+| Generic OpenID Connect and Authentik sign-in                                        | Identity Integration in E1/E3. Require discovery, state, nonce, S256 Proof Key for Code Exchange, exact issuer and subject, token validation, linking policy, and logout evidence. |
+| Fasti OAuth and Nuvio or command-line device approval                               | Fasti Access in E2. Require approved clients, scopes, profile consent, bounded codes, polling, rotation, revocation, and replay tests.                                             |
 
 These methods are approved MVP work. A method becomes active only
 when its backend capability, host adapter, typed problem recovery, generated
@@ -74,6 +81,31 @@ documented public TrailBase APIs. TrailBase owns only proven human-account
 functions. Fasti owns `AuthSubject`, browser sessions, workspaces, memberships,
 roles, profiles, grants, scopes, clients, devices, passkeys, recovery codes,
 authorization, audit, and Chronicle state.
+
+Every TrailBase installation has its own administrator credential. The
+operator keeps it in a selected password manager or equivalent private
+installation record. The initial and replacement administrator passwords exist
+only in the initializing process memory. Fasti writes the replacement once to
+the controlling terminal. It never persists either password in Fasti data,
+command arguments, logs, receipts, or browser storage. Every person uses a
+distinct TrailBase account. The
+administrator credential is not a shared human account and does not justify a
+new Fasti secret store.
+
+C1 uses a server-only direct backchannel to the exact supervised TrailBase
+origin. Fasti exchanges the one-use ceremony's authorization code at
+`/api/auth/v1/token`, rechecks the returned proof and refresh session at
+`/api/auth/v1/status`, and revokes that refresh session at
+`/api/auth/v1/logout`. It discards every TrailBase token before it creates an
+opaque Fasti browser session. Fasti does not accept a browser-supplied
+TrailBase token, validate TrailBase tokens offline, or treat TrailBase
+administrator and TOTP-enrollment claims as Fasti authorization or proof of
+multi-factor use.
+
+TrailBase hardening that is useful beyond C1 is tracked in the separate
+[upstream hardening plan](../plans/trailbase-upstream-hardening.md). That work
+does not authorize a Fasti-maintained fork and does not block the direct C1
+profile.
 
 Fasti assigns one stable `TrailBaseInstanceId` to the installation and links it
 to the proven TrailBase subject. Fasti must not use a TrailBase database row ID
@@ -100,15 +132,19 @@ unavailable states until their approved owner passes its package gate.
 - PR A adds no public command-line authentication operation.
   `Public CLI: N/A — direct deterministic fixtures only; activation belongs to C1`.
 - PR B exposes TrailBase operator lifecycle only through `scripts/dev.sh trailbase`.
-  The exact vendor OpenAPI is digest-bound in conformance evidence;
-  Fasti adds no identity-exchange OpenAPI or SDK method before C1.
+  The exact vendor OpenAPI is digest-bound in conformance evidence. C1 owns
+  Fasti's separate exchange contract and does not copy vendor routes.
 - PR B adds no Fasti asynchronous authentication event or public linked-data
   entity. `AsyncAPI: N/A — synchronous vendor account lifecycle` and
   `JSON-LD: N/A — private human credential and session state`.
 - Tauri administrator and provider-secret commands are local IPC. They do not
   create an undocumented HTTP or AsyncAPI surface.
-- C1 and later packages must update each applicable OpenAPI, SDK, permission,
-  typed problem, command-line, and documentation surface with the behavior.
+- C1 generates the finite browser-authentication and session OpenAPI, JSON
+  Schema, typed problem, capability, and TypeScript SDK surfaces. Its callback
+  is browser navigation and has no SDK method. AsyncAPI and JSON-LD remain not
+  applicable. First-administrator bootstrap uses the trusted local Unix CLI
+  and has no HTTP or SDK operation. Windows and packaged-host authentication
+  remain deferred.
 
 ## Compatibility reference
 

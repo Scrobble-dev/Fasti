@@ -1,7 +1,7 @@
 use crate::{
     local::{
-        authenticate_request, request_authentication, run_kernel, LocalApiState,
-        RequestAuthentication,
+        application_request_authentication, authenticate_application_request, run_kernel,
+        ApplicationRequestAuthentication, LocalApiState,
     },
     problem::{application_problem, json_rejection, HttpProblem},
 };
@@ -12,8 +12,8 @@ use axum::{
     Json, Router,
 };
 use fasti_application::{
-    derive_deterministic_operation_id, AcceptObservationCommand, CapabilityKey,
-    EvidenceUploadRequest, FastiProblem, LocalKernel, Violation,
+    AcceptObservationCommand, CapabilityKey, EvidenceUploadRequest, FastiProblem, LocalKernel,
+    SourceEvent, SourceEventError, Violation,
 };
 use fasti_contracts::{ProblemDetails, SubmitObservationRequest, SubmitObservationResponse};
 use fasti_domain::{
@@ -42,23 +42,23 @@ fn invalid_observation(
 fn validate_request(
     request: &SubmitObservationRequest,
     correlation_id: RequestCorrelationId,
-) -> Result<(), HttpProblem> {
-    if request.source.is_empty() || request.source.len() > 64 {
-        return Err(invalid_observation(
-            correlation_id,
-            "/source",
-            "source must contain between 1 and 64 bytes",
-            "a stable source identifier",
-        ));
-    }
-    if request.source_event_id.is_empty() || request.source_event_id.len() > 256 {
-        return Err(invalid_observation(
-            correlation_id,
-            "/source_event_id",
-            "source event identity must contain between 1 and 256 bytes",
-            "a stable event identity reused for retries",
-        ));
-    }
+) -> Result<SourceEvent, HttpProblem> {
+    let source_event = SourceEvent::try_new(&request.source, &request.source_event_id).map_err(
+        |error| match error {
+            SourceEventError::InvalidSource => invalid_observation(
+                correlation_id,
+                "/source",
+                "source must contain between 1 and 64 bytes",
+                "a stable source identifier",
+            ),
+            SourceEventError::InvalidSourceEventId => invalid_observation(
+                correlation_id,
+                "/source_event_id",
+                "source event identity must contain between 1 and 256 bytes",
+                "a stable event identity reused for retries",
+            ),
+        },
+    )?;
     if request.identifiers.len() > 16 {
         return Err(invalid_observation(
             correlation_id,
@@ -115,7 +115,7 @@ fn validate_request(
             ));
         }
     }
-    Ok(())
+    Ok(source_event)
 }
 
 fn resolution_name(value: ObservationResolution) -> &'static str {
@@ -128,12 +128,12 @@ fn resolution_name(value: ObservationResolution) -> &'static str {
 
 pub(crate) async fn accept_observation_request(
     state: LocalApiState,
-    authentication: RequestAuthentication,
+    authentication: ApplicationRequestAuthentication,
     request: SubmitObservationRequest,
     evidence_bytes: Vec<u8>,
     correlation_id: RequestCorrelationId,
 ) -> HttpResult<SubmitObservationResponse> {
-    validate_request(&request, correlation_id)?;
+    let source_event = validate_request(&request, correlation_id)?;
     if evidence_bytes.len() > MAX_NORMALIZED_EVIDENCE_BYTES {
         return Err(application_problem(Box::new(
             FastiProblem::payload_too_large(
@@ -210,43 +210,28 @@ pub(crate) async fn accept_observation_request(
         clues.push(clue);
     }
 
-    let source = request.source;
-    let source_event_id = request.source_event_id;
     let kernel = state.kernel;
     let outcome = run_kernel(
         CapabilityKey::AcceptObservation,
         correlation_id,
         move || {
-            let access = authenticate_request(
+            let access = authenticate_application_request(
                 kernel.as_ref(),
                 authentication,
                 CapabilityKey::AcceptObservation,
                 correlation_id,
             )?;
-            let operation_material = serde_json::to_string(&(
-                "observation",
-                access.client_id().to_string(),
-                &source,
-                &source_event_id,
-            ))
-            .map_err(|_| {
-                Box::new(FastiProblem::integrity_failed(
-                    CapabilityKey::AcceptObservation,
-                    correlation_id,
-                ))
-            })?;
-            let operation_id = derive_deterministic_operation_id(&operation_material);
             let mut upload = kernel.begin_evidence_upload(EvidenceUploadRequest::new(
                 correlation_id,
-                access,
+                access.clone(),
                 Some(evidence_bytes.len() as u64),
             ))?;
             upload.write_chunk(&evidence_bytes)?;
             let evidence = upload.finish()?;
-            let command = AcceptObservationCommand::new(
+            let command = AcceptObservationCommand::new_source_event(
                 correlation_id,
                 access,
-                operation_id,
+                source_event,
                 occurred_at,
                 observed_at,
                 evidence,
@@ -286,7 +271,7 @@ pub(crate) async fn accept_observation_request(
     post,
     path = "/api/v1/observations",
     tag = "observations",
-    security(("credential_bearer" = [])),
+    security(("credential_bearer" = []), ("browser_session_cookie" = [], "csrf_cookie" = [], "csrf_header" = [])),
     request_body = SubmitObservationRequest,
     responses(
         (status = 200, description = "Durable observation receipt; a safe retry can return a replayed disposition", body = SubmitObservationResponse),
@@ -311,8 +296,13 @@ pub(crate) async fn submit_observation(
     let Json(request) = request.map_err(|rejection| {
         json_rejection(CapabilityKey::AcceptObservation, correlation_id, rejection)
     })?;
-    let authentication =
-        request_authentication(&headers, CapabilityKey::AcceptObservation, correlation_id)?;
+    let authentication = application_request_authentication(
+        &headers,
+        state.browser_boundary.as_ref(),
+        true,
+        CapabilityKey::AcceptObservation,
+        correlation_id,
+    )?;
     let evidence_bytes = serde_json::to_vec(&request).map_err(|_| {
         application_problem(Box::new(FastiProblem::integrity_failed(
             CapabilityKey::AcceptObservation,

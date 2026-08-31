@@ -1,6 +1,59 @@
 {
   "capabilities": [
     {
+      "authorization": "local_operator",
+      "bounded_context": "access.identity",
+      "contract_body": "c1",
+      "examples": [],
+      "id": "access.identity.bootstrap",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "c1",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "auth_browser_binding_invalid",
+        "auth_identity_conflict",
+        "capacity_exceeded",
+        "forbidden",
+        "identity_service_unavailable",
+        "integrity_failed",
+        "storage_unavailable",
+        "trailbase_proof_invalid",
+        "trailbase_session_cleanup_failed",
+        "trailbase_trust_unavailable",
+        "trailbase_version_unsupported"
+      ],
+      "runtime_body": "c1",
+      "scopes": [],
+      "surface_profile": "c1_identity_bootstrap",
+      "uat": []
+    },
+    {
+      "authorization": "browser_session",
+      "bounded_context": "access.projection",
+      "contract_body": "c1",
+      "examples": [],
+      "id": "access.projection.read",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "c1",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "browser_session_expired",
+        "browser_session_revoked",
+        "capability_unavailable",
+        "integrity_failed",
+        "session_policy_changed",
+        "storage_unavailable"
+      ],
+      "runtime_body": "c1",
+      "scopes": [],
+      "surface_profile": "c1_access_projection",
+      "uat": []
+    },
+    {
       "authorization": "unauthenticated",
       "bounded_context": "browser.authentication",
       "contract_body": "c1",
@@ -9,15 +62,26 @@
       "lifecycle": {
         "contract_state": "finalized",
         "introduced_in": "c1",
-        "runtime_availability": "later_body"
+        "runtime_availability": "implemented"
       },
       "problems": [
+        "auth_browser_binding_invalid",
+        "auth_continuation_persistence_failed",
+        "auth_identity_conflict",
+        "auth_selection_changed",
+        "auth_subject_unaffiliated",
         "capability_unavailable",
+        "capacity_exceeded",
         "forbidden",
+        "identity_service_unavailable",
         "integrity_failed",
         "malformed_json",
         "payload_too_large",
         "storage_unavailable",
+        "trailbase_proof_invalid",
+        "trailbase_session_cleanup_failed",
+        "trailbase_trust_unavailable",
+        "trailbase_version_unsupported",
         "unsupported_media_type",
         "validation_failed"
       ],
@@ -35,7 +99,7 @@
       "lifecycle": {
         "contract_state": "finalized",
         "introduced_in": "c1",
-        "runtime_availability": "later_body"
+        "runtime_availability": "implemented"
       },
       "problems": [
         "browser_session_expired",
@@ -60,7 +124,7 @@
       "lifecycle": {
         "contract_state": "finalized",
         "introduced_in": "c1",
-        "runtime_availability": "later_body"
+        "runtime_availability": "implemented"
       },
       "problems": [
         "browser_session_expired",
@@ -68,8 +132,11 @@
         "capability_unavailable",
         "forbidden",
         "integrity_failed",
+        "malformed_json",
+        "payload_too_large",
         "session_policy_changed",
         "storage_unavailable",
+        "unsupported_media_type",
         "validation_failed"
       ],
       "runtime_body": "c1",
@@ -86,7 +153,7 @@
       "lifecycle": {
         "contract_state": "finalized",
         "introduced_in": "c1",
-        "runtime_availability": "later_body"
+        "runtime_availability": "implemented"
       },
       "problems": [
         "browser_session_expired",
@@ -110,7 +177,7 @@
       "lifecycle": {
         "contract_state": "finalized",
         "introduced_in": "c1",
-        "runtime_availability": "later_body"
+        "runtime_availability": "implemented"
       },
       "problems": [
         "browser_session_expired",
@@ -136,7 +203,7 @@
       "lifecycle": {
         "contract_state": "finalized",
         "introduced_in": "c1",
-        "runtime_availability": "later_body"
+        "runtime_availability": "implemented"
       },
       "problems": [
         "browser_session_expired",
@@ -161,7 +228,7 @@
       "lifecycle": {
         "contract_state": "finalized",
         "introduced_in": "c1",
-        "runtime_availability": "later_body"
+        "runtime_availability": "implemented"
       },
       "problems": [
         "browser_session_expired",
@@ -185,7 +252,7 @@
       "lifecycle": {
         "contract_state": "finalized",
         "introduced_in": "c1",
-        "runtime_availability": "later_body"
+        "runtime_availability": "implemented"
       },
       "problems": [
         "browser_session_expired",
@@ -210,7 +277,7 @@
       "lifecycle": {
         "contract_state": "finalized",
         "introduced_in": "c1",
-        "runtime_availability": "later_body"
+        "runtime_availability": "implemented"
       },
       "problems": [
         "browser_session_expired",
@@ -351,7 +418,7 @@
       "uat": []
     },
     {
-      "authorization": "scoped",
+      "authorization": "scoped_or_browser_session",
       "bounded_context": "identity.identifiers",
       "contract_body": "b1",
       "examples": [
@@ -365,6 +432,8 @@
       },
       "problems": [
         "authentication_failed",
+        "browser_session_expired",
+        "browser_session_revoked",
         "capability_unavailable",
         "forbidden",
         "identity_conflict",
@@ -373,6 +442,7 @@
         "malformed_json",
         "payload_too_large",
         "record_not_found",
+        "session_policy_changed",
         "storage_unavailable",
         "unsupported_media_type",
         "validation_failed"
@@ -385,7 +455,7 @@
       "uat": []
     },
     {
-      "authorization": "scoped",
+      "authorization": "scoped_or_browser_session",
       "bounded_context": "identity.identifiers",
       "contract_body": "b1",
       "examples": [
@@ -399,11 +469,14 @@
       },
       "problems": [
         "authentication_failed",
+        "browser_session_expired",
+        "browser_session_revoked",
         "capability_unavailable",
         "forbidden",
         "integrity_failed",
         "malformed_json",
         "payload_too_large",
+        "session_policy_changed",
         "storage_unavailable",
         "unsupported_media_type",
         "validation_failed"
@@ -416,7 +489,7 @@
       "uat": []
     },
     {
-      "authorization": "scoped",
+      "authorization": "scoped_or_browser_session",
       "bounded_context": "identity.records",
       "contract_body": "b1",
       "examples": [
@@ -430,12 +503,15 @@
       },
       "problems": [
         "authentication_failed",
+        "browser_session_expired",
+        "browser_session_revoked",
         "capability_unavailable",
         "forbidden",
         "integrity_failed",
         "invalid_identifier",
         "malformed_json",
         "payload_too_large",
+        "session_policy_changed",
         "storage_unavailable",
         "unsupported_media_type",
         "validation_failed"
@@ -448,7 +524,7 @@
       "uat": []
     },
     {
-      "authorization": "scoped",
+      "authorization": "scoped_or_browser_session",
       "bounded_context": "identity.records",
       "contract_body": "b1",
       "examples": [
@@ -462,9 +538,12 @@
       },
       "problems": [
         "authentication_failed",
+        "browser_session_expired",
+        "browser_session_revoked",
         "capability_unavailable",
         "forbidden",
         "integrity_failed",
+        "session_policy_changed",
         "storage_unavailable"
       ],
       "runtime_body": "b2",
@@ -733,7 +812,7 @@
       "uat": []
     },
     {
-      "authorization": "scoped",
+      "authorization": "scoped_or_browser_session",
       "bounded_context": "observation.ingress",
       "contract_body": "b1",
       "examples": [
@@ -749,6 +828,8 @@
       },
       "problems": [
         "authentication_failed",
+        "browser_session_expired",
+        "browser_session_revoked",
         "capacity_exceeded",
         "forbidden",
         "idempotency_conflict",
@@ -756,6 +837,7 @@
         "invalid_observation",
         "malformed_json",
         "payload_too_large",
+        "session_policy_changed",
         "storage_unavailable",
         "unsupported_media_type",
         "validation_failed"
@@ -865,7 +947,7 @@
       "uat": []
     },
     {
-      "authorization": "scoped",
+      "authorization": "scoped_or_browser_session",
       "bounded_context": "profile.catalog_configuration",
       "contract_body": "b2",
       "examples": [],
@@ -877,9 +959,12 @@
       },
       "problems": [
         "authentication_failed",
+        "browser_session_expired",
+        "browser_session_revoked",
         "capability_unavailable",
         "forbidden",
         "integrity_failed",
+        "session_policy_changed",
         "storage_unavailable"
       ],
       "runtime_body": "b2",
@@ -890,7 +975,7 @@
       "uat": []
     },
     {
-      "authorization": "scoped",
+      "authorization": "scoped_or_browser_session",
       "bounded_context": "profile.catalog_configuration",
       "contract_body": "b2",
       "examples": [],
@@ -902,9 +987,12 @@
       },
       "problems": [
         "authentication_failed",
+        "browser_session_expired",
+        "browser_session_revoked",
         "capability_unavailable",
         "forbidden",
         "integrity_failed",
+        "session_policy_changed",
         "storage_unavailable"
       ],
       "runtime_body": "b2",
@@ -915,7 +1003,7 @@
       "uat": []
     },
     {
-      "authorization": "scoped",
+      "authorization": "scoped_or_browser_session",
       "bounded_context": "profile.catalog_configuration",
       "contract_body": "b2",
       "examples": [],
@@ -927,11 +1015,14 @@
       },
       "problems": [
         "authentication_failed",
+        "browser_session_expired",
+        "browser_session_revoked",
         "capability_unavailable",
         "forbidden",
         "integrity_failed",
         "malformed_json",
         "payload_too_large",
+        "session_policy_changed",
         "storage_unavailable",
         "unsupported_media_type",
         "validation_failed"
@@ -944,7 +1035,7 @@
       "uat": []
     },
     {
-      "authorization": "scoped",
+      "authorization": "scoped_or_browser_session",
       "bounded_context": "profile.tracking",
       "contract_body": "b2",
       "examples": [
@@ -958,9 +1049,12 @@
       },
       "problems": [
         "authentication_failed",
+        "browser_session_expired",
+        "browser_session_revoked",
         "capability_unavailable",
         "forbidden",
         "integrity_failed",
+        "session_policy_changed",
         "storage_unavailable"
       ],
       "runtime_body": "b2",
@@ -971,7 +1065,7 @@
       "uat": []
     },
     {
-      "authorization": "scoped",
+      "authorization": "scoped_or_browser_session",
       "bounded_context": "profile.tracking",
       "contract_body": "b2",
       "examples": [
@@ -985,12 +1079,15 @@
       },
       "problems": [
         "authentication_failed",
+        "browser_session_expired",
+        "browser_session_revoked",
         "capability_unavailable",
         "forbidden",
         "integrity_failed",
         "malformed_json",
         "payload_too_large",
         "record_not_found",
+        "session_policy_changed",
         "storage_unavailable",
         "unsupported_media_type",
         "validation_failed"
@@ -1696,6 +1793,59 @@
         "state": "required"
       }
     },
+    "c1_access_projection": {
+      "cli": {
+        "reason": "The Account and Security projection is a first-party browser surface.",
+        "state": "not_applicable"
+      },
+      "domain_application": {
+        "binding_visibility": "internal",
+        "state": "required"
+      },
+      "http_openapi": {
+        "binding": "openapi:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "json_ld": {
+        "reason": "Private account and session security state is not linked data.",
+        "state": "not_applicable"
+      },
+      "json_schema": {
+        "binding": "schema:production-openapi-operation:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "knowledge": {
+        "binding": "knowledge:problem-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "okf": {
+        "binding": "okf:capability-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "package_smoke": {
+        "body": "c1",
+        "reason": "Authenticated projection smoke is delivered after the route is active.",
+        "state": "later_body"
+      },
+      "sdk": {
+        "binding": "sdk:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "sse_asyncapi": {
+        "reason": "The Access projection is a finite request and has no event stream.",
+        "state": "not_applicable"
+      },
+      "ui": {
+        "binding": "ui:account-security",
+        "binding_visibility": "public",
+        "state": "required"
+      }
+    },
     "c1_browser_session_foundation": {
       "cli": {
         "reason": "Browser sessions are administered through the first-party web surface.",
@@ -1706,18 +1856,18 @@
         "state": "required"
       },
       "http_openapi": {
-        "body": "c1",
-        "reason": "Browser session HTTP routes require the TrailBase-backed C1 runtime.",
-        "state": "later_body"
+        "binding": "openapi:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
       },
       "json_ld": {
         "reason": "Private browser authentication state is not linked data.",
         "state": "not_applicable"
       },
       "json_schema": {
-        "body": "c1",
-        "reason": "Browser session request and response schemas require the C1 runtime contract.",
-        "state": "later_body"
+        "binding": "schema:production-openapi-operation:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
       },
       "knowledge": {
         "binding": "knowledge:problem-catalog",
@@ -1735,9 +1885,9 @@
         "state": "later_body"
       },
       "sdk": {
-        "body": "c1",
-        "reason": "Browser session SDK methods require the C1 HTTP contract.",
-        "state": "later_body"
+        "binding": "sdk:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
       },
       "sse_asyncapi": {
         "reason": "Browser authentication uses finite requests and has no event stream.",
@@ -1747,6 +1897,56 @@
         "body": "c1",
         "reason": "PR A keeps the Account and security controls visibly unavailable until C1.",
         "state": "later_body"
+      }
+    },
+    "c1_identity_bootstrap": {
+      "cli": {
+        "binding": "cli:access-identity-bootstrap",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "domain_application": {
+        "binding_visibility": "internal",
+        "state": "required"
+      },
+      "http_openapi": {
+        "reason": "First-administrator bootstrap is a trusted local CLI operation and has no HTTP route.",
+        "state": "not_applicable"
+      },
+      "json_ld": {
+        "reason": "Private authentication bootstrap state is not linked data.",
+        "state": "not_applicable"
+      },
+      "json_schema": {
+        "reason": "No public transport represents the local-operator bootstrap command.",
+        "state": "not_applicable"
+      },
+      "knowledge": {
+        "binding": "knowledge:problem-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "okf": {
+        "binding": "okf:capability-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "package_smoke": {
+        "binding": "package-smoke:c1-operator-bootstrap",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "sdk": {
+        "reason": "Browser and third-party SDK callers cannot invoke local-operator bootstrap.",
+        "state": "not_applicable"
+      },
+      "sse_asyncapi": {
+        "reason": "First-administrator bootstrap is a finite operation and has no event stream.",
+        "state": "not_applicable"
+      },
+      "ui": {
+        "reason": "The active first-administrator operation is the trusted local CLI; packaged first-run authentication remains unavailable until C1-TAURI-AUTH.",
+        "state": "not_applicable"
       }
     },
     "health": {

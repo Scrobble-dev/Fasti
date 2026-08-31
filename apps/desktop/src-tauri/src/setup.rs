@@ -128,6 +128,15 @@ impl DesktopProblem {
         }
     }
 
+    pub(crate) fn access_unavailable(detail: impl Into<String>) -> Self {
+        Self {
+            code: "trailbase_trust_unavailable",
+            title: "TrailBase access is unavailable",
+            detail: detail.into(),
+            next_action: "Activate the pinned TrailBase installation, then restart Fasti.",
+        }
+    }
+
     pub(crate) fn application(problem: &FastiProblem) -> Self {
         let contract = problem.code().contract();
         Self {

@@ -1,4 +1,4 @@
-use crate::kernel::{authorize_transaction, map_sql, now, timestamp, SqliteKernel};
+use crate::kernel::{authorize_application_transaction, map_sql, now, timestamp, SqliteKernel};
 use fasti_application::{
     ApplicationResult, CapabilityKey, ClearNuvioCollectionsCommand, FastiProblem,
     GetNuvioCollectionsQuery, NuvioCollectionsDocument, NuvioCollectionsPort,
@@ -19,7 +19,12 @@ impl NuvioCollectionsPort for SqliteKernel {
             capability,
             correlation_id,
         )?;
-        authorize_transaction(&transaction, capability, query.access(), correlation_id)?;
+        let authorized = authorize_application_transaction(
+            &transaction,
+            capability,
+            query.access(),
+            correlation_id,
+        )?;
         let stored = map_sql(
             transaction
                 .query_row(
@@ -29,8 +34,8 @@ impl NuvioCollectionsPort for SqliteKernel {
                     WHERE workspace_id = ?1 AND profile_id = ?2
                     "#,
                     params![
-                        query.access().workspace_id().to_string(),
-                        query.access().profile_id().to_string()
+                        authorized.workspace_id().to_string(),
+                        authorized.profile_id().to_string()
                     ],
                     |row| row.get::<_, String>(0),
                 )
@@ -61,7 +66,12 @@ impl NuvioCollectionsPort for SqliteKernel {
             capability,
             correlation_id,
         )?;
-        authorize_transaction(&transaction, capability, command.access(), correlation_id)?;
+        let authorized = authorize_application_transaction(
+            &transaction,
+            capability,
+            command.access(),
+            correlation_id,
+        )?;
         map_sql(
             transaction.execute(
                 r#"
@@ -74,8 +84,8 @@ impl NuvioCollectionsPort for SqliteKernel {
                 WHERE profile_nuvio_collections.document_json <> excluded.document_json
                 "#,
                 params![
-                    command.access().workspace_id().to_string(),
-                    command.access().profile_id().to_string(),
+                    authorized.workspace_id().to_string(),
+                    authorized.profile_id().to_string(),
                     command.document().canonical_json(),
                     timestamp(now())
                 ],
@@ -99,7 +109,12 @@ impl NuvioCollectionsPort for SqliteKernel {
             capability,
             correlation_id,
         )?;
-        authorize_transaction(&transaction, capability, command.access(), correlation_id)?;
+        let authorized = authorize_application_transaction(
+            &transaction,
+            capability,
+            command.access(),
+            correlation_id,
+        )?;
         map_sql(
             transaction.execute(
                 r#"
@@ -107,8 +122,8 @@ impl NuvioCollectionsPort for SqliteKernel {
                 WHERE workspace_id = ?1 AND profile_id = ?2
                 "#,
                 params![
-                    command.access().workspace_id().to_string(),
-                    command.access().profile_id().to_string()
+                    authorized.workspace_id().to_string(),
+                    authorized.profile_id().to_string()
                 ],
             ),
             capability,

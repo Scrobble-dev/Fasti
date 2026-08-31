@@ -1,13 +1,22 @@
 import type { IntegrationRuntimeStatus } from "./integration-status.js";
 import type {
+  AccessProjectionResponse,
+  CompleteTrailBaseContinuationRequest,
   ConfigureMetadataProjectionRequest,
   MetadataProjectionConfigurationResponse,
   MetadataProjectionResponse,
+  ReadTrailBaseContinuationResponse,
   RefreshMetadataClaimsRequest,
   RefreshMetadataClaimsResponse,
+  RevokeBrowserSessionsResponse,
+  RotateBrowserSessionResponse,
+  StartTrailBaseSignInRequest,
+  StartTrailBaseSignInResponse,
 } from "@fasti/sdk";
 
 export type {
+  AccessProjectionResponse,
+  CompleteTrailBaseContinuationRequest,
   ConfigureMetadataProjectionRequest,
   EnrichmentPolicyDto,
   MetadataAttributionDto,
@@ -16,9 +25,14 @@ export type {
   MetadataProjectedFieldDto,
   MetadataProjectionConfigurationResponse,
   MetadataProjectionResponse,
+  ReadTrailBaseContinuationResponse,
   RatingClaimDto,
   RefreshMetadataClaimsRequest,
   RefreshMetadataClaimsResponse,
+  RevokeBrowserSessionsResponse,
+  RotateBrowserSessionResponse,
+  StartTrailBaseSignInRequest,
+  StartTrailBaseSignInResponse,
 } from "@fasti/sdk";
 
 export type MediaKind =
@@ -321,6 +335,7 @@ export interface NuvioCollectionsState {
 
 export interface WorkbenchHost {
   readonly networkConfigurationScope: "client" | "node";
+  readonly profileDataAuthority?: "browser_session" | "scoped";
   loadNetworkConfiguration(): Promise<NetworkConfiguration>;
   saveNetworkConfiguration(
     input: SaveNetworkConfigurationRequest,
@@ -391,6 +406,26 @@ export interface WorkbenchHost {
     request: RefreshMetadataClaimsRequest,
   ): Promise<RefreshMetadataClaimsResponse>;
   listIntegrations?(): Promise<IntegrationRuntimeStatus[]>;
+  startFirstAdministratorBootstrap?(): Promise<StartTrailBaseSignInResponse>;
+  startTrailBaseSignIn?(
+    request: StartTrailBaseSignInRequest,
+  ): Promise<StartTrailBaseSignInResponse>;
+  readTrailBaseContinuation?(
+    signal?: AbortSignal,
+  ): Promise<ReadTrailBaseContinuationResponse>;
+  completeTrailBaseContinuation?(
+    request: CompleteTrailBaseContinuationRequest,
+  ): Promise<void>;
+  cancelTrailBaseContinuation?(): Promise<void>;
+  readAccessProjection?(
+    signal?: AbortSignal,
+  ): Promise<AccessProjectionResponse>;
+  endBrowserSession?(): Promise<void>;
+  revokeBrowserSession?(
+    browserSessionId: string,
+  ): Promise<RevokeBrowserSessionsResponse>;
+  revokeOtherBrowserSessions?(): Promise<RevokeBrowserSessionsResponse>;
+  rotateBrowserSession?(): Promise<RotateBrowserSessionResponse>;
 }
 
 /** Wire shape of the desktop host's `create_record` command output. */

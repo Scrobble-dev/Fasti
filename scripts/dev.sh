@@ -62,6 +62,7 @@ TRAILBASE_PUBLIC_ADDR="127.0.0.1:4000"
 TRAILBASE_ADMIN_ADDR="127.0.0.1:4001"
 TRAILBASE_PUBLIC_URL="http://$TRAILBASE_PUBLIC_ADDR"
 TRAILBASE_CONTAINER_NAME="trailbase-dev-$DEV_SCOPE"
+unset FASTI_TRAILBASE_ROOT
 
 _validate_port() {
   if [[ "$2" =~ ^[0-9]+$ && ${#2} -le 5 ]] && ((10#$2 >= 1 && 10#$2 <= 65535)); then
@@ -386,6 +387,14 @@ _trailbase_container_runtime() {
   return 1
 }
 
+_configure_fasti_trailbase_root() {
+  unset FASTI_TRAILBASE_ROOT
+  [[ -e "$TRAILBASE_ROOT/.fasti-installation.json" \
+    || -L "$TRAILBASE_ROOT/.fasti-installation.json" ]] || return 0
+  python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" verify-installation "$TRAILBASE_ROOT" >/dev/null
+  export FASTI_TRAILBASE_ROOT="$TRAILBASE_ROOT"
+}
+
 _trailbase_initialize() {
   if [[ -f "$TRAILBASE_ROOT/bootstrap.json" ]]; then
     echo "TrailBase is already initialized for this worktree." >&2
@@ -410,6 +419,9 @@ _trailbase_start_native() {
   fi
   if pid="$(_tracked_pid trailbase 2>/dev/null)"; then
     python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" verify-root "$TRAILBASE_ROOT" >/dev/null
+    python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" prepare-installation \
+      "$TRAILBASE_ROOT" --runtime native >/dev/null
+    python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" verify-installation "$TRAILBASE_ROOT" >/dev/null
     echo "TrailBase is already running (PID: $pid)."
     return 0
   fi
@@ -419,6 +431,8 @@ _trailbase_start_native() {
   fi
   python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" prepare-runtime-lock "$TRAILBASE_ROOT" >/dev/null
   python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" verify-root "$TRAILBASE_ROOT" >/dev/null
+  python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" prepare-installation \
+    "$TRAILBASE_ROOT" --runtime native >/dev/null
   _trailbase_ports_are_free
   _configure_native_scope
   (umask 077; mkdir -p "$LOGDIR" "$RUNDIR")
@@ -446,7 +460,6 @@ _trailbase_start_native() {
     return 1
   fi
   echo "TrailBase v0.33.5 is running on $TRAILBASE_PUBLIC_URL (private admin: http://$TRAILBASE_ADMIN_ADDR)."
-  echo "Fasti session exchange remains unavailable until Package C1."
 }
 
 _trailbase_start_container() {
@@ -471,6 +484,9 @@ _trailbase_start_container() {
     python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" verify-root "$TRAILBASE_ROOT" >/dev/null
     python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" verify-oci-container \
       "$TRAILBASE_ROOT" --runtime "$existing_runtime" --name "$TRAILBASE_CONTAINER_NAME" >/dev/null
+    python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" prepare-installation \
+      "$TRAILBASE_ROOT" --runtime oci --oci-runtime "$existing_runtime" >/dev/null
+    python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" verify-installation "$TRAILBASE_ROOT" >/dev/null
     echo "TrailBase container $TRAILBASE_CONTAINER_NAME is already running."
     return 0
   fi
@@ -479,6 +495,12 @@ _trailbase_start_container() {
     return 1
   fi
   python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" prepare-runtime-lock "$TRAILBASE_ROOT" >/dev/null
+  if [[ -L "$TRAILBASE_ROOT/.cache" ]] || [[ -e "$TRAILBASE_ROOT/.cache" && ! -d "$TRAILBASE_ROOT/.cache" ]]; then
+    echo "TrailBase OCI cache must be a private directory inside the TrailBase root" >&2
+    return 1
+  fi
+  (umask 077; mkdir -p "$TRAILBASE_ROOT/.cache")
+  chmod 700 -- "$TRAILBASE_ROOT/.cache"
   python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" verify-root "$TRAILBASE_ROOT" >/dev/null
   reference="$(python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" prepare-oci "$TRAILBASE_ROOT" --runtime "$runtime" --offline)"
   local port_probe_result=0
@@ -498,6 +520,7 @@ _trailbase_start_container() {
   container_id="$("$runtime" run -d --name "$TRAILBASE_CONTAINER_NAME" --rm --pull never \
     --log-driver none \
     "${user_args[@]}" \
+    --env XDG_CACHE_HOME=/app/trailroot/.cache \
     --memory 192m --memory-swap 192m --cpus 1 --pids-limit 128 \
     --read-only --security-opt no-new-privileges --cap-drop ALL \
     --publish 127.0.0.1:4000:4000 \
@@ -505,6 +528,7 @@ _trailbase_start_container() {
     --entrypoint /usr/bin/flock \
     "$reference" \
     /app/trailroot/runtime.lock \
+    /bin/sh -c 'umask 077; exec "$@"' sh \
     /app/trail \
     --depot /app/trailroot/depot \
     --public-url "$TRAILBASE_PUBLIC_URL" \
@@ -535,10 +559,11 @@ _trailbase_start_container() {
     echo "TrailBase $runtime container executable version differs from the release lock." >&2
     return 1
   fi
+  python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" prepare-installation \
+    "$TRAILBASE_ROOT" --runtime oci --oci-runtime "$runtime" >/dev/null
   echo "TrailBase v0.33.5 is running from the exact $runtime OCI digest on $TRAILBASE_PUBLIC_URL."
   echo "Container ID: $container_id"
   echo "The admin listener remains inside the container and is not host-published."
-  echo "Fasti session exchange remains unavailable until Package C1."
 }
 
 _trailbase_start() {
@@ -548,6 +573,18 @@ _trailbase_start() {
     --docker) _trailbase_start_container docker ;;
     *) echo "Usage: ./scripts/dev.sh trailbase start [--podman|--docker]" >&2; return 1 ;;
   esac
+}
+
+_ensure_trailbase_for_fasti() {
+  local runtime=""
+  unset FASTI_TRAILBASE_ROOT
+  [[ -f "$TRAILBASE_ROOT/bootstrap.json" ]] || return 0
+  if runtime="$(_trailbase_container_runtime 2>/dev/null)"; then
+    _trailbase_start_container "$runtime"
+  else
+    _trailbase_start_native
+  fi
+  _configure_fasti_trailbase_root
 }
 
 _trailbase_stop() {
@@ -585,11 +622,14 @@ _trailbase_status() {
   if [[ ! -f "$TRAILBASE_ROOT/bootstrap.json" ]]; then
     echo "  State: NOT INITIALIZED"
     echo "  Next action: ./scripts/dev.sh trailbase initialize"
-    echo "  Fasti session exchange: UNAVAILABLE UNTIL PACKAGE C1"
     return 0
   fi
   if ! python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" verify-root "$TRAILBASE_ROOT" >/dev/null; then
     echo "  State: NEEDS ATTENTION (private root or bootstrap receipt failed verification)"
+    return 1
+  fi
+  if ! python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" verify-installation "$TRAILBASE_ROOT" >/dev/null; then
+    echo "  State: NEEDS ATTENTION (installation receipt failed exact root or release verification)"
     return 1
   fi
   if pid="$(_tracked_pid trailbase 2>/dev/null)"; then
@@ -618,7 +658,6 @@ _trailbase_status() {
     echo "  Process: STOPPED"
     echo "  Next action: ./scripts/dev.sh trailbase start"
   fi
-  echo "  Fasti session exchange: UNAVAILABLE UNTIL PACKAGE C1"
 }
 
 _trailbase_help() {
@@ -1114,6 +1153,9 @@ _start_container() {
 
   if _wait_for_health && _durable_api_is_mounted; then
     echo "Fasti $FASTI_CONTAINER_RUNTIME container is healthy with durable routes on $FASTI_API_URL"
+    echo "Browser authentication: UNAVAILABLE in C1 container forwarding."
+    echo "Reason: C1 permits only the exact direct 127.0.0.1:8420 browser origin and 127.0.0.1:4000 TrailBase backchannel."
+    echo "Next action: use './scripts/dev.sh' or an explicit FASTI_DATA_ROOT with './scripts/dev.sh --desktop'."
   else
     echo "Fasti $FASTI_CONTAINER_RUNTIME container failed its health or durable-route probe:" >&2
     "$FASTI_CONTAINER_RUNTIME" logs "$CONTAINER_NAME" >&2 || true
@@ -1145,6 +1187,7 @@ _start_native() {
   echo "=== 1. Compiling and starting Fasti daemon ==="
   _configure_native_scope
   cargo build --locked --bin fastid
+  _ensure_trailbase_for_fasti
   export FASTI_LISTEN FASTI_API_URL FASTI_PORT_FALLBACK
   export FASTI_BOUND_ADDR_FILE="$BOUND_ADDR_FILE"
   export FASTI_DATA_ROOT="$DATADIR"
@@ -1224,6 +1267,7 @@ _start_desktop() {
   (umask 077; mkdir -p "$DATADIR")
   [[ -n "${PKG_CONFIG:-}" || ! -x /usr/bin/pkg-config ]] || export PKG_CONFIG=/usr/bin/pkg-config
   pnpm --dir "$PROJECT_ROOT" run build
+  _ensure_trailbase_for_fasti
   FASTI_DATA_ROOT="$DATADIR" cargo run --locked \
     --manifest-path "$manifest" \
     --bin fasti-desktop
@@ -1244,6 +1288,9 @@ _self_test() {
   local leader_file=""
   local desktop_calls=""
   local trailbase_calls=""
+  local container_calls=""
+  local container_invocation=""
+  local old_trailbase_root="$TRAILBASE_ROOT"
   local old_datadir="$DATADIR"
   local old_data_root_explicit="$FASTI_DATA_ROOT_EXPLICIT"
   RUNDIR="$(mktemp -d)"
@@ -1252,7 +1299,8 @@ _self_test() {
   exec_go="$RUNDIR/exec-go"
   desktop_calls="$RUNDIR/desktop-calls"
   trailbase_calls="$RUNDIR/trailbase-calls"
-  trap '_stop_pidfile child; _stop_pidfile exec-child; rm -f "$RUNDIR/stale.pid" "$RUNDIR/leader" "$RUNDIR/exec-ready" "$RUNDIR/exec-go" "$RUNDIR/desktop-calls" "$RUNDIR/trailbase-calls"; rmdir "$RUNDIR/desktop-data" 2>/dev/null || true; rmdir "$RUNDIR" 2>/dev/null || true' EXIT
+  container_calls="$RUNDIR/container-calls"
+  trap '_stop_pidfile child; _stop_pidfile exec-child; rm -f "$RUNDIR/stale.pid" "$RUNDIR/leader" "$RUNDIR/exec-ready" "$RUNDIR/exec-go" "$RUNDIR/desktop-calls" "$RUNDIR/trailbase-calls" "$RUNDIR/container-calls"; rmdir "$RUNDIR/desktop-data" 2>/dev/null || true; rmdir "$RUNDIR" 2>/dev/null || true' EXIT
   # The values expand in the child shell.
   # shellcheck disable=SC2016
   setsid --fork --wait bash -c 'printf "%s\n" "$$" > "$1"; trap "" TERM; sleep 30 & wait' _ "$leader_file" 2>/dev/null &
@@ -1350,6 +1398,18 @@ _self_test() {
     return 1
   fi
   unset -f id
+  (
+    id() { [[ "$1" == -u ]] && printf '1000\n' || printf '1000\n'; }
+    _memory_ceiling_mib() { printf '192\n'; }
+    podman() { printf '%s\n' "$*" > "$container_calls"; }
+    FASTI_CONTAINER_RUNTIME=podman _run_container 127.0.0.1:18420:8420
+  )
+  container_invocation="$(<"$container_calls")"
+  if [[ "$container_invocation" == *FASTI_TRAILBASE_ROOT* \
+    || "$container_invocation" == *:/trailbase* ]]; then
+    echo "self-test exposed unsupported C1 TrailBase authentication to container forwarding" >&2
+    return 1
+  fi
   podman() { return 1; }
   if FASTI_CONTAINER_RUNTIME=podman _require_container_image >/dev/null 2>&1; then
     echo "self-test accepted a missing container image" >&2
@@ -1432,16 +1492,17 @@ PY
     echo "self-test accepted inferred Desktop data root" >&2
     return 1
   fi
-  pnpm() { printf 'pnpm:%s\n' "$*" >> "$desktop_calls"; }
-  cargo() { printf 'cargo:%s|data:%s\n' "$*" "$FASTI_DATA_ROOT" >> "$desktop_calls"; }
-  FASTI_DATA_ROOT_EXPLICIT=1
-  DATADIR="$RUNDIR/desktop-data"
-  _start_desktop
-  unset -f pnpm cargo
+  (
+    pnpm() { printf 'pnpm:%s\n' "$*" >> "$desktop_calls"; }
+    cargo() { printf 'cargo:%s|data:%s\n' "$*" "$FASTI_DATA_ROOT" >> "$desktop_calls"; }
+    _ensure_trailbase_for_fasti() { :; }
+    FASTI_DATA_ROOT_EXPLICIT=1
+    DATADIR="$RUNDIR/desktop-data"
+    _start_desktop
+  )
   mapfile -t desktop_invocations < "$desktop_calls"
   [[ "${desktop_invocations[0]}" == "pnpm:--dir $PROJECT_ROOT run build" ]]
-  [[ "${desktop_invocations[1]}" == "cargo:run --locked --manifest-path $PROJECT_ROOT/apps/desktop/src-tauri/Cargo.toml --bin fasti-desktop|data:$DATADIR" ]]
-  DATADIR="$old_datadir"
+  [[ "${desktop_invocations[1]}" == "cargo:run --locked --manifest-path $PROJECT_ROOT/apps/desktop/src-tauri/Cargo.toml --bin fasti-desktop|data:$RUNDIR/desktop-data" ]]
   FASTI_DATA_ROOT_EXPLICIT="$old_data_root_explicit"
   _validate_open_target 'https://fasti.internal/path?view=settings'
   if _validate_open_target 'https://userinfo-marker@fasti.internal/path' >/dev/null 2>&1; then
@@ -1463,17 +1524,45 @@ PY
   [[ "$help_output" == *"--desktop"* ]]
   [[ "$help_output" != *$'\n  fasti '* ]]
   [[ "$(bash "$0" trailbase --help)" == *"Prepare first: ./scripts/dev.sh --prepare-offline"* ]]
-  id() { printf '1000\n'; }
-  _tracked_pid() { return 1; }
-  _trailbase_container_runtime() { printf 'podman\n'; }
-  python3() { printf '%s\n' "$*" >> "$trailbase_calls"; }
-  _trailbase_start_container podman >/dev/null
-  unset -f id _tracked_pid _trailbase_container_runtime python3
+  (
+    id() { printf '1000\n'; }
+    _tracked_pid() { return 1; }
+    _trailbase_container_runtime() { printf 'podman\n'; }
+    python3() { printf '%s\n' "$*" >> "$trailbase_calls"; }
+    _trailbase_start_container podman >/dev/null
+  )
   mapfile -t trailbase_invocations < "$trailbase_calls"
   [[ "${trailbase_invocations[0]}" == "-B $PROJECT_ROOT/scripts/trailbase_runtime.py verify-root $TRAILBASE_ROOT" ]]
   [[ "${trailbase_invocations[1]}" == "-B $PROJECT_ROOT/scripts/trailbase_runtime.py verify-oci-container $TRAILBASE_ROOT --runtime podman --name $TRAILBASE_CONTAINER_NAME" ]]
+  [[ "${trailbase_invocations[2]}" == "-B $PROJECT_ROOT/scripts/trailbase_runtime.py prepare-installation $TRAILBASE_ROOT --runtime oci --oci-runtime podman" ]]
+  [[ "${trailbase_invocations[3]}" == "-B $PROJECT_ROOT/scripts/trailbase_runtime.py verify-installation $TRAILBASE_ROOT" ]]
+  TRAILBASE_ROOT="$RUNDIR/trailbase-root"
+  mkdir -p "$TRAILBASE_ROOT"
+  : > "$TRAILBASE_ROOT/.fasti-installation.json"
+  python3() { [[ "$*" == "-B $PROJECT_ROOT/scripts/trailbase_runtime.py verify-installation $TRAILBASE_ROOT" ]]; }
+  _configure_fasti_trailbase_root
+  [[ "$FASTI_TRAILBASE_ROOT" == "$TRAILBASE_ROOT" ]]
+  rm -f "$TRAILBASE_ROOT/.fasti-installation.json"
+  FASTI_TRAILBASE_ROOT=/unverified
+  _configure_fasti_trailbase_root
+  [[ -z "${FASTI_TRAILBASE_ROOT:-}" ]]
+  : > "$TRAILBASE_ROOT/bootstrap.json"
+  (
+    _trailbase_container_runtime() { return 1; }
+    _trailbase_start_native() {
+      printf 'started\n' > "$RUNDIR/trailbase-supervised"
+      : > "$TRAILBASE_ROOT/.fasti-installation.json"
+    }
+    _ensure_trailbase_for_fasti
+    [[ "$FASTI_TRAILBASE_ROOT" == "$TRAILBASE_ROOT" ]]
+  )
+  [[ -f "$RUNDIR/trailbase-supervised" ]]
+  unset -f python3
+  rm -f "$TRAILBASE_ROOT/bootstrap.json" "$TRAILBASE_ROOT/.fasti-installation.json" "$RUNDIR/trailbase-supervised"
+  rmdir "$TRAILBASE_ROOT"
+  TRAILBASE_ROOT="$old_trailbase_root"
   rmdir "$RUNDIR/desktop-data"
-  rm -f "$desktop_calls" "$trailbase_calls"
+  rm -f "$desktop_calls" "$trailbase_calls" "$container_calls"
   rm -f "$leader_file" "$exec_ready" "$exec_go"
   rmdir "$RUNDIR"
   RUNDIR="$old_rundir"
@@ -1535,7 +1624,7 @@ Examples:
   ./scripts/dev.sh --prepare-offline # Prepare locked inputs before network denial
   ./scripts/dev.sh trailbase initialize
                           # One-time terminal-only administrator bootstrap
-  ./scripts/dev.sh trailbase start   # Start private TrailBase without session exchange
+  ./scripts/dev.sh trailbase start   # Start the private TrailBase account service
   FASTI_DATA_ROOT=/private/path ./scripts/dev.sh desktop
 EOF
 }

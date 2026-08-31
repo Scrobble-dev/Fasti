@@ -4,7 +4,7 @@ use fasti_domain::{
     AuthSubject, AuthSubjectId, BrowserSessionId, FastiBrowserSession, ProfileGrantId,
     RequestCorrelationId, WorkspaceId,
 };
-use std::{collections::HashSet, error::Error, fmt, time::Duration};
+use std::{collections::HashSet, error::Error, fmt, sync::Arc, time::Duration};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SessionPolicyInputError;
@@ -50,6 +50,9 @@ pub struct BrowserRequestBoundaryPolicy {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ValidatedBrowserRequestBoundary(());
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ValidatedBrowserReadBoundary(());
 
 impl BrowserRequestBoundaryPolicy {
     pub fn try_new(
@@ -98,13 +101,24 @@ impl BrowserRequestBoundaryPolicy {
         }
         Ok(ValidatedBrowserRequestBoundary(()))
     }
+
+    pub fn validate_read(
+        &self,
+        host: Option<&str>,
+    ) -> Result<ValidatedBrowserReadBoundary, BrowserRequestBoundaryError> {
+        let host = host.ok_or(BrowserRequestBoundaryError::MissingHost)?;
+        if !host.eq_ignore_ascii_case(&self.allowed_host) {
+            return Err(BrowserRequestBoundaryError::HostMismatch);
+        }
+        Ok(ValidatedBrowserReadBoundary(()))
+    }
 }
 
 /// Governed browser-session timings.
 ///
-/// PR A deliberately has no `Default`: the approved plan does not provide
-/// source-backed values. The configuration owner must supply the approved
-/// values before C1 can issue a production session.
+/// There is deliberately no `Default`: C1 selects [`SessionPolicy::C1`]
+/// explicitly, and a later policy must be approved before it replaces these
+/// values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SessionPolicy {
     browser_idle_timeout: Duration,
@@ -114,6 +128,13 @@ pub struct SessionPolicy {
 }
 
 impl SessionPolicy {
+    pub const C1: Self = Self {
+        browser_idle_timeout: Duration::from_secs(30 * 60),
+        browser_absolute_lifetime: Duration::from_secs(8 * 60 * 60),
+        remembered_browser_lifetime: Duration::from_secs(30 * 24 * 60 * 60),
+        last_seen_write_interval: Duration::from_secs(60),
+    };
+
     pub fn try_new(
         browser_idle_timeout: Duration,
         browser_absolute_lifetime: Duration,
@@ -163,6 +184,9 @@ impl SessionPolicy {
         }
     }
 }
+
+pub const C1_RECENT_AUTHENTICATION_WINDOW: Duration = Duration::from_secs(10 * 60);
+pub const C1_AUTH_CEREMONY_LIFETIME: Duration = Duration::from_secs(10 * 60);
 
 pub struct CreateAuthSubjectCommand {
     correlation_id: RequestCorrelationId,
@@ -346,6 +370,95 @@ impl BrowserSessionMutationCommand {
     }
 }
 
+/// Browser-session proof carried into one first-party application operation.
+///
+/// `Arc` shares the same non-cloneable secret allocation across bounded
+/// preparation and commit checks. The secret is still zeroed when the final
+/// owner drops it, and never gains `Debug` or serialization.
+#[derive(Clone)]
+pub enum BrowserSessionAccessContext {
+    Read {
+        query: Arc<BrowserSessionQuery>,
+        _request_boundary: ValidatedBrowserReadBoundary,
+    },
+    Mutation(Arc<BrowserSessionMutationCommand>),
+}
+
+impl BrowserSessionAccessContext {
+    pub fn read(
+        query: BrowserSessionQuery,
+        request_boundary: ValidatedBrowserReadBoundary,
+    ) -> Self {
+        Self::Read {
+            query: Arc::new(query),
+            _request_boundary: request_boundary,
+        }
+    }
+
+    pub fn mutation(command: BrowserSessionMutationCommand) -> Self {
+        Self::Mutation(Arc::new(command))
+    }
+
+    pub const fn is_mutation(&self) -> bool {
+        matches!(self, Self::Mutation(_))
+    }
+
+    pub fn session_secret(&self) -> &SecretMaterial {
+        match self {
+            Self::Read { query, .. } => query.session_secret(),
+            Self::Mutation(command) => command.session_secret(),
+        }
+    }
+
+    pub fn csrf_secret(&self) -> Option<&SecretMaterial> {
+        match self {
+            Self::Read { .. } => None,
+            Self::Mutation(command) => Some(command.csrf_secret()),
+        }
+    }
+
+    pub fn now(&self) -> DateTime<Utc> {
+        match self {
+            Self::Read { query, .. } => query.now(),
+            Self::Mutation(command) => command.now(),
+        }
+    }
+}
+
+impl fmt::Debug for BrowserSessionAccessContext {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("BrowserSessionAccessContext")
+            .field(
+                "kind",
+                &if self.is_mutation() {
+                    "mutation"
+                } else {
+                    "read"
+                },
+            )
+            .field("now", &self.now())
+            .finish_non_exhaustive()
+    }
+}
+
+impl PartialEq for BrowserSessionAccessContext {
+    fn eq(&self, other: &Self) -> bool {
+        self.is_mutation() == other.is_mutation()
+            && self.now() == other.now()
+            && self
+                .session_secret()
+                .constant_time_eq(other.session_secret())
+            && match (self.csrf_secret(), other.csrf_secret()) {
+                (Some(left), Some(right)) => left.constant_time_eq(right),
+                (None, None) => true,
+                _ => false,
+            }
+    }
+}
+
+impl Eq for BrowserSessionAccessContext {}
+
 pub struct TargetBrowserSessionCommand {
     proof: BrowserSessionMutationCommand,
     target_session_id: BrowserSessionId,
@@ -416,6 +529,52 @@ pub struct BrowserSessionSummary {
     is_current: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BrowserSessionInventory {
+    sessions: Vec<BrowserSessionSummary>,
+    truncated: bool,
+}
+
+impl BrowserSessionInventory {
+    pub fn new(sessions: Vec<BrowserSessionSummary>, truncated: bool) -> Self {
+        Self {
+            sessions,
+            truncated,
+        }
+    }
+
+    pub fn sessions(&self) -> &[BrowserSessionSummary] {
+        &self.sessions
+    }
+
+    pub const fn truncated(&self) -> bool {
+        self.truncated
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RevokeBrowserSessionOutcome {
+    revoked: bool,
+    current_session_revoked: bool,
+}
+
+impl RevokeBrowserSessionOutcome {
+    pub const fn new(revoked: bool, current_session_revoked: bool) -> Self {
+        Self {
+            revoked,
+            current_session_revoked,
+        }
+    }
+
+    pub const fn revoked(self) -> bool {
+        self.revoked
+    }
+
+    pub const fn current_session_revoked(self) -> bool {
+        self.current_session_revoked
+    }
+}
+
 impl BrowserSessionSummary {
     pub const fn new(session: FastiBrowserSession, is_current: bool) -> Self {
         Self {
@@ -446,7 +605,7 @@ pub trait BrowserSessionPort: Send + Sync {
     fn list_browser_sessions(
         &self,
         query: BrowserSessionQuery,
-    ) -> ApplicationResult<Vec<BrowserSessionSummary>>;
+    ) -> ApplicationResult<BrowserSessionInventory>;
     fn revoke_current_browser_session(
         &self,
         command: BrowserSessionMutationCommand,
@@ -454,7 +613,7 @@ pub trait BrowserSessionPort: Send + Sync {
     fn revoke_browser_session(
         &self,
         command: TargetBrowserSessionCommand,
-    ) -> ApplicationResult<bool>;
+    ) -> ApplicationResult<RevokeBrowserSessionOutcome>;
     fn revoke_other_browser_sessions(
         &self,
         command: BrowserSessionMutationCommand,
@@ -504,6 +663,31 @@ mod tests {
         )
         .is_err());
         assert_eq!(policy().browser_idle_timeout(), Duration::from_secs(30));
+    }
+
+    #[test]
+    fn c1_policy_uses_the_approved_fixed_lifetimes() {
+        assert_eq!(
+            SessionPolicy::C1.browser_idle_timeout(),
+            Duration::from_secs(30 * 60)
+        );
+        assert_eq!(
+            SessionPolicy::C1.browser_absolute_lifetime(),
+            Duration::from_secs(8 * 60 * 60)
+        );
+        assert_eq!(
+            SessionPolicy::C1.remembered_browser_lifetime(),
+            Duration::from_secs(30 * 24 * 60 * 60)
+        );
+        assert_eq!(
+            SessionPolicy::C1.last_seen_write_interval(),
+            Duration::from_secs(60)
+        );
+        assert_eq!(
+            C1_RECENT_AUTHENTICATION_WINDOW,
+            Duration::from_secs(10 * 60)
+        );
+        assert_eq!(C1_AUTH_CEREMONY_LIFETIME, Duration::from_secs(10 * 60));
     }
 
     #[test]

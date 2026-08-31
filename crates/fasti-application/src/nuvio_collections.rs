@@ -3,7 +3,7 @@
 //! Nuvio Collections describe external catalog browse configuration. They are
 //! not Fasti media lists and their opaque provider IDs are never Fasti IDs.
 
-use crate::{ApplicationResult, RequestAccessContext};
+use crate::{ApplicationAccessContext, ApplicationResult};
 use fasti_domain::RequestCorrelationId;
 use serde_json::{Map, Value};
 use std::collections::HashMap;
@@ -20,17 +20,20 @@ const MAX_NUVIO_JSON_DEPTH: usize = 16;
 const MAX_NUVIO_STRING_BYTES: usize = 8 * 1024;
 const MAX_NUVIO_KEY_BYTES: usize = 128;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GetNuvioCollectionsQuery {
     correlation_id: RequestCorrelationId,
-    access: RequestAccessContext,
+    access: ApplicationAccessContext,
 }
 
 impl GetNuvioCollectionsQuery {
-    pub const fn new(correlation_id: RequestCorrelationId, access: RequestAccessContext) -> Self {
+    pub fn new(
+        correlation_id: RequestCorrelationId,
+        access: impl Into<ApplicationAccessContext>,
+    ) -> Self {
         Self {
             correlation_id,
-            access,
+            access: access.into(),
         }
     }
 
@@ -38,7 +41,7 @@ impl GetNuvioCollectionsQuery {
         self.correlation_id
     }
 
-    pub const fn access(&self) -> &RequestAccessContext {
+    pub const fn access(&self) -> &ApplicationAccessContext {
         &self.access
     }
 }
@@ -46,19 +49,19 @@ impl GetNuvioCollectionsQuery {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReplaceNuvioCollectionsCommand {
     correlation_id: RequestCorrelationId,
-    access: RequestAccessContext,
+    access: ApplicationAccessContext,
     document: NuvioCollectionsDocument,
 }
 
 impl ReplaceNuvioCollectionsCommand {
-    pub const fn new(
+    pub fn new(
         correlation_id: RequestCorrelationId,
-        access: RequestAccessContext,
+        access: impl Into<ApplicationAccessContext>,
         document: NuvioCollectionsDocument,
     ) -> Self {
         Self {
             correlation_id,
-            access,
+            access: access.into(),
             document,
         }
     }
@@ -67,7 +70,7 @@ impl ReplaceNuvioCollectionsCommand {
         self.correlation_id
     }
 
-    pub const fn access(&self) -> &RequestAccessContext {
+    pub const fn access(&self) -> &ApplicationAccessContext {
         &self.access
     }
 
@@ -80,17 +83,20 @@ impl ReplaceNuvioCollectionsCommand {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClearNuvioCollectionsCommand {
     correlation_id: RequestCorrelationId,
-    access: RequestAccessContext,
+    access: ApplicationAccessContext,
 }
 
 impl ClearNuvioCollectionsCommand {
-    pub const fn new(correlation_id: RequestCorrelationId, access: RequestAccessContext) -> Self {
+    pub fn new(
+        correlation_id: RequestCorrelationId,
+        access: impl Into<ApplicationAccessContext>,
+    ) -> Self {
         Self {
             correlation_id,
-            access,
+            access: access.into(),
         }
     }
 
@@ -98,7 +104,7 @@ impl ClearNuvioCollectionsCommand {
         self.correlation_id
     }
 
-    pub const fn access(&self) -> &RequestAccessContext {
+    pub const fn access(&self) -> &ApplicationAccessContext {
         &self.access
     }
 }

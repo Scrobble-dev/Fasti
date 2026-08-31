@@ -1,8 +1,9 @@
 use crate::crypto::{encode_hex, sha256_reader};
 use crate::kernel::{
-    authorize_connection, authorize_transaction, harden_private_regular_file, map_sql, now,
-    problem, timestamp, SqliteKernel, MAX_CONCURRENT_UPLOADS, MAX_EVIDENCE_BYTES,
-    MAX_PREPARED_EVIDENCE_BYTES, MAX_TEMP_EVIDENCE_BYTES,
+    authorize_application_connection, authorize_application_transaction,
+    harden_private_regular_file, map_sql, now, problem, timestamp, SqliteKernel,
+    MAX_CONCURRENT_UPLOADS, MAX_EVIDENCE_BYTES, MAX_PREPARED_EVIDENCE_BYTES,
+    MAX_TEMP_EVIDENCE_BYTES,
 };
 use fasti_application::{
     ApplicationResult, CapabilityKey, EvidenceUploadPort, EvidenceUploadRequest,
@@ -43,10 +44,15 @@ impl EvidenceUploadPort for SqliteKernel {
             // in-process reservation under one lock order. A completed upload
             // cannot disappear from the budget before its evidence row exists.
             let connection = self.lock_connection(capability, correlation_id)?;
-            authorize_connection(&connection, capability, request.access(), correlation_id)?;
+            let authorized = authorize_application_connection(
+                &connection,
+                capability,
+                request.access(),
+                correlation_id,
+            )?;
             let prepared_bytes = prepared_evidence_bytes(
                 &connection,
-                request.access().workspace_id(),
+                authorized.workspace_id(),
                 capability,
                 correlation_id,
             )?;
@@ -228,18 +234,22 @@ impl EvidenceUploadSession for SqliteEvidenceUpload {
         let digest = Sha256Digest::parse(format!("sha256:{digest_hex}"))
             .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
 
-        // Recheck the current credential and grant before durable promotion.
-        {
-            let connection = self.kernel.lock_connection(capability, correlation_id)?;
-            authorize_connection(
-                &connection,
-                capability,
-                self.request.access(),
-                correlation_id,
-            )?;
-        }
-
         let relative_path = relative_evidence_path(&digest_hex);
+        let relative_path = path_to_storage_value(&relative_path);
+        let created_at = timestamp(now());
+        let mut connection = self.kernel.lock_connection(capability, correlation_id)?;
+        let transaction = map_sql(
+            connection.transaction_with_behavior(TransactionBehavior::Immediate),
+            capability,
+            correlation_id,
+        )?;
+        let authorized = authorize_application_transaction(
+            &transaction,
+            capability,
+            self.request.access(),
+            correlation_id,
+        )?;
+
         let (prefix_directory, destination) = self
             .kernel
             .prepare_evidence_destination(&digest_hex)
@@ -249,15 +259,8 @@ impl EvidenceUploadSession for SqliteEvidenceUpload {
                     correlation_id,
                 ))
             })?;
-        match fs::hard_link(&self.temp_path, &destination) {
-            Ok(()) => {
-                fs::remove_file(&self.temp_path).map_err(|_| {
-                    Box::new(FastiProblem::storage_unavailable(
-                        capability,
-                        correlation_id,
-                    ))
-                })?;
-            }
+        let created_destination = match fs::hard_link(&self.temp_path, &destination) {
+            Ok(()) => true,
             Err(error) if error.kind() == ErrorKind::AlreadyExists => {
                 let existing = self
                     .kernel
@@ -274,12 +277,7 @@ impl EvidenceUploadSession for SqliteEvidenceUpload {
                         correlation_id,
                     )));
                 }
-                fs::remove_file(&self.temp_path).map_err(|_| {
-                    Box::new(FastiProblem::storage_unavailable(
-                        capability,
-                        correlation_id,
-                    ))
-                })?;
+                false
             }
             Err(_) => {
                 return Err(Box::new(FastiProblem::storage_unavailable(
@@ -287,79 +285,91 @@ impl EvidenceUploadSession for SqliteEvidenceUpload {
                     correlation_id,
                 )))
             }
-        }
-        prefix_directory.sync_all().map_err(|_| {
-            Box::new(FastiProblem::storage_unavailable(
-                capability,
-                correlation_id,
-            ))
-        })?;
+        };
 
-        let relative_path = path_to_storage_value(&relative_path);
-        let created_at = timestamp(now());
-        let mut connection = self.kernel.lock_connection(capability, correlation_id)?;
-        let transaction = map_sql(
-            connection.transaction_with_behavior(TransactionBehavior::Immediate),
-            capability,
-            correlation_id,
-        )?;
-        authorize_transaction(
-            &transaction,
-            capability,
-            self.request.access(),
-            correlation_id,
-        )?;
-        let existing = map_sql(
-            transaction
-                .query_row(
-                    "SELECT evidence_id, size_bytes FROM evidence WHERE workspace_id = ?1 AND digest = ?2",
-                    params![
-                        self.request.access().workspace_id().to_string(),
-                        digest.to_string()
-                    ],
-                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
-                )
-                .optional(),
-            capability,
-            correlation_id,
-        )?;
-        let result = if let Some((existing_id, existing_size)) = existing {
-            if u64::try_from(existing_size).ok() != Some(self.bytes_written) {
-                return Err(Box::new(FastiProblem::integrity_failed(
+        let persisted = (|| -> ApplicationResult<EvidenceReference> {
+            prefix_directory.sync_all().map_err(|_| {
+                Box::new(FastiProblem::storage_unavailable(
                     capability,
                     correlation_id,
-                )));
-            }
-            EvidenceReference::new(
-                existing_id.parse::<EvidenceId>().map_err(|_| {
-                    Box::new(FastiProblem::integrity_failed(capability, correlation_id))
-                })?,
-                digest,
-                self.bytes_written,
-            )
-        } else {
-            map_sql(
-                transaction.execute(
-                    r#"
-                    INSERT INTO evidence(
-                        evidence_id, workspace_id, digest, size_bytes, relative_path, created_at
-                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-                    "#,
-                    params![
-                        self.evidence_id.to_string(),
-                        self.request.access().workspace_id().to_string(),
-                        digest.to_string(),
-                        i64::try_from(self.bytes_written).unwrap_or(i64::MAX),
-                        relative_path,
-                        created_at
-                    ],
-                ),
+                ))
+            })?;
+            fs::remove_file(&self.temp_path).map_err(|_| {
+                Box::new(FastiProblem::storage_unavailable(
+                    capability,
+                    correlation_id,
+                ))
+            })?;
+
+            let existing = map_sql(
+                transaction
+                    .query_row(
+                        "SELECT evidence_id, size_bytes FROM evidence WHERE workspace_id = ?1 AND digest = ?2",
+                        params![
+                            authorized.workspace_id().to_string(),
+                            digest.to_string()
+                        ],
+                        |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+                    )
+                    .optional(),
                 capability,
                 correlation_id,
             )?;
-            EvidenceReference::new(self.evidence_id, digest, self.bytes_written)
+            let result = if let Some((existing_id, existing_size)) = existing {
+                if u64::try_from(existing_size).ok() != Some(self.bytes_written) {
+                    return Err(Box::new(FastiProblem::integrity_failed(
+                        capability,
+                        correlation_id,
+                    )));
+                }
+                EvidenceReference::new(
+                    existing_id.parse::<EvidenceId>().map_err(|_| {
+                        Box::new(FastiProblem::integrity_failed(capability, correlation_id))
+                    })?,
+                    digest,
+                    self.bytes_written,
+                )
+            } else {
+                map_sql(
+                    transaction.execute(
+                        r#"
+                        INSERT INTO evidence(
+                            evidence_id, workspace_id, digest, size_bytes, relative_path, created_at
+                        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                        "#,
+                        params![
+                            self.evidence_id.to_string(),
+                            authorized.workspace_id().to_string(),
+                            digest.to_string(),
+                            i64::try_from(self.bytes_written).unwrap_or(i64::MAX),
+                            relative_path,
+                            created_at
+                        ],
+                    ),
+                    capability,
+                    correlation_id,
+                )?;
+                EvidenceReference::new(self.evidence_id, digest, self.bytes_written)
+            };
+            map_sql(transaction.commit(), capability, correlation_id)?;
+            Ok(result)
+        })();
+
+        let result = match persisted {
+            Ok(result) => result,
+            Err(error) => {
+                if created_destination
+                    && (fs::remove_file(&destination).is_err()
+                        || prefix_directory.sync_all().is_err())
+                {
+                    return Err(Box::new(FastiProblem::storage_unavailable(
+                        capability,
+                        correlation_id,
+                    )));
+                }
+                return Err(error);
+            }
         };
-        map_sql(transaction.commit(), capability, correlation_id)?;
         drop(connection);
 
         self.completed = true;
@@ -508,6 +518,59 @@ mod tests {
             .expect("read scratch directory")
             .next()
             .is_none());
+    }
+
+    #[test]
+    fn revoked_access_before_finish_leaves_no_evidence_row_or_payload() {
+        let node = TestNode::new();
+        let bytes = b"authorization changed during upload";
+        let mut upload = node
+            .kernel
+            .begin_evidence_upload(EvidenceUploadRequest::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+                Some(bytes.len() as u64),
+            ))
+            .expect("begin upload");
+        upload.write_chunk(bytes).expect("write evidence");
+
+        {
+            let connection = node
+                .kernel
+                .inner
+                .connection
+                .lock()
+                .expect("SQLite connection");
+            connection
+                .execute(
+                    "UPDATE credentials SET status = 'revoked', revoked_at = ?1 WHERE credential_id = ?2",
+                    params![timestamp(now()), node.access.credential_id().to_string()],
+                )
+                .expect("revoke credential during upload");
+        }
+
+        let error = upload
+            .finish()
+            .expect_err("final authorization must observe revocation");
+        assert_eq!(error.code(), ProblemCode::Forbidden);
+
+        let digest_hex = encode_hex(&Sha256::digest(bytes));
+        assert!(!node
+            .kernel
+            .inner
+            .current_root
+            .join(relative_evidence_path(&digest_hex))
+            .exists());
+        let connection = node
+            .kernel
+            .inner
+            .connection
+            .lock()
+            .expect("SQLite connection");
+        let count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM evidence", [], |row| row.get(0))
+            .expect("count evidence rows");
+        assert_eq!(count, 0);
     }
 
     #[test]

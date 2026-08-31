@@ -1,8 +1,10 @@
+use crate::browser_auth::authenticate_session;
 use crate::crypto::{constant_time_eq, sha256_hex};
 use crate::schema::{migrate, SCHEMA_VERSION};
 use chrono::{DateTime, Utc};
 use fasti_application::{
-    authorize, AccessSnapshot, ApplicationResult, AuthorizationRequirement, CapabilityKey,
+    authorize, AccessSnapshot, ApplicationAccessContext, ApplicationResult,
+    AuthorizationRequirement, AuthorizedActor, AuthorizedApplicationAccess, CapabilityKey,
     CredentialStatus, FastiProblem, GrantStatus, ProblemCode, RequestAccessContext, ScopeKey,
 };
 use fasti_domain::{
@@ -57,6 +59,8 @@ pub enum StoreOpenError {
     DataRootLocked,
     #[error("restore activation state is incomplete or invalid")]
     RestoreActivation,
+    #[error("human Access restart recovery failed")]
+    AccessRecovery,
 }
 
 #[derive(Debug, Clone)]
@@ -269,6 +273,17 @@ impl SqliteKernel {
                 actual: version,
             });
         }
+        crate::human_access::recover_auth_ceremonies_on_open(
+            &connection,
+            RequestCorrelationId::new_v7(),
+            now(),
+        )
+        .map_err(|error| match error {
+            crate::human_access::HumanAccessStoreError::Storage(error) => {
+                StoreOpenError::Sqlite(error)
+            }
+            _ => StoreOpenError::AccessRecovery,
+        })?;
 
         Ok(Self {
             inner: Arc::new(KernelInner {
@@ -1002,6 +1017,142 @@ pub(crate) fn authorize_transaction(
     correlation_id: RequestCorrelationId,
 ) -> ApplicationResult<AccessSnapshot> {
     authorize_connection(transaction, capability, access, correlation_id)
+}
+
+pub(crate) fn authorize_application_connection(
+    connection: &Connection,
+    capability: CapabilityKey,
+    access: &ApplicationAccessContext,
+    correlation_id: RequestCorrelationId,
+) -> ApplicationResult<AuthorizedApplicationAccess> {
+    let requirement = AuthorizationRequirement::for_capability(capability);
+    if !requirement.is_scoped_or_browser_session() {
+        return Err(Box::new(FastiProblem::forbidden(
+            capability,
+            correlation_id,
+        )));
+    }
+
+    match access {
+        ApplicationAccessContext::Credential(access) => {
+            authorize_connection(connection, capability, access, correlation_id)?;
+            Ok(AuthorizedApplicationAccess::new(
+                access.workspace_id(),
+                access.profile_id(),
+                access.grant_id(),
+                AuthorizedActor::Credential {
+                    presented_client_id: access.client_id(),
+                    credential_id: access.credential_id(),
+                },
+            ))
+        }
+        ApplicationAccessContext::BrowserSession(access) => {
+            if requirement.requires_browser_mutation_proof() && !access.is_mutation() {
+                return Err(Box::new(FastiProblem::forbidden(
+                    capability,
+                    correlation_id,
+                )));
+            }
+            let current = authenticate_session(
+                connection,
+                access.session_secret(),
+                access.csrf_secret(),
+                now(),
+                capability,
+                correlation_id,
+            )?;
+            let subject = current.subject();
+            let session = current.session();
+            let row = map_sql(
+                connection
+                    .query_row(
+                        r#"
+                        SELECT grant.profile_id, grant.client_id
+                        FROM profile_grants grant
+                        JOIN profiles profile
+                          ON profile.profile_id = grant.profile_id
+                         AND profile.workspace_id = grant.workspace_id
+                        JOIN clients client
+                          ON client.client_id = grant.client_id
+                         AND client.workspace_id = grant.workspace_id
+                         AND client.status = 'active'
+                        JOIN auth_subject_profile_grants subject_grant
+                          ON subject_grant.profile_grant_id = grant.grant_id
+                         AND subject_grant.auth_subject_id = ?1
+                        WHERE grant.grant_id = ?2
+                          AND grant.workspace_id = ?3
+                          AND grant.status = 'active'
+                        "#,
+                        rusqlite::params![
+                            subject.id().to_string(),
+                            session.selected_profile_grant_id().to_string(),
+                            session.workspace_id().to_string(),
+                        ],
+                        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                    )
+                    .optional(),
+                capability,
+                correlation_id,
+            )?
+            .ok_or_else(|| Box::new(FastiProblem::forbidden(capability, correlation_id)))?;
+
+            let mut statement = map_sql(
+                connection.prepare("SELECT scope_key FROM grant_scopes WHERE grant_id = ?1"),
+                capability,
+                correlation_id,
+            )?;
+            let rows = map_sql(
+                statement.query_map([session.selected_profile_grant_id().to_string()], |row| {
+                    row.get::<_, String>(0)
+                }),
+                capability,
+                correlation_id,
+            )?;
+            let mut scopes = Vec::new();
+            for scope in rows {
+                let scope = map_sql(scope, capability, correlation_id)?;
+                scopes.push(parse_scope(&scope).ok_or_else(|| {
+                    Box::new(FastiProblem::integrity_failed(capability, correlation_id))
+                })?);
+            }
+            if !requirement
+                .required_scopes()
+                .iter()
+                .all(|required| scopes.contains(required))
+            {
+                return Err(Box::new(FastiProblem::forbidden(
+                    capability,
+                    correlation_id,
+                )));
+            }
+
+            let profile_id = row.0.parse::<ProfileId>().map_err(|_| {
+                Box::new(FastiProblem::integrity_failed(capability, correlation_id))
+            })?;
+            let client_id = row.1.parse::<ClientId>().map_err(|_| {
+                Box::new(FastiProblem::integrity_failed(capability, correlation_id))
+            })?;
+            Ok(AuthorizedApplicationAccess::new(
+                session.workspace_id(),
+                profile_id,
+                session.selected_profile_grant_id(),
+                AuthorizedActor::BrowserSession {
+                    auth_subject_id: subject.id(),
+                    browser_session_id: session.id(),
+                    grant_owner_client_id: client_id,
+                },
+            ))
+        }
+    }
+}
+
+pub(crate) fn authorize_application_transaction(
+    transaction: &Transaction<'_>,
+    capability: CapabilityKey,
+    access: &ApplicationAccessContext,
+    correlation_id: RequestCorrelationId,
+) -> ApplicationResult<AuthorizedApplicationAccess> {
+    authorize_application_connection(transaction, capability, access, correlation_id)
 }
 
 pub(crate) fn problem(

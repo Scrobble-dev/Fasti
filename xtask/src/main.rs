@@ -94,6 +94,7 @@ enum TestCommand {
 enum BodyArg {
     #[value(name = "B")]
     AccessB,
+    C1,
     B0,
     B1,
     B2,
@@ -330,6 +331,13 @@ fn run_milestone(
 ) -> anyhow::Result<()> {
     match body {
         BodyArg::AccessB => orchestration::run_access_b(root),
+        BodyArg::C1 => {
+            anyhow::ensure!(
+                manifest.is_none(),
+                "C1 emits target/fasti-receipts/access-c1.json as its in-scope delivery receipt; packaged Tauri authentication is a deferred follow-up and is not represented by this command"
+            );
+            orchestration::run_access_c1(root)
+        }
         BodyArg::B1 => {
             run_deep(root)?;
             let manifest = manifest

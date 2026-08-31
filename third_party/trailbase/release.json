@@ -1,5 +1,6 @@
 {
-  "schema_version": "fasti.trailbase-release.v1",
+  "schema_version": "fasti.trailbase-release.v2",
+  "supersedes_release_lock_identity": "sha256:72f07a2b4701ad187e8622b789f1e88c5d3d8072fcf43c7823244032ad8c01a2",
   "version": "0.33.5",
   "tag": "v0.33.5",
   "tag_commit": "b4c85d5152d4e5f472e0b5da5303f7c938e3a083",
@@ -12,6 +13,16 @@
     "integration": "separate-unmodified-process"
   },
   "expected_version_line": "trail v0.33.5-0-gb4c85d51 (2026-08-27)",
+  "auth_ui": {
+    "component_id": "trailbase/auth_ui",
+    "url": "https://github.com/trailbaseio/trailbase/releases/download/v0.33.5/trailbase_v0.33.5_wasm_auth_ui.zip",
+    "bytes": 782222,
+    "sha256": "5f95093933e29bc5aa2dfc992730538adee9051f5f11e3ec12328eb51bd9f741",
+    "component": "trailbase_auth_ui_component.wasm",
+    "component_bytes": 2418620,
+    "component_sha256": "0ded80bbdeb4069c3aef2f335cf80b9c7cddec6a8b0ed4c55ccbcd84cfaa5198",
+    "install_path": "depot/wasm/trailbase_auth_ui_component.wasm"
+  },
   "upgrade_fixture": {
     "version": "0.33.4",
     "tag": "v0.33.4",

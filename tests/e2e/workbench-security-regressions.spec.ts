@@ -2,6 +2,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page, type Route } from "@playwright/test";
 import {
   expectNoHorizontalOverflow,
+  mockAuthenticatedAccess,
   mockMissingTmdbProvider,
 } from "./test-helpers";
 
@@ -55,6 +56,30 @@ async function fulfillRecords(route: Route, title?: string, poster?: string) {
     status: 200,
     contentType: "application/json",
     body: JSON.stringify(recordResponse(title, poster)),
+  });
+}
+
+async function fulfillSignedOutAccess(route: Route) {
+  await route.fulfill({
+    status: 401,
+    contentType: "application/problem+json",
+    body: JSON.stringify({
+      actual: null,
+      capability_id: "access.projection.read",
+      code: "browser_session_expired",
+      correlation_id: "req_018f0e0e7f7b70008000000000000009",
+      detail: "the Fasti browser session reached its idle or absolute expiry",
+      next_actions: [
+        { id: "sign_in_again", label: "Sign in again to continue" },
+      ],
+      param: null,
+      retryability: "retry_after_correction",
+      safe_state: "no_mutation",
+      status: 401,
+      title: "Browser session expired",
+      type: "https://fasti.scrobble.dev/v1/problems/browser-session-expired",
+      violations: [],
+    }),
   });
 }
 
@@ -196,25 +221,29 @@ test("a saved service URL owns browser record and status requests after reload",
   await expect(page.getByText(savedOrigin, { exact: true })).toBeVisible();
 });
 
-test("changing the browser service URL preserves truthful unavailable account state", async ({
+test("changing the browser service URL keeps Access on the browser origin", async ({
   page,
 }) => {
-  await page.route(/\/api\/v1\/records$/, (route) => fulfillRecords(route));
-  await page.goto("/");
-  await expect(
-    page.getByRole("heading", { name: "A bounded local record" }).first(),
-  ).toBeVisible();
-
-  await openWorkbenchSection(page, "Settings");
+  const accessOrigins: string[] = [];
+  await page.route("**/api/access/v1/**", async (route) => {
+    accessOrigins.push(new URL(route.request().url()).origin);
+    await fulfillSignedOutAccess(route);
+  });
+  await page.goto("/settings");
   await page.getByLabel("Service URL").fill("https://new.fasti.test");
   await page.getByRole("button", { name: "Save service URL" }).click();
   await expect(page.getByRole("status")).toHaveText("Settings saved.");
   await expect(
     page.getByRole("button", { name: "Open account access" }),
   ).toBeVisible();
+  await page.getByRole("button", { name: "Open account access" }).click();
   await expect(
-    page.getByRole("button", { name: /Manage account/ }),
-  ).toHaveCount(0);
+    page
+      .getByRole("dialog", { name: "Account access" })
+      .getByText("Sign-in required"),
+  ).toBeVisible();
+  expect(accessOrigins.length).toBeGreaterThan(0);
+  expect(new Set(accessOrigins)).toEqual(new Set([browserOrigin]));
 });
 
 test("record summaries stay truthful, bounded, and free of poster egress", async ({
@@ -308,6 +337,7 @@ test("legacy saved navigation cannot revive unsupported destinations", async ({
 test("Discover selects available providers and preserves an explicit choice", async ({
   page,
 }) => {
+  await mockAuthenticatedAccess(page);
   await page.setViewportSize({ width: 320, height: 900 });
   await page.addInitScript(() => {
     let googleConfigured = false;
@@ -641,6 +671,7 @@ test("Discover selects available providers and preserves an explicit choice", as
 test("browser Discover fails closed when provider credentials are unavailable", async ({
   page,
 }) => {
+  await mockAuthenticatedAccess(page);
   await mockMissingTmdbProvider(page);
   await page.goto("/discover");
   await expect(

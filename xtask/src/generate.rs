@@ -188,7 +188,7 @@ const PRODUCTION_BOOTSTRAP_OPERATIONS: [ConformanceOperation; 2] = [
 /// surface. Kept separate from `PRODUCTION_BOOTSTRAP_OPERATIONS` because that
 /// array also drives the bootstrap-only SDK slice in
 /// `render_production_bootstrap_contract`, which must not grow to include them.
-const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 23] = [
+const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 36] = [
     ConformanceOperation {
         alias: "submitObservation",
         operation_id: "submit_observation",
@@ -442,7 +442,310 @@ const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 23] = [
         response: Some("MetadataProjectionConfigurationResponse"),
         retry: "never",
     },
+    ConformanceOperation {
+        alias: "startTrailBaseSignIn",
+        operation_id: "start_trailbase_sign_in",
+        method: "post",
+        path: "/api/access/v1/trailbase/sign-in",
+        capability_id: "browser.session.create",
+        authenticated: false,
+        request: Some("StartTrailBaseSignInRequest"),
+        response: Some("StartTrailBaseSignInResponse"),
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "readTrailBaseContinuation",
+        operation_id: "read_trailbase_continuation",
+        method: "get",
+        path: "/api/access/v1/trailbase/continuation",
+        capability_id: "browser.session.create",
+        authenticated: false,
+        request: None,
+        response: Some("ReadTrailBaseContinuationResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "completeTrailBaseContinuation",
+        operation_id: "complete_trailbase_continuation",
+        method: "post",
+        path: "/api/access/v1/trailbase/continuation",
+        capability_id: "browser.session.create",
+        authenticated: false,
+        request: Some("CompleteTrailBaseContinuationRequest"),
+        response: None,
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "cancelTrailBaseContinuation",
+        operation_id: "cancel_trailbase_continuation",
+        method: "delete",
+        path: "/api/access/v1/trailbase/continuation",
+        capability_id: "browser.session.create",
+        authenticated: false,
+        request: None,
+        response: None,
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "readAccessProjection",
+        operation_id: "read_access_projection",
+        method: "get",
+        path: "/api/access/v1/projection",
+        capability_id: "access.projection.read",
+        authenticated: false,
+        request: None,
+        response: Some("AccessProjectionResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "readBrowserSession",
+        operation_id: "read_browser_session",
+        method: "get",
+        path: "/api/access/v1/browser-session",
+        capability_id: "browser.session.read",
+        authenticated: false,
+        request: None,
+        response: Some("ReadBrowserSessionResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "endBrowserSession",
+        operation_id: "end_browser_session",
+        method: "delete",
+        path: "/api/access/v1/browser-session",
+        capability_id: "browser.session.end",
+        authenticated: false,
+        request: None,
+        response: None,
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "listBrowserSessions",
+        operation_id: "list_browser_sessions",
+        method: "get",
+        path: "/api/access/v1/browser-sessions",
+        capability_id: "browser.sessions.list",
+        authenticated: false,
+        request: None,
+        response: Some("ListBrowserSessionsResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "revokeBrowserSession",
+        operation_id: "revoke_browser_session",
+        method: "delete",
+        path: "/api/access/v1/browser-sessions/{browser_session_id}",
+        capability_id: "browser.session.revoke",
+        authenticated: false,
+        request: None,
+        response: Some("RevokeBrowserSessionsResponse"),
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "revokeOtherBrowserSessions",
+        operation_id: "revoke_other_browser_sessions",
+        method: "delete",
+        path: "/api/access/v1/browser-sessions/others",
+        capability_id: "browser.sessions.revoke_others",
+        authenticated: false,
+        request: None,
+        response: Some("RevokeBrowserSessionsResponse"),
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "revokeAllBrowserSessions",
+        operation_id: "revoke_all_browser_sessions",
+        method: "delete",
+        path: "/api/access/v1/browser-sessions",
+        capability_id: "browser.sessions.revoke_all",
+        authenticated: false,
+        request: None,
+        response: Some("RevokeBrowserSessionsResponse"),
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "rotateBrowserSession",
+        operation_id: "rotate_browser_session",
+        method: "post",
+        path: "/api/access/v1/browser-session/rotation",
+        capability_id: "browser.session.rotate",
+        authenticated: false,
+        request: None,
+        response: Some("RotateBrowserSessionResponse"),
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "selectBrowserSessionProfile",
+        operation_id: "select_browser_session_profile",
+        method: "put",
+        path: "/api/access/v1/browser-session/profile",
+        capability_id: "browser.session.profile.select",
+        authenticated: false,
+        request: Some("SelectBrowserSessionProfileRequest"),
+        response: Some("SelectBrowserSessionProfileResponse"),
+        retry: "never",
+    },
 ];
+
+const CREDENTIAL_ONLY_HYBRID_OPERATIONS: [&str; 5] = [
+    "nuvio_webhook",
+    "tautulli_webhook",
+    "jellyfin_webhook",
+    "emby_webhook",
+    "plex_webhook",
+];
+const BROWSER_SESSION_PROBLEMS: [&str; 3] = [
+    "browser_session_expired",
+    "browser_session_revoked",
+    "session_policy_changed",
+];
+const START_TRAILBASE_SIGN_IN_PROBLEMS: [&str; 9] = [
+    "capacity_exceeded",
+    "forbidden",
+    "integrity_failed",
+    "malformed_json",
+    "payload_too_large",
+    "storage_unavailable",
+    "trailbase_trust_unavailable",
+    "unsupported_media_type",
+    "validation_failed",
+];
+const READ_TRAILBASE_CONTINUATION_PROBLEMS: [&str; 12] = [
+    "auth_browser_binding_invalid",
+    "auth_continuation_persistence_failed",
+    "auth_subject_unaffiliated",
+    "capacity_exceeded",
+    "forbidden",
+    "identity_service_unavailable",
+    "integrity_failed",
+    "storage_unavailable",
+    "trailbase_proof_invalid",
+    "trailbase_session_cleanup_failed",
+    "trailbase_trust_unavailable",
+    "validation_failed",
+];
+const COMPLETE_TRAILBASE_CONTINUATION_PROBLEMS: [&str; 16] = [
+    "auth_browser_binding_invalid",
+    "auth_continuation_persistence_failed",
+    "auth_selection_changed",
+    "auth_subject_unaffiliated",
+    "capacity_exceeded",
+    "forbidden",
+    "identity_service_unavailable",
+    "integrity_failed",
+    "malformed_json",
+    "payload_too_large",
+    "storage_unavailable",
+    "trailbase_proof_invalid",
+    "trailbase_session_cleanup_failed",
+    "trailbase_trust_unavailable",
+    "unsupported_media_type",
+    "validation_failed",
+];
+const CANCEL_TRAILBASE_CONTINUATION_PROBLEMS: [&str; 6] = [
+    "auth_browser_binding_invalid",
+    "forbidden",
+    "integrity_failed",
+    "storage_unavailable",
+    "trailbase_proof_invalid",
+    "validation_failed",
+];
+const BROWSER_SESSION_READ_PROBLEMS: [&str; 5] = [
+    "browser_session_expired",
+    "browser_session_revoked",
+    "integrity_failed",
+    "session_policy_changed",
+    "storage_unavailable",
+];
+const BROWSER_SESSION_MUTATION_PROBLEMS: [&str; 6] = [
+    "browser_session_expired",
+    "browser_session_revoked",
+    "forbidden",
+    "integrity_failed",
+    "session_policy_changed",
+    "storage_unavailable",
+];
+
+fn production_problem_codes(
+    operation: ConformanceOperation,
+    capability: &Value,
+) -> anyhow::Result<Vec<Value>> {
+    let exact: Option<&[&str]> = match operation.operation_id {
+        "start_trailbase_sign_in" => Some(&START_TRAILBASE_SIGN_IN_PROBLEMS),
+        "read_trailbase_continuation" => Some(&READ_TRAILBASE_CONTINUATION_PROBLEMS),
+        "complete_trailbase_continuation" => Some(&COMPLETE_TRAILBASE_CONTINUATION_PROBLEMS),
+        "cancel_trailbase_continuation" => Some(&CANCEL_TRAILBASE_CONTINUATION_PROBLEMS),
+        "read_access_projection" | "read_browser_session" | "list_browser_sessions" => {
+            Some(&BROWSER_SESSION_READ_PROBLEMS)
+        }
+        "end_browser_session"
+        | "revoke_other_browser_sessions"
+        | "revoke_all_browser_sessions"
+        | "rotate_browser_session" => Some(&BROWSER_SESSION_MUTATION_PROBLEMS),
+        "revoke_browser_session" => Some(&[
+            "browser_session_expired",
+            "browser_session_revoked",
+            "forbidden",
+            "integrity_failed",
+            "session_policy_changed",
+            "storage_unavailable",
+            "validation_failed",
+        ]),
+        "select_browser_session_profile" => Some(&[
+            "browser_session_expired",
+            "browser_session_revoked",
+            "forbidden",
+            "integrity_failed",
+            "malformed_json",
+            "payload_too_large",
+            "session_policy_changed",
+            "storage_unavailable",
+            "unsupported_media_type",
+            "validation_failed",
+        ]),
+        _ => None,
+    };
+    let governed = array_at(capability, "/problems")?;
+    if let Some(exact) = exact {
+        for code in exact {
+            ensure!(
+                governed.iter().any(|value| value.as_str() == Some(code)),
+                "production operation {} claims problem {code} outside its capability",
+                operation.operation_id
+            );
+        }
+        return Ok(exact
+            .iter()
+            .map(|code| Value::String((*code).to_owned()))
+            .collect());
+    }
+    Ok(governed
+        .iter()
+        .filter(|problem| {
+            !CREDENTIAL_ONLY_HYBRID_OPERATIONS.contains(&operation.operation_id)
+                || problem
+                    .as_str()
+                    .is_none_or(|code| !BROWSER_SESSION_PROBLEMS.contains(&code))
+        })
+        .cloned()
+        .collect())
+}
+
+fn production_operation_authorization(
+    operation: ConformanceOperation,
+    capability_authorization: &str,
+) -> anyhow::Result<&str> {
+    if CREDENTIAL_ONLY_HYBRID_OPERATIONS.contains(&operation.operation_id) {
+        ensure!(
+            operation.capability_id == "observation.accept"
+                && operation.path.starts_with("/api/v1/integrations/"),
+            "credential-only hybrid override escaped governed webhook ingress"
+        );
+        Ok("scoped")
+    } else {
+        Ok(capability_authorization)
+    }
+}
 
 pub(crate) fn generate_checked_in(workspace_root: &Path) -> anyhow::Result<Artifacts> {
     generate_to(workspace_root, workspace_root)
@@ -541,6 +844,8 @@ fn build(workspace_root: &Path) -> anyhow::Result<Artifacts> {
         &public_registry,
         &capability_keys,
     )?;
+    validate_access_contract_secrets(&production_openapi)?;
+    validate_trailbase_continuation_contract(&production_openapi)?;
     let mut conformance_openapi = serde_json::to_value(fasti_api::b1_conformance_openapi())
         .context("B1 conformance OpenAPI is not serializable")?;
     enrich_conformance_openapi(
@@ -560,6 +865,8 @@ fn build(workspace_root: &Path) -> anyhow::Result<Artifacts> {
         &production_openapi,
         &conformance_openapi,
     )?;
+    let sdk_transport = fs::read_to_string(workspace_root.join("packages/sdk/src/transport.ts"))
+        .context("SDK transport source is unreadable")?;
     validate_required_bindings(
         workspace_root,
         &capability_keys,
@@ -569,6 +876,7 @@ fn build(workspace_root: &Path) -> anyhow::Result<Artifacts> {
         &problem_catalog,
         &health_schema,
         &sdk_source,
+        &sdk_transport,
     )?;
     insert(&mut artifacts, OPENAPI_PATH, production_openapi.clone())?;
     insert(
@@ -1082,7 +1390,14 @@ fn enrich_conformance_openapi(
         operation.insert("x-fasti-required-scopes".to_owned(), Value::Array(scopes));
         operation.insert(
             "x-fasti-authorization".to_owned(),
-            Value::String(string_at(capability, "/authorization")?.to_owned()),
+            Value::String(
+                if expected.operation_id == "accept_observation" {
+                    "scoped"
+                } else {
+                    string_at(capability, "/authorization")?
+                }
+                .to_owned(),
+            ),
         );
         operation.insert(
             "x-fasti-problem-codes".to_owned(),
@@ -1129,6 +1444,9 @@ fn conformance_problem_codes(
             "integrity_failed",
             "storage_unavailable",
         ],
+        "observation.accept" if expected.operation_id == "accept_observation" => {
+            &BROWSER_SESSION_PROBLEMS
+        }
         _ => &[],
     };
     Ok(array_at(capability, "/problems")?
@@ -1428,9 +1746,15 @@ fn enrich_production_openapi(
         );
         operation.insert(
             "x-fasti-authorization".to_owned(),
-            Value::String(string_at(capability, "/authorization")?.to_owned()),
+            Value::String(
+                production_operation_authorization(
+                    expected,
+                    string_at(capability, "/authorization")?,
+                )?
+                .to_owned(),
+            ),
         );
-        let problems = array_at(capability, "/problems")?.clone();
+        let problems = production_problem_codes(expected, capability)?;
         operation.insert(
             "x-fasti-problem-codes".to_owned(),
             Value::Array(problems.clone()),
@@ -1456,6 +1780,262 @@ fn enrich_production_openapi(
             &Value::Null,
         )?;
     }
+    enrich_trailbase_callback_openapi(openapi, public_registry)?;
+    Ok(())
+}
+
+fn enrich_trailbase_callback_openapi(
+    openapi: &mut Value,
+    public_registry: &Value,
+) -> anyhow::Result<()> {
+    let capability = array_at(public_registry, "/capabilities")?
+        .iter()
+        .find(|capability| string_at(capability, "/id").ok() == Some("browser.session.create"))
+        .context("registry omits browser.session.create")?;
+    let operation = openapi
+        .pointer_mut("/paths/~1api~1access~1v1~1trailbase~1callback/get")
+        .and_then(Value::as_object_mut)
+        .context("production OpenAPI omits the TrailBase callback")?;
+    ensure!(
+        operation.get("operationId").and_then(Value::as_str)
+            == Some("complete_trailbase_authentication"),
+        "TrailBase callback operation ID changed"
+    );
+    ensure!(
+        operation.get("requestBody").is_none(),
+        "TrailBase callback must not accept a request body"
+    );
+    ensure!(
+        operation.get("security") == Some(&serde_json::json!([{"auth_binding_cookie": []}])),
+        "TrailBase callback must require only the binding cookie"
+    );
+    let responses = operation
+        .get("responses")
+        .and_then(Value::as_object)
+        .context("TrailBase callback responses must be an object")?;
+    ensure!(
+        responses.len() == 1 && responses.contains_key("303"),
+        "TrailBase callback must expose only its fixed 303 redirect"
+    );
+    let parameters = operation
+        .get("parameters")
+        .and_then(Value::as_array)
+        .context("TrailBase callback parameters must be an array")?;
+    ensure!(
+        parameters.len() == 1
+            && string_at(&parameters[0], "/name")? == "code"
+            && string_at(&parameters[0], "/in")? == "query"
+            && parameters[0].get("required") == Some(&Value::Bool(true))
+            && u64_at(&parameters[0], "/schema/minLength")? == 48
+            && u64_at(&parameters[0], "/schema/maxLength")? == 48
+            && string_at(&parameters[0], "/schema/pattern")? == "^[A-Za-z0-9]{48}$",
+        "TrailBase callback must expose one exact 48-character code query"
+    );
+    for (name, value) in [
+        (
+            "x-fasti-capability-id",
+            Value::String("browser.session.create".to_owned()),
+        ),
+        (
+            "x-fasti-required-scopes",
+            Value::Array(array_at(capability, "/scopes")?.clone()),
+        ),
+        (
+            "x-fasti-authorization",
+            Value::String(string_at(capability, "/authorization")?.to_owned()),
+        ),
+        ("x-fasti-problem-codes", Value::Array(Vec::new())),
+        (
+            "x-fasti-example-ids",
+            Value::Array(array_at(capability, "/examples")?.clone()),
+        ),
+        (
+            "x-fasti-runtime-availability",
+            Value::String(string_at(capability, "/lifecycle/runtime_availability")?.to_owned()),
+        ),
+    ] {
+        operation.insert(name.to_owned(), value);
+    }
+    Ok(())
+}
+
+const FORBIDDEN_ACCESS_CONTRACT_PROPERTIES: [&str; 16] = [
+    "access_token",
+    "bootstrap_secret",
+    "browser_binding",
+    "browser_binding_digest",
+    "code_verifier",
+    "credential",
+    "credential_digest",
+    "csrf",
+    "csrf_digest",
+    "csrf_secret",
+    "csrf_token",
+    "id_token",
+    "refresh_token",
+    "session_digest",
+    "session_secret",
+    "vendor_token",
+];
+
+fn validate_access_contract_secrets(openapi: &Value) -> anyhow::Result<()> {
+    let paths = object_at(openapi, "/paths")?;
+    let mut seen_refs = BTreeSet::new();
+    for (path, path_item) in paths {
+        if !path.starts_with("/api/access/v1/") {
+            continue;
+        }
+        for operation in path_item
+            .as_object()
+            .context("Access path item must be an object")?
+            .values()
+        {
+            for key in ["parameters", "requestBody", "responses"] {
+                if let Some(surface) = operation.get(key) {
+                    validate_access_schema_node(openapi, surface, &mut seen_refs)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_trailbase_continuation_contract(openapi: &Value) -> anyhow::Result<()> {
+    let schemas = object_at(openapi, "/components/schemas")?;
+    for (name, expected) in [
+        ("StartTrailBaseSignInRequest", &["remembered"][..]),
+        (
+            "StartTrailBaseSignInResponse",
+            &["authorization_url", "expires_at"][..],
+        ),
+        (
+            "TrailBaseContinuationChoiceDto",
+            &[
+                "choice_ordinal",
+                "workspace_ordinal",
+                "profile_ordinal",
+                "workspace_created_at",
+                "profile_created_at",
+                "membership_state",
+                "role",
+            ][..],
+        ),
+        (
+            "ReadTrailBaseContinuationResponse",
+            &["expires_at", "remembered", "candidate_revision", "choices"][..],
+        ),
+        (
+            "CompleteTrailBaseContinuationRequest",
+            &["choice_ordinal", "candidate_revision"][..],
+        ),
+    ] {
+        let schema = schemas
+            .get(name)
+            .with_context(|| format!("production OpenAPI omits {name}"))?;
+        ensure!(
+            schema.get("additionalProperties").and_then(Value::as_bool) == Some(false),
+            "{name} must reject unknown fields"
+        );
+        let actual: BTreeSet<_> = object_at(schema, "/properties")?
+            .keys()
+            .map(String::as_str)
+            .collect();
+        let expected: BTreeSet<_> = expected.iter().copied().collect();
+        ensure!(actual == expected, "{name} exposes unexpected properties");
+    }
+    for (pointer, minimum, maximum) in [
+        (
+            "/components/schemas/TrailBaseContinuationChoiceDto/properties/choice_ordinal",
+            0,
+            63,
+        ),
+        (
+            "/components/schemas/TrailBaseContinuationChoiceDto/properties/workspace_ordinal",
+            1,
+            64,
+        ),
+        (
+            "/components/schemas/TrailBaseContinuationChoiceDto/properties/profile_ordinal",
+            1,
+            64,
+        ),
+        (
+            "/components/schemas/CompleteTrailBaseContinuationRequest/properties/choice_ordinal",
+            0,
+            63,
+        ),
+    ] {
+        let schema = value_at(openapi, pointer)?;
+        ensure!(
+            u64_at(schema, "/minimum")? == minimum && u64_at(schema, "/maximum")? == maximum,
+            "{pointer} has the wrong numeric bounds"
+        );
+    }
+    let choices = value_at(
+        openapi,
+        "/components/schemas/ReadTrailBaseContinuationResponse/properties/choices",
+    )?;
+    ensure!(
+        u64_at(choices, "/minItems")? == 1 && u64_at(choices, "/maxItems")? == 64,
+        "TrailBase continuation choices must contain 1 to 64 entries"
+    );
+    for pointer in [
+        "/components/schemas/ReadTrailBaseContinuationResponse/properties/candidate_revision",
+        "/components/schemas/CompleteTrailBaseContinuationRequest/properties/candidate_revision",
+    ] {
+        let revision = value_at(openapi, pointer)?;
+        ensure!(
+            u64_at(revision, "/minLength")? == 71
+                && u64_at(revision, "/maxLength")? == 71
+                && string_at(revision, "/pattern")? == r"^sha256:[0-9a-f]{64}$",
+            "{pointer} must use the canonical SHA-256 revision"
+        );
+    }
+    Ok(())
+}
+
+fn validate_access_schema_node(
+    openapi: &Value,
+    node: &Value,
+    seen_refs: &mut BTreeSet<String>,
+) -> anyhow::Result<()> {
+    match node {
+        Value::Array(values) => {
+            for value in values {
+                validate_access_schema_node(openapi, value, seen_refs)?;
+            }
+        }
+        Value::Object(object) => {
+            if let Some(reference) = object.get("$ref").and_then(Value::as_str) {
+                ensure!(
+                    reference.starts_with("#/components/schemas/"),
+                    "Access contract contains a non-local schema reference"
+                );
+                if seen_refs.insert(reference.to_owned()) {
+                    let pointer = reference
+                        .strip_prefix('#')
+                        .expect("local schema reference has a fragment");
+                    let target = value_at(openapi, pointer).with_context(|| {
+                        format!("Access schema reference {reference} is absent")
+                    })?;
+                    validate_access_schema_node(openapi, target, seen_refs)?;
+                }
+            }
+            if let Some(properties) = object.get("properties").and_then(Value::as_object) {
+                for name in properties.keys() {
+                    ensure!(
+                        !FORBIDDEN_ACCESS_CONTRACT_PROPERTIES.contains(&name.as_str())
+                            && name != "token",
+                        "Access contract exposes forbidden secret property {name}"
+                    );
+                }
+            }
+            for value in object.values() {
+                validate_access_schema_node(openapi, value, seen_refs)?;
+            }
+        }
+        _ => {}
+    }
     Ok(())
 }
 
@@ -1468,6 +2048,30 @@ fn validate_production_security_schemes(openapi: &Value) -> anyhow::Result<()> {
             "production security scheme {name} must be HTTP bearer"
         );
     }
+    for (name, location, wire_name) in [
+        ("browser_session_cookie", "cookie", "__Host-fasti_session"),
+        ("csrf_cookie", "cookie", "__Host-fasti_csrf"),
+        ("csrf_header", "header", "X-CSRF-Token"),
+        (
+            "auth_binding_cookie",
+            "cookie",
+            "__Secure-fasti_auth_binding",
+        ),
+        (
+            "auth_continuation_cookie",
+            "cookie",
+            "__Secure-fasti_auth_continuation",
+        ),
+    ] {
+        let pointer = format!("/components/securitySchemes/{name}");
+        let scheme = value_at(openapi, &pointer)?;
+        ensure!(
+            string_at(scheme, "/type")? == "apiKey"
+                && string_at(scheme, "/in")? == location
+                && string_at(scheme, "/name")? == wire_name,
+            "production security scheme {name} must be the exact {location} {wire_name}"
+        );
+    }
     Ok(())
 }
 
@@ -1477,19 +2081,62 @@ fn validate_production_operation_security(
     method: &str,
     path: &str,
 ) -> anyhow::Result<()> {
-    let expected = match operation_id {
-        "initialize_node" => vec!["bootstrap_bearer"],
+    let access_security = match operation_id {
+        "start_trailbase_sign_in" => Some(serde_json::json!(null)),
+        "read_trailbase_continuation"
+        | "complete_trailbase_continuation"
+        | "cancel_trailbase_continuation" => {
+            Some(serde_json::json!([{"auth_continuation_cookie": []}]))
+        }
+        "read_access_projection" | "read_browser_session" | "list_browser_sessions" => {
+            Some(serde_json::json!([{"browser_session_cookie": []}]))
+        }
+        "end_browser_session"
+        | "revoke_browser_session"
+        | "revoke_other_browser_sessions"
+        | "revoke_all_browser_sessions"
+        | "rotate_browser_session"
+        | "select_browser_session_profile" => Some(serde_json::json!([{
+            "browser_session_cookie": [],
+            "csrf_cookie": [],
+            "csrf_header": []
+        }])),
         "submit_observation"
         | "create_record"
         | "attach_identifier"
-        | "list_records"
         | "register_namespace"
-        | "list_tracking_dispositions"
         | "set_tracking_disposition"
-        | "get_nuvio_collections"
         | "replace_nuvio_collections"
-        | "clear_nuvio_collections"
-        | "list_providers"
+        | "clear_nuvio_collections" => Some(serde_json::json!([
+            {"credential_bearer": []},
+            {
+                "browser_session_cookie": [],
+                "csrf_cookie": [],
+                "csrf_header": []
+            }
+        ])),
+        _ => None,
+    };
+    if let Some(expected) = access_security {
+        if expected.is_null() {
+            ensure!(
+                operation.get("security").is_none(),
+                "production operation {method} {path} must not declare authentication"
+            );
+        } else {
+            ensure!(
+                operation.get("security") == Some(&expected),
+                "production operation {method} {path} has the wrong browser security requirement"
+            );
+        }
+        return Ok(());
+    }
+    let expected = match operation_id {
+        "initialize_node" => vec!["bootstrap_bearer"],
+        "list_records" | "list_tracking_dispositions" | "get_nuvio_collections" => {
+            vec!["credential_bearer", "browser_session_cookie"]
+        }
+        "list_providers"
         | "configure_provider_credential"
         | "remove_provider_credential"
         | "test_provider_credential"
@@ -1646,6 +2293,7 @@ fn validate_required_bindings(
     problem_catalog: &Value,
     health_schema: &Value,
     sdk_source: &str,
+    sdk_transport: &str,
 ) -> anyhow::Result<()> {
     for required in registry::finalized_required_bindings(workspace_root)? {
         resolve_required_binding(
@@ -1660,6 +2308,7 @@ fn validate_required_bindings(
             problem_catalog,
             health_schema,
             sdk_source,
+            sdk_transport,
         )
         .with_context(|| {
             format!(
@@ -1687,6 +2336,15 @@ fn sdk_source_declares_capability(sdk_source: &str, capability_id: &str) -> bool
         .any(|operation| sdk_source.contains(&format!("  {}: {{ operationId:", operation.alias)))
 }
 
+fn sdk_transport_declares_capability(sdk_transport: &str, capability_id: &str) -> bool {
+    PRODUCTION_BOOTSTRAP_OPERATIONS
+        .iter()
+        .chain(PRODUCTION_RUNTIME_OPERATIONS.iter())
+        .chain(CONFORMANCE_OPERATIONS.iter())
+        .filter(|operation| operation.capability_id == capability_id)
+        .any(|operation| sdk_transport.contains(&format!("\n  {}(", operation.alias)))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn resolve_required_binding(
     workspace_root: &Path,
@@ -1700,6 +2358,7 @@ fn resolve_required_binding(
     problem_catalog: &Value,
     health_schema: &Value,
     sdk_source: &str,
+    sdk_transport: &str,
 ) -> anyhow::Result<()> {
     match surface {
         "domain_application" => {
@@ -1735,6 +2394,21 @@ fn resolve_required_binding(
             );
         }
         "cli" => {
+            if binding == "cli:access-identity-bootstrap" {
+                let main_source =
+                    fs::read_to_string(workspace_root.join("crates/fasti-cli/src/main.rs"))?;
+                ensure!(
+                    capability_id == "access.identity.bootstrap"
+                        && main_source.contains("BootstrapAdministrator")
+                        && main_source.contains("LocalOperatorAccessRuntime")
+                        && main_source.contains("--password")
+                        && main_source.contains(
+                            "first_administrator_cli_accepts_only_private_root_locations"
+                        ),
+                    "trusted CLI first-administrator bootstrap binding is absent"
+                );
+                return Ok(());
+            }
             ensure!(binding == "cli:capability-discovery", "unknown CLI binding");
             let source =
                 fs::read_to_string(workspace_root.join("crates/fasti-cli/src/capabilities.rs"))?;
@@ -1805,10 +2479,9 @@ fn resolve_required_binding(
             ensure!(
                 capability_id == "system.health"
                     || capability_id == "receipt.stream"
-                    || sdk_source_declares_capability(sdk_source, capability_id),
-                "generated SDK omits an operation entry for this capability -- list \
-                 membership in a *_OPERATIONS array is not enough, the alias must \
-                 actually appear as an emitted operation in {SDK_GENERATED_PATH}"
+                    || (sdk_source_declares_capability(sdk_source, capability_id)
+                        && sdk_transport_declares_capability(sdk_transport, capability_id)),
+                "SDK omits a generated operation entry or callable client method for this capability"
             );
         }
         "knowledge" => {
@@ -1877,9 +2550,51 @@ fn resolve_required_binding(
                     "production metadata smoke is absent"
                 );
             }
+            "package-smoke:c1-operator-bootstrap" => {
+                let smoke = fs::read_to_string(workspace_root.join("scripts/smoke-oci.sh"))?;
+                ensure!(
+                    capability_id == "access.identity.bootstrap"
+                        && smoke.contains("access bootstrap-administrator --help")
+                        && smoke.contains("--password")
+                        && smoke.contains("/missing-fasti-data-root"),
+                    "C1 operator bootstrap package smoke is absent"
+                );
+            }
             _ => anyhow::bail!("unknown package-smoke binding"),
         },
         "ui" => match binding {
+            "ui:account-security" => {
+                ensure!(
+                    capability_id == "access.projection.read",
+                    "the Account and Security UI binding belongs only to the Access projection"
+                );
+                let types = fs::read_to_string(workspace_root.join("packages/ui/src/types.ts"))?;
+                let host = fs::read_to_string(workspace_root.join("apps/web/src/web-host.ts"))?;
+                let workbench = fs::read_to_string(
+                    workspace_root.join("packages/ui/src/fasti-workbench.svelte"),
+                )?;
+                let view = fs::read_to_string(
+                    workspace_root.join("packages/ui/src/account-security-view.svelte"),
+                )?;
+                let browser =
+                    fs::read_to_string(workspace_root.join("tests/e2e/access-c1.spec.ts"))?;
+                ensure!(
+                    types.contains("readAccessProjection?")
+                        && host.contains("const accessClient = new FastiClient")
+                        && host.contains("accessClient.readAccessProjection")
+                        && workbench.contains("function acceptAccessProjection")
+                        && workbench.contains("function readAccessProjection")
+                        && workbench.contains("clearProfileOwnedWorkbenchState")
+                        && workbench.contains("window.addEventListener(\"focus\"")
+                        && view.contains("const projection = await readAccessProjection()")
+                        && view.contains("onProjection?.(undefined)")
+                        && browser.contains("one shared projection read owns navigation")
+                        && browser.contains("an expired browser-session deadline clears profile authority")
+                        && browser.contains("window focus revalidates cached browser-session authority")
+                        && browser.contains("a committed revocation cannot resurrect stale session inventory"),
+                    "Account and Security UI does not preserve the governed Access projection boundary"
+                );
+            }
             "ui:provider-settings" => {
                 let view = fs::read_to_string(
                     workspace_root.join("packages/ui/src/runtime-settings-view.svelte"),
@@ -2551,6 +3266,17 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         "MetadataDataClassificationDto",
         "MetadataCacheInvalidationReasonDto",
         "MetadataCacheReadStateDto",
+        "AccessEvidenceStateDto",
+        "AccessSubjectLifecycleDto",
+        "AccessMembershipLifecycleDto",
+        "AccessWorkspaceRoleDto",
+        "TrailBaseActivationStateDto",
+        "TrailBaseActivationBlockerDto",
+        "AccessAuthenticationMethodDto",
+        "AccessEvidenceKindDto",
+        "AccessCeremonyStateDto",
+        "AccessCeremonyFailureDto",
+        "AccessFirstRunStepKeyDto",
     ] {
         let schema = schemas
             .get(name)
@@ -2609,6 +3335,28 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         "MetadataOverrideMutationDto",
         "ConfigureMetadataProjectionRequest",
         "MetadataProjectionConfigurationResponse",
+        "StartTrailBaseSignInRequest",
+        "StartTrailBaseSignInResponse",
+        "TrailBaseContinuationChoiceDto",
+        "ReadTrailBaseContinuationResponse",
+        "CompleteTrailBaseContinuationRequest",
+        "SelectBrowserSessionProfileRequest",
+        "BrowserSessionDto",
+        "ReadBrowserSessionResponse",
+        "ListBrowserSessionsResponse",
+        "RevokeBrowserSessionsResponse",
+        "RotateBrowserSessionResponse",
+        "SelectBrowserSessionProfileResponse",
+        "AccessSubjectDto",
+        "AccessMembershipDto",
+        "AccessProfileGrantDto",
+        "BrowserSessionPolicyDto",
+        "RecentAuthenticationDto",
+        "AccessSessionAuthenticationDto",
+        "TrailBaseActivationDto",
+        "AccessFirstRunStepDto",
+        "AccessEvidenceDto",
+        "AccessProjectionResponse",
     ] {
         let schema = schemas
             .get(name)
@@ -2786,6 +3534,47 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
             "parseMetadataProjectionConfigurationResponse",
             "MetadataProjectionConfigurationResponse",
         ),
+        (
+            "parseStartTrailBaseSignInRequest",
+            "StartTrailBaseSignInRequest",
+        ),
+        (
+            "parseStartTrailBaseSignInResponse",
+            "StartTrailBaseSignInResponse",
+        ),
+        (
+            "parseReadTrailBaseContinuationResponse",
+            "ReadTrailBaseContinuationResponse",
+        ),
+        (
+            "parseCompleteTrailBaseContinuationRequest",
+            "CompleteTrailBaseContinuationRequest",
+        ),
+        (
+            "parseSelectBrowserSessionProfileRequest",
+            "SelectBrowserSessionProfileRequest",
+        ),
+        (
+            "parseReadBrowserSessionResponse",
+            "ReadBrowserSessionResponse",
+        ),
+        (
+            "parseListBrowserSessionsResponse",
+            "ListBrowserSessionsResponse",
+        ),
+        (
+            "parseRevokeBrowserSessionsResponse",
+            "RevokeBrowserSessionsResponse",
+        ),
+        (
+            "parseRotateBrowserSessionResponse",
+            "RotateBrowserSessionResponse",
+        ),
+        (
+            "parseSelectBrowserSessionProfileResponse",
+            "SelectBrowserSessionProfileResponse",
+        ),
+        ("parseAccessProjectionResponse", "AccessProjectionResponse"),
     ] {
         writeln!(
             output,
@@ -4209,6 +4998,70 @@ mod tests {
     }
 
     #[test]
+    fn access_contract_graph_rejects_secret_properties() {
+        let artifacts = build(workspace_root()).expect("contract generation succeeds");
+        let mut openapi: Value = serde_json::from_slice(
+            artifacts
+                .get(Path::new(OPENAPI_PATH))
+                .expect("production OpenAPI generated"),
+        )
+        .expect("production OpenAPI JSON");
+        validate_access_contract_secrets(&openapi).expect("current Access graph is public-safe");
+        openapi
+            .pointer_mut("/components/schemas/AccessProjectionResponse/properties")
+            .and_then(Value::as_object_mut)
+            .expect("Access projection properties")
+            .insert(
+                "session_secret".to_owned(),
+                serde_json::json!({"type": "string"}),
+            );
+        let error = validate_access_contract_secrets(&openapi)
+            .expect_err("secret property must fail the Access contract gate");
+        assert!(error.to_string().contains("session_secret"));
+    }
+
+    #[test]
+    fn trailbase_continuation_contract_rejects_internal_identifiers() {
+        let artifacts = build(workspace_root()).expect("contract generation succeeds");
+        let mut openapi: Value = serde_json::from_slice(
+            artifacts
+                .get(Path::new(OPENAPI_PATH))
+                .expect("production OpenAPI generated"),
+        )
+        .expect("production OpenAPI JSON");
+        validate_trailbase_continuation_contract(&openapi)
+            .expect("current continuation contract is identifier-free");
+        openapi
+            .pointer_mut("/components/schemas/TrailBaseContinuationChoiceDto/properties")
+            .and_then(Value::as_object_mut)
+            .expect("continuation choice properties")
+            .insert(
+                "workspace_id".to_owned(),
+                serde_json::json!({"type": "string"}),
+            );
+        let error = validate_trailbase_continuation_contract(&openapi)
+            .expect_err("internal identifier must fail the continuation contract gate");
+        assert!(error.to_string().contains("unexpected properties"));
+    }
+
+    #[test]
+    fn access_callback_is_documented_but_excluded_from_the_sdk() {
+        let artifacts = build(workspace_root()).expect("contract generation succeeds");
+        let sdk = std::str::from_utf8(
+            artifacts
+                .get(Path::new(SDK_GENERATED_PATH))
+                .expect("SDK generated"),
+        )
+        .expect("SDK is UTF-8");
+        assert!(sdk.contains("startTrailBaseSignIn"));
+        assert!(sdk.contains("readTrailBaseContinuation"));
+        assert!(sdk.contains("completeTrailBaseContinuation"));
+        assert!(sdk.contains("cancelTrailBaseContinuation"));
+        assert!(!sdk.contains("complete_trailbase_authentication"));
+        assert!(!sdk.contains("completeTrailBaseAuthentication"));
+    }
+
+    #[test]
     fn local_operator_restore_metadata_does_not_activate_a_transport() {
         let artifacts = build(workspace_root()).expect("contract generation succeeds");
         let registry: Value = serde_json::from_slice(
@@ -4332,6 +5185,109 @@ mod tests {
                     .to_string()
                     .contains(&format!("\"{example}\"")));
             }
+        }
+    }
+
+    #[test]
+    fn production_hybrid_authorization_keeps_webhooks_credential_only() {
+        for operation in PRODUCTION_RUNTIME_OPERATIONS {
+            let authorization = production_operation_authorization(
+                operation,
+                if operation.capability_id == "observation.accept" {
+                    "scoped_or_browser_session"
+                } else {
+                    "scoped"
+                },
+            )
+            .expect("operation authorization is governed");
+            if CREDENTIAL_ONLY_HYBRID_OPERATIONS.contains(&operation.operation_id) {
+                assert_eq!(authorization, "scoped");
+            } else if operation.operation_id == "submit_observation" {
+                assert_eq!(authorization, "scoped_or_browser_session");
+            }
+        }
+    }
+
+    #[test]
+    fn generated_openapi_keeps_browser_auth_on_the_hybrid_ten_only() {
+        let artifacts = build(workspace_root()).expect("contract generation succeeds");
+        let openapi: Value = serde_json::from_slice(
+            artifacts
+                .get(Path::new(OPENAPI_PATH))
+                .expect("production OpenAPI generated"),
+        )
+        .expect("production OpenAPI JSON");
+        for pointer in [
+            "/paths/~1api~1v1~1records/get/security",
+            "/paths/~1api~1v1~1profile~1record-tracking-dispositions/get/security",
+            "/paths/~1api~1v1~1profile~1nuvio-collections/get/security",
+        ] {
+            assert_eq!(
+                value_at(&openapi, pointer).expect("hybrid operation security"),
+                &serde_json::json!([
+                    {"credential_bearer": []},
+                    {"browser_session_cookie": []}
+                ]),
+                "{pointer}"
+            );
+        }
+        for pointer in [
+            "/paths/~1api~1v1~1observations/post/security",
+            "/paths/~1api~1v1~1records/post/security",
+            "/paths/~1api~1v1~1records~1identifiers/post/security",
+            "/paths/~1api~1v1~1namespaces/post/security",
+            "/paths/~1api~1v1~1profile~1record-tracking-dispositions~1{record_id}/put/security",
+            "/paths/~1api~1v1~1profile~1nuvio-collections/put/security",
+            "/paths/~1api~1v1~1profile~1nuvio-collections/delete/security",
+        ] {
+            assert_eq!(
+                value_at(&openapi, pointer).expect("hybrid mutation security"),
+                &serde_json::json!([
+                    {"credential_bearer": []},
+                    {
+                        "browser_session_cookie": [],
+                        "csrf_cookie": [],
+                        "csrf_header": []
+                    }
+                ]),
+                "{pointer}"
+            );
+        }
+        assert_eq!(
+            value_at(
+                &openapi,
+                "/paths/~1api~1v1~1integrations~1nuvio~1webhook/post/security"
+            )
+            .expect("webhook security"),
+            &serde_json::json!([{"credential_bearer": []}])
+        );
+        let webhook = value_at(
+            &openapi,
+            "/paths/~1api~1v1~1integrations~1nuvio~1webhook/post",
+        )
+        .expect("webhook operation");
+        for problem in BROWSER_SESSION_PROBLEMS {
+            assert!(!array_at(webhook, "/x-fasti-problem-codes")
+                .expect("webhook problems")
+                .contains(&Value::String(problem.to_owned())));
+        }
+
+        let conformance: Value = serde_json::from_slice(
+            artifacts
+                .get(Path::new(CONFORMANCE_OPENAPI_PATH))
+                .expect("conformance OpenAPI generated"),
+        )
+        .expect("conformance OpenAPI JSON");
+        let acceptance = value_at(&conformance, "/paths/~1api~1v1~1observations/post")
+            .expect("conformance observation acceptance");
+        assert_eq!(
+            string_at(acceptance, "/x-fasti-authorization").expect("authorization"),
+            "scoped"
+        );
+        for problem in BROWSER_SESSION_PROBLEMS {
+            assert!(!array_at(acceptance, "/x-fasti-problem-codes")
+                .expect("conformance problems")
+                .contains(&Value::String(problem.to_owned())));
         }
     }
 

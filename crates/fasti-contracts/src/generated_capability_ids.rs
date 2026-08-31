@@ -6,6 +6,7 @@ use fasti_application::CapabilityKey;
 pub const fn public_capability_id(key: CapabilityKey) -> &'static str {
     match key {
         CapabilityKey::AcceptObservation => "observation.accept",
+        CapabilityKey::AccessIdentityBootstrap => "access.identity.bootstrap",
         CapabilityKey::AppendCorrection => "correction.chain.append",
         CapabilityKey::AttachIdentifier => "identity.identifier.attach",
         CapabilityKey::ClearNuvioCollections => "profile.nuvio_collections.clear",
@@ -28,6 +29,7 @@ pub const fn public_capability_id(key: CapabilityKey) -> &'static str {
         CapabilityKey::ListProviders => "provider.list",
         CapabilityKey::ListRecords => "identity.record.list",
         CapabilityKey::ListTrackingDispositions => "profile.record.tracking_disposition.list",
+        CapabilityKey::ReadAccessProjection => "access.projection.read",
         CapabilityKey::ReadBrowserSession => "browser.session.read",
         CapabilityKey::ReadMetadataProjection => "metadata.projection.read",
         CapabilityKey::ReadProviderHealth => "provider.health.read",

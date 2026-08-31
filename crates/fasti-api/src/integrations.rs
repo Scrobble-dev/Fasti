@@ -1,5 +1,5 @@
 use crate::{
-    local::{bearer_secret, LocalApiState, RequestAuthentication},
+    local::{bearer_secret, ApplicationRequestAuthentication, LocalApiState},
     observation::accept_observation_request,
     problem::{application_problem, HttpProblem},
 };
@@ -223,7 +223,7 @@ async fn template_webhook(
     let normalized = normalize_template_request(source, request, correlation_id)?;
     accept_observation_request(
         state,
-        RequestAuthentication::Bearer(secret),
+        ApplicationRequestAuthentication::Bearer(secret),
         normalized,
         body.to_vec(),
         correlation_id,
@@ -527,7 +527,7 @@ pub(crate) async fn emby_webhook(
     let normalized = emby_request(&value, &body, correlation_id)?;
     accept_observation_request(
         state,
-        RequestAuthentication::Bearer(secret),
+        ApplicationRequestAuthentication::Bearer(secret),
         normalized,
         body.to_vec(),
         correlation_id,
@@ -797,7 +797,7 @@ pub(crate) async fn plex_webhook(
     let normalized = plex_request(&value, payload, correlation_id)?;
     accept_observation_request(
         state,
-        RequestAuthentication::Bearer(secret),
+        ApplicationRequestAuthentication::Bearer(secret),
         normalized,
         payload.to_vec(),
         correlation_id,

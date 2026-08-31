@@ -7,9 +7,14 @@ use axum::{
     routing::get,
     Json, Router,
 };
-use fasti_application::LocalKernel;
+use fasti_application::{
+    BrowserRequestBoundaryPolicy, LocalKernel, ProblemCode, SecretMaterial,
+    C1_AUTH_CEREMONY_LIFETIME,
+};
 use fasti_contracts::{HealthResponse, ProblemActionDto, ProblemDetails, ViolationDto};
+use fasti_domain::{AuthCeremonySelection, RequestCorrelationId, TrailBaseActivationState};
 use std::collections::BTreeMap;
+use std::io;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
@@ -17,12 +22,22 @@ use tower_http::services::{ServeDir, ServeFile};
 use utoipa::{
     openapi::{
         schema::{AdditionalProperties, Schema},
-        security::{HttpAuthScheme, HttpBuilder, SecurityScheme},
+        security::{ApiKey, ApiKeyValue, HttpAuthScheme, HttpBuilder, SecurityScheme},
         RefOr,
     },
     Modify, OpenApi,
 };
 
+pub const FASTI_ACCESS_ORIGIN: &str = "http://127.0.0.1:8420";
+pub const FASTI_ACCESS_HOST: &str = "127.0.0.1:8420";
+pub const FASTI_ACCESS_CALLBACK_PATH: &str = "/api/access/v1/trailbase/callback";
+pub const FASTI_ACCESS_CALLBACK_URL: &str =
+    "http://127.0.0.1:8420/api/access/v1/trailbase/callback";
+pub const FASTI_ACCESS_BINDING_COOKIE: &str = "__Secure-fasti_auth_binding";
+pub const FASTI_ACCESS_CONTINUATION_PATH: &str = "/api/access/v1/trailbase/continuation";
+pub const FASTI_ACCESS_CONTINUATION_COOKIE: &str = "__Secure-fasti_auth_continuation";
+
+mod access;
 mod integrations;
 mod local;
 mod metadata;
@@ -32,6 +47,7 @@ mod problem;
 mod profile_state;
 mod providers;
 mod records;
+mod trailbase;
 
 /// Provider-scoped gates shared by credential mutation, provider checks, and
 /// metadata refreshes in one API process.
@@ -108,6 +124,41 @@ impl Modify for ProductionSecurityAddon {
                         .build(),
                 ),
             );
+            components.add_security_scheme(
+                "browser_session_cookie",
+                SecurityScheme::ApiKey(ApiKey::Cookie(ApiKeyValue::with_description(
+                    "__Host-fasti_session",
+                    "Opaque Fasti browser session. The browser supplies this Secure, HttpOnly, SameSite=Strict cookie.",
+                ))),
+            );
+            components.add_security_scheme(
+                "csrf_cookie",
+                SecurityScheme::ApiKey(ApiKey::Cookie(ApiKeyValue::with_description(
+                    "__Host-fasti_csrf",
+                    "First-party CSRF value copied by the browser SDK into X-CSRF-Token.",
+                ))),
+            );
+            components.add_security_scheme(
+                "csrf_header",
+                SecurityScheme::ApiKey(ApiKey::Header(ApiKeyValue::with_description(
+                    "X-CSRF-Token",
+                    "Exact value of the __Host-fasti_csrf cookie for browser mutations.",
+                ))),
+            );
+            components.add_security_scheme(
+                "auth_binding_cookie",
+                SecurityScheme::ApiKey(ApiKey::Cookie(ApiKeyValue::with_description(
+                    "__Secure-fasti_auth_binding",
+                    "One-use, callback-path-scoped browser binding for a TrailBase ceremony.",
+                ))),
+            );
+            components.add_security_scheme(
+                "auth_continuation_cookie",
+                SecurityScheme::ApiKey(ApiKey::Cookie(ApiKeyValue::with_description(
+                    FASTI_ACCESS_CONTINUATION_COOKIE,
+                    "One-use, continuation-path-scoped binding for explicit Fasti sign-in selection.",
+                ))),
+            );
             let Some(RefOr::T(Schema::OneOf(override_schema))) =
                 components.schemas.get_mut("MetadataOverrideMutationDto")
             else {
@@ -128,6 +179,20 @@ impl Modify for ProductionSecurityAddon {
 #[openapi(
     paths(
         health_check,
+        access::start_trailbase_sign_in,
+        access::complete_trailbase_authentication,
+        access::read_trailbase_continuation,
+        access::complete_trailbase_continuation,
+        access::cancel_trailbase_continuation,
+        access::read_access_projection,
+        access::read_browser_session,
+        access::end_browser_session,
+        access::list_browser_sessions,
+        access::revoke_browser_session,
+        access::revoke_other_browser_sessions,
+        access::revoke_all_browser_sessions,
+        access::rotate_browser_session,
+        access::select_browser_session_profile,
         local::initialize_node,
         local::enroll_first_client,
         nuvio_collections::clear_nuvio_collections,
@@ -157,6 +222,39 @@ impl Modify for ProductionSecurityAddon {
     ),
     components(schemas(
         HealthResponse,
+        fasti_contracts::StartTrailBaseSignInRequest,
+        fasti_contracts::StartTrailBaseSignInResponse,
+        fasti_contracts::TrailBaseContinuationChoiceDto,
+        fasti_contracts::ReadTrailBaseContinuationResponse,
+        fasti_contracts::CompleteTrailBaseContinuationRequest,
+        fasti_contracts::SelectBrowserSessionProfileRequest,
+        fasti_contracts::BrowserSessionDto,
+        fasti_contracts::ReadBrowserSessionResponse,
+        fasti_contracts::ListBrowserSessionsResponse,
+        fasti_contracts::RevokeBrowserSessionsResponse,
+        fasti_contracts::RotateBrowserSessionResponse,
+        fasti_contracts::SelectBrowserSessionProfileResponse,
+        fasti_contracts::AccessEvidenceStateDto,
+        fasti_contracts::AccessSubjectLifecycleDto,
+        fasti_contracts::AccessMembershipLifecycleDto,
+        fasti_contracts::AccessWorkspaceRoleDto,
+        fasti_contracts::TrailBaseActivationStateDto,
+        fasti_contracts::TrailBaseActivationBlockerDto,
+        fasti_contracts::AccessAuthenticationMethodDto,
+        fasti_contracts::AccessEvidenceKindDto,
+        fasti_contracts::AccessCeremonyStateDto,
+        fasti_contracts::AccessCeremonyFailureDto,
+        fasti_contracts::AccessFirstRunStepKeyDto,
+        fasti_contracts::AccessSubjectDto,
+        fasti_contracts::AccessMembershipDto,
+        fasti_contracts::AccessProfileGrantDto,
+        fasti_contracts::BrowserSessionPolicyDto,
+        fasti_contracts::RecentAuthenticationDto,
+        fasti_contracts::AccessSessionAuthenticationDto,
+        fasti_contracts::TrailBaseActivationDto,
+        fasti_contracts::AccessFirstRunStepDto,
+        fasti_contracts::AccessEvidenceDto,
+        fasti_contracts::AccessProjectionResponse,
         fasti_contracts::AttachIdentifierRequest,
         fasti_contracts::AttachIdentifierResponse,
         fasti_contracts::ClientEnrollmentResponse,
@@ -256,7 +354,10 @@ pub fn health_router() -> Router {
 /// provider adapters. Node bootstrap, generic record mutation, and the generic
 /// observation endpoint are never mounted here.
 pub fn integration_router(kernel: Arc<dyn LocalKernel>) -> Router {
-    let state = local::LocalApiState { kernel };
+    let state = local::LocalApiState {
+        kernel,
+        browser_boundary: None,
+    };
     health_router().merge(integrations::router().with_state(state))
 }
 
@@ -324,6 +425,295 @@ pub fn api_router(
         local_exposure_addr.ip().is_loopback(),
         "api_router requires loopback client exposure, got non-loopback {local_exposure_addr}"
     );
+    durable_loopback_router(kernel, data_root, None)
+}
+
+/// Constructs the only C1 browser-enabled application router.
+///
+/// The caller must pass the actual bound address and fallback result. A
+/// requested address is not proof that the fixed origin was obtained.
+pub fn direct_loopback_api_router(
+    kernel: Arc<dyn LocalKernel>,
+    bound_addr: SocketAddr,
+    used_fallback: bool,
+    data_root: &Path,
+    trailbase_root: Option<&Path>,
+) -> io::Result<Router> {
+    DirectLoopbackAccessRuntime::new(kernel, bound_addr, used_fallback, data_root, trailbase_root)
+        .map(|runtime| runtime.router())
+}
+
+/// One fixed-origin Access runtime shared by its router and packaged host.
+pub struct DirectLoopbackAccessRuntime {
+    router: Router,
+    trailbase: Option<Arc<trailbase::TrailBaseOrchestrator>>,
+}
+
+/// Trusted headless host for first-administrator setup while `fastid` is stopped.
+pub struct LocalOperatorAccessRuntime {
+    trailbase: Arc<trailbase::TrailBaseOrchestrator>,
+    access: Arc<dyn LocalKernel>,
+}
+
+/// First-administrator ceremony material kept inside trusted Rust host code.
+pub struct StartedFirstAdministratorBootstrap {
+    operation_id: fasti_domain::OperationId,
+    authorization_url: String,
+    expires_at: chrono::DateTime<chrono::Utc>,
+    browser_binding: SecretMaterial,
+}
+
+impl StartedFirstAdministratorBootstrap {
+    pub fn authorization_url(&self) -> &str {
+        &self.authorization_url
+    }
+
+    pub const fn expires_at(&self) -> chrono::DateTime<chrono::Utc> {
+        self.expires_at
+    }
+
+    pub const fn browser_binding(&self) -> &SecretMaterial {
+        &self.browser_binding
+    }
+}
+
+fn verified_trailbase_orchestrator(
+    kernel: &Arc<dyn LocalKernel>,
+    trailbase_root: &Path,
+) -> io::Result<Option<Arc<trailbase::TrailBaseOrchestrator>>> {
+    let evidence = trailbase::verify_installation_receipt(trailbase_root)?;
+    let installation = fasti_application::HumanAccessPort::verify_trailbase_installation(
+        kernel.as_ref(),
+        fasti_application::VerifyTrailBaseInstallationCommand::new(
+            evidence.instance_id,
+            evidence.physical_root_identity,
+            evidence.release_lock_identity,
+            evidence.declared_restore,
+            RequestCorrelationId::new_v7(),
+            chrono::Utc::now(),
+        ),
+    )
+    .map_err(|_| io::Error::other("TrailBase activation verification failed"))?;
+    Ok(
+        (installation.activation_state() == TrailBaseActivationState::Active).then(|| {
+            Arc::new(
+                trailbase::TrailBaseOrchestrator::production(Arc::clone(kernel), &installation)
+                    .expect("active TrailBase installation must satisfy the fixed C1 client"),
+            )
+        }),
+    )
+}
+
+fn start_first_administrator_bootstrap(
+    trailbase: &trailbase::TrailBaseOrchestrator,
+    selection: AuthCeremonySelection,
+    bootstrap_secret: SecretMaterial,
+) -> Result<StartedFirstAdministratorBootstrap, ProblemCode> {
+    let created_at = chrono::Utc::now();
+    let expires_at = created_at
+        + chrono::Duration::from_std(C1_AUTH_CEREMONY_LIFETIME)
+            .expect("C1 ceremony lifetime fits chrono");
+    let started = trailbase
+        .start_bootstrap(
+            selection,
+            bootstrap_secret,
+            RequestCorrelationId::new_v7(),
+            created_at,
+            expires_at,
+        )
+        .map_err(|error| match error {
+            trailbase::TrailBaseOrchestrationError::ApplicationProblem(code) => code,
+            trailbase::TrailBaseOrchestrationError::InvalidInput => ProblemCode::IntegrityFailed,
+            trailbase::TrailBaseOrchestrationError::LocalState => ProblemCode::StorageUnavailable,
+            _ => ProblemCode::TrailBaseTrustUnavailable,
+        })?;
+    Ok(StartedFirstAdministratorBootstrap {
+        operation_id: started.operation_id,
+        authorization_url: started.authorization_url,
+        expires_at: started.expires_at,
+        browser_binding: started.browser_binding,
+    })
+}
+
+fn cancel_first_administrator_bootstrap(
+    trailbase: &trailbase::TrailBaseOrchestrator,
+    started: StartedFirstAdministratorBootstrap,
+) -> Result<(), ProblemCode> {
+    trailbase
+        .cancel(fasti_application::CancelAuthCeremonyCommand::new(
+            started.operation_id,
+            RequestCorrelationId::new_v7(),
+            chrono::Utc::now(),
+        ))
+        .map_err(|error| match error {
+            trailbase::TrailBaseOrchestrationError::ApplicationProblem(code) => code,
+            trailbase::TrailBaseOrchestrationError::LocalState => ProblemCode::StorageUnavailable,
+            _ => ProblemCode::TrailBaseTrustUnavailable,
+        })
+}
+
+impl DirectLoopbackAccessRuntime {
+    pub fn new(
+        kernel: Arc<dyn LocalKernel>,
+        bound_addr: SocketAddr,
+        used_fallback: bool,
+        data_root: &Path,
+        trailbase_root: Option<&Path>,
+    ) -> io::Result<Self> {
+        assert_eq!(
+            bound_addr,
+            FASTI_ACCESS_HOST.parse().expect("fixed C1 address"),
+            "browser authentication requires the exact direct 127.0.0.1:8420 listener"
+        );
+        assert!(
+            !used_fallback,
+            "browser authentication is unavailable on a fallback listener"
+        );
+        let boundary =
+            BrowserRequestBoundaryPolicy::try_new(FASTI_ACCESS_ORIGIN, FASTI_ACCESS_HOST)
+                .expect("fixed C1 browser boundary is valid");
+        let trailbase = trailbase_root
+            .map(|root| verified_trailbase_orchestrator(&kernel, root))
+            .transpose()?
+            .flatten();
+        let browser_runtime = Some((boundary, trailbase.as_ref().map(Arc::clone)));
+        let router = durable_loopback_router(Arc::clone(&kernel), data_root, browser_runtime);
+        Ok(Self { router, trailbase })
+    }
+
+    pub fn router(&self) -> Router {
+        self.router.clone()
+    }
+
+    #[cfg(test)]
+    fn from_test_orchestrator(
+        kernel: Arc<dyn LocalKernel>,
+        data_root: &Path,
+        trailbase: Arc<trailbase::TrailBaseOrchestrator>,
+    ) -> Self {
+        let boundary =
+            BrowserRequestBoundaryPolicy::try_new(FASTI_ACCESS_ORIGIN, FASTI_ACCESS_HOST)
+                .expect("fixed C1 browser boundary is valid");
+        let router = durable_loopback_router(
+            Arc::clone(&kernel),
+            data_root,
+            Some((boundary, Some(Arc::clone(&trailbase)))),
+        );
+        Self {
+            router,
+            trailbase: Some(trailbase),
+        }
+    }
+
+    pub fn start_first_administrator_bootstrap(
+        &self,
+        selection: AuthCeremonySelection,
+        bootstrap_secret: SecretMaterial,
+    ) -> Result<StartedFirstAdministratorBootstrap, ProblemCode> {
+        let trailbase = self
+            .trailbase
+            .as_ref()
+            .ok_or(ProblemCode::TrailBaseTrustUnavailable)?;
+        start_first_administrator_bootstrap(trailbase, selection, bootstrap_secret)
+    }
+
+    pub fn cancel_first_administrator_bootstrap(
+        &self,
+        started: StartedFirstAdministratorBootstrap,
+    ) -> Result<(), ProblemCode> {
+        let trailbase = self
+            .trailbase
+            .as_ref()
+            .ok_or(ProblemCode::TrailBaseTrustUnavailable)?;
+        cancel_first_administrator_bootstrap(trailbase, started)
+    }
+}
+
+impl LocalOperatorAccessRuntime {
+    pub fn new(kernel: Arc<dyn LocalKernel>, trailbase_root: &Path) -> io::Result<Self> {
+        let trailbase = verified_trailbase_orchestrator(&kernel, trailbase_root)?
+            .ok_or_else(|| io::Error::other("TrailBase installation is not active"))?;
+        Ok(Self {
+            trailbase,
+            access: kernel,
+        })
+    }
+
+    #[cfg(test)]
+    fn from_test_orchestrator(
+        kernel: Arc<dyn LocalKernel>,
+        trailbase: Arc<trailbase::TrailBaseOrchestrator>,
+    ) -> Self {
+        Self {
+            trailbase,
+            access: kernel,
+        }
+    }
+
+    pub fn start_first_administrator_bootstrap(
+        &self,
+    ) -> Result<StartedFirstAdministratorBootstrap, ProblemCode> {
+        let correlation_id = RequestCorrelationId::new_v7();
+        let bootstrap_secret = self
+            .access
+            .ensure_bootstrap_secret()
+            .map_err(|problem| problem.code())?;
+        let selection = self
+            .access
+            .prepare_trailbase_bootstrap(fasti_application::PrepareTrailBaseBootstrapQuery::new(
+                SecretMaterial::from_bytes(*bootstrap_secret.expose_bytes()),
+                correlation_id,
+            ))
+            .map_err(|problem| problem.code())?;
+        start_first_administrator_bootstrap(&self.trailbase, selection, bootstrap_secret)
+    }
+
+    pub async fn complete_first_administrator_bootstrap(
+        &self,
+        started: &StartedFirstAdministratorBootstrap,
+        callback_url: &str,
+    ) -> Result<(), ProblemCode> {
+        let code = access::exact_callback_url_code(callback_url)
+            .ok_or(ProblemCode::TrailBaseProofInvalid)?;
+        self.trailbase
+            .callback_for_operator(
+                code,
+                &started.browser_binding,
+                RequestCorrelationId::new_v7(),
+                chrono::Utc::now(),
+            )
+            .await
+            .map_err(|error| match error {
+                trailbase::TrailBaseOrchestrationError::ApplicationProblem(code) => code,
+                trailbase::TrailBaseOrchestrationError::InvalidInput => {
+                    ProblemCode::TrailBaseProofInvalid
+                }
+                trailbase::TrailBaseOrchestrationError::LocalState => {
+                    ProblemCode::StorageUnavailable
+                }
+                trailbase::TrailBaseOrchestrationError::LogoutUncertain => {
+                    ProblemCode::TrailBaseSessionCleanupFailed
+                }
+                _ => ProblemCode::IdentityServiceUnavailable,
+            })
+    }
+
+    pub fn cancel_first_administrator_bootstrap(
+        &self,
+        started: StartedFirstAdministratorBootstrap,
+    ) -> Result<(), ProblemCode> {
+        cancel_first_administrator_bootstrap(&self.trailbase, started)
+    }
+}
+
+fn durable_loopback_router(
+    kernel: Arc<dyn LocalKernel>,
+    data_root: &Path,
+    browser_runtime: Option<(
+        BrowserRequestBoundaryPolicy,
+        Option<Arc<trailbase::TrailBaseOrchestrator>>,
+    )>,
+) -> Router {
     assert!(
         !data_root.as_os_str().is_empty(),
         "api_router requires non-empty data_root"
@@ -335,11 +725,19 @@ pub fn api_router(
     kernel
         .ensure_bootstrap_secret()
         .expect("bootstrap secret must be preparable before serving any route");
+    let active_browser_boundary = browser_runtime
+        .as_ref()
+        .map(|(boundary, _)| boundary.clone());
+    let access = browser_runtime.map_or_else(Router::new, |(boundary, trailbase)| {
+        access::router(Arc::clone(&kernel), boundary, trailbase)
+    });
     let integration_state = local::LocalApiState {
         kernel: Arc::clone(&kernel),
+        browser_boundary: None,
     };
     health_router()
-        .merge(local::router(kernel, true))
+        .merge(local::router(kernel, true, active_browser_boundary))
+        .merge(access)
         .merge(integrations::router().with_state(integration_state))
 }
 
@@ -360,9 +758,10 @@ pub fn remote_api_router(
     );
     let integration_state = local::LocalApiState {
         kernel: Arc::clone(&kernel),
+        browser_boundary: None,
     };
     health_router()
-        .merge(local::router(kernel, false))
+        .merge(local::router(kernel, false, None))
         .merge(integrations::router().with_state(integration_state))
 }
 
@@ -416,6 +815,8 @@ mod tests {
     use fasti_application::{
         AccessAdministrationPort, AuthenticateCredentialQuery, CapabilityKey, SecretMaterial,
     };
+    #[cfg(target_os = "linux")]
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
     use tower::ServiceExt;
     use utoipa::openapi::OpenApiVersion;
 
@@ -429,6 +830,59 @@ mod tests {
     #[cfg(target_os = "linux")]
     fn test_bind_addr() -> SocketAddr {
         "127.0.0.1:8420".parse().expect("loopback address")
+    }
+
+    #[cfg(target_os = "linux")]
+    fn test_trailbase_root() -> tempfile::TempDir {
+        fn digest(bytes: &[u8]) -> String {
+            trailbase::sha256_digest(bytes).to_string()
+        }
+
+        let root = tempfile::tempdir().expect("temporary TrailBase root");
+        std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700))
+            .expect("private root");
+        let nonce = [7_u8; 32];
+        let lock = root.path().join("runtime.lock");
+        std::fs::write(&lock, nonce).expect("runtime nonce");
+        std::fs::set_permissions(&lock, std::fs::Permissions::from_mode(0o600))
+            .expect("private nonce");
+        let metadata = std::fs::metadata(root.path()).expect("root metadata");
+        let mut identity = Vec::with_capacity(48);
+        identity.extend_from_slice(&metadata.dev().to_be_bytes());
+        identity.extend_from_slice(&metadata.ino().to_be_bytes());
+        identity.extend_from_slice(&nonce);
+        let (runtime_target, artifact_identity) = if cfg!(target_arch = "aarch64") {
+            (
+                "linux-aarch64",
+                "sha256:e8d86d361682e697d78fa159fb9c706f30ebdcc886a3015daa78d75eb9d7c199",
+            )
+        } else {
+            (
+                "linux-x86_64",
+                "sha256:550c053355bdc68222c94fe84ecc0e23ef983cfb7232863a7c51ff9b84bce18e",
+            )
+        };
+        let receipt = serde_json::json!({
+            "schema_version": "fasti.trailbase-installation.v1",
+            "instance_id": fasti_domain::TrailBaseInstanceId::new_v7(),
+            "physical_root_identity": digest(&identity),
+            "release_lock_identity": digest(include_bytes!("../../../third_party/trailbase/release.json")),
+            "runtime": "native",
+            "runtime_target": runtime_target,
+            "artifact_identity": artifact_identity,
+            "declared_restore": false,
+            "created_at": "2026-08-30T00:00:00Z",
+            "verified_at": "2026-08-30T00:00:01Z"
+        });
+        let receipt_path = root.path().join(".fasti-installation.json");
+        std::fs::write(
+            &receipt_path,
+            serde_json::to_vec(&receipt).expect("receipt JSON"),
+        )
+        .expect("installation receipt");
+        std::fs::set_permissions(&receipt_path, std::fs::Permissions::from_mode(0o600))
+            .expect("private receipt");
+        root
     }
 
     #[tokio::test]
@@ -596,10 +1050,20 @@ mod tests {
             "/api/v1/metadata/claims/refresh",
             "/api/v1/records/{record_id}/metadata-projection",
             "/api/v1/profile/metadata-projection",
+            "/api/access/v1/trailbase/sign-in",
+            "/api/access/v1/trailbase/callback",
+            "/api/access/v1/trailbase/continuation",
+            "/api/access/v1/projection",
+            "/api/access/v1/browser-session",
+            "/api/access/v1/browser-sessions",
+            "/api/access/v1/browser-sessions/others",
+            "/api/access/v1/browser-sessions/{browser_session_id}",
+            "/api/access/v1/browser-session/rotation",
+            "/api/access/v1/browser-session/profile",
         ] {
             assert!(document.paths.paths.contains_key(path), "missing {path}");
         }
-        assert_eq!(document.paths.paths.len(), 23);
+        assert_eq!(document.paths.paths.len(), 33);
 
         let serialized = serde_json::to_string(&document).expect("serializable OpenAPI document");
         assert!(serialized.contains("#/components/schemas/HealthResponse"));
@@ -613,11 +1077,67 @@ mod tests {
             Some(&serde_json::json!("bearer"))
         );
         assert_eq!(
+            value.pointer("/components/securitySchemes/browser_session_cookie"),
+            Some(&serde_json::json!({
+                "type": "apiKey",
+                "in": "cookie",
+                "name": "__Host-fasti_session",
+                "description": "Opaque Fasti browser session. The browser supplies this Secure, HttpOnly, SameSite=Strict cookie."
+            }))
+        );
+        assert_eq!(
+            value.pointer("/components/securitySchemes/csrf_cookie/name"),
+            Some(&serde_json::json!("__Host-fasti_csrf"))
+        );
+        assert_eq!(
+            value.pointer("/components/securitySchemes/csrf_header/name"),
+            Some(&serde_json::json!("X-CSRF-Token"))
+        );
+        assert_eq!(
+            value.pointer("/components/securitySchemes/auth_binding_cookie/name"),
+            Some(&serde_json::json!("__Secure-fasti_auth_binding"))
+        );
+        assert_eq!(
+            value.pointer("/components/securitySchemes/auth_continuation_cookie/name"),
+            Some(&serde_json::json!("__Secure-fasti_auth_continuation"))
+        );
+        assert_eq!(
+            value.pointer("/paths/~1api~1access~1v1~1projection/get/security"),
+            Some(&serde_json::json!([{"browser_session_cookie": []}]))
+        );
+        assert_eq!(
+            value.pointer("/paths/~1api~1access~1v1~1browser-session/delete/security"),
+            Some(&serde_json::json!([{
+                "browser_session_cookie": [],
+                "csrf_cookie": [],
+                "csrf_header": []
+            }]))
+        );
+        assert_eq!(
+            value.pointer("/paths/~1api~1access~1v1~1trailbase~1callback/get/security"),
+            Some(&serde_json::json!([{"auth_binding_cookie": []}]))
+        );
+        for method in ["get", "post", "delete"] {
+            assert_eq!(
+                value.pointer(&format!(
+                    "/paths/~1api~1access~1v1~1trailbase~1continuation/{method}/security"
+                )),
+                Some(&serde_json::json!([{"auth_continuation_cookie": []}]))
+            );
+        }
+        assert_eq!(
             value
                 .pointer("/paths/~1api~1v1~1records/get/security")
                 .and_then(serde_json::Value::as_array)
                 .map(Vec::len),
-            Some(1)
+            Some(2)
+        );
+        assert_eq!(
+            value.pointer("/paths/~1api~1v1~1records/get/security"),
+            Some(&serde_json::json!([
+                {"credential_bearer": []},
+                {"browser_session_cookie": []}
+            ]))
         );
         assert!(value
             .pointer("/paths/~1api~1v1~1health/get/security")
@@ -650,6 +1170,15 @@ mod tests {
         let schemas = &document.components.expect("OpenAPI components").schemas;
         for schema in [
             "HealthResponse",
+            "StartTrailBaseSignInRequest",
+            "StartTrailBaseSignInResponse",
+            "TrailBaseContinuationChoiceDto",
+            "ReadTrailBaseContinuationResponse",
+            "CompleteTrailBaseContinuationRequest",
+            "BrowserSessionDto",
+            "AccessProjectionResponse",
+            "ListBrowserSessionsResponse",
+            "RevokeBrowserSessionsResponse",
             "NodeInitializationResponse",
             "NuvioCatalogSourceDto",
             "NuvioCollectionDto",
@@ -877,6 +1406,135 @@ mod tests {
                 .expect("router response");
             assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    async fn assert_access_routes_are_absent(router: Router) {
+        for path in [
+            "/api/access/v1/projection",
+            "/api/access/v1/trailbase/callback?code=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        ] {
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::get(path)
+                        .body(Body::empty())
+                        .expect("Access request"),
+                )
+                .await
+                .expect("router response");
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn access_routes_exist_only_on_the_exact_direct_listener() {
+        let (root, kernel) = test_kernel();
+        let inactive = direct_loopback_api_router(
+            kernel.clone(),
+            "127.0.0.1:8420".parse().expect("fixed listener"),
+            false,
+            root.path(),
+            None,
+        )
+        .expect("inactive router");
+        let inactive_callback = inactive
+            .oneshot(
+                Request::get(format!(
+                    "/api/access/v1/trailbase/callback?code={}",
+                    "a".repeat(48)
+                ))
+                .header(header::HOST, "127.0.0.1:8420")
+                .body(Body::empty())
+                .expect("callback request"),
+            )
+            .await
+            .expect("inactive callback response");
+        assert_eq!(inactive_callback.status(), StatusCode::SEE_OTHER);
+
+        let trailbase_root = test_trailbase_root();
+        let direct = direct_loopback_api_router(
+            kernel.clone(),
+            "127.0.0.1:8420".parse().expect("fixed listener"),
+            false,
+            root.path(),
+            Some(trailbase_root.path()),
+        )
+        .expect("verified direct router");
+        let generic = api_router(kernel.clone(), test_bind_addr(), root.path());
+        let integration = integration_router(kernel.clone());
+        let remote = remote_api_router(
+            kernel,
+            "0.0.0.0:8420".parse().expect("remote listener"),
+            root.path(),
+        );
+
+        let direct_projection = direct
+            .clone()
+            .oneshot(
+                Request::get("/api/access/v1/projection")
+                    .header(header::HOST, "127.0.0.1:8420")
+                    .body(Body::empty())
+                    .expect("Access request"),
+            )
+            .await
+            .expect("direct response");
+        assert_eq!(direct_projection.status(), StatusCode::UNAUTHORIZED);
+
+        let callback = direct
+            .oneshot(
+                Request::get(format!(
+                    "/api/access/v1/trailbase/callback?code={}",
+                    "a".repeat(48)
+                ))
+                .header(header::HOST, "127.0.0.1:8420")
+                .body(Body::empty())
+                .expect("callback request"),
+            )
+            .await
+            .expect("callback response");
+        assert_eq!(callback.status(), StatusCode::SEE_OTHER);
+        assert!(callback
+            .headers()
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .any(|value| value
+                .to_str()
+                .expect("cookie")
+                .starts_with("__Secure-fasti_auth_binding=;")));
+
+        for router in [generic, integration, remote] {
+            assert_access_routes_are_absent(router).await;
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn copied_trailbase_receipt_cannot_activate_a_different_root() {
+        let (data_root, kernel) = test_kernel();
+        let source = test_trailbase_root();
+        let copy = tempfile::tempdir().expect("copied TrailBase root");
+        std::fs::set_permissions(copy.path(), std::fs::Permissions::from_mode(0o700))
+            .expect("private copied root");
+        for name in ["runtime.lock", ".fasti-installation.json"] {
+            std::fs::copy(source.path().join(name), copy.path().join(name))
+                .expect("copy installation evidence");
+            std::fs::set_permissions(
+                copy.path().join(name),
+                std::fs::Permissions::from_mode(0o600),
+            )
+            .expect("private copied evidence");
+        }
+
+        let result = DirectLoopbackAccessRuntime::new(
+            kernel,
+            "127.0.0.1:8420".parse().expect("fixed listener"),
+            false,
+            data_root.path(),
+            Some(copy.path()),
+        );
+        assert!(result.is_err());
     }
 
     #[cfg(target_os = "linux")]

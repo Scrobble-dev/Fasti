@@ -1,4 +1,4 @@
-use crate::kernel::{authorize_transaction, map_sql, now, timestamp, SqliteKernel};
+use crate::kernel::{authorize_application_transaction, map_sql, now, timestamp, SqliteKernel};
 use crate::metadata::load_record_list_metadata;
 use fasti_application::{
     ApplicationResult, AttachIdentifierCommand, AttachIdentifierOutcome, CapabilityKey,
@@ -27,16 +27,21 @@ impl IdentityPort for SqliteKernel {
         command: RegisterNamespaceDefinitionCommand,
     ) -> ApplicationResult<RegisterNamespaceDefinitionOutcome> {
         let correlation_id = command.correlation_id();
-        let capability = CapabilityKey::AttachIdentifier;
+        let capability = CapabilityKey::RegisterNamespace;
         let mut connection = self.lock_connection(capability, correlation_id)?;
         let transaction = map_sql(
             connection.transaction_with_behavior(TransactionBehavior::Immediate),
             capability,
             correlation_id,
         )?;
-        authorize_transaction(&transaction, capability, command.access(), correlation_id)?;
+        let authorized = authorize_application_transaction(
+            &transaction,
+            capability,
+            command.access(),
+            correlation_id,
+        )?;
         let definition = command.definition();
-        let workspace_id = command.access().workspace_id().to_string();
+        let workspace_id = authorized.workspace_id().to_string();
         let namespace = definition.namespace().as_str();
         let supported_grains = definition
             .grains()
@@ -138,17 +143,22 @@ impl IdentityPort for SqliteKernel {
             capability,
             correlation_id,
         )?;
-        authorize_transaction(&transaction, capability, command.access(), correlation_id)?;
+        let authorized = authorize_application_transaction(
+            &transaction,
+            capability,
+            command.access(),
+            correlation_id,
+        )?;
         let record_id = insert_record(
             &transaction,
-            command.access().workspace_id(),
+            authorized.workspace_id(),
             command.grain(),
             capability,
             correlation_id,
         )?;
         map_sql(transaction.commit(), capability, correlation_id)?;
         Ok(CreateRecordOutcome::new(
-            command.access().workspace_id(),
+            authorized.workspace_id(),
             record_id,
             command.grain(),
         ))
@@ -166,10 +176,15 @@ impl IdentityPort for SqliteKernel {
             capability,
             correlation_id,
         )?;
-        authorize_transaction(&transaction, capability, command.access(), correlation_id)?;
+        let authorized = authorize_application_transaction(
+            &transaction,
+            capability,
+            command.access(),
+            correlation_id,
+        )?;
         let outcome = attach_identifier_tx(
             &transaction,
-            command.access().workspace_id(),
+            authorized.workspace_id(),
             command.record_id(),
             command.claim(),
             capability,
@@ -188,10 +203,15 @@ impl IdentityPort for SqliteKernel {
             capability,
             correlation_id,
         )?;
-        authorize_transaction(&transaction, capability, query.access(), correlation_id)?;
+        let authorized = authorize_application_transaction(
+            &transaction,
+            capability,
+            query.access(),
+            correlation_id,
+        )?;
 
-        let workspace_id = query.access().workspace_id();
-        let profile_id = query.access().profile_id();
+        let workspace_id = authorized.workspace_id();
+        let profile_id = authorized.profile_id();
         let mut statement = map_sql(
             transaction.prepare(
                 r#"

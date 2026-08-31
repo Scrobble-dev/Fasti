@@ -3,10 +3,11 @@ use crate::kernel::{
 };
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use fasti_application::{
-    ApplicationResult, AuthenticatedBrowserSession, BrowserSessionMutationCommand,
-    BrowserSessionPort, BrowserSessionQuery, BrowserSessionSummary, CapabilityKey,
-    CreateAuthSubjectCommand, CreateBrowserSessionCommand, CreatedBrowserSession, FastiProblem,
-    ProblemCode, SelectBrowserSessionProfileCommand, SessionPolicy, TargetBrowserSessionCommand,
+    ApplicationResult, AuthenticatedBrowserSession, BrowserSessionInventory,
+    BrowserSessionMutationCommand, BrowserSessionPort, BrowserSessionQuery, BrowserSessionSummary,
+    CapabilityKey, CreateAuthSubjectCommand, CreateBrowserSessionCommand, CreatedBrowserSession,
+    FastiProblem, ProblemCode, RevokeBrowserSessionOutcome, SelectBrowserSessionProfileCommand,
+    SessionPolicy, TargetBrowserSessionCommand,
 };
 use fasti_domain::{
     AuthSubject, AuthSubjectId, AuthSubjectLifecycle, BrowserSessionId, BrowserSessionState,
@@ -205,7 +206,7 @@ fn query_session_row(
     )
 }
 
-fn authenticate_session(
+pub(crate) fn authenticate_session(
     connection: &Connection,
     session_secret: &fasti_application::SecretMaterial,
     csrf_secret: Option<&fasti_application::SecretMaterial>,
@@ -247,6 +248,14 @@ fn authenticate_session(
         }
         return Err(problem(session_problem(state), capability, correlation_id));
     }
+    validate_active_membership(
+        connection,
+        subject.id(),
+        session.workspace_id(),
+        ProblemCode::SessionPolicyChanged,
+        capability,
+        correlation_id,
+    )?;
     validate_grants(
         connection,
         subject.id(),
@@ -274,6 +283,37 @@ fn authenticate_session(
         session = parse_session(&row, capability, correlation_id)?;
     }
     Ok(AuthenticatedBrowserSession::new(subject, session))
+}
+
+fn validate_active_membership(
+    connection: &Connection,
+    subject_id: AuthSubjectId,
+    workspace_id: WorkspaceId,
+    invalid_code: ProblemCode,
+    capability: CapabilityKey,
+    correlation_id: fasti_domain::RequestCorrelationId,
+) -> ApplicationResult<()> {
+    let exists = map_sql(
+        connection.query_row(
+            r#"
+            SELECT EXISTS(
+                SELECT 1
+                FROM workspace_memberships
+                WHERE auth_subject_id = ?1
+                  AND workspace_id = ?2
+                  AND lifecycle = 'active'
+            )
+            "#,
+            params![subject_id.to_string(), workspace_id.to_string()],
+            |row| row.get::<_, i64>(0),
+        ),
+        capability,
+        correlation_id,
+    )?;
+    if exists != 1 {
+        return Err(problem(invalid_code, capability, correlation_id));
+    }
+    Ok(())
 }
 
 fn validate_grants(
@@ -320,7 +360,7 @@ fn validate_grants(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn insert_session(
+pub(crate) fn insert_session(
     transaction: &Transaction<'_>,
     subject: AuthSubject,
     workspace_id: WorkspaceId,
@@ -333,6 +373,14 @@ fn insert_session(
     capability: CapabilityKey,
     correlation_id: fasti_domain::RequestCorrelationId,
 ) -> ApplicationResult<CreatedBrowserSession> {
+    validate_active_membership(
+        transaction,
+        subject.id(),
+        workspace_id,
+        ProblemCode::Forbidden,
+        capability,
+        correlation_id,
+    )?;
     validate_grants(
         transaction,
         subject.id(),
@@ -467,17 +515,30 @@ fn session_grants(
     Ok(grants)
 }
 
-/// PR A has no Membership or Role aggregate. Returning zero keeps the old
-/// client-credential adapter from pretending that BrowserUser still proves
-/// administrator continuity. C1 must replace this call with the final role
-/// owner before it activates identity administration.
 pub(crate) fn viable_administrator_count(
-    _connection: &Connection,
-    _workspace_id: &str,
-    _capability: CapabilityKey,
-    _correlation_id: fasti_domain::RequestCorrelationId,
+    connection: &Connection,
+    workspace_id: &str,
+    capability: CapabilityKey,
+    correlation_id: fasti_domain::RequestCorrelationId,
 ) -> ApplicationResult<i64> {
-    Ok(0)
+    map_sql(
+        connection.query_row(
+            r#"
+            SELECT COUNT(*)
+            FROM workspace_memberships membership
+            JOIN auth_subjects subject
+              ON subject.auth_subject_id = membership.auth_subject_id
+            WHERE membership.workspace_id = ?1
+              AND membership.lifecycle = 'active'
+              AND membership.role = 'administrator'
+              AND subject.lifecycle = 'active'
+            "#,
+            [workspace_id],
+            |row| row.get(0),
+        ),
+        capability,
+        correlation_id,
+    )
 }
 
 fn rotate_session(
@@ -598,6 +659,30 @@ fn rotate_session(
             correlation_id,
         )?;
     }
+    let copied_authentication = map_sql(
+        transaction.execute(
+            r#"
+            INSERT INTO fasti_browser_session_authentication(
+                browser_session_id, trailbase_instance_id, activation_generation,
+                method, verified_at, recent_authentication_expires_at
+            )
+            SELECT ?1, trailbase_instance_id, activation_generation,
+                   method, verified_at, recent_authentication_expires_at
+            FROM fasti_browser_session_authentication
+            WHERE browser_session_id = ?2
+            "#,
+            params![rotated.id().to_string(), current_session.id().to_string()],
+        ),
+        capability,
+        correlation_id,
+    )?;
+    if copied_authentication != 1 {
+        return Err(problem(
+            ProblemCode::IntegrityFailed,
+            capability,
+            correlation_id,
+        ));
+    }
     map_sql(
         transaction.execute(
             "UPDATE fasti_browser_sessions SET revoked_at = ?1 WHERE browser_session_id = ?2 AND revoked_at IS NULL",
@@ -656,11 +741,7 @@ impl BrowserSessionPort for SqliteKernel {
             correlation_id,
         )?;
         if !matches!(subject.lifecycle(), AuthSubjectLifecycle::Active) {
-            return Err(problem(
-                ProblemCode::SessionPolicyChanged,
-                capability,
-                correlation_id,
-            ));
+            return Err(problem(ProblemCode::Forbidden, capability, correlation_id));
         }
         let created = insert_session(
             &transaction,
@@ -699,7 +780,7 @@ impl BrowserSessionPort for SqliteKernel {
     fn list_browser_sessions(
         &self,
         query: BrowserSessionQuery,
-    ) -> ApplicationResult<Vec<BrowserSessionSummary>> {
+    ) -> ApplicationResult<BrowserSessionInventory> {
         let capability = CapabilityKey::ListBrowserSessions;
         let correlation_id = query.correlation_id();
         let connection = self.lock_connection(capability, correlation_id)?;
@@ -723,6 +804,7 @@ impl BrowserSessionPort for SqliteKernel {
                 WHERE auth_subject_id = ?1 AND revoked_at IS NULL
                   AND idle_expires_at > ?2 AND absolute_expires_at > ?2
                 ORDER BY created_at, browser_session_id
+                LIMIT 33
                 "#,
             ),
             capability,
@@ -762,7 +844,9 @@ impl BrowserSessionPort for SqliteKernel {
                 session.id() == current.session().id(),
             ));
         }
-        Ok(sessions)
+        let truncated = sessions.len() > 32;
+        sessions.truncate(32);
+        Ok(BrowserSessionInventory::new(sessions, truncated))
     }
 
     fn revoke_current_browser_session(
@@ -771,9 +855,14 @@ impl BrowserSessionPort for SqliteKernel {
     ) -> ApplicationResult<bool> {
         let capability = CapabilityKey::EndBrowserSession;
         let correlation_id = command.correlation_id();
-        let connection = self.lock_connection(capability, correlation_id)?;
+        let mut connection = self.lock_connection(capability, correlation_id)?;
+        let transaction = map_sql(
+            connection.transaction_with_behavior(TransactionBehavior::Immediate),
+            capability,
+            correlation_id,
+        )?;
         let current = authenticate_session(
-            &connection,
+            &transaction,
             command.session_secret(),
             Some(command.csrf_secret()),
             command.now(),
@@ -781,25 +870,31 @@ impl BrowserSessionPort for SqliteKernel {
             correlation_id,
         )?;
         let changed = map_sql(
-            connection.execute(
+            transaction.execute(
                 "UPDATE fasti_browser_sessions SET revoked_at = ?1 WHERE browser_session_id = ?2 AND revoked_at IS NULL",
                 params![timestamp(command.now()), current.session().id().to_string()],
             ),
             capability,
             correlation_id,
         )?;
+        map_sql(transaction.commit(), capability, correlation_id)?;
         Ok(changed == 1)
     }
 
     fn revoke_browser_session(
         &self,
         command: TargetBrowserSessionCommand,
-    ) -> ApplicationResult<bool> {
+    ) -> ApplicationResult<RevokeBrowserSessionOutcome> {
         let capability = CapabilityKey::RevokeBrowserSession;
         let correlation_id = command.proof().correlation_id();
-        let connection = self.lock_connection(capability, correlation_id)?;
+        let mut connection = self.lock_connection(capability, correlation_id)?;
+        let transaction = map_sql(
+            connection.transaction_with_behavior(TransactionBehavior::Immediate),
+            capability,
+            correlation_id,
+        )?;
         let current = authenticate_session(
-            &connection,
+            &transaction,
             command.proof().session_secret(),
             Some(command.proof().csrf_secret()),
             command.proof().now(),
@@ -807,7 +902,7 @@ impl BrowserSessionPort for SqliteKernel {
             correlation_id,
         )?;
         let changed = map_sql(
-            connection.execute(
+            transaction.execute(
                 "UPDATE fasti_browser_sessions SET revoked_at = ?1 WHERE browser_session_id = ?2 AND auth_subject_id = ?3 AND revoked_at IS NULL",
                 params![
                     timestamp(command.proof().now()),
@@ -818,7 +913,14 @@ impl BrowserSessionPort for SqliteKernel {
             capability,
             correlation_id,
         )?;
-        Ok(changed == 1)
+        let revoked = changed == 1;
+        let current_session_revoked =
+            revoked && current.session().id() == command.target_session_id();
+        map_sql(transaction.commit(), capability, correlation_id)?;
+        Ok(RevokeBrowserSessionOutcome::new(
+            revoked,
+            current_session_revoked,
+        ))
     }
 
     fn revoke_other_browser_sessions(
@@ -827,9 +929,14 @@ impl BrowserSessionPort for SqliteKernel {
     ) -> ApplicationResult<u64> {
         let capability = CapabilityKey::RevokeOtherBrowserSessions;
         let correlation_id = command.correlation_id();
-        let connection = self.lock_connection(capability, correlation_id)?;
+        let mut connection = self.lock_connection(capability, correlation_id)?;
+        let transaction = map_sql(
+            connection.transaction_with_behavior(TransactionBehavior::Immediate),
+            capability,
+            correlation_id,
+        )?;
         let current = authenticate_session(
-            &connection,
+            &transaction,
             command.session_secret(),
             Some(command.csrf_secret()),
             command.now(),
@@ -837,7 +944,7 @@ impl BrowserSessionPort for SqliteKernel {
             correlation_id,
         )?;
         let changed = map_sql(
-            connection.execute(
+            transaction.execute(
                 "UPDATE fasti_browser_sessions SET revoked_at = ?1 WHERE auth_subject_id = ?2 AND browser_session_id <> ?3 AND revoked_at IS NULL",
                 params![
                     timestamp(command.now()),
@@ -848,6 +955,7 @@ impl BrowserSessionPort for SqliteKernel {
             capability,
             correlation_id,
         )?;
+        map_sql(transaction.commit(), capability, correlation_id)?;
         u64::try_from(changed)
             .map_err(|_| problem(ProblemCode::IntegrityFailed, capability, correlation_id))
     }
@@ -858,9 +966,14 @@ impl BrowserSessionPort for SqliteKernel {
     ) -> ApplicationResult<u64> {
         let capability = CapabilityKey::RevokeAllBrowserSessions;
         let correlation_id = command.correlation_id();
-        let connection = self.lock_connection(capability, correlation_id)?;
+        let mut connection = self.lock_connection(capability, correlation_id)?;
+        let transaction = map_sql(
+            connection.transaction_with_behavior(TransactionBehavior::Immediate),
+            capability,
+            correlation_id,
+        )?;
         let current = authenticate_session(
-            &connection,
+            &transaction,
             command.session_secret(),
             Some(command.csrf_secret()),
             command.now(),
@@ -868,13 +981,14 @@ impl BrowserSessionPort for SqliteKernel {
             correlation_id,
         )?;
         let changed = map_sql(
-            connection.execute(
+            transaction.execute(
                 "UPDATE fasti_browser_sessions SET revoked_at = ?1 WHERE auth_subject_id = ?2 AND revoked_at IS NULL",
                 params![timestamp(command.now()), current.subject().id().to_string()],
             ),
             capability,
             correlation_id,
         )?;
+        map_sql(transaction.commit(), capability, correlation_id)?;
         u64::try_from(changed)
             .map_err(|_| problem(ProblemCode::IntegrityFailed, capability, correlation_id))
     }
@@ -949,13 +1063,14 @@ mod tests {
     use super::*;
     use chrono::TimeZone;
     use fasti_application::SecretMaterial;
-    use fasti_domain::{ClientId, ProfileId};
+    use fasti_domain::{ClientId, ProfileId, TrailBaseInstanceId};
 
     struct Fixture {
         _root: tempfile::TempDir,
         kernel: SqliteKernel,
         subject_id: AuthSubjectId,
         workspace_id: WorkspaceId,
+        instance_id: TrailBaseInstanceId,
         grants: [ProfileGrantId; 3],
         created_at: DateTime<Utc>,
     }
@@ -1000,6 +1115,7 @@ mod tests {
         let root = tempfile::tempdir().expect("temporary data root");
         let kernel = SqliteKernel::open(root.path()).expect("kernel");
         let workspace_id = WorkspaceId::new_v7();
+        let instance_id = TrailBaseInstanceId::new_v7();
         let client_id = ClientId::new_v7();
         let profiles = [
             ProfileId::new_v7(),
@@ -1031,6 +1147,23 @@ mod tests {
                     params![client_id.to_string(), workspace_id.to_string(), timestamp(created_at)],
                 )
                 .expect("client");
+            connection
+                .execute(
+                    r#"
+                    INSERT INTO trailbase_installation(
+                        singleton, trailbase_instance_id, physical_root_identity,
+                        release_lock_identity, activation_state, activation_blocker,
+                        activation_generation, created_at, updated_at
+                    ) VALUES (1, ?1, ?2, ?3, 'active', NULL, 1, ?4, ?4)
+                    "#,
+                    params![
+                        instance_id.to_string(),
+                        format!("sha256:{}", "0".repeat(64)),
+                        format!("sha256:{}", "1".repeat(64)),
+                        timestamp(created_at),
+                    ],
+                )
+                .expect("TrailBase installation");
             for (profile_id, grant_id) in profiles.into_iter().zip(grants) {
                 connection
                     .execute(
@@ -1076,12 +1209,24 @@ mod tests {
                     )
                     .expect("subject profile grant");
             }
+            connection
+                .execute(
+                    "INSERT INTO workspace_memberships(membership_id, auth_subject_id, workspace_id, lifecycle, role, created_at, updated_at) VALUES (?1, ?2, ?3, 'active', 'member', ?4, ?4)",
+                    params![
+                        fasti_domain::MembershipId::new_v7().to_string(),
+                        subject_id.to_string(),
+                        workspace_id.to_string(),
+                        timestamp(created_at),
+                    ],
+                )
+                .expect("active membership");
         }
         Fixture {
             _root: root,
             kernel,
             subject_id,
             workspace_id,
+            instance_id,
             grants,
             created_at,
         }
@@ -1093,7 +1238,7 @@ mod tests {
         selected: ProfileGrantId,
         offset_seconds: i64,
     ) -> CreatedBrowserSession {
-        fixture
+        let created = fixture
             .kernel
             .create_browser_session(
                 CreateBrowserSessionCommand::try_new(
@@ -1108,7 +1253,67 @@ mod tests {
                 )
                 .expect("session command"),
             )
-            .expect("session")
+            .expect("session");
+        fixture
+            .kernel
+            .inner
+            .connection
+            .lock()
+            .expect("connection")
+            .execute(
+                r#"
+                INSERT INTO fasti_browser_session_authentication(
+                    browser_session_id, trailbase_instance_id, activation_generation,
+                    method, verified_at, recent_authentication_expires_at
+                ) VALUES (?1, ?2, 1, 'trailbase_password', ?3, NULL)
+                "#,
+                params![
+                    created.session().id().to_string(),
+                    fixture.instance_id.to_string(),
+                    timestamp(fixture.created_at + ChronoDuration::seconds(offset_seconds)),
+                ],
+            )
+            .expect("session authentication");
+        created
+    }
+
+    #[test]
+    fn viable_administrators_require_active_subject_membership_and_role() {
+        let fixture = fixture();
+        let correlation_id = fasti_domain::RequestCorrelationId::new_v7();
+        let connection = fixture
+            .kernel
+            .lock_connection(CapabilityKey::CreateBrowserSession, correlation_id)
+            .expect("connection");
+        let count = || {
+            viable_administrator_count(
+                &connection,
+                &fixture.workspace_id.to_string(),
+                CapabilityKey::CreateBrowserSession,
+                correlation_id,
+            )
+            .expect("administrator count")
+        };
+        assert_eq!(count(), 0);
+
+        connection
+            .execute(
+                "UPDATE workspace_memberships SET role = 'administrator' WHERE auth_subject_id = ?1 AND workspace_id = ?2",
+                params![
+                    fixture.subject_id.to_string(),
+                    fixture.workspace_id.to_string(),
+                ],
+            )
+            .expect("administrator membership");
+        assert_eq!(count(), 1);
+
+        connection
+            .execute(
+                "UPDATE auth_subjects SET lifecycle = 'disabled' WHERE auth_subject_id = ?1",
+                [fixture.subject_id.to_string()],
+            )
+            .expect("disable subject");
+        assert_eq!(count(), 0);
     }
 
     fn assert_problem<T>(result: ApplicationResult<T>, expected: ProblemCode) {
@@ -1116,6 +1321,42 @@ mod tests {
             Ok(_) => panic!("expected {expected:?}"),
             Err(problem) => assert_eq!(problem.code(), expected),
         }
+    }
+
+    #[test]
+    fn session_creation_rejects_an_inactive_subject_without_problem_contract_panic() {
+        let fixture = fixture();
+        {
+            let connection = fixture
+                .kernel
+                .lock_connection(
+                    CapabilityKey::CreateBrowserSession,
+                    fasti_domain::RequestCorrelationId::new_v7(),
+                )
+                .expect("connection");
+            connection
+                .execute(
+                    "UPDATE auth_subjects SET lifecycle = 'disabled' WHERE auth_subject_id = ?1",
+                    [fixture.subject_id.to_string()],
+                )
+                .expect("disable subject");
+        }
+        assert_problem(
+            fixture.kernel.create_browser_session(
+                CreateBrowserSessionCommand::try_new(
+                    fasti_domain::RequestCorrelationId::new_v7(),
+                    fixture.subject_id,
+                    fixture.workspace_id,
+                    fixture.grants[..1].to_vec(),
+                    fixture.grants[0],
+                    policy(),
+                    false,
+                    fixture.created_at,
+                )
+                .expect("session command"),
+            ),
+            ProblemCode::Forbidden,
+        );
     }
 
     #[test]
@@ -1177,6 +1418,21 @@ mod tests {
     fn rotation_revokes_the_old_secret_without_extending_absolute_expiry() {
         let fixture = fixture();
         let created = create_session(&fixture, &fixture.grants[..1], fixture.grants[0], 0);
+        let recent_expires_at = fixture.created_at + ChronoDuration::seconds(60);
+        fixture
+            .kernel
+            .inner
+            .connection
+            .lock()
+            .expect("connection")
+            .execute(
+                "UPDATE fasti_browser_session_authentication SET recent_authentication_expires_at = ?1 WHERE browser_session_id = ?2",
+                params![
+                    timestamp(recent_expires_at),
+                    created.session().id().to_string(),
+                ],
+            )
+            .expect("recent authentication");
         let rotated = fixture
             .kernel
             .rotate_browser_session(mutation_command(
@@ -1186,6 +1442,41 @@ mod tests {
                 fixture.created_at + ChronoDuration::seconds(1),
             ))
             .expect("rotate");
+        let copied_authentication = fixture
+            .kernel
+            .inner
+            .connection
+            .lock()
+            .expect("connection")
+            .query_row(
+                r#"
+                SELECT trailbase_instance_id, activation_generation, method,
+                       verified_at, recent_authentication_expires_at
+                FROM fasti_browser_session_authentication
+                WHERE browser_session_id = ?1
+                "#,
+                [rotated.session().id().to_string()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                    ))
+                },
+            )
+            .expect("rotated session authentication");
+        assert_eq!(
+            copied_authentication,
+            (
+                fixture.instance_id.to_string(),
+                1,
+                "trailbase_password".to_owned(),
+                timestamp(fixture.created_at),
+                Some(timestamp(recent_expires_at)),
+            )
+        );
         assert_ne!(rotated.session().id(), created.session().id());
         assert_eq!(rotated.session().rotation_generation(), 1);
         assert_eq!(
@@ -1229,7 +1520,8 @@ mod tests {
                 ),
                 second.session().id(),
             ))
-            .expect("revoke exact"));
+            .expect("revoke exact")
+            .revoked());
         assert_problem(
             fixture
                 .kernel
@@ -1516,8 +1808,8 @@ mod tests {
     }
 
     #[test]
-    fn session_authentication_rechecks_selected_grant_and_client_state() {
-        for revoke in ["grant", "client"] {
+    fn session_authentication_rechecks_membership_grant_and_client_state() {
+        for revoke in ["membership", "grant", "client"] {
             let fixture = fixture();
             let created = create_session(&fixture, &fixture.grants[..1], fixture.grants[0], 0);
             let connection = fixture
@@ -1527,7 +1819,17 @@ mod tests {
                     fasti_domain::RequestCorrelationId::new_v7(),
                 )
                 .expect("connection");
-            if revoke == "grant" {
+            if revoke == "membership" {
+                connection
+                    .execute(
+                        "UPDATE workspace_memberships SET lifecycle = 'suspended' WHERE auth_subject_id = ?1 AND workspace_id = ?2",
+                        params![
+                            fixture.subject_id.to_string(),
+                            fixture.workspace_id.to_string(),
+                        ],
+                    )
+                    .expect("suspend membership");
+            } else if revoke == "grant" {
                 connection
                     .execute(
                         "UPDATE profile_grants SET status = 'revoked', revoked_at = ?1 WHERE grant_id = ?2",
@@ -1588,7 +1890,7 @@ mod tests {
         let wins = threads
             .into_iter()
             .map(|thread| thread.join().expect("thread"))
-            .filter(|won| *won)
+            .filter(|outcome| outcome.revoked())
             .count();
         assert_eq!(wins, 1);
 

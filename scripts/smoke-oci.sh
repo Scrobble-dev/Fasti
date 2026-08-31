@@ -146,6 +146,35 @@ if "$oci_runtime" run --rm --network none "$image" /usr/local/bin/fasti verify >
   echo "Unavailable verify command reported success" >&2
   exit 1
 fi
+if [[ -s "$cli_stdout" ]] || \
+  ! grep -Fq "capability_id=portability.workspace.verify" "$cli_stderr" || \
+  ! grep -Fq "not available in the current runtime" "$cli_stderr" || \
+  ! grep -Fq "owned by B3" "$cli_stderr"; then
+  echo "Unavailable verify command did not fail explicitly and quietly" >&2
+  exit 1
+fi
+
+if ! "$oci_runtime" run --rm --network none "$image" /usr/local/bin/fasti \
+  access bootstrap-administrator --help >"$cli_stdout" 2>"$cli_stderr"; then
+  echo "First-administrator CLI help is unavailable" >&2
+  exit 1
+fi
+if grep -Eiq 'password|token|bootstrap.secret|browser.binding' "$cli_stdout"; then
+  echo "First-administrator CLI help exposes a forbidden credential argument" >&2
+  exit 1
+fi
+if "$oci_runtime" run --rm --network none "$image" /usr/local/bin/fasti \
+  access bootstrap-administrator \
+  --data-root /missing-fasti-data-root \
+  --trailbase-root /missing-trailbase-root \
+  --password must-not-echo >"$cli_stdout" 2>"$cli_stderr"; then
+  echo "First-administrator CLI accepted a password argument" >&2
+  exit 1
+fi
+if grep -Fq 'must-not-echo' "$cli_stdout" "$cli_stderr"; then
+  echo "First-administrator CLI repeated a rejected credential value" >&2
+  exit 1
+fi
 
 isolated_id="$("$oci_runtime" run --detach --rm --network none "$image")"
 for attempt in $(seq 1 30); do
@@ -170,14 +199,6 @@ payload = json.loads(sys.argv[1])
 if payload.get("status") != "healthy" or not payload.get("version"):
     raise SystemExit(f"Unexpected network-denied health payload: {payload!r}")
 PY
-
-if [[ -s "$cli_stdout" ]] || \
-  ! grep -Fq "capability_id=portability.workspace.verify" "$cli_stderr" || \
-  ! grep -Fq "not available in the current runtime" "$cli_stderr" || \
-  ! grep -Fq "owned by B3" "$cli_stderr"; then
-  echo "Unavailable verify command did not fail explicitly and quietly" >&2
-  exit 1
-fi
 
 memory_field='{{.MemUsage}}'
 if [[ "$oci_runtime" == "podman" ]]; then

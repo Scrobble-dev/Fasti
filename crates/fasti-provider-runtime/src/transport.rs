@@ -80,14 +80,23 @@ pub fn pinned_client(
     addresses: &[SocketAddr],
     timeout: Duration,
 ) -> Result<Client, &'static str> {
+    pinned_client_with_timeouts(host, addresses, timeout, timeout)
+}
+
+pub fn pinned_client_with_timeouts(
+    host: &str,
+    addresses: &[SocketAddr],
+    connect_timeout: Duration,
+    total_timeout: Duration,
+) -> Result<Client, &'static str> {
     if addresses.is_empty() {
         return Err("The host name did not return an address.");
     }
     Client::builder()
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
-        .connect_timeout(timeout)
-        .timeout(timeout)
+        .connect_timeout(connect_timeout)
+        .timeout(total_timeout)
         .resolve_to_addrs(host, addresses)
         .build()
         .map_err(|_| "The secure HTTP client could not be created.")

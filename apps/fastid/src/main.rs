@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use fasti_api::{
-    api_router, health_router, integration_router, metadata_api_router, provider_api_router,
-    remote_api_router, with_static_fallback,
+    api_router, direct_loopback_api_router, health_router, integration_router, metadata_api_router,
+    provider_api_router, remote_api_router, with_static_fallback,
 };
 use fasti_application::OutboundAccessPolicy;
 use fasti_provider_runtime::{
@@ -24,6 +24,15 @@ use tracing::{info, warn};
 
 const DEFAULT_LISTEN: &str = "127.0.0.1:8420";
 const DEFAULT_PORT_FALLBACK: &str = "fail";
+
+fn browser_access_is_direct(
+    requested_addr: SocketAddr,
+    bound_addr: SocketAddr,
+    used_fallback: bool,
+) -> bool {
+    let fixed_addr: SocketAddr = DEFAULT_LISTEN.parse().expect("valid fixed listener");
+    requested_addr == fixed_addr && bound_addr == fixed_addr && !used_fallback
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum PortFallback {
@@ -194,6 +203,14 @@ fn data_root() -> Result<Option<PathBuf>> {
     parse_data_root(env::var_os("FASTI_DATA_ROOT"))
 }
 
+fn trailbase_root() -> Result<Option<PathBuf>> {
+    let value = env::var_os("FASTI_TRAILBASE_ROOT");
+    if value.as_ref().is_some_and(|value| value.is_empty()) {
+        anyhow::bail!("FASTI_TRAILBASE_ROOT must name a directory when it is set");
+    }
+    Ok(value.map(PathBuf::from))
+}
+
 fn provider_runtime(kernel: &SqliteKernel) -> Result<Arc<ProviderRuntime>> {
     PlatformCredentialVault::initialize()
         .map_err(|error| anyhow::anyhow!("provider credential store is unavailable: {error}"))?;
@@ -297,6 +314,7 @@ async fn main() -> Result<()> {
     let addr = listener.local_addr()?;
 
     let configured_data_root = data_root()?;
+    let configured_trailbase_root = trailbase_root()?;
     let kernel = configured_data_root
         .as_ref()
         .map(|data_root| {
@@ -332,12 +350,24 @@ async fn main() -> Result<()> {
                     "Fasti durable local listener starting on http://{} with data root {:?}",
                     addr, data_root
                 );
-                api_router(
-                    kernel.clone(),
-                    local_api_addr.expect("configured durable local routes require local exposure"),
-                    data_root,
-                )
-                .merge(metadata_and_provider_router(kernel.clone(), providers))
+                let local_router = if browser_access_is_direct(requested_addr, addr, used_fallback)
+                {
+                    direct_loopback_api_router(
+                        kernel.clone(),
+                        addr,
+                        used_fallback,
+                        data_root,
+                        configured_trailbase_root.as_deref(),
+                    )?
+                } else {
+                    api_router(
+                        kernel.clone(),
+                        local_api_addr
+                            .expect("configured durable local routes require local exposure"),
+                        data_root,
+                    )
+                };
+                local_router.merge(metadata_and_provider_router(kernel.clone(), providers))
             }
         }
         _ => {
@@ -533,6 +563,33 @@ mod tests {
             PortFallback::Fail
         );
         assert!(parse_port_fallback("random").is_err());
+    }
+
+    #[test]
+    fn browser_access_requires_the_exact_requested_and_bound_listener() {
+        let fixed: SocketAddr = DEFAULT_LISTEN.parse().expect("fixed listener");
+        assert!(browser_access_is_direct(fixed, fixed, false));
+        assert!(!browser_access_is_direct(fixed, fixed, true));
+        assert!(!browser_access_is_direct(
+            "127.0.0.1:8421".parse().expect("other port"),
+            fixed,
+            false
+        ));
+        assert!(!browser_access_is_direct(
+            fixed,
+            "127.0.0.1:8421".parse().expect("other port"),
+            false
+        ));
+        assert!(!browser_access_is_direct(
+            "[::1]:8420".parse().expect("IPv6 loopback"),
+            "[::1]:8420".parse().expect("IPv6 loopback"),
+            false
+        ));
+        assert!(!browser_access_is_direct(
+            "0.0.0.0:8420".parse().expect("wildcard"),
+            "0.0.0.0:8420".parse().expect("wildcard"),
+            false
+        ));
     }
 
     #[tokio::test]

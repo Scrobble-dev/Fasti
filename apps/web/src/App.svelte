@@ -1,5 +1,9 @@
 <script lang="ts">
-  import { FastiProtocolError, connectionEndpoint } from "@fasti/sdk";
+  import {
+    FastiClient,
+    FastiProtocolError,
+    connectionEndpoint,
+  } from "@fasti/sdk";
   import type {
     NetworkConfiguration,
     RecordPage,
@@ -187,8 +191,26 @@
   async function inspectDesktop(): Promise<void> {
     try {
       const { convertFileSrc, invoke } = await import("@tauri-apps/api/core");
+      const accessClient = new FastiClient({ baseUrl: window.location.origin });
       host = {
         networkConfigurationScope: "node",
+        profileDataAuthority: "scoped",
+        startTrailBaseSignIn: (request) =>
+          accessClient.startTrailBaseSignIn(request),
+        readTrailBaseContinuation: (signal) =>
+          accessClient.readTrailBaseContinuation({ signal }),
+        completeTrailBaseContinuation: (request) =>
+          accessClient.completeTrailBaseContinuation(request),
+        cancelTrailBaseContinuation: () =>
+          accessClient.cancelTrailBaseContinuation(),
+        readAccessProjection: (signal) =>
+          accessClient.readAccessProjection({ signal }),
+        endBrowserSession: () => accessClient.endBrowserSession(),
+        revokeBrowserSession: (browserSessionId) =>
+          accessClient.revokeBrowserSession(browserSessionId),
+        revokeOtherBrowserSessions: () =>
+          accessClient.revokeOtherBrowserSessions(),
+        rotateBrowserSession: () => accessClient.rotateBrowserSession(),
         loadNetworkConfiguration: () => invoke("load_network_configuration"),
         saveNetworkConfiguration: async (input) => {
           const configuration = await invoke<NetworkConfiguration>(
@@ -341,7 +363,9 @@
   async function setup(): Promise<void> {
     try {
       const { invoke } = await import("@tauri-apps/api/core");
-      applySetupStatus(await invoke<SetupStatus>("complete_setup"));
+      const completed = await invoke<SetupStatus>("complete_setup");
+      window.history.replaceState({}, "", "/first-run");
+      applySetupStatus(completed);
       if (activeSurface === "status") await inspectHealth();
     } catch (error) {
       applySetupProblem(error);

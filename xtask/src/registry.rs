@@ -9,7 +9,7 @@ use std::fs;
 use std::path::Path;
 
 const REGISTRY_PATH: &str = "contracts/registry/v1/capabilities.yaml";
-const EXPECTED_PROFILES: [&str; 14] = [
+const EXPECTED_PROFILES: [&str; 16] = [
     "b1_durable_bootstrap",
     "b1_http_fixture",
     "b1_integration_status",
@@ -18,7 +18,9 @@ const EXPECTED_PROFILES: [&str; 14] = [
     "b1_receipt_stream",
     "b1_records",
     "b2_profile_state",
+    "c1_access_projection",
     "c1_browser_session_foundation",
+    "c1_identity_bootstrap",
     "health",
     "later_b2",
     "later_b3",
@@ -214,7 +216,7 @@ pub(crate) fn finalized_required_bindings(
     for capability in registry.capabilities {
         if !matches!(
             capability.contract_body,
-            CapabilityBody::B1 | CapabilityBody::M1 | CapabilityBody::M2
+            CapabilityBody::B1 | CapabilityBody::C1 | CapabilityBody::M1 | CapabilityBody::M2
         ) || capability.lifecycle.contract_state != ContractState::Finalized
         {
             continue;
@@ -391,6 +393,9 @@ fn validate_capabilities(registry: &Registry) -> anyhow::Result<()> {
                 AuthorizationKind::BootstrapOnly => requirement.is_bootstrap_only(),
                 AuthorizationKind::LocalOperator => requirement.is_local_operator(),
                 AuthorizationKind::BrowserSession => requirement.is_browser_session(),
+                AuthorizationKind::ScopedOrBrowserSession => {
+                    requirement.is_scoped_or_browser_session()
+                }
                 AuthorizationKind::Scoped => {
                     !requirement.is_unauthenticated()
                         && !requirement.is_bootstrap_only()
@@ -452,9 +457,18 @@ fn validate_capabilities(registry: &Registry) -> anyhow::Result<()> {
                 "{label}: reserved problem code {problem:?} cannot enter the public registry before {}",
                 problem_code.introduced_in().as_str()
             );
+            let is_browser_session_extension = capability.authorization
+                == AuthorizationKind::ScopedOrBrowserSession
+                && matches!(
+                    problem_code,
+                    ProblemCode::BrowserSessionExpired
+                        | ProblemCode::BrowserSessionRevoked
+                        | ProblemCode::SessionPolicyChanged
+                );
             ensure!(
                 body_rank(problem_code.introduced_in())
-                    <= body_rank(capability.contract_body).max(body_rank(capability.runtime_body)),
+                    <= body_rank(capability.contract_body).max(body_rank(capability.runtime_body))
+                    || is_browser_session_extension,
                 "{label}: problem code {problem:?} belongs after both contract body {} and runtime body {}",
                 capability.contract_body.as_str(),
                 capability.runtime_body.as_str()
@@ -634,6 +648,8 @@ const fn expected_surface_profile(key: CapabilityKey) -> &'static str {
         | CapabilityKey::RevokeAllBrowserSessions
         | CapabilityKey::RotateBrowserSession
         | CapabilityKey::SelectBrowserSessionProfile => "c1_browser_session_foundation",
+        CapabilityKey::AccessIdentityBootstrap => "c1_identity_bootstrap",
+        CapabilityKey::ReadAccessProjection => "c1_access_projection",
         CapabilityKey::ListProviders
         | CapabilityKey::ConfigureProviderCredential
         | CapabilityKey::TestProviderCredential
@@ -786,7 +802,7 @@ mod tests {
     }
 
     #[test]
-    fn restore_is_the_only_local_operator_capability() {
+    fn local_operator_capabilities_are_explicit_and_scope_free() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .expect("xtask lives under workspace root");
@@ -797,12 +813,17 @@ mod tests {
             .filter(|capability| capability.authorization == AuthorizationKind::LocalOperator)
             .collect();
 
-        assert_eq!(local_operator.len(), 1);
+        assert_eq!(local_operator.len(), 2);
         assert_eq!(
             local_operator[0].application_key,
-            CapabilityKey::RestoreWorkspace
+            CapabilityKey::AccessIdentityBootstrap
         );
         assert!(local_operator[0].scopes.is_empty());
+        assert_eq!(
+            local_operator[1].application_key,
+            CapabilityKey::RestoreWorkspace
+        );
+        assert!(local_operator[1].scopes.is_empty());
 
         let export = registry
             .capabilities
@@ -830,6 +851,9 @@ mod tests {
         let rendered = serde_json::to_string(&public).expect("serialize public registry");
 
         assert!(!rendered.contains(ProblemCode::CursorExpired.as_str()));
+        assert!(!rendered.contains(ProblemCode::AuthLastSignInMethod.as_str()));
+        assert!(!rendered.contains(ProblemCode::AuthAssuranceInsufficient.as_str()));
+        assert!(!rendered.contains(ProblemCode::RecentAuthenticationRequired.as_str()));
         assert!(rendered.contains(ProblemCode::StorageUnavailable.as_str()));
         assert_eq!(
             ProblemCode::CursorExpired.contract_state(),
@@ -839,6 +863,46 @@ mod tests {
             ProblemCode::StorageUnavailable.contract_state(),
             ContractState::Finalized
         );
+    }
+
+    #[test]
+    fn hybrid_authorization_is_limited_to_the_frozen_capabilities() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("xtask lives under workspace root");
+        let registry = load_validated(root).expect("authored registry is valid");
+        let hybrid: Vec<_> = registry
+            .capabilities
+            .iter()
+            .filter(|capability| {
+                capability.authorization == AuthorizationKind::ScopedOrBrowserSession
+            })
+            .map(|capability| capability.application_key)
+            .collect();
+        assert_eq!(
+            hybrid,
+            [
+                CapabilityKey::AcceptObservation,
+                CapabilityKey::CreateRecord,
+                CapabilityKey::AttachIdentifier,
+                CapabilityKey::ListRecords,
+                CapabilityKey::RegisterNamespace,
+                CapabilityKey::ListTrackingDispositions,
+                CapabilityKey::SetTrackingDisposition,
+                CapabilityKey::GetNuvioCollections,
+                CapabilityKey::ReplaceNuvioCollections,
+                CapabilityKey::ClearNuvioCollections,
+            ]
+        );
+
+        let mut broadened = registry;
+        broadened
+            .capabilities
+            .iter_mut()
+            .find(|capability| capability.application_key == CapabilityKey::ReplayReceipt)
+            .expect("receipt replay")
+            .authorization = AuthorizationKind::ScopedOrBrowserSession;
+        assert!(validate_capabilities(&broadened).is_err());
     }
 
     #[test]

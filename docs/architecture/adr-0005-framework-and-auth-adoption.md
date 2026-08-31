@@ -46,9 +46,11 @@ following Fasti's existing rules.
    database as Fasti domain storage.
 6. Remove the proposed local `BrowserUser`, password, and development-account
    path. It is not a compatibility surface.
-7. Keep Fasti's browser-session model dormant until C1 proves the TrailBase
+7. Activate Fasti browser sessions only through C1 after the TrailBase
    exchange, subject anchor, membership, role, administrator continuity, and
-   session issuance.
+   session-issuance gates pass. Current local C1 source uses only the exact
+   direct `127.0.0.1:8420` listener; package and delivery evidence remains
+   pending.
 8. Add no second broad application framework beside TrailBase. Named external
    identity integrations must remain bounded adapters under their approved
    package plans.
@@ -155,11 +157,11 @@ decision or trigger a second Fasti authentication implementation.
 
 | Goal | Command or shape | Rule |
 | --- | --- | --- |
-| Fast Rust and web iteration | `./scripts/dev.sh` | Default PR A contributor path. Native daemon and Vite; human sign-in remains unavailable. |
-| Trusted desktop review | `FASTI_DATA_ROOT=/private/path ./scripts/dev.sh --desktop` | One Tauri host with the embedded local kernel. |
+| Fast Rust and web iteration | `./scripts/dev.sh` | Native daemon and Vite. An already initialized, verified TrailBase root starts beside Fasti; the exact direct listener mounts C1. The launcher never initializes TrailBase. |
+| Trusted desktop review | `FASTI_DATA_ROOT=/private/path ./scripts/dev.sh --desktop` | One Tauri host with the embedded local kernel. An already initialized, verified TrailBase root starts beside it; package evidence remains pending. |
 | Daemon/CLI container proof | `docker build .` | Produces the runtime-equivalent default image. Docker requires BuildKit; Podman/Buildah must keep unused-stage pruning enabled. |
 | One-container product review | `docker build --target local -t fasti:local .` | Adds the pre-built Workbench to `fastid`; remains review-only until release gates pass. |
-| TrailBase integration package | Explicit pinned profile | Starts TrailBase beside Fasti as a separate process with a separate data directory and clear health state. It does not activate production sessions before C1. |
+| TrailBase integration package | Explicit pinned profile | Starts TrailBase beside Fasti as a separate process with a separate data directory and clear health state. Verified activation can issue C1 sessions only on the exact direct listener; other topologies omit the routes. |
 
 Docker's deprecated legacy builder is not supported. The Dockerfile contains a
 modern-builder feature gate, so CI and local builds fail instead of silently
@@ -205,8 +207,9 @@ directly to Chronicle or identity tables.
 - Contributors keep one runtime and one persistence model.
 - TrailBase owns proven human-account flows without becoming Fasti's
   application backend.
-- The proposed local account path is removed. The final Fasti session model
-  stays dormant until C1 activation evidence exists.
+- The proposed local account path is removed. C1 now implements the final Fasti
+  session model in local source without making a package, merge, or release
+  claim.
 - Future agents have a fail-closed repository check against accidental Loco
   adoption and unpinned Docker bases.
 - OpenAPI, AsyncAPI, JSON Schema, JSON-LD, SDK, and CLI outputs remain unchanged

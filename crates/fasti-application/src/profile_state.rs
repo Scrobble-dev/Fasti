@@ -1,17 +1,20 @@
-use crate::{ApplicationResult, RequestAccessContext};
+use crate::{ApplicationAccessContext, ApplicationResult};
 use fasti_domain::{RecordId, RequestCorrelationId, TrackingDisposition};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListTrackingDispositionsQuery {
     correlation_id: RequestCorrelationId,
-    access: RequestAccessContext,
+    access: ApplicationAccessContext,
 }
 
 impl ListTrackingDispositionsQuery {
-    pub const fn new(correlation_id: RequestCorrelationId, access: RequestAccessContext) -> Self {
+    pub fn new(
+        correlation_id: RequestCorrelationId,
+        access: impl Into<ApplicationAccessContext>,
+    ) -> Self {
         Self {
             correlation_id,
-            access,
+            access: access.into(),
         }
     }
 
@@ -19,29 +22,29 @@ impl ListTrackingDispositionsQuery {
         self.correlation_id
     }
 
-    pub const fn access(&self) -> &RequestAccessContext {
+    pub const fn access(&self) -> &ApplicationAccessContext {
         &self.access
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SetTrackingDispositionCommand {
     correlation_id: RequestCorrelationId,
-    access: RequestAccessContext,
+    access: ApplicationAccessContext,
     record_id: RecordId,
     disposition: Option<TrackingDisposition>,
 }
 
 impl SetTrackingDispositionCommand {
-    pub const fn new(
+    pub fn new(
         correlation_id: RequestCorrelationId,
-        access: RequestAccessContext,
+        access: impl Into<ApplicationAccessContext>,
         record_id: RecordId,
         disposition: Option<TrackingDisposition>,
     ) -> Self {
         Self {
             correlation_id,
-            access,
+            access: access.into(),
             record_id,
             disposition,
         }
@@ -51,7 +54,7 @@ impl SetTrackingDispositionCommand {
         self.correlation_id
     }
 
-    pub const fn access(&self) -> &RequestAccessContext {
+    pub const fn access(&self) -> &ApplicationAccessContext {
         &self.access
     }
 

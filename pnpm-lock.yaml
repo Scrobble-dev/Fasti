@@ -29,6 +29,9 @@ importers:
       '@cyclonedx/cyclonedx-npm':
         specifier: 6.0.1
         version: 6.0.1(supports-color@7.2.0)
+      '@fasti/sdk':
+        specifier: workspace:*
+        version: link:packages/sdk
       '@playwright/test':
         specifier: 1.62.1
         version: 1.62.1

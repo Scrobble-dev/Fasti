@@ -7,7 +7,7 @@ use fasti_domain::{Grain, MetadataClaimId, MAX_EXTERNAL_IDENTIFIER_BYTES};
 use rusqlite::{Connection, Result, Transaction, TransactionBehavior};
 use std::fmt::Write as _;
 
-pub(crate) const SCHEMA_VERSION: i64 = 13;
+pub(crate) const SCHEMA_VERSION: i64 = 14;
 
 pub(crate) fn migrate(connection: &Connection) -> Result<()> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -73,6 +73,11 @@ pub(crate) fn migrate(connection: &Connection) -> Result<()> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if version == 12 {
         migrate_v13(connection)?;
+    }
+
+    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version == 13 {
+        migrate_v14(connection)?;
     }
 
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -1853,6 +1858,524 @@ fn migrate_v13(connection: &Connection) -> Result<()> {
     transaction.commit()
 }
 
+fn migrate_v14(connection: &Connection) -> Result<()> {
+    let transaction = Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+    transaction.execute_batch(
+        r#"
+        CREATE TABLE trailbase_installation (
+            singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+            trailbase_instance_id TEXT NOT NULL UNIQUE CHECK (
+                length(trailbase_instance_id) = 36
+                AND substr(trailbase_instance_id, 1, 4) = 'tbi_'
+                AND substr(trailbase_instance_id, 5) NOT GLOB '*[^0-9a-f]*'
+                AND substr(trailbase_instance_id, 17, 1) = '7'
+                AND substr(trailbase_instance_id, 21, 1) GLOB '[89ab]'
+            ),
+            physical_root_identity TEXT NOT NULL CHECK (
+                length(physical_root_identity) = 71
+                AND substr(physical_root_identity, 1, 7) = 'sha256:'
+                AND substr(physical_root_identity, 8) NOT GLOB '*[^0-9a-f]*'
+            ),
+            release_lock_identity TEXT CHECK (
+                release_lock_identity IS NULL OR (
+                    length(release_lock_identity) = 71
+                    AND substr(release_lock_identity, 1, 7) = 'sha256:'
+                    AND substr(release_lock_identity, 8) NOT GLOB '*[^0-9a-f]*'
+                )
+            ),
+            activation_state TEXT NOT NULL
+                CHECK (activation_state IN ('inactive', 'active', 'blocked')),
+            activation_blocker TEXT CHECK (activation_blocker IN (
+                'release_mismatch', 'physical_root_identity_mismatch', 'declared_restore'
+            )),
+            activation_generation INTEGER NOT NULL CHECK (activation_generation >= 0),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            CHECK (updated_at >= created_at),
+            CHECK (
+                (activation_state = 'inactive'
+                    AND activation_blocker IS NULL
+                    AND activation_generation = 0)
+                OR
+                (activation_state = 'active'
+                    AND activation_blocker IS NULL
+                    AND release_lock_identity IS NOT NULL
+                    AND activation_generation >= 1)
+                OR
+                (activation_state = 'blocked' AND activation_blocker IS NOT NULL)
+            )
+        ) STRICT;
+
+        CREATE TABLE trailbase_auth_anchors (
+            trailbase_instance_id TEXT NOT NULL
+                REFERENCES trailbase_installation(trailbase_instance_id),
+            trailbase_subject BLOB NOT NULL CHECK (length(trailbase_subject) = 16),
+            auth_subject_id TEXT NOT NULL UNIQUE
+                REFERENCES auth_subjects(auth_subject_id),
+            linked_at TEXT NOT NULL,
+            PRIMARY KEY (trailbase_instance_id, trailbase_subject)
+        ) STRICT, WITHOUT ROWID;
+
+        CREATE TRIGGER trailbase_auth_anchors_immutable_update
+        BEFORE UPDATE ON trailbase_auth_anchors
+        BEGIN
+            SELECT RAISE(ABORT, 'TrailBase authentication anchors are immutable');
+        END;
+
+        CREATE TRIGGER trailbase_auth_anchors_immutable_delete
+        BEFORE DELETE ON trailbase_auth_anchors
+        BEGIN
+            SELECT RAISE(ABORT, 'TrailBase authentication anchors are immutable');
+        END;
+
+        CREATE TABLE workspace_memberships (
+            membership_id TEXT PRIMARY KEY CHECK (
+                length(membership_id) = 36
+                AND substr(membership_id, 1, 4) = 'mem_'
+                AND substr(membership_id, 5) NOT GLOB '*[^0-9a-f]*'
+                AND substr(membership_id, 17, 1) = '7'
+                AND substr(membership_id, 21, 1) GLOB '[89ab]'
+            ),
+            auth_subject_id TEXT NOT NULL REFERENCES auth_subjects(auth_subject_id),
+            workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id),
+            lifecycle TEXT NOT NULL CHECK (lifecycle IN (
+                'invited', 'pending_approval', 'active', 'suspended', 'removed'
+            )),
+            role TEXT NOT NULL CHECK (role IN ('member', 'administrator')),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            CHECK (updated_at >= created_at),
+            CHECK (
+                lifecycle NOT IN ('invited', 'pending_approval') OR role = 'member'
+            )
+        ) STRICT;
+        CREATE UNIQUE INDEX workspace_memberships_current_idx
+            ON workspace_memberships(auth_subject_id, workspace_id)
+            WHERE lifecycle <> 'removed';
+        CREATE INDEX workspace_memberships_authorization_idx
+            ON workspace_memberships(workspace_id, lifecycle, role, auth_subject_id);
+
+        CREATE TRIGGER workspace_memberships_removed_immutable_update
+        BEFORE UPDATE ON workspace_memberships
+        WHEN OLD.lifecycle = 'removed'
+        BEGIN
+            SELECT RAISE(ABORT, 'removed workspace memberships are immutable');
+        END;
+
+        CREATE TRIGGER workspace_memberships_removed_immutable_delete
+        BEFORE DELETE ON workspace_memberships
+        WHEN OLD.lifecycle = 'removed'
+        BEGIN
+            SELECT RAISE(ABORT, 'removed workspace memberships are immutable');
+        END;
+
+        CREATE TABLE auth_ceremonies (
+            operation_id TEXT PRIMARY KEY CHECK (
+                length(operation_id) = 35
+                AND substr(operation_id, 1, 3) = 'op_'
+                AND substr(operation_id, 4) NOT GLOB '*[^0-9a-f]*'
+                AND substr(operation_id, 16, 1) = '7'
+                AND substr(operation_id, 20, 1) GLOB '[89ab]'
+            ),
+            purpose TEXT NOT NULL CHECK (purpose IN (
+                'sign_in', 'recent_authentication', 'first_administrator_bootstrap'
+            )),
+            protocol TEXT NOT NULL
+                CHECK (protocol = 'trailbase_authorization_code_pkce'),
+            trailbase_instance_id TEXT NOT NULL
+                REFERENCES trailbase_installation(trailbase_instance_id),
+            activation_generation INTEGER NOT NULL CHECK (activation_generation >= 1),
+            browser_binding_digest TEXT NOT NULL CHECK (
+                length(browser_binding_digest) = 71
+                AND substr(browser_binding_digest, 1, 7) = 'sha256:'
+                AND substr(browser_binding_digest, 8) NOT GLOB '*[^0-9a-f]*'
+            ),
+            workspace_id TEXT CHECK (
+                workspace_id IS NULL OR (
+                    length(workspace_id) = 36
+                    AND substr(workspace_id, 1, 4) = 'wsp_'
+                    AND substr(workspace_id, 5) NOT GLOB '*[^0-9a-f]*'
+                    AND substr(workspace_id, 17, 1) = '7'
+                    AND substr(workspace_id, 21, 1) GLOB '[89ab]'
+                )
+            ),
+            selected_profile_grant_id TEXT CHECK (
+                selected_profile_grant_id IS NULL OR (
+                    length(selected_profile_grant_id) = 36
+                    AND substr(selected_profile_grant_id, 1, 4) = 'grt_'
+                    AND substr(selected_profile_grant_id, 5) NOT GLOB '*[^0-9a-f]*'
+                    AND substr(selected_profile_grant_id, 17, 1) = '7'
+                    AND substr(selected_profile_grant_id, 21, 1) GLOB '[89ab]'
+                )
+            ),
+            bound_browser_session_id TEXT CHECK (
+                bound_browser_session_id IS NULL OR (
+                    length(bound_browser_session_id) = 36
+                    AND substr(bound_browser_session_id, 1, 4) = 'ses_'
+                    AND substr(bound_browser_session_id, 5) NOT GLOB '*[^0-9a-f]*'
+                    AND substr(bound_browser_session_id, 17, 1) = '7'
+                    AND substr(bound_browser_session_id, 21, 1) GLOB '[89ab]'
+                )
+            ),
+            invited_membership_id TEXT CHECK (
+                invited_membership_id IS NULL OR (
+                    length(invited_membership_id) = 36
+                    AND substr(invited_membership_id, 1, 4) = 'mem_'
+                    AND substr(invited_membership_id, 5) NOT GLOB '*[^0-9a-f]*'
+                    AND substr(invited_membership_id, 17, 1) = '7'
+                    AND substr(invited_membership_id, 21, 1) GLOB '[89ab]'
+                )
+            ),
+            remembered INTEGER NOT NULL CHECK (remembered IN (0, 1)),
+            confirmed_auth_subject_id TEXT
+                REFERENCES auth_subjects(auth_subject_id),
+            authentication_method TEXT CHECK (
+                authentication_method IS NULL OR authentication_method IN (
+                    'trailbase_password', 'trailbase_social'
+                )
+            ),
+            authentication_verified_at TEXT,
+            confirmed_auth_epoch INTEGER CHECK (
+                confirmed_auth_epoch IS NULL OR confirmed_auth_epoch >= 0
+            ),
+            confirmed_authorization_epoch INTEGER CHECK (
+                confirmed_authorization_epoch IS NULL
+                OR confirmed_authorization_epoch >= 0
+            ),
+            callback_path TEXT NOT NULL CHECK (
+                length(callback_path) BETWEEN 1 AND 128
+                AND substr(callback_path, 1, 1) = '/'
+                AND substr(callback_path, 1, 2) <> '//'
+                AND callback_path NOT GLOB '*[^A-Za-z0-9/_.-]*'
+            ),
+            return_target TEXT NOT NULL CHECK (return_target IN (
+                'application_home', 'account_security', 'first_run'
+            )),
+            correlation_id TEXT NOT NULL CHECK (
+                length(correlation_id) = 36
+                AND substr(correlation_id, 1, 4) = 'req_'
+                AND substr(correlation_id, 5) NOT GLOB '*[^0-9a-f]*'
+                AND substr(correlation_id, 17, 1) = '7'
+                AND substr(correlation_id, 21, 1) GLOB '[89ab]'
+            ),
+            state TEXT NOT NULL CHECK (state IN (
+                'pending', 'claimed', 'selection_required', 'completed',
+                'cancelled', 'failed', 'cleanup_uncertain', 'expired'
+            )),
+            failure TEXT CHECK (failure IN (
+                'verifier_lost_on_restart', 'exchange_outcome_uncertain',
+                'exchange_failed', 'status_rejected', 'logout_uncertain',
+                'local_authorization_denied', 'local_persistence_failed',
+                'trust_unavailable'
+            )),
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            claimed_at TEXT,
+            terminal_at TEXT,
+            CHECK (expires_at > created_at),
+            CHECK (claimed_at IS NULL OR (claimed_at >= created_at AND claimed_at < expires_at)),
+            CHECK (terminal_at IS NULL OR terminal_at >= COALESCE(claimed_at, created_at)),
+            CHECK (
+                (workspace_id IS NULL
+                    AND selected_profile_grant_id IS NULL
+                    AND bound_browser_session_id IS NULL
+                    AND invited_membership_id IS NULL)
+                OR
+                (workspace_id IS NOT NULL AND selected_profile_grant_id IS NOT NULL)
+            ),
+            CHECK (
+                (confirmed_auth_subject_id IS NULL
+                    AND authentication_method IS NULL
+                    AND authentication_verified_at IS NULL
+                    AND confirmed_auth_epoch IS NULL
+                    AND confirmed_authorization_epoch IS NULL)
+                OR
+                (confirmed_auth_subject_id IS NOT NULL
+                    AND authentication_method IS NOT NULL
+                    AND authentication_verified_at IS NOT NULL
+                    AND confirmed_auth_epoch IS NOT NULL
+                    AND confirmed_authorization_epoch IS NOT NULL)
+            ),
+            CHECK (
+                authentication_verified_at IS NULL OR (
+                    claimed_at IS NOT NULL
+                    AND authentication_verified_at >= claimed_at
+                    AND authentication_verified_at < expires_at
+                )
+            ),
+            CHECK (
+                (purpose = 'sign_in' AND return_target = 'application_home')
+                OR (purpose = 'recent_authentication' AND return_target = 'account_security')
+                OR (purpose = 'first_administrator_bootstrap' AND return_target = 'first_run')
+            ),
+            CHECK (
+                (purpose = 'sign_in'
+                    AND bound_browser_session_id IS NULL
+                    AND (
+                        (state IN (
+                            'pending', 'claimed', 'failed', 'cleanup_uncertain'
+                        )
+                            AND workspace_id IS NULL
+                            AND confirmed_auth_subject_id IS NULL)
+                        OR
+                        (state IN ('cancelled', 'expired')
+                            AND workspace_id IS NULL
+                            AND (
+                                (claimed_at IS NULL
+                                    AND confirmed_auth_subject_id IS NULL)
+                                OR
+                                (claimed_at IS NOT NULL
+                                    AND confirmed_auth_subject_id IS NOT NULL)
+                            ))
+                        OR
+                        (state = 'selection_required'
+                            AND workspace_id IS NULL
+                            AND confirmed_auth_subject_id IS NOT NULL)
+                        OR
+                        (state = 'completed'
+                            AND workspace_id IS NOT NULL
+                            AND confirmed_auth_subject_id IS NOT NULL)
+                    ))
+                OR (purpose = 'recent_authentication'
+                    AND workspace_id IS NOT NULL
+                    AND bound_browser_session_id IS NOT NULL
+                    AND invited_membership_id IS NULL
+                    AND remembered = 0
+                    AND confirmed_auth_subject_id IS NULL
+                    AND state <> 'selection_required')
+                OR (purpose = 'first_administrator_bootstrap'
+                    AND workspace_id IS NOT NULL
+                    AND bound_browser_session_id IS NULL
+                    AND invited_membership_id IS NULL
+                    AND remembered = 0
+                    AND confirmed_auth_subject_id IS NULL
+                    AND state <> 'selection_required')
+            ),
+            CHECK (
+                (state = 'pending' AND failure IS NULL
+                    AND claimed_at IS NULL AND terminal_at IS NULL)
+                OR
+                (state = 'claimed' AND failure IS NULL
+                    AND claimed_at IS NOT NULL AND terminal_at IS NULL)
+                OR
+                (state = 'selection_required' AND failure IS NULL
+                    AND claimed_at IS NOT NULL AND terminal_at IS NULL)
+                OR
+                (state = 'completed' AND failure IS NULL
+                    AND claimed_at IS NOT NULL AND terminal_at IS NOT NULL
+                    AND terminal_at < expires_at)
+                OR
+                (state = 'cancelled' AND failure IS NULL
+                    AND terminal_at IS NOT NULL
+                    AND terminal_at < expires_at)
+                OR
+                (state = 'failed' AND terminal_at IS NOT NULL AND (
+                    (claimed_at IS NULL AND failure = 'verifier_lost_on_restart')
+                    OR
+                    (claimed_at IS NOT NULL AND failure IN (
+                        'exchange_failed', 'status_rejected', 'local_authorization_denied',
+                        'local_persistence_failed', 'trust_unavailable'
+                    ))
+                ))
+                OR
+                (state = 'cleanup_uncertain' AND claimed_at IS NOT NULL
+                    AND terminal_at IS NOT NULL
+                    AND failure IN ('exchange_outcome_uncertain', 'logout_uncertain'))
+                OR
+                (state = 'expired' AND failure IS NULL
+                    AND terminal_at IS NOT NULL AND terminal_at >= expires_at)
+            )
+        ) STRICT;
+        CREATE INDEX auth_ceremonies_state_expiry_idx
+            ON auth_ceremonies(state, expires_at, operation_id);
+        CREATE UNIQUE INDEX auth_ceremonies_browser_binding_idx
+            ON auth_ceremonies(browser_binding_digest);
+        CREATE INDEX auth_ceremonies_terminal_idx
+            ON auth_ceremonies(terminal_at, operation_id)
+            WHERE terminal_at IS NOT NULL;
+        CREATE UNIQUE INDEX auth_ceremonies_active_bootstrap_idx
+            ON auth_ceremonies(purpose)
+            WHERE purpose = 'first_administrator_bootstrap'
+                AND state IN ('pending', 'claimed');
+
+        CREATE TABLE fasti_browser_session_authentication (
+            browser_session_id TEXT PRIMARY KEY
+                REFERENCES fasti_browser_sessions(browser_session_id) ON DELETE CASCADE,
+            trailbase_instance_id TEXT NOT NULL
+                REFERENCES trailbase_installation(trailbase_instance_id),
+            activation_generation INTEGER NOT NULL CHECK (activation_generation >= 1),
+            method TEXT NOT NULL CHECK (method IN (
+                'trailbase_password', 'trailbase_social'
+            )),
+            verified_at TEXT NOT NULL,
+            recent_authentication_expires_at TEXT,
+            CHECK (
+                recent_authentication_expires_at IS NULL
+                OR recent_authentication_expires_at > verified_at
+            )
+        ) STRICT;
+        CREATE INDEX fasti_browser_session_authentication_generation_idx
+            ON fasti_browser_session_authentication(
+                trailbase_instance_id, activation_generation, browser_session_id
+            );
+
+        CREATE TABLE access_audit_events (
+            audit_event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_kind TEXT NOT NULL CHECK (event_kind IN (
+                'trailbase_activated', 'trailbase_blocked', 'anchor_linked',
+                'first_administrator_bootstrapped', 'subject_disabled',
+                'subject_deleted', 'subject_recovery_pending', 'subject_reactivated',
+                'membership_invited', 'membership_approval_requested',
+                'membership_invitation_accepted', 'membership_approved',
+                'membership_suspended', 'membership_resumed', 'membership_removed',
+                'membership_promoted', 'membership_demoted',
+                'ceremony_claimed', 'ceremony_selection_required', 'ceremony_completed',
+                'ceremony_cancelled', 'ceremony_expired',
+                'ceremony_cleanup_uncertain', 'ceremony_failed',
+                'browser_session_issued', 'browser_session_revoked'
+            )),
+            trailbase_instance_id TEXT CHECK (
+                trailbase_instance_id IS NULL OR (
+                    length(trailbase_instance_id) = 36
+                    AND substr(trailbase_instance_id, 1, 4) = 'tbi_'
+                    AND substr(trailbase_instance_id, 5) NOT GLOB '*[^0-9a-f]*'
+                    AND substr(trailbase_instance_id, 17, 1) = '7'
+                    AND substr(trailbase_instance_id, 21, 1) GLOB '[89ab]'
+                )
+            ),
+            auth_subject_id TEXT CHECK (
+                auth_subject_id IS NULL OR (
+                    length(auth_subject_id) = 36
+                    AND substr(auth_subject_id, 1, 4) = 'sub_'
+                    AND substr(auth_subject_id, 5) NOT GLOB '*[^0-9a-f]*'
+                    AND substr(auth_subject_id, 17, 1) = '7'
+                    AND substr(auth_subject_id, 21, 1) GLOB '[89ab]'
+                )
+            ),
+            actor_auth_subject_id TEXT CHECK (
+                actor_auth_subject_id IS NULL OR (
+                    length(actor_auth_subject_id) = 36
+                    AND substr(actor_auth_subject_id, 1, 4) = 'sub_'
+                    AND substr(actor_auth_subject_id, 5) NOT GLOB '*[^0-9a-f]*'
+                    AND substr(actor_auth_subject_id, 17, 1) = '7'
+                    AND substr(actor_auth_subject_id, 21, 1) GLOB '[89ab]'
+                )
+            ),
+            workspace_id TEXT CHECK (
+                workspace_id IS NULL OR (
+                    length(workspace_id) = 36
+                    AND substr(workspace_id, 1, 4) = 'wsp_'
+                    AND substr(workspace_id, 5) NOT GLOB '*[^0-9a-f]*'
+                    AND substr(workspace_id, 17, 1) = '7'
+                    AND substr(workspace_id, 21, 1) GLOB '[89ab]'
+                )
+            ),
+            membership_id TEXT CHECK (
+                membership_id IS NULL OR (
+                    length(membership_id) = 36
+                    AND substr(membership_id, 1, 4) = 'mem_'
+                    AND substr(membership_id, 5) NOT GLOB '*[^0-9a-f]*'
+                    AND substr(membership_id, 17, 1) = '7'
+                    AND substr(membership_id, 21, 1) GLOB '[89ab]'
+                )
+            ),
+            operation_id TEXT CHECK (
+                operation_id IS NULL OR (
+                    length(operation_id) = 35
+                    AND substr(operation_id, 1, 3) = 'op_'
+                    AND substr(operation_id, 4) NOT GLOB '*[^0-9a-f]*'
+                    AND substr(operation_id, 16, 1) = '7'
+                    AND substr(operation_id, 20, 1) GLOB '[89ab]'
+                )
+            ),
+            browser_session_id TEXT CHECK (
+                browser_session_id IS NULL OR (
+                    length(browser_session_id) = 36
+                    AND substr(browser_session_id, 1, 4) = 'ses_'
+                    AND substr(browser_session_id, 5) NOT GLOB '*[^0-9a-f]*'
+                    AND substr(browser_session_id, 17, 1) = '7'
+                    AND substr(browser_session_id, 21, 1) GLOB '[89ab]'
+                )
+            ),
+            correlation_id TEXT NOT NULL CHECK (
+                length(correlation_id) = 36
+                AND substr(correlation_id, 1, 4) = 'req_'
+                AND substr(correlation_id, 5) NOT GLOB '*[^0-9a-f]*'
+                AND substr(correlation_id, 17, 1) = '7'
+                AND substr(correlation_id, 21, 1) GLOB '[89ab]'
+            ),
+            occurred_at TEXT NOT NULL,
+            CHECK (
+                (event_kind IN ('trailbase_activated', 'trailbase_blocked')
+                    AND trailbase_instance_id IS NOT NULL)
+                OR
+                (event_kind = 'anchor_linked'
+                    AND trailbase_instance_id IS NOT NULL
+                    AND auth_subject_id IS NOT NULL)
+                OR
+                (event_kind = 'first_administrator_bootstrapped'
+                    AND trailbase_instance_id IS NOT NULL
+                    AND auth_subject_id IS NOT NULL
+                    AND workspace_id IS NOT NULL
+                    AND membership_id IS NOT NULL
+                    AND operation_id IS NOT NULL)
+                OR
+                (event_kind IN (
+                    'subject_disabled', 'subject_deleted',
+                    'subject_recovery_pending', 'subject_reactivated'
+                )
+                    AND auth_subject_id IS NOT NULL
+                    AND actor_auth_subject_id IS NOT NULL)
+                OR
+                (event_kind IN (
+                        'membership_invited', 'membership_approval_requested',
+                        'membership_invitation_accepted', 'membership_approved',
+                        'membership_suspended', 'membership_resumed',
+                        'membership_removed', 'membership_promoted',
+                        'membership_demoted'
+                    )
+                    AND auth_subject_id IS NOT NULL
+                    AND actor_auth_subject_id IS NOT NULL
+                    AND workspace_id IS NOT NULL
+                    AND membership_id IS NOT NULL)
+                OR
+                (event_kind IN (
+                        'ceremony_claimed', 'ceremony_selection_required', 'ceremony_completed',
+                        'ceremony_cancelled', 'ceremony_expired',
+                        'ceremony_cleanup_uncertain', 'ceremony_failed'
+                    )
+                    AND trailbase_instance_id IS NOT NULL
+                    AND operation_id IS NOT NULL)
+                OR
+                (event_kind = 'browser_session_issued'
+                    AND trailbase_instance_id IS NOT NULL
+                    AND auth_subject_id IS NOT NULL
+                    AND workspace_id IS NOT NULL
+                    AND operation_id IS NOT NULL
+                    AND browser_session_id IS NOT NULL)
+                OR
+                (event_kind = 'browser_session_revoked'
+                    AND trailbase_instance_id IS NOT NULL
+                    AND auth_subject_id IS NOT NULL
+                    AND actor_auth_subject_id IS NOT NULL
+                    AND workspace_id IS NOT NULL
+                    AND browser_session_id IS NOT NULL)
+            )
+        ) STRICT;
+        CREATE INDEX access_audit_events_retention_idx
+            ON access_audit_events(occurred_at, audit_event_id);
+
+        CREATE TRIGGER access_audit_events_immutable_update
+        BEFORE UPDATE ON access_audit_events
+        BEGIN
+            SELECT RAISE(ABORT, 'Access audit events are immutable');
+        END;
+        "#,
+    )?;
+    transaction.pragma_update(None, "user_version", 14)?;
+    transaction.commit()
+}
+
 /// Materialize v12 companions for rows restored from archive-v2 after the
 /// archive's frozen legacy tables have been imported and coordinate-repaired.
 /// Every insert is retry-safe and the archive-owned rows remain untouched.
@@ -2525,6 +3048,11 @@ mod tests {
         migrate_v12(connection).expect("version twelve");
     }
 
+    fn migrate_to_version_thirteen(connection: &Connection) {
+        migrate_to_version_twelve(connection);
+        migrate_v13(connection).expect("version thirteen");
+    }
+
     fn seed_legacy_override_root(connection: &Connection, profile_count: usize) {
         connection
             .execute_batch(
@@ -2772,7 +3300,7 @@ mod tests {
     }
 
     #[test]
-    fn version_twelve_upgrades_to_append_only_refresh_receipts() {
+    fn version_twelve_upgrades_through_append_only_refresh_receipts() {
         let connection = Connection::open_in_memory().expect("in-memory SQLite");
         connection
             .pragma_update(None, "foreign_keys", "ON")
@@ -2826,6 +3354,341 @@ mod tests {
             ]
         );
         assert_eq!(triggers, 6);
+    }
+
+    #[test]
+    fn version_thirteen_upgrades_to_node_local_access_without_archive_triggers() {
+        let connection = Connection::open_in_memory().expect("in-memory SQLite");
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .expect("enable foreign keys");
+        migrate_to_version_thirteen(&connection);
+
+        let before: i64 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .expect("read v13");
+        assert_eq!(before, 13);
+        for table in [
+            "trailbase_installation",
+            "trailbase_auth_anchors",
+            "workspace_memberships",
+            "auth_ceremonies",
+            "fasti_browser_session_authentication",
+            "access_audit_events",
+        ] {
+            let count: i64 = connection
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_schema WHERE type = 'table' AND name = ?1",
+                    [table],
+                    |row| row.get(0),
+                )
+                .expect("inspect v13 tables");
+            assert_eq!(count, 0, "{table} must not exist in published v13");
+        }
+
+        migrate(&connection).expect("upgrade v13 to v14");
+
+        let after: i64 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .expect("read v14");
+        assert_eq!(after, 14);
+        for table in [
+            "trailbase_installation",
+            "trailbase_auth_anchors",
+            "workspace_memberships",
+            "auth_ceremonies",
+            "fasti_browser_session_authentication",
+            "access_audit_events",
+        ] {
+            let count: i64 = connection
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_schema WHERE type = 'table' AND name = ?1",
+                    [table],
+                    |row| row.get(0),
+                )
+                .expect("inspect v14 tables");
+            assert_eq!(count, 1, "{table}");
+        }
+        let revision_triggers: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_schema WHERE type = 'trigger' AND name LIKE 'workspace_revision_%' AND tbl_name IN ('trailbase_installation', 'trailbase_auth_anchors', 'workspace_memberships', 'auth_ceremonies', 'fasti_browser_session_authentication', 'access_audit_events')",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count Access revision triggers");
+        assert_eq!(revision_triggers, 0);
+        let active_bootstrap_index: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_schema WHERE type = 'index' AND name = 'auth_ceremonies_active_bootstrap_idx'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count active bootstrap index");
+        assert_eq!(active_bootstrap_index, 1);
+    }
+
+    #[test]
+    fn version_fourteen_constraints_preserve_membership_ceremony_and_audit_invariants() {
+        let connection = migrated_connection();
+        let workspace_id = fasti_domain::WorkspaceId::new_v7().to_string();
+        let subject_id = fasti_domain::AuthSubjectId::new_v7().to_string();
+        let instance_id = fasti_domain::TrailBaseInstanceId::new_v7().to_string();
+        let membership_id = fasti_domain::MembershipId::new_v7().to_string();
+        let next_membership_id = fasti_domain::MembershipId::new_v7().to_string();
+        let grant_id = fasti_domain::ProfileGrantId::new_v7().to_string();
+        let operation_id = fasti_domain::OperationId::new_v7().to_string();
+        let correlation_id = fasti_domain::RequestCorrelationId::new_v7().to_string();
+        let root_digest = format!("sha256:{}", "11".repeat(32));
+        let release_lock_digest = format!("sha256:{}", "22".repeat(32));
+        let binding_digest = format!("sha256:{}", "22".repeat(32));
+        connection
+            .execute(
+                "INSERT INTO workspaces(workspace_id, created_at) VALUES (?1, ?2)",
+                params![workspace_id, CREATED_AT],
+            )
+            .expect("workspace");
+        connection
+            .execute(
+                "INSERT INTO auth_subjects(auth_subject_id, lifecycle, auth_epoch, authorization_epoch, created_at, updated_at) VALUES (?1, 'active', 0, 0, ?2, ?2)",
+                params![subject_id, CREATED_AT],
+            )
+            .expect("subject");
+        connection
+            .execute(
+                "INSERT INTO trailbase_installation(singleton, trailbase_instance_id, physical_root_identity, release_lock_identity, activation_state, activation_blocker, activation_generation, created_at, updated_at) VALUES (1, ?1, ?2, NULL, 'inactive', NULL, 0, ?3, ?3)",
+                params![instance_id, root_digest, CREATED_AT],
+            )
+            .expect("inactive installation may omit release lock identity");
+        connection
+            .execute("DELETE FROM trailbase_installation", [])
+            .expect("replace inactive constraint fixture");
+        connection
+            .execute(
+                "INSERT INTO trailbase_installation(singleton, trailbase_instance_id, physical_root_identity, release_lock_identity, activation_state, activation_blocker, activation_generation, created_at, updated_at) VALUES (1, ?1, ?2, NULL, 'blocked', 'declared_restore', 0, ?3, ?3)",
+                params![instance_id, root_digest, CREATED_AT],
+            )
+            .expect("blocked installation may omit release lock identity");
+        connection
+            .execute("DELETE FROM trailbase_installation", [])
+            .expect("replace blocked constraint fixture");
+        assert!(connection
+            .execute(
+                "INSERT INTO trailbase_installation(singleton, trailbase_instance_id, physical_root_identity, activation_state, activation_blocker, activation_generation, created_at, updated_at) VALUES (1, ?1, ?2, 'active', NULL, 1, ?3, ?3)",
+                params![instance_id, root_digest, CREATED_AT],
+            )
+            .is_err());
+        connection
+            .execute(
+                "INSERT INTO trailbase_installation(singleton, trailbase_instance_id, physical_root_identity, release_lock_identity, activation_state, activation_blocker, activation_generation, created_at, updated_at) VALUES (1, ?1, ?2, ?3, 'active', NULL, 1, ?4, ?4)",
+                params![instance_id, root_digest, release_lock_digest, CREATED_AT],
+            )
+            .expect("installation");
+        connection
+            .execute(
+                "INSERT INTO trailbase_auth_anchors(trailbase_instance_id, trailbase_subject, auth_subject_id, linked_at) VALUES (?1, ?2, ?3, ?4)",
+                params![instance_id, [7_u8; 16].as_slice(), subject_id, CREATED_AT],
+            )
+            .expect("anchor");
+        assert!(connection
+            .execute(
+                "UPDATE trailbase_auth_anchors SET linked_at = ?1",
+                ["2026-08-24T00:00:01.000000Z"],
+            )
+            .is_err());
+        assert!(connection
+            .execute("DELETE FROM trailbase_auth_anchors", [])
+            .is_err());
+
+        assert!(connection
+            .execute(
+                "INSERT INTO workspace_memberships(membership_id, auth_subject_id, workspace_id, lifecycle, role, created_at, updated_at) VALUES (?1, ?2, ?3, 'invited', 'administrator', ?4, ?4)",
+                params![membership_id, subject_id, workspace_id, CREATED_AT],
+            )
+            .is_err());
+        connection
+            .execute(
+                "INSERT INTO workspace_memberships(membership_id, auth_subject_id, workspace_id, lifecycle, role, created_at, updated_at) VALUES (?1, ?2, ?3, 'invited', 'member', ?4, ?4)",
+                params![membership_id, subject_id, workspace_id, CREATED_AT],
+            )
+            .expect("invited membership");
+        assert!(connection
+            .execute(
+                "INSERT INTO workspace_memberships(membership_id, auth_subject_id, workspace_id, lifecycle, role, created_at, updated_at) VALUES (?1, ?2, ?3, 'active', 'member', ?4, ?4)",
+                params![next_membership_id, subject_id, workspace_id, CREATED_AT],
+            )
+            .is_err());
+        connection
+            .execute(
+                "UPDATE workspace_memberships SET lifecycle = 'removed', updated_at = '2026-08-24T00:00:01.000000Z' WHERE membership_id = ?1",
+                [membership_id.as_str()],
+            )
+            .expect("remove membership");
+        connection
+            .execute(
+                "INSERT INTO workspace_memberships(membership_id, auth_subject_id, workspace_id, lifecycle, role, created_at, updated_at) VALUES (?1, ?2, ?3, 'invited', 'member', ?4, ?4)",
+                params![next_membership_id, subject_id, workspace_id, CREATED_AT],
+            )
+            .expect("reinvite with new identity");
+        assert!(connection
+            .execute(
+                "UPDATE workspace_memberships SET role = 'administrator' WHERE membership_id = ?1",
+                [membership_id.as_str()],
+            )
+            .is_err());
+
+        assert!(connection
+            .execute(
+                "INSERT INTO auth_ceremonies(operation_id, purpose, protocol, trailbase_instance_id, activation_generation, browser_binding_digest, workspace_id, selected_profile_grant_id, bound_browser_session_id, invited_membership_id, remembered, callback_path, return_target, correlation_id, state, failure, created_at, expires_at, claimed_at, terminal_at) VALUES (?1, 'sign_in', 'trailbase_authorization_code_pkce', ?2, 1, ?3, NULL, NULL, NULL, NULL, 0, '/auth/trailbase/callback', 'first_run', ?4, 'pending', NULL, ?5, '2026-08-24T00:05:00.000000Z', NULL, NULL)",
+                params![operation_id, instance_id, binding_digest, correlation_id, CREATED_AT],
+            )
+            .is_err());
+        connection
+            .execute(
+                "INSERT INTO auth_ceremonies(operation_id, purpose, protocol, trailbase_instance_id, activation_generation, browser_binding_digest, workspace_id, selected_profile_grant_id, bound_browser_session_id, invited_membership_id, remembered, callback_path, return_target, correlation_id, state, failure, created_at, expires_at, claimed_at, terminal_at) VALUES (?1, 'sign_in', 'trailbase_authorization_code_pkce', ?2, 1, ?3, NULL, NULL, NULL, NULL, 0, '/auth/trailbase/callback', 'application_home', ?4, 'pending', NULL, ?5, '2026-08-24T00:05:00.000000Z', NULL, NULL)",
+                params![operation_id, instance_id, binding_digest, correlation_id, CREATED_AT],
+            )
+            .expect("valid pending ceremony");
+        let browser_session_id = fasti_domain::BrowserSessionId::new_v7().to_string();
+        assert!(connection
+            .execute(
+                "UPDATE auth_ceremonies SET bound_browser_session_id = ?1 WHERE operation_id = ?2",
+                params![browser_session_id, operation_id],
+            )
+            .is_err());
+        connection
+            .execute(
+                "UPDATE auth_ceremonies SET purpose = 'recent_authentication', return_target = 'account_security', workspace_id = ?1, selected_profile_grant_id = ?2, bound_browser_session_id = ?3, remembered = 0 WHERE operation_id = ?4",
+                params![workspace_id, grant_id, browser_session_id, operation_id],
+            )
+            .expect("valid reserved recent-auth association");
+        assert!(connection
+            .execute(
+                "UPDATE auth_ceremonies SET invited_membership_id = ?1 WHERE operation_id = ?2",
+                params![next_membership_id, operation_id],
+            )
+            .is_err());
+        connection
+            .execute(
+                "UPDATE auth_ceremonies SET purpose = 'sign_in', return_target = 'application_home', workspace_id = NULL, selected_profile_grant_id = NULL, bound_browser_session_id = NULL WHERE operation_id = ?1",
+                [operation_id.as_str()],
+            )
+            .expect("restore sign-in association");
+        assert!(connection
+            .execute(
+                "INSERT INTO auth_ceremonies(operation_id, purpose, protocol, trailbase_instance_id, activation_generation, browser_binding_digest, workspace_id, selected_profile_grant_id, bound_browser_session_id, invited_membership_id, remembered, callback_path, return_target, correlation_id, state, failure, created_at, expires_at, claimed_at, terminal_at) VALUES (?1, 'sign_in', 'trailbase_authorization_code_pkce', ?2, 1, ?3, NULL, NULL, NULL, NULL, 0, '/auth/trailbase/callback', 'application_home', ?4, 'pending', NULL, ?5, '2026-08-24T00:05:00.000000Z', NULL, NULL)",
+                params![
+                    fasti_domain::OperationId::new_v7().to_string(),
+                    instance_id,
+                    binding_digest,
+                    correlation_id,
+                    CREATED_AT,
+                ],
+            )
+            .is_err());
+        let lookup_plan: String = connection
+            .query_row(
+                "EXPLAIN QUERY PLAN SELECT operation_id FROM auth_ceremonies WHERE browser_binding_digest = ?1",
+                [binding_digest.as_str()],
+                |row| row.get(3),
+            )
+            .expect("browser binding lookup plan");
+        assert!(lookup_plan.contains("auth_ceremonies_browser_binding_idx"));
+        assert!(connection
+            .execute(
+                "UPDATE auth_ceremonies SET state = 'completed' WHERE operation_id = ?1",
+                [operation_id.as_str()],
+            )
+            .is_err());
+        connection
+            .execute(
+                "UPDATE auth_ceremonies SET state = 'cancelled', terminal_at = '2026-08-24T00:00:01.000000Z' WHERE operation_id = ?1",
+                [operation_id.as_str()],
+            )
+            .expect("cancel pending ceremony");
+        let claimed_operation_id = fasti_domain::OperationId::new_v7().to_string();
+        let claimed_binding_digest = format!("sha256:{}", "33".repeat(32));
+        connection
+            .execute(
+                "INSERT INTO auth_ceremonies(operation_id, purpose, protocol, trailbase_instance_id, activation_generation, browser_binding_digest, workspace_id, selected_profile_grant_id, bound_browser_session_id, invited_membership_id, remembered, callback_path, return_target, correlation_id, state, failure, created_at, expires_at, claimed_at, terminal_at) VALUES (?1, 'sign_in', 'trailbase_authorization_code_pkce', ?2, 1, ?3, NULL, NULL, NULL, NULL, 0, '/auth/trailbase/callback', 'application_home', ?4, 'claimed', NULL, ?5, '2026-08-24T00:05:00.000000Z', '2026-08-24T00:00:01.000000Z', NULL)",
+                params![
+                    claimed_operation_id,
+                    instance_id,
+                    claimed_binding_digest,
+                    correlation_id,
+                    CREATED_AT,
+                ],
+            )
+            .expect("claimed ceremony");
+        assert!(connection
+            .execute(
+                "UPDATE auth_ceremonies SET state = 'cancelled', terminal_at = '2026-08-24T00:00:02.000000Z' WHERE operation_id = ?1",
+                [claimed_operation_id.as_str()],
+            )
+            .is_err());
+
+        connection
+            .execute(
+                "INSERT INTO access_audit_events(event_kind, trailbase_instance_id, auth_subject_id, actor_auth_subject_id, workspace_id, membership_id, operation_id, browser_session_id, correlation_id, occurred_at) VALUES ('membership_invited', ?1, ?2, ?2, ?3, ?4, NULL, NULL, ?5, ?6)",
+                params![instance_id, subject_id, workspace_id, next_membership_id, correlation_id, CREATED_AT],
+            )
+            .expect("audit event");
+        assert!(connection
+            .execute(
+                "UPDATE access_audit_events SET event_kind = 'membership_demoted'",
+                [],
+            )
+            .is_err());
+        assert!(connection
+            .execute(
+                "INSERT INTO access_audit_events(event_kind, correlation_id, occurred_at) VALUES ('membership_invited', ?1, ?2)",
+                params![correlation_id, CREATED_AT],
+            )
+            .is_err());
+        assert!(connection
+            .execute(
+                "INSERT INTO access_audit_events(event_kind, workspace_id, correlation_id, occurred_at) VALUES ('membership_invited', 'wsp_00000000000040008000000000000000', ?1, ?2)",
+                params![correlation_id, CREATED_AT],
+            )
+            .is_err());
+        connection
+            .execute("DELETE FROM access_audit_events", [])
+            .expect("retention pruning may delete audit events");
+    }
+
+    #[test]
+    fn version_fourteen_migration_conflict_is_atomic_and_retryable() {
+        let connection = Connection::open_in_memory().expect("in-memory SQLite");
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .expect("enable foreign keys");
+        migrate_to_version_thirteen(&connection);
+        connection
+            .execute_batch("CREATE TABLE trailbase_installation (collision INTEGER) STRICT;")
+            .expect("simulate schema collision");
+
+        assert!(migrate(&connection).is_err());
+        let version: i64 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .expect("read version after rollback");
+        let partial_tables: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_schema WHERE type = 'table' AND name IN ('trailbase_auth_anchors', 'workspace_memberships', 'auth_ceremonies', 'fasti_browser_session_authentication', 'access_audit_events')",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count rolled-back tables");
+        assert_eq!((version, partial_tables), (13, 0));
+
+        connection
+            .execute_batch("DROP TABLE trailbase_installation;")
+            .expect("remove test collision");
+        migrate(&connection).expect("retry v14 migration");
+        assert_eq!(
+            connection
+                .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .expect("read retried version"),
+            14
+        );
     }
 
     #[test]
@@ -3867,6 +4730,12 @@ mod tests {
                 "metadata_cache_entries".to_owned(),
                 "metadata_cache_claims".to_owned(),
                 "metadata_refresh_receipts".to_owned(),
+                "trailbase_installation".to_owned(),
+                "trailbase_auth_anchors".to_owned(),
+                "workspace_memberships".to_owned(),
+                "auth_ceremonies".to_owned(),
+                "fasti_browser_session_authentication".to_owned(),
+                "access_audit_events".to_owned(),
             ])
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()

@@ -36,6 +36,38 @@ async function mockHealth(page: Page) {
   );
 }
 
+test("desktop setup mounts the first-run journey after committing its route", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const browserWindow = window as typeof window & {
+      __TAURI_INTERNALS__: {
+        invoke: (command: string) => Promise<unknown>;
+      };
+    };
+    browserWindow.__TAURI_INTERNALS__ = {
+      invoke: async (command) => {
+        if (command === "setup_status") {
+          return { phase: "needs_setup", proof_cleanup_pending: false };
+        }
+        if (command === "complete_setup") {
+          return { phase: "ready", proof_cleanup_pending: false };
+        }
+        return undefined;
+      },
+    };
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Create local record" }).click();
+
+  await expect(page).toHaveURL(/\/first-run$/);
+  await expect(page.getByTestId("first-run-guided-setup")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Secure your Fasti account" }),
+  ).toBeVisible();
+});
+
 async function mockTrustedHost(
   page: Page,
   providerConfigured = false,

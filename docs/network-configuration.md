@@ -89,17 +89,17 @@ cargo run --locked -p fastid
 ```
 
 The trusted proxy must terminate HTTPS and must not expose the cleartext
-upstream directly. The remote router omits node initialization and first-client
-enrollment. PR A accepts only existing scoped bearer client credentials for
-durable data routes. It exposes no development human account, local password,
-or production browser-session path.
+upstream directly. The remote router omits node initialization, first-client
+enrollment, and every C1 human-account and browser-session route. It accepts
+only existing scoped bearer client credentials for durable data routes. Fasti
+has no development human account or local password.
 
 TrailBase is the selected separate human-account platform. Production browser
-authentication remains unavailable until C1 proves TrailBase exchange, stable
-subject resolution, membership, role, administrator continuity, cookie and
-CSRF controls, and Fasti session issuance. C1 must document the exact proxy,
-origin, cookie, and outage behavior before a remote browser session becomes an
-active network surface.
+authentication is implemented locally only for the exact requested and bound
+direct `127.0.0.1:8420` listener. `FASTI_REMOTE_TRUSTED_PROXY` and
+`FASTI_PUBLIC_URL` do not activate it. A separate reviewed remote-browser
+package must define and prove the proxy, origin, cookie, redirect, and outage
+boundary before any remote browser session becomes an active surface.
 
 TrailBase `v0.33.5` accepts protocol-relative values in its shared redirect
 validator. Keep its account and OAuth routes on loopback. Do not add them to a

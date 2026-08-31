@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -49,6 +50,7 @@ const contractIds = {
   observation: v7("obs", "6"),
   evidence: v7("evd", "7"),
   record: v7("rec", "8"),
+  browserSession: v7("ses", "9"),
 };
 
 test("metadata refresh parser enforces canonical operation IDs", () => {
@@ -72,19 +74,281 @@ test("metadata refresh parser enforces canonical operation IDs", () => {
   );
 });
 
-test("browser authentication SDK methods are absent until C1", () => {
+test("browser authentication SDK exposes callable operations but never the callback", () => {
   const client = new FastiClient({
     baseUrl: "http://127.0.0.1:8420",
   });
   for (const method of [
-    "createBrowserSession",
+    "startTrailBaseSignIn",
+    "readTrailBaseContinuation",
+    "completeTrailBaseContinuation",
+    "cancelTrailBaseContinuation",
+    "readAccessProjection",
     "readBrowserSession",
     "endBrowserSession",
     "listBrowserSessions",
-    "listBrowserUsers",
+    "revokeBrowserSession",
+    "revokeOtherBrowserSessions",
+    "revokeAllBrowserSessions",
+    "rotateBrowserSession",
+    "selectBrowserSessionProfile",
   ]) {
-    assert.equal(client[method], undefined);
+    assert.equal(typeof client[method], "function", method);
   }
+  assert.equal(client.completeTrailBaseAuthentication, undefined);
+});
+
+test("TrailBase continuation SDK keeps binding authority in same-origin cookies", async () => {
+  const revision = `sha256:${"a".repeat(64)}`;
+  const projection = {
+    expires_at: "2026-08-31T12:00:00Z",
+    remembered: true,
+    candidate_revision: revision,
+    choices: [
+      {
+        choice_ordinal: 0,
+        workspace_ordinal: 1,
+        profile_ordinal: 1,
+        workspace_created_at: "2026-08-30T10:00:00Z",
+        profile_created_at: "2026-08-30T10:01:00Z",
+        membership_state: "active",
+        role: "member",
+      },
+    ],
+  };
+  const requests = [];
+  const client = new FastiClient({
+    baseUrl: "http://127.0.0.1:8420",
+    credential: "must-not-be-sent",
+    retryPolicy: { maxAttempts: 3 },
+    fetch: async (url, init) => {
+      requests.push({ url: String(url), init });
+      return init?.method === "GET"
+        ? new Response(JSON.stringify(projection), {
+            headers: { "content-type": "application/json" },
+          })
+        : new Response(null, { status: 204 });
+    },
+  });
+
+  assert.deepEqual(await client.readTrailBaseContinuation(), projection);
+  await client.completeTrailBaseContinuation({
+    choice_ordinal: 0,
+    candidate_revision: revision,
+  });
+  await client.cancelTrailBaseContinuation();
+
+  assert.deepEqual(
+    requests.map(({ url, init }) => ({
+      url,
+      method: init.method,
+      body: init.body,
+      credentials: init.credentials,
+      authorization: new Headers(init.headers).get("authorization"),
+      csrf: new Headers(init.headers).get("x-csrf-token"),
+    })),
+    [
+      {
+        url: "http://127.0.0.1:8420/api/access/v1/trailbase/continuation",
+        method: "GET",
+        body: undefined,
+        credentials: "same-origin",
+        authorization: null,
+        csrf: null,
+      },
+      {
+        url: "http://127.0.0.1:8420/api/access/v1/trailbase/continuation",
+        method: "POST",
+        body: JSON.stringify({
+          choice_ordinal: 0,
+          candidate_revision: revision,
+        }),
+        credentials: "same-origin",
+        authorization: null,
+        csrf: null,
+      },
+      {
+        url: "http://127.0.0.1:8420/api/access/v1/trailbase/continuation",
+        method: "DELETE",
+        body: undefined,
+        credentials: "same-origin",
+        authorization: null,
+        csrf: null,
+      },
+    ],
+  );
+  assert.throws(
+    () =>
+      client.completeTrailBaseContinuation({
+        choice_ordinal: 0,
+        candidate_revision: revision,
+        workspace_id: contractIds.workspace,
+      }),
+    FastiProtocolError,
+  );
+  assert.equal(requests.length, 3);
+
+  const leakingClient = new FastiClient({
+    baseUrl: "http://127.0.0.1:8420",
+    fetch: async () =>
+      new Response(
+        JSON.stringify({
+          ...projection,
+          choices: [
+            {
+              ...projection.choices[0],
+              workspace_id: contractIds.workspace,
+            },
+          ],
+        }),
+        { headers: { "content-type": "application/json" } },
+      ),
+  });
+  await assert.rejects(
+    leakingClient.readTrailBaseContinuation(),
+    FastiProtocolError,
+  );
+});
+
+test("TrailBase continuation mutations make one attempt on network failure", async () => {
+  const revision = `sha256:${"a".repeat(64)}`;
+  for (const [label, invoke] of [
+    [
+      "complete",
+      (client) =>
+        client.completeTrailBaseContinuation({
+          choice_ordinal: 0,
+          candidate_revision: revision,
+        }),
+    ],
+    ["cancel", (client) => client.cancelTrailBaseContinuation()],
+  ]) {
+    let attempts = 0;
+    const client = new FastiClient({
+      baseUrl: "http://127.0.0.1:8420",
+      retryPolicy: { maxAttempts: 3, baseDelayMs: 0, maxDelayMs: 0 },
+      fetch: async () => {
+        attempts += 1;
+        throw new Error("network unavailable");
+      },
+    });
+    await assert.rejects(invoke(client), FastiTransportError, label);
+    assert.equal(attempts, 1, label);
+  }
+});
+
+test("TrailBase continuation SDK accepts governed continuation evidence problems", async () => {
+  const catalog = JSON.parse(
+    await readFile(
+      path.join(repositoryRoot, "contracts/generated/v1/problems.json"),
+      "utf8",
+    ),
+  );
+  const revision = `sha256:${"a".repeat(64)}`;
+  for (const code of [
+    "auth_continuation_persistence_failed",
+    "auth_subject_unaffiliated",
+    "identity_service_unavailable",
+    "storage_unavailable",
+    "trailbase_session_cleanup_failed",
+    "trailbase_trust_unavailable",
+  ]) {
+    const { param_policy: _paramPolicy, ...definition } = catalog.problems.find(
+      (problem) =>
+        problem.capability_id === "browser.session.create" &&
+        problem.code === code,
+    );
+    const problem = {
+      ...definition,
+      actual: null,
+      correlation_id: ids.correlation,
+      violations: [],
+    };
+    for (const [label, invoke] of [
+      ["read", (client) => client.readTrailBaseContinuation()],
+      [
+        "complete",
+        (client) =>
+          client.completeTrailBaseContinuation({
+            choice_ordinal: 0,
+            candidate_revision: revision,
+          }),
+      ],
+    ]) {
+      let attempts = 0;
+      const client = new FastiClient({
+        baseUrl: "http://127.0.0.1:8420",
+        retryPolicy: { maxAttempts: 3, baseDelayMs: 0, maxDelayMs: 0 },
+        fetch: async () => {
+          attempts += 1;
+          return new Response(JSON.stringify(problem), {
+            status: problem.status,
+            headers: { "content-type": "application/problem+json" },
+          });
+        },
+      });
+      await assert.rejects(invoke(client), (error) => {
+        assert.ok(error instanceof FastiProblemError, `${label}: ${code}`);
+        assert.equal(error.problem.code, code, label);
+        return true;
+      });
+      assert.equal(
+        attempts,
+        label === "read" && problem.retryability === "retry_safe" ? 3 : 1,
+        `${label}: ${code}`,
+      );
+    }
+  }
+});
+
+test("browser mutations copy the exact CSRF cookie and omit bearer credentials", async () => {
+  const csrf = "a".repeat(64);
+  const original = Object.getOwnPropertyDescriptor(globalThis, "document");
+  Object.defineProperty(globalThis, "document", {
+    configurable: true,
+    value: { cookie: `unrelated=1; __Host-fasti_csrf=${csrf}` },
+  });
+  try {
+    let request;
+    const client = new FastiClient({
+      baseUrl: "http://127.0.0.1:8420",
+      credential: "must-not-be-sent",
+      fetch: async (url, init) => {
+        request = { url: String(url), init };
+        return new Response(JSON.stringify({ revoked_count: 1 }), {
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+    assert.deepEqual(
+      await client.revokeBrowserSession(contractIds.browserSession),
+      { revoked_count: 1 },
+    );
+    const headers = new Headers(request.init.headers);
+    assert.equal(
+      request.url,
+      `http://127.0.0.1:8420/api/access/v1/browser-sessions/${contractIds.browserSession}`,
+    );
+    assert.equal(request.init.credentials, "same-origin");
+    assert.equal(headers.get("x-csrf-token"), csrf);
+    assert.equal(headers.get("authorization"), null);
+  } finally {
+    if (original) Object.defineProperty(globalThis, "document", original);
+    else delete globalThis.document;
+  }
+});
+
+test("browser mutations fail locally without one valid CSRF cookie", async () => {
+  let called = false;
+  const client = new FastiClient({
+    baseUrl: "http://127.0.0.1:8420",
+    fetch: async () => {
+      called = true;
+      throw new Error("must not call fetch");
+    },
+  });
+  await assert.rejects(client.endBrowserSession(), FastiProtocolError);
+  assert.equal(called, false);
 });
 
 test("health omits credentials and returns the exact public contract", async () => {
@@ -517,35 +781,48 @@ test("credentials are header-only on authenticated surfaces and no offline queue
         assert.deepEqual(methods, [
           "acceptObservation",
           "attachIdentifier",
+          "cancelTrailBaseContinuation",
           "clearNuvioCollections",
+          "completeTrailBaseContinuation",
           "configureListener",
           "configureMetadataProjection",
           "configureProviderCredential",
           "constructor",
           "createRecord",
           "discoverCapabilities",
+          "endBrowserSession",
           "enrollDurableFirstClient",
           "enrollFirstClient",
           "getNuvioCollections",
           "health",
           "initializeDurableNode",
           "initializeNode",
+          "listBrowserSessions",
           "listIntegrations",
           "listProviders",
           "listRecords",
           "listTrackingDispositions",
+          "readAccessProjection",
+          "readBrowserSession",
           "readMetadataProjection",
           "readProviderHealth",
+          "readTrailBaseContinuation",
           "receiptEvents",
           "refreshMetadataClaims",
           "registerNamespace",
           "removeProviderCredential",
           "replaceNuvioCollections",
           "replayReceipt",
+          "revokeAllBrowserSessions",
+          "revokeBrowserSession",
           "revokeCredential",
+          "revokeOtherBrowserSessions",
+          "rotateBrowserSession",
           "rotateCredential",
+          "selectBrowserSessionProfile",
           "selectProfile",
           "setTrackingDisposition",
+          "startTrailBaseSignIn",
           "submitObservation",
           "testProviderCredential",
         ]);
@@ -843,10 +1120,10 @@ test("connection endpoints reject unsafe origins", () => {
   }
 });
 test("generated public metadata preserves complete registry and surface dispositions", () => {
-  assert.equal(PUBLIC_CAPABILITY_REGISTRY.capabilities.length, 46);
+  assert.equal(PUBLIC_CAPABILITY_REGISTRY.capabilities.length, 48);
   assert.equal(
     Object.keys(PUBLIC_CAPABILITY_REGISTRY.surface_profiles).length,
-    14,
+    16,
   );
   const stream = PUBLIC_CAPABILITY_REGISTRY.capabilities.find(
     (capability) => capability.id === "receipt.stream",
@@ -1380,7 +1657,7 @@ test("all implemented contract routes complete against the loopback Rust fixture
       discovery.surface_profiles,
       PUBLIC_CAPABILITY_REGISTRY.surface_profiles,
     );
-    assert.equal(discovery.capabilities.length, 46);
+    assert.equal(discovery.capabilities.length, 48);
     assert.ok(
       discovery.capabilities.some(
         (capability) =>

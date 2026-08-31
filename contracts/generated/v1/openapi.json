@@ -1,6 +1,388 @@
 {
   "components": {
     "schemas": {
+      "AccessAuthenticationMethodDto": {
+        "enum": [
+          "trail_base_password",
+          "trail_base_social"
+        ],
+        "type": "string"
+      },
+      "AccessCeremonyFailureDto": {
+        "enum": [
+          "verifier_lost_on_restart",
+          "exchange_outcome_uncertain",
+          "exchange_failed",
+          "status_rejected",
+          "logout_uncertain",
+          "local_authorization_denied",
+          "local_persistence_failed",
+          "trust_unavailable"
+        ],
+        "type": "string"
+      },
+      "AccessCeremonyStateDto": {
+        "enum": [
+          "pending",
+          "claimed",
+          "selection_required",
+          "completed",
+          "cancelled",
+          "failed",
+          "cleanup_uncertain",
+          "expired"
+        ],
+        "type": "string"
+      },
+      "AccessEvidenceDto": {
+        "additionalProperties": false,
+        "properties": {
+          "ceremony_state": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AccessCeremonyStateDto"
+              }
+            ]
+          },
+          "correlation_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^req_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          },
+          "failure": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AccessCeremonyFailureDto"
+              }
+            ]
+          },
+          "kind": {
+            "$ref": "#/components/schemas/AccessEvidenceKindDto"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "maxLength": 35,
+            "minLength": 20,
+            "type": "string"
+          },
+          "operation_id": {
+            "maxLength": 35,
+            "minLength": 35,
+            "pattern": "^op_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/AccessEvidenceStateDto"
+          }
+        },
+        "required": [
+          "kind",
+          "state",
+          "operation_id",
+          "correlation_id",
+          "occurred_at"
+        ],
+        "type": "object"
+      },
+      "AccessEvidenceKindDto": {
+        "enum": [
+          "current_session_issued",
+          "first_administrator_bootstrap"
+        ],
+        "type": "string"
+      },
+      "AccessEvidenceStateDto": {
+        "enum": [
+          "loading",
+          "empty",
+          "unavailable",
+          "needs_attention",
+          "failed_safely",
+          "verified"
+        ],
+        "type": "string"
+      },
+      "AccessFirstRunStepDto": {
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "$ref": "#/components/schemas/AccessFirstRunStepKeyDto"
+          },
+          "state": {
+            "$ref": "#/components/schemas/AccessEvidenceStateDto"
+          }
+        },
+        "required": [
+          "key",
+          "state"
+        ],
+        "type": "object"
+      },
+      "AccessFirstRunStepKeyDto": {
+        "enum": [
+          "account_confirmed",
+          "strong_sign_in",
+          "recovery",
+          "devices_and_clients",
+          "external_identity"
+        ],
+        "type": "string"
+      },
+      "AccessMembershipDto": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "maxLength": 35,
+            "minLength": 20,
+            "type": "string"
+          },
+          "lifecycle": {
+            "$ref": "#/components/schemas/AccessMembershipLifecycleDto"
+          },
+          "membership_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^mem_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/AccessWorkspaceRoleDto"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "maxLength": 35,
+            "minLength": 20,
+            "type": "string"
+          },
+          "workspace_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^wsp_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "membership_id",
+          "workspace_id",
+          "lifecycle",
+          "role",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "AccessMembershipLifecycleDto": {
+        "enum": [
+          "invited",
+          "pending_approval",
+          "active",
+          "suspended",
+          "removed"
+        ],
+        "type": "string"
+      },
+      "AccessProfileGrantDto": {
+        "additionalProperties": false,
+        "properties": {
+          "owner_client_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^cli_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          },
+          "profile_grant_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^grt_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          },
+          "profile_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^prf_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          },
+          "selected": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "profile_grant_id",
+          "profile_id",
+          "owner_client_id",
+          "selected"
+        ],
+        "type": "object"
+      },
+      "AccessProjectionResponse": {
+        "additionalProperties": false,
+        "description": "One server-derived source for the permanent Account and security surface\nand the separate resumable first-run journey.",
+        "properties": {
+          "authentication": {
+            "$ref": "#/components/schemas/AccessSessionAuthenticationDto"
+          },
+          "current_session": {
+            "$ref": "#/components/schemas/BrowserSessionDto"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/AccessEvidenceDto"
+            },
+            "maxItems": 16,
+            "type": "array"
+          },
+          "evidence_truncated": {
+            "type": "boolean"
+          },
+          "first_run_steps": {
+            "items": {
+              "$ref": "#/components/schemas/AccessFirstRunStepDto"
+            },
+            "type": "array"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "maxLength": 35,
+            "minLength": 20,
+            "type": "string"
+          },
+          "membership": {
+            "$ref": "#/components/schemas/AccessMembershipDto"
+          },
+          "profile_grants": {
+            "items": {
+              "$ref": "#/components/schemas/AccessProfileGrantDto"
+            },
+            "maxItems": 64,
+            "type": "array"
+          },
+          "profile_grants_truncated": {
+            "type": "boolean"
+          },
+          "session_policy": {
+            "$ref": "#/components/schemas/BrowserSessionPolicyDto"
+          },
+          "sessions": {
+            "items": {
+              "$ref": "#/components/schemas/BrowserSessionDto"
+            },
+            "maxItems": 32,
+            "type": "array"
+          },
+          "sessions_truncated": {
+            "type": "boolean"
+          },
+          "subject": {
+            "$ref": "#/components/schemas/AccessSubjectDto"
+          },
+          "trailbase": {
+            "$ref": "#/components/schemas/TrailBaseActivationDto"
+          }
+        },
+        "required": [
+          "generated_at",
+          "subject",
+          "membership",
+          "current_session",
+          "sessions",
+          "sessions_truncated",
+          "profile_grants",
+          "profile_grants_truncated",
+          "session_policy",
+          "authentication",
+          "trailbase",
+          "first_run_steps",
+          "evidence",
+          "evidence_truncated"
+        ],
+        "type": "object"
+      },
+      "AccessSessionAuthenticationDto": {
+        "additionalProperties": false,
+        "properties": {
+          "activation_generation": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "method": {
+            "$ref": "#/components/schemas/AccessAuthenticationMethodDto"
+          },
+          "recent_authentication": {
+            "$ref": "#/components/schemas/RecentAuthenticationDto"
+          },
+          "verified_at": {
+            "format": "date-time",
+            "maxLength": 35,
+            "minLength": 20,
+            "type": "string"
+          }
+        },
+        "required": [
+          "method",
+          "verified_at",
+          "activation_generation",
+          "recent_authentication"
+        ],
+        "type": "object"
+      },
+      "AccessSubjectDto": {
+        "additionalProperties": false,
+        "properties": {
+          "auth_subject_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^sub_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "maxLength": 35,
+            "minLength": 20,
+            "type": "string"
+          },
+          "lifecycle": {
+            "$ref": "#/components/schemas/AccessSubjectLifecycleDto"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "maxLength": 35,
+            "minLength": 20,
+            "type": "string"
+          }
+        },
+        "required": [
+          "auth_subject_id",
+          "lifecycle",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "AccessSubjectLifecycleDto": {
+        "enum": [
+          "active",
+          "disabled",
+          "deleted",
+          "recovery_pending"
+        ],
+        "type": "string"
+      },
+      "AccessWorkspaceRoleDto": {
+        "enum": [
+          "member",
+          "administrator"
+        ],
+        "type": "string"
+      },
       "AttachIdentifierRequest": {
         "additionalProperties": false,
         "properties": {
@@ -53,6 +435,105 @@
         ],
         "type": "object"
       },
+      "BrowserSessionDto": {
+        "additionalProperties": false,
+        "properties": {
+          "absolute_expires_at": {
+            "format": "date-time",
+            "maxLength": 35,
+            "minLength": 20,
+            "type": "string"
+          },
+          "browser_session_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^ses_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "maxLength": 35,
+            "minLength": 20,
+            "type": "string"
+          },
+          "idle_expires_at": {
+            "format": "date-time",
+            "maxLength": 35,
+            "minLength": 20,
+            "type": "string"
+          },
+          "is_current": {
+            "type": "boolean"
+          },
+          "last_seen_at": {
+            "format": "date-time",
+            "maxLength": 35,
+            "minLength": 20,
+            "type": "string"
+          },
+          "rotation_generation": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "selected_profile_grant_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^grt_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          },
+          "workspace_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^wsp_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "browser_session_id",
+          "workspace_id",
+          "selected_profile_grant_id",
+          "is_current",
+          "created_at",
+          "last_seen_at",
+          "idle_expires_at",
+          "absolute_expires_at",
+          "rotation_generation"
+        ],
+        "type": "object"
+      },
+      "BrowserSessionPolicyDto": {
+        "additionalProperties": false,
+        "properties": {
+          "browser_lifetime_seconds": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "idle_timeout_seconds": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "last_seen_write_interval_seconds": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "remembered_browser_lifetime_seconds": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "idle_timeout_seconds",
+          "browser_lifetime_seconds",
+          "remembered_browser_lifetime_seconds",
+          "last_seen_write_interval_seconds"
+        ],
+        "type": "object"
+      },
       "ClaimedPrecisionDto": {
         "enum": [
           "date",
@@ -90,6 +571,30 @@
         "required": [
           "credential_scheme",
           "credential"
+        ],
+        "type": "object"
+      },
+      "CompleteTrailBaseContinuationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate_revision": {
+            "description": "Candidate revision returned by the continuation read, echoed unchanged.",
+            "maxLength": 71,
+            "minLength": 71,
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "choice_ordinal": {
+            "description": "Zero-based opaque choice submitted with the unchanged candidate revision.",
+            "format": "int32",
+            "maximum": 63,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "choice_ordinal",
+          "candidate_revision"
         ],
         "type": "object"
       },
@@ -492,6 +997,26 @@
           "deny"
         ],
         "type": "string"
+      },
+      "ListBrowserSessionsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "sessions": {
+            "items": {
+              "$ref": "#/components/schemas/BrowserSessionDto"
+            },
+            "maxItems": 32,
+            "type": "array"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "sessions",
+          "truncated"
+        ],
+        "type": "object"
       },
       "ListProvidersResponse": {
         "additionalProperties": false,
@@ -1763,6 +2288,75 @@
         ],
         "type": "object"
       },
+      "ReadBrowserSessionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "session": {
+            "$ref": "#/components/schemas/BrowserSessionDto"
+          }
+        },
+        "required": [
+          "session"
+        ],
+        "type": "object"
+      },
+      "ReadTrailBaseContinuationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate_revision": {
+            "description": "Revision submitted unchanged with the chosen zero-based choice ordinal.",
+            "maxLength": 71,
+            "minLength": 71,
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "choices": {
+            "items": {
+              "$ref": "#/components/schemas/TrailBaseContinuationChoiceDto"
+            },
+            "maxItems": 64,
+            "minItems": 1,
+            "type": "array"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "maxLength": 35,
+            "minLength": 20,
+            "type": "string"
+          },
+          "remembered": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "expires_at",
+          "remembered",
+          "candidate_revision",
+          "choices"
+        ],
+        "type": "object"
+      },
+      "RecentAuthenticationDto": {
+        "additionalProperties": false,
+        "properties": {
+          "expires_at": {
+            "format": "date-time",
+            "maxLength": 35,
+            "minLength": 20,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "$ref": "#/components/schemas/AccessEvidenceStateDto"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "type": "object"
+      },
       "RecordActivityDto": {
         "additionalProperties": false,
         "properties": {
@@ -2077,6 +2671,59 @@
         ],
         "type": "object"
       },
+      "RevokeBrowserSessionsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "revoked_count": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revoked_count"
+        ],
+        "type": "object"
+      },
+      "RotateBrowserSessionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "session": {
+            "$ref": "#/components/schemas/BrowserSessionDto"
+          }
+        },
+        "required": [
+          "session"
+        ],
+        "type": "object"
+      },
+      "SelectBrowserSessionProfileRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "profile_grant_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^grt_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "profile_grant_id"
+        ],
+        "type": "object"
+      },
+      "SelectBrowserSessionProfileResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "session": {
+            "$ref": "#/components/schemas/BrowserSessionDto"
+          }
+        },
+        "required": [
+          "session"
+        ],
+        "type": "object"
+      },
       "SetTrackingDispositionRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2086,6 +2733,39 @@
         },
         "required": [
           "disposition"
+        ],
+        "type": "object"
+      },
+      "StartTrailBaseSignInRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "remembered": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "remembered"
+        ],
+        "type": "object"
+      },
+      "StartTrailBaseSignInResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "authorization_url": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "maxLength": 35,
+            "minLength": 20,
+            "type": "string"
+          }
+        },
+        "required": [
+          "authorization_url",
+          "expires_at"
         ],
         "type": "object"
       },
@@ -2294,6 +2974,122 @@
         ],
         "type": "string"
       },
+      "TrailBaseActivationBlockerDto": {
+        "enum": [
+          "release_mismatch",
+          "physical_root_identity_mismatch",
+          "declared_restore"
+        ],
+        "type": "string"
+      },
+      "TrailBaseActivationDto": {
+        "additionalProperties": false,
+        "properties": {
+          "blocker": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TrailBaseActivationBlockerDto"
+              }
+            ]
+          },
+          "generation": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "session_generation_current": {
+            "type": "boolean"
+          },
+          "state": {
+            "$ref": "#/components/schemas/TrailBaseActivationStateDto"
+          },
+          "trailbase_instance_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^tbi_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "maxLength": 35,
+            "minLength": 20,
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "trailbase_instance_id",
+          "generation",
+          "session_generation_current",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "TrailBaseActivationStateDto": {
+        "enum": [
+          "inactive",
+          "active",
+          "blocked"
+        ],
+        "type": "string"
+      },
+      "TrailBaseContinuationChoiceDto": {
+        "additionalProperties": false,
+        "properties": {
+          "choice_ordinal": {
+            "description": "Zero-based opaque choice submitted with the unchanged candidate revision.",
+            "format": "int32",
+            "maximum": 63,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "membership_state": {
+            "$ref": "#/components/schemas/AccessMembershipLifecycleDto"
+          },
+          "profile_created_at": {
+            "format": "date-time",
+            "maxLength": 35,
+            "minLength": 20,
+            "type": "string"
+          },
+          "profile_ordinal": {
+            "description": "One-based profile number for display only.",
+            "format": "int32",
+            "maximum": 64,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "role": {
+            "$ref": "#/components/schemas/AccessWorkspaceRoleDto"
+          },
+          "workspace_created_at": {
+            "format": "date-time",
+            "maxLength": 35,
+            "minLength": 20,
+            "type": "string"
+          },
+          "workspace_ordinal": {
+            "description": "One-based workspace number for display only.",
+            "format": "int32",
+            "maximum": 64,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "choice_ordinal",
+          "workspace_ordinal",
+          "profile_ordinal",
+          "workspace_created_at",
+          "profile_created_at",
+          "membership_state",
+          "role"
+        ],
+        "type": "object"
+      },
       "ViolationDto": {
         "additionalProperties": false,
         "properties": {
@@ -2324,17 +3120,47 @@
       }
     },
     "securitySchemes": {
+      "auth_binding_cookie": {
+        "description": "One-use, callback-path-scoped browser binding for a TrailBase ceremony.",
+        "in": "cookie",
+        "name": "__Secure-fasti_auth_binding",
+        "type": "apiKey"
+      },
+      "auth_continuation_cookie": {
+        "description": "One-use, continuation-path-scoped binding for explicit Fasti sign-in selection.",
+        "in": "cookie",
+        "name": "__Secure-fasti_auth_continuation",
+        "type": "apiKey"
+      },
       "bootstrap_bearer": {
         "bearerFormat": "64-character lowercase hexadecimal secret",
         "description": "One-time local data-root bootstrap secret. Never use an enrolled client credential here.",
         "scheme": "bearer",
         "type": "http"
       },
+      "browser_session_cookie": {
+        "description": "Opaque Fasti browser session. The browser supplies this Secure, HttpOnly, SameSite=Strict cookie.",
+        "in": "cookie",
+        "name": "__Host-fasti_session",
+        "type": "apiKey"
+      },
       "credential_bearer": {
         "bearerFormat": "64-character lowercase hexadecimal credential",
         "description": "Enrolled Fasti client credential sent only in the Authorization header.",
         "scheme": "bearer",
         "type": "http"
+      },
+      "csrf_cookie": {
+        "description": "First-party CSRF value copied by the browser SDK into X-CSRF-Token.",
+        "in": "cookie",
+        "name": "__Host-fasti_csrf",
+        "type": "apiKey"
+      },
+      "csrf_header": {
+        "description": "Exact value of the __Host-fasti_csrf cookie for browser mutations.",
+        "in": "header",
+        "name": "X-CSRF-Token",
+        "type": "apiKey"
       }
     }
   },
@@ -2353,6 +3179,1267 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/access/v1/browser-session": {
+      "delete": {
+        "operationId": "end_browser_session",
+        "responses": {
+          "204": {
+            "description": "Current browser session ended"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Browser session is inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Origin, Host, or CSRF proof rejected"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Stored session failed integrity checks"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "browser_session_cookie": [],
+            "csrf_cookie": [],
+            "csrf_header": []
+          }
+        ],
+        "tags": [
+          "access"
+        ],
+        "x-fasti-authorization": "browser_session",
+        "x-fasti-capability-id": "browser.session.end",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "browser_session_expired",
+          "browser_session_revoked",
+          "forbidden",
+          "integrity_failed",
+          "session_policy_changed",
+          "storage_unavailable"
+        ],
+        "x-fasti-required-scopes": [],
+        "x-fasti-runtime-availability": "implemented"
+      },
+      "get": {
+        "operationId": "read_browser_session",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadBrowserSessionResponse"
+                }
+              }
+            },
+            "description": "Current Fasti browser session"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Browser session is inactive"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Stored session failed integrity checks"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "browser_session_cookie": []
+          }
+        ],
+        "tags": [
+          "access"
+        ],
+        "x-fasti-authorization": "browser_session",
+        "x-fasti-capability-id": "browser.session.read",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "browser_session_expired",
+          "browser_session_revoked",
+          "integrity_failed",
+          "session_policy_changed",
+          "storage_unavailable"
+        ],
+        "x-fasti-required-scopes": [],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/access/v1/browser-session/profile": {
+      "put": {
+        "operationId": "select_browser_session_profile",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SelectBrowserSessionProfileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelectBrowserSessionProfileResponse"
+                }
+              }
+            },
+            "description": "Browser session with selected profile"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Malformed JSON"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Browser session is inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Origin, Host, or CSRF proof rejected"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Request payload is too large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Request media type is unsupported"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Profile grant is invalid or unavailable"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Stored session failed integrity checks"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "browser_session_cookie": [],
+            "csrf_cookie": [],
+            "csrf_header": []
+          }
+        ],
+        "tags": [
+          "access"
+        ],
+        "x-fasti-authorization": "browser_session",
+        "x-fasti-capability-id": "browser.session.profile.select",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "browser_session_expired",
+          "browser_session_revoked",
+          "forbidden",
+          "integrity_failed",
+          "malformed_json",
+          "payload_too_large",
+          "session_policy_changed",
+          "storage_unavailable",
+          "unsupported_media_type",
+          "validation_failed"
+        ],
+        "x-fasti-required-scopes": [],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/access/v1/browser-session/rotation": {
+      "post": {
+        "operationId": "rotate_browser_session",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RotateBrowserSessionResponse"
+                }
+              }
+            },
+            "description": "Rotated browser session"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Browser session is inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Origin, Host, or CSRF proof rejected"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Stored session failed integrity checks"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "browser_session_cookie": [],
+            "csrf_cookie": [],
+            "csrf_header": []
+          }
+        ],
+        "tags": [
+          "access"
+        ],
+        "x-fasti-authorization": "browser_session",
+        "x-fasti-capability-id": "browser.session.rotate",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "browser_session_expired",
+          "browser_session_revoked",
+          "forbidden",
+          "integrity_failed",
+          "session_policy_changed",
+          "storage_unavailable"
+        ],
+        "x-fasti-required-scopes": [],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/access/v1/browser-sessions": {
+      "delete": {
+        "operationId": "revoke_all_browser_sessions",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevokeBrowserSessionsResponse"
+                }
+              }
+            },
+            "description": "All-session revocation count"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Browser session is inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Origin, Host, or CSRF proof rejected"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Stored session failed integrity checks"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "browser_session_cookie": [],
+            "csrf_cookie": [],
+            "csrf_header": []
+          }
+        ],
+        "tags": [
+          "access"
+        ],
+        "x-fasti-authorization": "browser_session",
+        "x-fasti-capability-id": "browser.sessions.revoke_all",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "browser_session_expired",
+          "browser_session_revoked",
+          "forbidden",
+          "integrity_failed",
+          "session_policy_changed",
+          "storage_unavailable"
+        ],
+        "x-fasti-required-scopes": [],
+        "x-fasti-runtime-availability": "implemented"
+      },
+      "get": {
+        "operationId": "list_browser_sessions",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListBrowserSessionsResponse"
+                }
+              }
+            },
+            "description": "Bounded active browser-session inventory"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Browser session is inactive"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Stored session failed integrity checks"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "browser_session_cookie": []
+          }
+        ],
+        "tags": [
+          "access"
+        ],
+        "x-fasti-authorization": "browser_session",
+        "x-fasti-capability-id": "browser.sessions.list",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "browser_session_expired",
+          "browser_session_revoked",
+          "integrity_failed",
+          "session_policy_changed",
+          "storage_unavailable"
+        ],
+        "x-fasti-required-scopes": [],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/access/v1/browser-sessions/others": {
+      "delete": {
+        "operationId": "revoke_other_browser_sessions",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevokeBrowserSessionsResponse"
+                }
+              }
+            },
+            "description": "Other-session revocation count"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Browser session is inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Origin, Host, or CSRF proof rejected"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Stored session failed integrity checks"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "browser_session_cookie": [],
+            "csrf_cookie": [],
+            "csrf_header": []
+          }
+        ],
+        "tags": [
+          "access"
+        ],
+        "x-fasti-authorization": "browser_session",
+        "x-fasti-capability-id": "browser.sessions.revoke_others",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "browser_session_expired",
+          "browser_session_revoked",
+          "forbidden",
+          "integrity_failed",
+          "session_policy_changed",
+          "storage_unavailable"
+        ],
+        "x-fasti-required-scopes": [],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/access/v1/browser-sessions/{browser_session_id}": {
+      "delete": {
+        "operationId": "revoke_browser_session",
+        "parameters": [
+          {
+            "description": "Fasti browser-session identifier",
+            "in": "path",
+            "name": "browser_session_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevokeBrowserSessionsResponse"
+                }
+              }
+            },
+            "description": "Exact revocation outcome"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Browser session is inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Origin, Host, or CSRF proof rejected"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Target session identifier is invalid"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Stored session failed integrity checks"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "browser_session_cookie": [],
+            "csrf_cookie": [],
+            "csrf_header": []
+          }
+        ],
+        "tags": [
+          "access"
+        ],
+        "x-fasti-authorization": "browser_session",
+        "x-fasti-capability-id": "browser.session.revoke",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "browser_session_expired",
+          "browser_session_revoked",
+          "forbidden",
+          "integrity_failed",
+          "session_policy_changed",
+          "storage_unavailable",
+          "validation_failed"
+        ],
+        "x-fasti-required-scopes": [],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/access/v1/projection": {
+      "get": {
+        "operationId": "read_access_projection",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessProjectionResponse"
+                }
+              }
+            },
+            "description": "Bounded Account and security projection"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Browser session is inactive"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Stored Access state failed integrity checks"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "browser_session_cookie": []
+          }
+        ],
+        "tags": [
+          "access"
+        ],
+        "x-fasti-authorization": "browser_session",
+        "x-fasti-capability-id": "access.projection.read",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "browser_session_expired",
+          "browser_session_revoked",
+          "integrity_failed",
+          "session_policy_changed",
+          "storage_unavailable"
+        ],
+        "x-fasti-required-scopes": [],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/access/v1/trailbase/callback": {
+      "get": {
+        "operationId": "complete_trailbase_authentication",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "maxLength": 48,
+              "minLength": 48,
+              "pattern": "^[A-Za-z0-9]{48}$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "303": {
+            "description": "Fixed application redirect after success or safe failure"
+          }
+        },
+        "security": [
+          {
+            "auth_binding_cookie": []
+          }
+        ],
+        "tags": [
+          "access"
+        ],
+        "x-fasti-authorization": "unauthenticated",
+        "x-fasti-capability-id": "browser.session.create",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [],
+        "x-fasti-required-scopes": [],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/access/v1/trailbase/continuation": {
+      "delete": {
+        "operationId": "cancel_trailbase_continuation",
+        "responses": {
+          "204": {
+            "description": "Sign-in continuation cancelled"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Continuation binding or proof is invalid"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Continuation request is not authorized"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Continuation input is invalid"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Stored continuation state failed integrity checks"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "auth_continuation_cookie": []
+          }
+        ],
+        "tags": [
+          "access"
+        ],
+        "x-fasti-authorization": "unauthenticated",
+        "x-fasti-capability-id": "browser.session.create",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "auth_browser_binding_invalid",
+          "forbidden",
+          "integrity_failed",
+          "storage_unavailable",
+          "trailbase_proof_invalid",
+          "validation_failed"
+        ],
+        "x-fasti-required-scopes": [],
+        "x-fasti-runtime-availability": "implemented"
+      },
+      "get": {
+        "operationId": "read_trailbase_continuation",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadTrailBaseContinuationResponse"
+                }
+              }
+            },
+            "description": "Bounded identifier-free sign-in choices"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Continuation binding or proof is invalid"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "No selectable Fasti affiliation"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Continuation input is invalid"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Stored continuation state failed integrity checks"
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "TrailBase session cleanup was not confirmed"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "TrailBase identity, trust, or local storage is unavailable"
+          },
+          "507": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The bounded selection capacity was exceeded"
+          }
+        },
+        "security": [
+          {
+            "auth_continuation_cookie": []
+          }
+        ],
+        "tags": [
+          "access"
+        ],
+        "x-fasti-authorization": "unauthenticated",
+        "x-fasti-capability-id": "browser.session.create",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "auth_browser_binding_invalid",
+          "auth_continuation_persistence_failed",
+          "auth_subject_unaffiliated",
+          "capacity_exceeded",
+          "forbidden",
+          "identity_service_unavailable",
+          "integrity_failed",
+          "storage_unavailable",
+          "trailbase_proof_invalid",
+          "trailbase_session_cleanup_failed",
+          "trailbase_trust_unavailable",
+          "validation_failed"
+        ],
+        "x-fasti-required-scopes": [],
+        "x-fasti-runtime-availability": "implemented"
+      },
+      "post": {
+        "operationId": "complete_trailbase_continuation",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteTrailBaseContinuationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Opaque Fasti browser session issued"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Malformed request body"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Continuation binding or proof is invalid"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Continuation request is not authorized"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Sign-in choices changed"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Request body is too large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Request media type is unsupported"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Choice or revision is invalid"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Stored continuation state failed integrity checks"
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "TrailBase session cleanup was not confirmed"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "TrailBase identity, trust, or local storage is unavailable"
+          },
+          "507": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The bounded selection capacity was exceeded"
+          }
+        },
+        "security": [
+          {
+            "auth_continuation_cookie": []
+          }
+        ],
+        "tags": [
+          "access"
+        ],
+        "x-fasti-authorization": "unauthenticated",
+        "x-fasti-capability-id": "browser.session.create",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "auth_browser_binding_invalid",
+          "auth_continuation_persistence_failed",
+          "auth_selection_changed",
+          "auth_subject_unaffiliated",
+          "capacity_exceeded",
+          "forbidden",
+          "identity_service_unavailable",
+          "integrity_failed",
+          "malformed_json",
+          "payload_too_large",
+          "storage_unavailable",
+          "trailbase_proof_invalid",
+          "trailbase_session_cleanup_failed",
+          "trailbase_trust_unavailable",
+          "unsupported_media_type",
+          "validation_failed"
+        ],
+        "x-fasti-required-scopes": [],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/access/v1/trailbase/sign-in": {
+      "post": {
+        "operationId": "start_trailbase_sign_in",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartTrailBaseSignInRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StartTrailBaseSignInResponse"
+                }
+              }
+            },
+            "description": "TrailBase authorization URL and bounded Fasti ceremony"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Malformed JSON"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Origin or Host boundary rejected"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Request payload is too large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Request media type is unsupported"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Sign-in selection is invalid"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Stored Access state failed integrity checks"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "TrailBase trust or local storage is unavailable"
+          },
+          "507": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Bounded authentication capacity is exhausted"
+          }
+        },
+        "tags": [
+          "access"
+        ],
+        "x-fasti-authorization": "unauthenticated",
+        "x-fasti-capability-id": "browser.session.create",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "capacity_exceeded",
+          "forbidden",
+          "integrity_failed",
+          "malformed_json",
+          "payload_too_large",
+          "storage_unavailable",
+          "trailbase_trust_unavailable",
+          "unsupported_media_type",
+          "validation_failed"
+        ],
+        "x-fasti-required-scopes": [],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
     "/api/v1/client-enrollments": {
       "post": {
         "operationId": "enroll_first_client",
@@ -4045,23 +6132,31 @@
         "security": [
           {
             "credential_bearer": []
+          },
+          {
+            "browser_session_cookie": [],
+            "csrf_cookie": [],
+            "csrf_header": []
           }
         ],
         "tags": [
           "records"
         ],
-        "x-fasti-authorization": "scoped",
+        "x-fasti-authorization": "scoped_or_browser_session",
         "x-fasti-capability-id": "identity.namespace.register",
         "x-fasti-example-ids": [
           "identity.namespace.register.validation_failed"
         ],
         "x-fasti-problem-codes": [
           "authentication_failed",
+          "browser_session_expired",
+          "browser_session_revoked",
           "capability_unavailable",
           "forbidden",
           "integrity_failed",
           "malformed_json",
           "payload_too_large",
+          "session_policy_changed",
           "storage_unavailable",
           "unsupported_media_type",
           "validation_failed"
@@ -4420,12 +6515,17 @@
         "security": [
           {
             "credential_bearer": []
+          },
+          {
+            "browser_session_cookie": [],
+            "csrf_cookie": [],
+            "csrf_header": []
           }
         ],
         "tags": [
           "observations"
         ],
-        "x-fasti-authorization": "scoped",
+        "x-fasti-authorization": "scoped_or_browser_session",
         "x-fasti-capability-id": "observation.accept",
         "x-fasti-example-ids": [
           "observation.accept.capacity_exceeded",
@@ -4434,6 +6534,8 @@
         ],
         "x-fasti-problem-codes": [
           "authentication_failed",
+          "browser_session_expired",
+          "browser_session_revoked",
           "capacity_exceeded",
           "forbidden",
           "idempotency_conflict",
@@ -4441,6 +6543,7 @@
           "invalid_observation",
           "malformed_json",
           "payload_too_large",
+          "session_policy_changed",
           "storage_unavailable",
           "unsupported_media_type",
           "validation_failed"
@@ -4685,19 +6788,27 @@
         "security": [
           {
             "credential_bearer": []
+          },
+          {
+            "browser_session_cookie": [],
+            "csrf_cookie": [],
+            "csrf_header": []
           }
         ],
         "tags": [
           "profile"
         ],
-        "x-fasti-authorization": "scoped",
+        "x-fasti-authorization": "scoped_or_browser_session",
         "x-fasti-capability-id": "profile.nuvio_collections.clear",
         "x-fasti-example-ids": [],
         "x-fasti-problem-codes": [
           "authentication_failed",
+          "browser_session_expired",
+          "browser_session_revoked",
           "capability_unavailable",
           "forbidden",
           "integrity_failed",
+          "session_policy_changed",
           "storage_unavailable"
         ],
         "x-fasti-required-scopes": [
@@ -4772,19 +6883,25 @@
         "security": [
           {
             "credential_bearer": []
+          },
+          {
+            "browser_session_cookie": []
           }
         ],
         "tags": [
           "profile"
         ],
-        "x-fasti-authorization": "scoped",
+        "x-fasti-authorization": "scoped_or_browser_session",
         "x-fasti-capability-id": "profile.nuvio_collections.get",
         "x-fasti-example-ids": [],
         "x-fasti-problem-codes": [
           "authentication_failed",
+          "browser_session_expired",
+          "browser_session_revoked",
           "capability_unavailable",
           "forbidden",
           "integrity_failed",
+          "session_policy_changed",
           "storage_unavailable"
         ],
         "x-fasti-required-scopes": [
@@ -4909,21 +7026,29 @@
         "security": [
           {
             "credential_bearer": []
+          },
+          {
+            "browser_session_cookie": [],
+            "csrf_cookie": [],
+            "csrf_header": []
           }
         ],
         "tags": [
           "profile"
         ],
-        "x-fasti-authorization": "scoped",
+        "x-fasti-authorization": "scoped_or_browser_session",
         "x-fasti-capability-id": "profile.nuvio_collections.replace",
         "x-fasti-example-ids": [],
         "x-fasti-problem-codes": [
           "authentication_failed",
+          "browser_session_expired",
+          "browser_session_revoked",
           "capability_unavailable",
           "forbidden",
           "integrity_failed",
           "malformed_json",
           "payload_too_large",
+          "session_policy_changed",
           "storage_unavailable",
           "unsupported_media_type",
           "validation_failed"
@@ -5026,21 +7151,27 @@
         "security": [
           {
             "credential_bearer": []
+          },
+          {
+            "browser_session_cookie": []
           }
         ],
         "tags": [
           "profile"
         ],
-        "x-fasti-authorization": "scoped",
+        "x-fasti-authorization": "scoped_or_browser_session",
         "x-fasti-capability-id": "profile.record.tracking_disposition.list",
         "x-fasti-example-ids": [
           "profile.record.tracking_disposition.list.forbidden"
         ],
         "x-fasti-problem-codes": [
           "authentication_failed",
+          "browser_session_expired",
+          "browser_session_revoked",
           "capability_unavailable",
           "forbidden",
           "integrity_failed",
+          "session_policy_changed",
           "storage_unavailable"
         ],
         "x-fasti-required-scopes": [
@@ -5220,24 +7351,32 @@
         "security": [
           {
             "credential_bearer": []
+          },
+          {
+            "browser_session_cookie": [],
+            "csrf_cookie": [],
+            "csrf_header": []
           }
         ],
         "tags": [
           "profile"
         ],
-        "x-fasti-authorization": "scoped",
+        "x-fasti-authorization": "scoped_or_browser_session",
         "x-fasti-capability-id": "profile.record.tracking_disposition.set",
         "x-fasti-example-ids": [
           "profile.record.tracking_disposition.set.validation_failed"
         ],
         "x-fasti-problem-codes": [
           "authentication_failed",
+          "browser_session_expired",
+          "browser_session_revoked",
           "capability_unavailable",
           "forbidden",
           "integrity_failed",
           "malformed_json",
           "payload_too_large",
           "record_not_found",
+          "session_policy_changed",
           "storage_unavailable",
           "unsupported_media_type",
           "validation_failed"
@@ -6098,21 +8237,27 @@
         "security": [
           {
             "credential_bearer": []
+          },
+          {
+            "browser_session_cookie": []
           }
         ],
         "tags": [
           "records"
         ],
-        "x-fasti-authorization": "scoped",
+        "x-fasti-authorization": "scoped_or_browser_session",
         "x-fasti-capability-id": "identity.record.list",
         "x-fasti-example-ids": [
           "identity.record.list.forbidden"
         ],
         "x-fasti-problem-codes": [
           "authentication_failed",
+          "browser_session_expired",
+          "browser_session_revoked",
           "capability_unavailable",
           "forbidden",
           "integrity_failed",
+          "session_policy_changed",
           "storage_unavailable"
         ],
         "x-fasti-required-scopes": [
@@ -6269,24 +8414,32 @@
         "security": [
           {
             "credential_bearer": []
+          },
+          {
+            "browser_session_cookie": [],
+            "csrf_cookie": [],
+            "csrf_header": []
           }
         ],
         "tags": [
           "records"
         ],
-        "x-fasti-authorization": "scoped",
+        "x-fasti-authorization": "scoped_or_browser_session",
         "x-fasti-capability-id": "identity.record.create",
         "x-fasti-example-ids": [
           "identity.record.create.validation_failed"
         ],
         "x-fasti-problem-codes": [
           "authentication_failed",
+          "browser_session_expired",
+          "browser_session_revoked",
           "capability_unavailable",
           "forbidden",
           "integrity_failed",
           "invalid_identifier",
           "malformed_json",
           "payload_too_large",
+          "session_policy_changed",
           "storage_unavailable",
           "unsupported_media_type",
           "validation_failed"
@@ -6467,18 +8620,25 @@
         "security": [
           {
             "credential_bearer": []
+          },
+          {
+            "browser_session_cookie": [],
+            "csrf_cookie": [],
+            "csrf_header": []
           }
         ],
         "tags": [
           "records"
         ],
-        "x-fasti-authorization": "scoped",
+        "x-fasti-authorization": "scoped_or_browser_session",
         "x-fasti-capability-id": "identity.identifier.attach",
         "x-fasti-example-ids": [
           "identity.identifier.attach.validation_failed"
         ],
         "x-fasti-problem-codes": [
           "authentication_failed",
+          "browser_session_expired",
+          "browser_session_revoked",
           "capability_unavailable",
           "forbidden",
           "identity_conflict",
@@ -6487,6 +8647,7 @@
           "malformed_json",
           "payload_too_large",
           "record_not_found",
+          "session_policy_changed",
           "storage_unavailable",
           "unsupported_media_type",
           "validation_failed"

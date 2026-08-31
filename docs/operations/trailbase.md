@@ -1,8 +1,9 @@
 # TrailBase development operations
 
 This runbook covers the pinned TrailBase identity service used by Fasti
-development and conformance tests. It does not activate Fasti browser sessions.
-PR C1 owns the TrailBase-to-Fasti exchange.
+development and conformance tests. C1 implements the TrailBase-to-Fasti
+exchange in local source. This runbook does not claim a supported package,
+merge, release, or deployment.
 
 ## Locked release
 
@@ -10,7 +11,10 @@ Fasti uses TrailBase `v0.33.5` at upstream commit
 `b4c85d5152d4e5f472e0b5da5303f7c938e3a083`.
 [`third_party/trailbase/release.json`](../../third_party/trailbase/release.json)
 binds both Linux native archives, the executable hashes, the OCI index and
-platform graphs, and the reviewed licence text. Floating tags are rejected.
+platform graphs, the official same-release Auth UI WASM archive and component,
+and the reviewed licence text. Floating tags are rejected. The server binary
+does not embed this UI; Fasti uses TrailBase's verified component instead of a
+custom sign-in page.
 It also binds TrailBase `v0.33.4` native artifacts as a test-only adjacent
 upgrade and rollback fixture. `v0.33.4` is not a supported runtime selection.
 
@@ -36,8 +40,13 @@ Run this once with network access:
 
 The command fetches the locked Rust and pnpm inputs and verifies and caches the
 exact TrailBase native and OCI artifacts and the exact prior-version upgrade
-fixture. A later offline start and conformance run use only those verified
-inputs.
+fixture. Preparation creates the private root and cache, but it does not
+initialize a fresh TrailBase root. For an already initialized root, preparation
+also verifies the installed Auth UI component. The subsequent `trailbase
+initialize` command creates the depot and bootstrap state and installs Auth UI
+for a fresh root. Later offline start and conformance commands use only those
+verified inputs. A missing, unsafe, or mismatched component keeps sign-in
+unavailable; start never fetches a floating component.
 
 ## Initialize
 
@@ -53,8 +62,25 @@ documented authentication APIs, verifies the replacement, and prints the new
 administrator password once. Redirected output is rejected. No password is
 written to the bootstrap receipt, command arguments, or logs.
 
-Store the printed password in an operator-controlled password manager. If it is
-lost, use TrailBase's documented password-reset flow. Do not edit its database.
+Each installation has its own TrailBase administrator credential. Store that
+credential in an operator-selected password manager or equivalent private
+installation record. The initial and replacement passwords exist only in the
+initializing process memory. Fasti writes the replacement once to the
+controlling terminal. It never persists either password in Fasti data, command
+arguments, logs, receipts, or browser storage. Do not create one shared
+administrator password across installations and do not add a Fasti secret
+store for it.
+
+Each person gets a distinct TrailBase account. Do not share the installation
+administrator credential as a human sign-in account. If the administrator
+credential is lost, use TrailBase's documented password-reset flow. Do not edit
+its database.
+
+Key the password-manager entry by the TrailBase installation ID and the account
+URL shown by `./scripts/dev.sh trailbase status`. When native TrailBase
+administration requires the credential, retrieve it from that entry and enter
+it only at the private Admin URL printed by the same status command. Fasti does
+not retrieve it for the operator. OCI mode does not publish the admin listener.
 
 The worktree-local root is `.dev-trailbase`. The root, depot, cache, receipt,
 and files must remain owned by the current user and inaccessible to group and
@@ -81,19 +107,71 @@ OCI:
 Use `--docker` instead of `--podman` only on a host with Docker and the exact
 image already prepared.
 
+The default native Fasti launcher and the Desktop review launcher auto-start
+TrailBase only when this worktree already has an initialized root. They verify
+the root, exact release, runtime identity, and installation receipt before they
+pass the root to Fasti. They never initialize TrailBase. An uninitialized root
+keeps sign-in unavailable and reports `trailbase_trust_unavailable`.
+
+## Create human accounts and sign in
+
+Run `./scripts/dev.sh trailbase status` and open its Account URL. Create one
+TrailBase account for each person, complete TrailBase email verification, then
+use that verified personal account from Fasti's Account and security surface.
+Do not use `admin@localhost` as a shared person account. Fasti receives no human
+password; TrailBase owns password entry, hashing, change, reset, and account
+verification.
+
+Email verification and password reset are unavailable until the installation
+has working mail delivery. The C1 conformance fixture proves these functions
+with an isolated local SMTP service; it does not configure production mail.
+Configure and verify TrailBase mail delivery for the installation before
+inviting people or relying on password reset. Keep mail credentials out of
+Fasti, browser storage, command arguments, logs, and evidence receipts.
+
+For a new Fasti data root on a supported Unix host, stop `fastid` and establish
+the first administrator:
+
+```bash
+cargo run --locked -p fasti-cli -- access bootstrap-administrator \
+  --data-root /absolute/private/fasti-root \
+  --trailbase-root /absolute/private/trailbase-root
+```
+
+Open the printed TrailBase URL and sign in with the first person's TrailBase
+account. Paste the complete callback URL when prompted. Input is bounded and
+hidden. Do not pass a password, token, subject, bootstrap secret, or callback
+binding as a command argument. The command creates no active browser session.
+Start the normal host, then use **Sign in** in an ordinary browser.
+
 The route-exposure contract is:
 
-| Mode | Account routes | Admin routes | Record API | Readiness evidence |
-|---|---|---|---|---|
-| Native | `127.0.0.1:4000` | `127.0.0.1:4001` only | Not configured; public root must return 404 | Health check plus public-route boundary |
-| OCI | `127.0.0.1:4000` | Container loopback only; not host-published | Not configured; public root must return 404 | Exact running image plus health and route boundary |
-| Remote | Unavailable | Unavailable | Unavailable | No claim; do not expose this release remotely |
+| Mode   | Account routes   | Admin routes                                | Record API                                  | Readiness evidence                                 |
+| ------ | ---------------- | ------------------------------------------- | ------------------------------------------- | -------------------------------------------------- |
+| Native | `127.0.0.1:4000` | `127.0.0.1:4001` only                       | Not configured; public root must return 404 | Health check plus public-route boundary            |
+| OCI    | `127.0.0.1:4000` | Container loopback only; not host-published | Not configured; public root must return 404 | Exact running image plus health and route boundary |
+| Remote | Unavailable      | Unavailable                                 | Unavailable                                 | No claim; do not expose this release remotely      |
 
 TrailBase `v0.33.5` accepts protocol-relative values in its shared redirect
 validator. Therefore remote account and OAuth routes are unavailable. The next
 action is to keep the service loopback-only until a pinned release proves safe
 redirect validation and the remote TLS and trusted-proxy package passes review.
 A reverse proxy, TLS endpoint, or public route is not part of this package.
+
+## Fasti Access activation
+
+Only a Fasti process with a data root that both requests and binds
+`127.0.0.1:8420` mounts the C1 browser-authentication and session route set.
+The routes remain mounted when TrailBase is unconfigured so Account and
+security can report the unavailable state and next action. Exchange and new
+Fasti session issuance remain disabled until Fasti verifies the installation
+receipt and persists active activation.
+
+Port fallback, alternate IPv4 or IPv6 loopback, generic local, integration,
+wildcard or container forwarding, and remote routers omit C1 routes. The Fasti
+OCI launcher does not mount the TrailBase root into the Fasti container and
+reports browser authentication unavailable. Use the native or Desktop launcher
+for C1 review.
 
 The process uses one CPU and the repository's 192 MiB memory ceiling. OCI mode
 also uses no extra swap, a 128-process limit, a read-only root filesystem,
@@ -128,6 +206,10 @@ It excludes the downloaded runtime and OCI cache. Every entry has an exact
 type, mode, size, and SHA-256 value in the archive manifest. Active-depot
 backup, symlinks, unsafe paths, unexpected types, digest changes, and release
 mismatches fail closed.
+
+The backup preserves TrailBase account records and password hashes. It does not
+recover a forgotten plaintext administrator password. Recovery still requires
+the installation's working TrailBase password-reset channel.
 
 Restore only to a new isolated directory:
 
@@ -186,3 +268,16 @@ TrailBase v0.33.5 social callbacks do not prove TOTP for the current sign-in.
 It also has no documented per-account disabled state. Those limits stay
 visible and cannot be simulated in Fasti. Its unsafe redirect acceptance keeps
 remote account and OAuth exposure unavailable.
+
+Run the local C1 gate suite with:
+
+```bash
+cargo xtask test milestone --body C1
+```
+
+The command writes `target/fasti-receipts/access-c1.json` as the in-scope C1
+delivery receipt. Its locked desktop tests cover the trusted-host source
+boundary only. Packaged Tauri authentication, cross-platform WebView behavior,
+and packaged assistive-technology proof are deferred to
+`C1-TAURI-AUTH`; no packaged desktop authentication support is claimed. Final
+review, exact-head CI, merge, and merged-tree evidence remain required.

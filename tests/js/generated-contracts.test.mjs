@@ -40,10 +40,10 @@ const mutateJson = async (root, relativePath, mutate) => {
 
 test("checked-in generated contracts validate", async () => {
   assert.deepEqual(await validateGeneratedContracts(), {
-    capabilityCount: 46,
+    capabilityCount: 48,
     conformanceOpenApiPathCount: 9,
-    openApiPathCount: 23,
-    problemCount: 264,
+    openApiPathCount: 33,
+    problemCount: 325,
     schemaCount: 2,
   });
 });
@@ -128,8 +128,20 @@ test("production OpenAPI authenticated requirements cannot be removed", async ()
     (result) =>
       assert.rejects(
         result,
-        /list_records security must match scoped authorization/u,
+        /list_records security must match hybrid authorization/u,
       ),
+  );
+});
+
+test("Access schemas reject forbidden secret properties", async () => {
+  await withArtifacts(
+    (root) =>
+      mutateJson(root, "contracts/generated/v1/openapi.json", (document) => {
+        document.components.schemas.RecentAuthenticationDto.properties.refresh_token =
+          { type: "string" };
+      }),
+    (result) =>
+      assert.rejects(result, /forbidden secret property refresh_token/u),
   );
 });
 

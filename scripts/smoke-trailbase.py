@@ -14,6 +14,7 @@ import json
 import os
 import queue
 import re
+import shutil
 import socketserver
 import struct
 import subprocess  # nosec B404 -- this hermetic conformance runner must launch the pinned fixture.
@@ -372,11 +373,49 @@ def write_bootstrap_receipt(root: Path, version: str) -> None:
     temporary.replace(path)
 
 
+def materialize_fixture_runtime(
+    source_root: Path,
+    target_root: Path,
+    release_version: str,
+    previous_release_version: str | None = None,
+) -> Path:
+    release = runtime.load_release()
+    current_version = str(release["version"])
+    old_version = str(release["upgrade_fixture"]["version"])
+    if release_version not in {current_version, old_version}:
+        raise AssertionError("fixture release is not pinned")
+    target = runtime.host_target()
+    archive_name = f"trailbase-v{release_version}-{target}.zip"
+    source_archive = source_root / "cache" / archive_name
+    target_cache = target_root / "cache"
+    target_cache.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(target_cache, 0o700)
+    target_archive = target_cache / archive_name
+    shutil.copyfile(source_archive, target_archive)
+    os.chmod(target_archive, 0o600)
+    if release_version == current_version:
+        auth_ui_archive_name = f"trailbase-v{current_version}-wasm-auth-ui.zip"
+        auth_ui_archive = target_cache / auth_ui_archive_name
+        shutil.copyfile(source_root / "cache" / auth_ui_archive_name, auth_ui_archive)
+        os.chmod(auth_ui_archive, 0o600)
+    executable = (
+        runtime.prepare_native(target_root, offline=True)
+        if release_version == current_version
+        else runtime.prepare_upgrade_fixture(target_root, offline=True)
+    )
+    runtime.prepare_installation(
+        target_root,
+        "native",
+        release_version=release_version,
+        previous_release_version=previous_release_version,
+    )
+    return executable
+
+
 def run_upgrade_fixture(
     source_root: Path,
     fixture: Path,
     smtp: SmtpServer,
-    current_executable: Path,
     checks: list[dict[str, object]],
 ) -> dict[str, object]:
     release = runtime.load_release()
@@ -469,7 +508,10 @@ jobs {}
         initial_password.clear()
         stop_process(process, reader)
     write_bootstrap_receipt(old_root, old_version)
+    runtime.prepare_runtime_lock(old_root)
+    old_executable = materialize_fixture_runtime(source_root, old_root, old_version)
     runtime.verify_private_root(old_root, old_version)
+    old_receipt = runtime.verify_installation(old_root, old_version)
     backup, backup_sha256 = runtime.backup_depot(
         old_root,
         fixture / "upgrade-backups",
@@ -477,6 +519,11 @@ jobs {}
     )
 
     def verify_login(executable: Path, root: Path, version: str) -> None:
+        expected_executable = (
+            root / "runtime" / f"v{version}-{runtime.host_target()}" / "trail"
+        ).resolve()
+        if executable.resolve() != expected_executable:
+            raise AssertionError("TrailBase fixture executable is outside its installation root")
         process, reader = start_fixture_release(executable, root, 24510)
         try:
             status, _ = request(
@@ -499,15 +546,56 @@ jobs {}
             stop_process(process, reader)
 
     upgrade_root = fixture / "upgrade-target"
-    runtime.restore_depot(backup, upgrade_root, old_version)
-    verify_login(current_executable, upgrade_root, current_version)
-    verify_login(current_executable, upgrade_root, current_version)
+    upgrade_restore = runtime.restore_depot(backup, upgrade_root, old_version)
+    if (
+        upgrade_restore["instance_id"] != old_receipt["instance_id"]
+        or upgrade_restore["created_at"] != old_receipt["created_at"]
+        or upgrade_restore["declared_restore"] is not True
+        or upgrade_restore["physical_root_identity"] == old_receipt["physical_root_identity"]
+    ):
+        raise AssertionError("upgrade restore did not preserve identity and rotate its root")
     write_bootstrap_receipt(upgrade_root, current_version)
+    current_executable = materialize_fixture_runtime(
+        source_root,
+        upgrade_root,
+        current_version,
+        previous_release_version=old_version,
+    )
+    verify_login(current_executable, upgrade_root, current_version)
+    verify_login(current_executable, upgrade_root, current_version)
     runtime.verify_private_root(upgrade_root, current_version)
+    current_receipt = runtime.verify_installation(upgrade_root, current_version)
+    if (
+        current_receipt["instance_id"] != old_receipt["instance_id"]
+        or current_receipt["created_at"] != old_receipt["created_at"]
+        or current_receipt["declared_restore"] is not True
+        or current_receipt["physical_root_identity"]
+        != upgrade_restore["physical_root_identity"]
+    ):
+        raise AssertionError("current activation changed the managed installation identity")
     checks.append({"id": "adjacent_version_upgrade", "status": "pass"})
 
     rollback_root = fixture / "rollback-target"
-    runtime.restore_depot(backup, rollback_root, old_version)
+    rollback_restore = runtime.restore_depot(backup, rollback_root, old_version)
+    if (
+        rollback_restore["instance_id"] != old_receipt["instance_id"]
+        or rollback_restore["created_at"] != old_receipt["created_at"]
+        or rollback_restore["declared_restore"] is not True
+        or rollback_restore["physical_root_identity"] == old_receipt["physical_root_identity"]
+        or rollback_restore["physical_root_identity"]
+        == upgrade_restore["physical_root_identity"]
+    ):
+        raise AssertionError("rollback restore did not preserve identity and rotate its root")
+    old_executable = materialize_fixture_runtime(source_root, rollback_root, old_version)
+    rollback_receipt = runtime.verify_installation(rollback_root, old_version)
+    if (
+        rollback_receipt["instance_id"] != old_receipt["instance_id"]
+        or rollback_receipt["created_at"] != old_receipt["created_at"]
+        or rollback_receipt["declared_restore"] is not True
+        or rollback_receipt["physical_root_identity"]
+        != rollback_restore["physical_root_identity"]
+    ):
+        raise AssertionError("rollback activation changed the managed installation identity")
     verify_login(old_executable, rollback_root, old_version)
     verify_login(old_executable, rollback_root, old_version)
     runtime.verify_private_root(rollback_root, old_version)
@@ -946,7 +1034,6 @@ jobs {}
                 source_root,
                 fixture,
                 smtp,
-                Path(executable),
                 checks,
             )
         finally:
