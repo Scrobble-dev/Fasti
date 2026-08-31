@@ -2133,12 +2133,6 @@ def restore_depot(
             _release=_release,
             _release_lock_identity_override=_release_lock_identity_override,
         )
-        verify_installation(
-            temporary,
-            release_version,
-            _release=_release,
-            _release_lock_identity_override=_release_lock_identity_override,
-        )
         current_parent = _validate_restore_parent(parent)
         if (current_parent.st_dev, current_parent.st_ino) != (
             parent_metadata.st_dev,

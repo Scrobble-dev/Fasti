@@ -393,6 +393,11 @@ def materialize_fixture_runtime(
     target_archive = target_cache / archive_name
     shutil.copyfile(source_archive, target_archive)
     os.chmod(target_archive, 0o600)
+    if release_version == current_version:
+        auth_ui_archive_name = f"trailbase-v{current_version}-wasm-auth-ui.zip"
+        auth_ui_archive = target_cache / auth_ui_archive_name
+        shutil.copyfile(source_root / "cache" / auth_ui_archive_name, auth_ui_archive)
+        os.chmod(auth_ui_archive, 0o600)
     executable = (
         runtime.prepare_native(target_root, offline=True)
         if release_version == current_version
