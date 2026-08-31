@@ -1865,6 +1865,8 @@ mod tests {
         target: ExternalIdentifierClaim,
         relation: IdentityAssertionRelation,
         initial_status: IdentityAssertionStatus,
+        evidence_class: IdentityAssertionEvidenceClass,
+        evidence_method: IdentityEvidenceMethod,
     ) -> IdentityAssertion {
         let assertion_id = IdentityAssertionId::new_v7();
         let coverage = matches!(
@@ -1901,12 +1903,13 @@ mod tests {
             relation,
             coverage,
             Vec::new(),
-            IdentityAssertionEvidenceClass::Verified,
+            evidence_class,
             vec![IdentityAssertionEvidence::try_new(
-                IdentityEvidenceMethod::HumanVerified,
+                evidence_method,
                 "pinned fixture source",
                 Some("fixture-root".to_owned()),
-                Some("fixture-reviewer".to_owned()),
+                (evidence_method == IdentityEvidenceMethod::HumanVerified)
+                    .then(|| "fixture-reviewer".to_owned()),
                 NaiveDate::from_ymd_opt(2026, 8, 30).expect("date fixture"),
                 None,
             )
@@ -1936,6 +1939,8 @@ mod tests {
             target,
             relation,
             IdentityAssertionStatus::Accepted,
+            IdentityAssertionEvidenceClass::Verified,
+            IdentityEvidenceMethod::HumanVerified,
         );
         let assertion_id = assertion.assertion_id();
         (
@@ -1952,6 +1957,8 @@ mod tests {
             identity_claim("mal.anime", "49894"),
             IdentityAssertionRelation::Exact,
             IdentityAssertionStatus::Candidate,
+            IdentityAssertionEvidenceClass::Verified,
+            IdentityEvidenceMethod::HumanVerified,
         );
         let accepted = IdentityAssertionLifecycleEvent::try_new(
             assertion.assertion_id(),
@@ -2027,6 +2034,31 @@ mod tests {
         )
         .expect("individually valid skipped event");
         assert!(IdentityRouteEvidence::accepted_crosswalk(&assertion, &[skipped]).is_none());
+
+        let inferred = crosswalk_assertion_fixture(
+            RecordId::new_v7(),
+            identity_claim("imdb.title", "tt28254942"),
+            IdentityAssertionRelation::Exact,
+            IdentityAssertionStatus::Candidate,
+            IdentityAssertionEvidenceClass::Inferred,
+            IdentityEvidenceMethod::HeuristicTitleMatch,
+        );
+        assert!(IdentityRouteEvidence::accepted_crosswalk(&inferred, &[]).is_none());
+        let reviewed = IdentityAssertionLifecycleEvent::try_new(
+            inferred.assertion_id(),
+            1,
+            IdentityAssertionStatus::Candidate,
+            IdentityAssertionStatus::Accepted,
+            ClientId::new_v7(),
+            ReceivedAt::from_application_clock(
+                Utc.timestamp_opt(1_800_000_001, 0)
+                    .single()
+                    .expect("acceptance time"),
+            ),
+            None,
+        )
+        .expect("explicit review event");
+        assert!(IdentityRouteEvidence::accepted_crosswalk(&inferred, &[reviewed]).is_some());
     }
 
     #[test]
