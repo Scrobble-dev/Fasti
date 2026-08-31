@@ -365,8 +365,9 @@
   async function setup(): Promise<void> {
     try {
       const { invoke } = await import("@tauri-apps/api/core");
-      applySetupStatus(await invoke<SetupStatus>("complete_setup"));
+      const completed = await invoke<SetupStatus>("complete_setup");
       window.history.replaceState({}, "", "/first-run");
+      applySetupStatus(completed);
       if (activeSurface === "status") await inspectHealth();
     } catch (error) {
       applySetupProblem(error);
