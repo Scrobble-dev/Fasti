@@ -612,6 +612,106 @@ The C1.4 UI may be authored and fixture-tested while packaged platform proof
 is pending, but it must not claim runtime completion or activate ordinary
 sign-in before both this continuation gate and the WebView cookie gate pass.
 
+### 2.8 Frozen identity-first continuation contract
+
+The bounded engineering, test, developer-experience, and additive AGY reviews
+converged on the following minimum. These decisions amend the unpublished v14
+design only. They add no provisional session, second ceremony table, browser
+state store, provider abstraction, or polling loop.
+
+- Ordinary `POST /api/access/v1/trailbase/sign-in` accepts only
+  `{ "remembered": boolean }`. It rejects workspace, profile-grant,
+  membership, subject, ceremony, callback, origin, and provider identifiers.
+  The response contains the authorization URL and expiry only; the browser
+  binding cookie is the sole ceremony authority.
+- `AuthCeremony` stores an optional final selection and the remembered choice
+  separately. Ordinary sign-in starts without a selection. Bootstrap and the
+  reserved recent-authentication purpose keep their existing required,
+  server-normalized selections and `remembered = false`.
+- Add exactly one non-terminal domain state, `SelectionRequired`. Only an
+  already claimed ordinary sign-in may enter it, and only after TrailBase
+  logout succeeds and the refresh/access proof material has been destroyed.
+  It survives process restart because no remote cleanup or PKCE verifier
+  remains. `Pending` and `Claimed` keep their existing fail-closed restart
+  behavior.
+- Persist on the existing ceremony row only the non-secret confirmation needed
+  after logout: anchored `AuthSubjectId`, authentication method and verified
+  time, subject authentication epoch, and subject authorization epoch. The
+  activation generation remains the existing ceremony field. No TrailBase
+  token, authorization code, verifier, email, username, or provider payload is
+  persisted.
+- Selection-required ceremonies retain the original ten-minute ceremony
+  expiry. Maintenance expires both `Pending` and `SelectionRequired` exactly
+  at `expires_at`. Expiry, completion, and cancellation remain terminal and
+  retained by the existing 24-hour bounded evidence policy.
+- The callback returns a typed bootstrap-completed, selection-required, or
+  attributable-failure outcome. Bootstrap still creates its session directly.
+  Ordinary sign-in never creates a Fasti session in the callback.
+- On selection-required or attributable post-claim failure, the response
+  clears the callback cookie and writes the same high-entropy binding value to
+  `__Secure-fasti_auth_continuation` with `Domain=127.0.0.1`, exact
+  `Path=/api/access/v1/trailbase/continuation`, `Secure`, `HttpOnly`,
+  `SameSite=Strict`, and `Max-Age` no longer than the ceremony's remaining
+  lifetime. Pre-claim noise clears the callback cookie and receives no
+  continuation cookie. Completion, cancellation, and expired evidence clear
+  the continuation cookie.
+- Add one resource path, `/api/access/v1/trailbase/continuation`, under the
+  existing `browser.session.create` capability:
+  - `GET` reads a binding-protected `SelectionRequired` projection or returns
+    one governed `application/problem+json` terminal result;
+  - `POST` accepts only an opaque zero-based choice ordinal and the exact
+    candidate revision, never retries automatically, and returns `204` plus
+    the opaque Fasti session and CSRF cookies on success;
+  - `DELETE` cancels or dismisses the bound continuation, returns `204`, and
+    clears the cookie. It is the existing user-control/start-over path, not a
+    second workflow.
+  `GET` requires the exact Host and exactly one well-formed continuation
+  cookie. `POST` and `DELETE` additionally require the exact Origin. None
+  accepts bearer authorization, browser-session CSRF, operation IDs, or
+  correlation IDs as authority.
+- A selection projection contains only `expires_at`, `remembered`, one
+  canonical SHA-256 revision, and at most 64 choices. Each choice exposes an
+  opaque ordinal plus safe presentation facts: deterministic workspace and
+  profile ordinals, workspace/profile creation times, membership state, and
+  role. It emits no workspace, profile, grant, membership, client, subject, or
+  TrailBase identifier. More than 64 choices fails closed; it is never
+  truncated.
+- Core storage currently has no authoritative workspace or profile display
+  name. C1 does not invent one or expose identifiers as labels. The C1 UI uses
+  the truthful creation time, role, membership state, and deterministic
+  ordinal. Adding editable names is a separate domain decision; it must not be
+  smuggled into authentication. Runtime UX evidence must record this known
+  recognition-over-recall ceiling instead of claiming it is solved.
+- The candidate revision is computed over the deterministic, complete
+  candidate tuples plus the stored subject epochs and activation generation.
+  `POST` uses one `BEGIN IMMEDIATE` transaction to reload the bound ceremony,
+  require `SelectionRequired`, require it unexpired, compare stored and current
+  subject epochs, require the same active TrailBase generation, recompute the
+  complete candidate set and revision, resolve the ordinal, and recheck the
+  membership or exact invitation, grant, client, and subject lifecycle. It then
+  accepts an invitation when applicable, stores the internal selection,
+  inserts authentication provenance and audit evidence, creates exactly one
+  opaque Fasti session, and CAS-transitions the ceremony to `Completed` before
+  commit. A stale revision, losing tab, invalid ordinal, or injected write
+  failure creates no session and changes no authorization state.
+- Add governed `auth_selection_changed` evidence for a stale revision:
+  HTTP 409, prior state retained, retry after correction, next action
+  `review_sign_in_choices`. Preserve exact existing unaffiliated, identity,
+  cleanup-uncertain, expiry, and binding evidence where source state proves it;
+  do not collapse a known condition into invented success or generic copy.
+  Pre-claim failures remain generic and non-attributable.
+- Workbench and the generated SDK use one same-origin client and exact request
+  DTOs. The callback remains browser navigation and has no SDK method. The SDK
+  exposes read, complete, and cancel continuation methods, never retries the
+  completion POST, and keeps returned data only in volatile component state.
+  No new Access host abstraction, provider, or wizard store is permitted.
+
+The minimum proof is one table-driven dependency-race store test, one complete
+TrailBase-to-continuation-to-session test, one table-driven attributable failure
+test, focused domain/state and cookie boundary tests, generated-contract drift,
+and the existing exact C1 suites. Explicit selection remains required even for
+one candidate.
+
 Theme and accessibility ownership stays in the existing Workbench:
 
 - light: `data-bs-theme=light`, `data-fasti-theme=light`;
@@ -1269,10 +1369,10 @@ C1 reuses these owners. It does not rebuild them.
 | Review        | Trigger               | Why                             | Runs | Status                                | Findings                                                                                                                                                               |
 | ------------- | --------------------- | ------------------------------- | ---- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | CEO Review    | `/plan-ceo-review`    | Scope & strategy                | 0    | —                                     | Gate 10 and canonical programme approvals are existing source decisions, not a new run.                                                                                |
-| Codex Review  | `/codex review`       | Independent 2nd opinion         | 0    | CLEAR BY EQUIVALENT READ-ONLY REVIEWS | Independent C1.3d review found and closed shared-runtime, Android-capability, two-start, PKCE-capacity, and shutdown-drain defects. Platform evidence remains pending. |
-| Eng Review    | `/plan-eng-review`    | Architecture & tests (required) | 2    | CLEAR                                 | C1 trust profile plus activation, membership, ceremony, audit-retention, archive-compatibility, and TOTP decisions are frozen.                                         |
+| Codex Review  | `/codex review`       | Independent 2nd opinion         | 0    | CLEAR BY EQUIVALENT READ-ONLY REVIEWS | Independent C1.3d review found and closed shared-runtime, Android-capability, two-start, PKCE-capacity, and shutdown-drain defects. Three continuation reviews then converged on the existing-row design. Platform evidence remains pending. |
+| Eng Review    | `/plan-eng-review`    | Architecture & tests (required) | 3    | CLEAR                                 | The identity-first state machine, persisted confirmation, expiry/restart rules, cookie rotation, bounded candidates, final transaction, and lean test matrix are frozen in section 2.8. |
 | Design Review | `/plan-design-review` | UI/UX gaps                      | 0    | —                                     | Existing approved Gate 10 A+C review and artifact hashes remain binding. Runtime design evidence stays in C1.4.                                                        |
-| DX Review     | `/plan-devex-review`  | Developer experience gaps       | 0    | REQUIRED NEXT                         | Review the bounded identity-first continuation and safe failure evidence before C1.4 activation.                                                                       |
+| DX Review     | `/plan-devex-review`  | Developer experience gaps       | 1    | CONTRACT CLEAR; LIVE AUDIT DEFERRED   | The request/response, SDK, cookie, retry, Workbench host, copy, and no-display-name limitation are frozen. The skill's required live product audit runs after the packaged C1.4 surface exists. |
 
 **OUTSIDE REVIEW:** Read-only subagents support direct backchannel C1 plus
 separate upstream hardening and identified the callback, association,
@@ -1286,3 +1386,5 @@ it did not replace the subagent review or an evidence gate.
 **VERDICT:** C1.3d CODE COMPLETE; PLATFORM PROOF PENDING. Freeze and implement
 the bounded identity-first continuation before activating ordinary sign-in,
 while A+C fixture work proceeds against the approved Tabler-first design.
+
+NO UNRESOLVED DECISIONS
