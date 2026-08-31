@@ -381,12 +381,16 @@ impl AnimeGroupingPolicyImpact {
         affected_records: u64,
         unresolved_routes: u64,
         possible_season_regroupings: u64,
+        requested_after_record_id: Option<RecordId>,
         records: Vec<AnimeGroupingRecordPreview>,
         next_after_record_id: Option<RecordId>,
     ) -> Result<Self, AnimeGroupingPolicyResultError> {
         let records_are_strictly_ordered = records
             .windows(2)
             .all(|pair| pair[0].record_id().uuid() < pair[1].record_id().uuid());
+        let page_advances = records.iter().all(|record| {
+            requested_after_record_id.is_none_or(|cursor| record.record_id().uuid() > cursor.uuid())
+        });
         let cursor_is_valid = next_after_record_id.is_none_or(|cursor| {
             records
                 .last()
@@ -399,6 +403,7 @@ impl AnimeGroupingPolicyImpact {
             || unresolved_routes > total_records
             || possible_season_regroupings > affected_records
             || !records_are_strictly_ordered
+            || !page_advances
             || !cursor_is_valid
         {
             return Err(AnimeGroupingPolicyResultError);
@@ -601,6 +606,7 @@ mod tests {
             0,
             u64::from(MAX_IDENTITY_IMPACT_PAGE) + 1,
             0,
+            None,
             records,
             None,
         )
@@ -613,6 +619,7 @@ mod tests {
             0,
             0,
             1,
+            None,
             Vec::new(),
             None,
         )
@@ -650,6 +657,7 @@ mod tests {
             0,
             0,
             0,
+            None,
             records.clone(),
             Some(final_record_id),
         )
@@ -669,6 +677,7 @@ mod tests {
                 affected,
                 unresolved,
                 regroupings,
+                None,
                 page,
                 None,
             )
@@ -685,6 +694,7 @@ mod tests {
             0,
             0,
             0,
+            None,
             unordered,
             None,
         )
@@ -697,6 +707,20 @@ mod tests {
             0,
             0,
             0,
+            Some(records[0].record_id()),
+            records.clone(),
+            Some(final_record_id),
+        )
+        .is_err());
+        assert!(AnimeGroupingPolicyImpact::try_new(
+            policy,
+            AnimeGroupingPreference::Automatic,
+            AnimeGroupingPolicySource::ProfileDefault,
+            2,
+            0,
+            0,
+            0,
+            None,
             records,
             Some(RecordId::new_v7()),
         )
