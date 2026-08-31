@@ -8,14 +8,15 @@ use crate::{ApplicationResult, RequestAccessContext};
 use crate::{ProviderCapabilityState, ProviderId};
 use fasti_domain::{
     AnimeGroupingPreference, EnrichmentPolicy, ExternalIdentifierClaim, ExternalIdentifierError,
-    FieldClaim, FieldClaimStatus, FieldKey, Grain, IdentityAssertion, IdentityAssertionId,
-    IdentityAssertionLifecycleEvent, IdentityAssertionRelation, IdentityRouteEvidenceKind,
-    IdentityRouteKind, MetadataAttribution, MetadataCacheEntry, MetadataCacheReadState,
-    MetadataFieldGroup, MetadataLocale, MetadataProjection, MetadataProjectionPolicy,
-    MetadataProviderId, MetadataRegion, NamespaceDefinition, NamespaceDefinitionError,
-    NamespaceLicencePosture, ProfileId, RatingClaim, RecordId, RequestCorrelationId,
-    ResolutionIntent, MAX_EXTERNAL_IDENTIFIER_BYTES, ORIGINAL_TITLE_FIELD_KEY, OVERVIEW_FIELD_KEY,
-    POSTER_FIELD_KEY, RELEASE_YEAR_FIELD_KEY, TITLE_FIELD_KEY,
+    FieldClaim, FieldClaimStatus, FieldKey, Grain, IdentityAssertion,
+    IdentityAssertionEvidenceClass, IdentityAssertionId, IdentityAssertionLifecycleEvent,
+    IdentityAssertionRelation, IdentityRouteEvidenceKind, IdentityRouteKind, MetadataAttribution,
+    MetadataCacheEntry, MetadataCacheReadState, MetadataFieldGroup, MetadataLocale,
+    MetadataProjection, MetadataProjectionPolicy, MetadataProviderId, MetadataRegion,
+    NamespaceDefinition, NamespaceDefinitionError, NamespaceLicencePosture, ProfileId, RatingClaim,
+    RecordId, RequestCorrelationId, ResolutionIntent, MAX_EXTERNAL_IDENTIFIER_BYTES,
+    ORIGINAL_TITLE_FIELD_KEY, OVERVIEW_FIELD_KEY, POSTER_FIELD_KEY, RELEASE_YEAR_FIELD_KEY,
+    TITLE_FIELD_KEY,
 };
 use std::{future::Future, pin::Pin};
 
@@ -198,6 +199,12 @@ impl IdentityRouteEvidence {
         assertion: &IdentityAssertion,
         lifecycle_events: &[IdentityAssertionLifecycleEvent],
     ) -> Option<Self> {
+        if matches!(
+            assertion.evidence_class(),
+            IdentityAssertionEvidenceClass::Candidate | IdentityAssertionEvidenceClass::Disputed
+        ) {
+            return None;
+        }
         assertion
             .effective_status(lifecycle_events)
             .ok()?
@@ -2020,6 +2027,77 @@ mod tests {
         )
         .expect("individually valid skipped event");
         assert!(IdentityRouteEvidence::accepted_crosswalk(&assertion, &[skipped]).is_none());
+    }
+
+    #[test]
+    fn candidate_and_disputed_evidence_never_become_routes() {
+        for (evidence_class, initial_status) in [
+            (
+                IdentityAssertionEvidenceClass::Candidate,
+                IdentityAssertionStatus::Candidate,
+            ),
+            (
+                IdentityAssertionEvidenceClass::Disputed,
+                IdentityAssertionStatus::Disputed,
+            ),
+        ] {
+            let record_id = RecordId::new_v7();
+            let source = fasti_domain::ExternalIdentifier::new(
+                ExternalIdentifierId::new_v7(),
+                WorkspaceId::new_v7(),
+                record_id,
+                identity_claim("mal.anime", "49894"),
+            );
+            let assertion = IdentityAssertion::try_new(
+                IdentityAssertionId::new_v7(),
+                &source,
+                identity_claim("imdb.title", "tt28254942"),
+                IdentityAssertionRelation::Exact,
+                Vec::new(),
+                Vec::new(),
+                evidence_class,
+                vec![IdentityAssertionEvidence::try_new(
+                    IdentityEvidenceMethod::HumanVerified,
+                    "reviewed candidate fixture",
+                    Some("candidate-fixture-root".to_owned()),
+                    Some("fixture-reviewer".to_owned()),
+                    NaiveDate::from_ymd_opt(2026, 8, 30).expect("date fixture"),
+                    None,
+                )
+                .expect("candidate evidence")],
+                "test-fixture",
+                Some("fixture-v1".to_owned()),
+                None,
+                None,
+                initial_status,
+                ReceivedAt::from_application_clock(
+                    Utc.timestamp_opt(1_800_000_000, 0)
+                        .single()
+                        .expect("assertion time"),
+                ),
+            )
+            .expect("non-routable assertion");
+            let accepted = IdentityAssertionLifecycleEvent::try_new(
+                assertion.assertion_id(),
+                1,
+                initial_status,
+                IdentityAssertionStatus::Accepted,
+                ClientId::new_v7(),
+                ReceivedAt::from_application_clock(
+                    Utc.timestamp_opt(1_800_000_001, 0)
+                        .single()
+                        .expect("acceptance time"),
+                ),
+                None,
+            )
+            .expect("accepted lifecycle event");
+
+            assert_eq!(
+                assertion.effective_status(std::slice::from_ref(&accepted)),
+                Ok(IdentityAssertionStatus::Accepted)
+            );
+            assert!(IdentityRouteEvidence::accepted_crosswalk(&assertion, &[accepted]).is_none());
+        }
     }
 
     #[test]
