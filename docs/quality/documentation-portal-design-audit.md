@@ -25,12 +25,12 @@ tablet, and mobile widths. It also checked light and dark themes.
 
 | Finding | Result | Commit |
 |---|---|---|
-| Status data moved the page after load. | The table is present in the first render. Successful loads measure zero cumulative layout shift. | 3b76de37 |
-| Search started as an empty region. | The page reserves the field space and gives the Pagefind field a searchbox role and name. | f43e9c06 |
-| Three Docusaurus controls were smaller than 44 by 44 CSS pixels. | The breadcrumb home link, mobile table-of-contents control, and code copy button meet the target. | 34403e2e |
-| The planner command lost its boundary in dark mode. | The existing border token defines the command surface. | 33b370eb |
-| Status lost its table when registry data failed. | The table stays visible with unknown counts and an error action. | 642d4721 |
-| Search had no recovery state when Pagefind failed. | A labelled fallback, failure action, and no-JavaScript action are present. | f1f83a9b |
+| Status data moved the page after load. | The table is present in the first render. Successful loads measure zero cumulative layout shift. | 670acbe1 |
+| Search started as an empty region. | The page reserves the field space and gives the Pagefind field a searchbox role and name. | 499ba7af |
+| Three Docusaurus controls were smaller than 44 by 44 CSS pixels. | The breadcrumb home link, mobile table-of-contents control, and code copy button meet the target. | 16eac2ed |
+| The planner command lost its boundary in dark mode. | The existing border token defines the command surface. | 12a582e0 |
+| Status lost its table when registry data failed. | The table stays visible with unknown counts and an error action. | 383503df |
+| Search had no recovery state when Pagefind failed. | A labelled fallback, failure action, and no-JavaScript action are present. | 756062c0 |
 
 ## Verification
 
