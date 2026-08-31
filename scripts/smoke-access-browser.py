@@ -15,7 +15,6 @@ import select
 import signal
 import sqlite3
 import subprocess  # nosec B404 -- this gate launches exact local test artifacts.
-import sys
 import tempfile
 import threading
 import time
@@ -27,7 +26,6 @@ import trailbase_runtime as runtime
 
 
 ROOT = Path(__file__).resolve().parents[1]
-TRAILBASE_ORIGIN = "http://127.0.0.1:4000"
 FASTI_ORIGIN = "http://127.0.0.1:8420"
 
 
