@@ -6,14 +6,6 @@ const css = await readFile(
   new URL("../../apps/docs/src/css/custom.css", import.meta.url),
   "utf8",
 );
-const searchPage = await readFile(
-  new URL("../../apps/docs/src/pages/search.tsx", import.meta.url),
-  "utf8",
-);
-const statusPage = await readFile(
-  new URL("../../apps/docs/src/pages/status.tsx", import.meta.url),
-  "utf8",
-);
 const tokensSource = await readFile(
   new URL("../../packages/tokens/src/index.ts", import.meta.url),
   "utf8",
@@ -61,22 +53,87 @@ test("Docusaurus documentation controls keep a 44 pixel target", () => {
   );
 });
 
-test("local search keeps an accessible fallback and waits for both assets", () => {
-  assert.match(searchPage, /aria-busy=\{!loadError\}/u);
-  assert.match(searchPage, /setAttribute\("role", "searchbox"\)/u);
-  assert.match(searchPage, /Local search could not load\./u);
-  assert.match(searchPage, /let mounted = true;/u);
-  assert.match(searchPage, /!scriptReady \|\| !stylesheetReady/u);
-  assert.match(searchPage, /mounted = false;/u);
-});
+test(
+  "built search and status pages keep usable loading and failure states",
+  { skip: !process.env.FASTI_DOCS_BASE_URL },
+  async () => {
+    const { chromium } = await import("@playwright/test");
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const search = await browser.newPage();
+      let scriptRoute;
+      let stylesheetRoute;
+      await search.route("**/pagefind/pagefind-ui.js", (route) => {
+        scriptRoute = route;
+      });
+      await search.route("**/pagefind/pagefind-ui.css", (route) => {
+        stylesheetRoute = route;
+      });
+      await search.goto(
+        new URL("/search/", process.env.FASTI_DOCS_BASE_URL).href,
+        { waitUntil: "domcontentloaded" },
+      );
+      const fallback = search.locator("#fasti-search-fallback");
+      await fallback.waitFor({ state: "visible" });
+      assert.equal(await fallback.isDisabled(), true);
+      assert.equal(
+        await fallback.getAttribute("aria-describedby"),
+        "fasti-search-loading",
+      );
+      assert.ok(scriptRoute);
+      assert.ok(stylesheetRoute);
+      await Promise.all([scriptRoute.continue(), stylesheetRoute.continue()]);
+      await search
+        .getByRole("searchbox", { name: "Search documentation" })
+        .waitFor({ state: "visible" });
 
-test("status keeps its table visible while data loads or fails", () => {
-  assert.match(statusPage, /aria-busy=\{!error && capabilities === null\}/u);
-  assert.equal(
-    [...statusPage.matchAll(/capabilities === null\s*\? "—"/gu)].length,
-    3,
-  );
-});
+      const failedSearch = await browser.newPage();
+      await failedSearch.route("**/pagefind/pagefind-ui.*", (route) =>
+        route.abort(),
+      );
+      await failedSearch.goto(
+        new URL("/search/", process.env.FASTI_DOCS_BASE_URL).href,
+      );
+      await failedSearch
+        .getByRole("alert")
+        .filter({ hasText: "Local search could not load." })
+        .waitFor({ state: "visible" });
+      assert.equal(
+        await failedSearch.locator("#fasti-search-fallback").isVisible(),
+        true,
+      );
+
+      const status = await browser.newPage();
+      let capabilityRoute;
+      await status.route("**/capabilities.json", (route) => {
+        capabilityRoute = route;
+      });
+      await status.goto(
+        new URL("/status/", process.env.FASTI_DOCS_BASE_URL).href,
+        { waitUntil: "domcontentloaded" },
+      );
+      const table = status.getByRole("table", {
+        name: "Current generated capability states",
+      });
+      await table.waitFor({ state: "visible" });
+      assert.equal(await table.getAttribute("aria-busy"), "true");
+      assert.deepEqual(
+        await table.locator("tbody tr td:last-child").allTextContents(),
+        ["—", "—", "—"],
+      );
+      assert.ok(capabilityRoute);
+      await capabilityRoute.abort();
+      await status
+        .getByRole("alert")
+        .filter({ hasText: "The generated capability data could not load." })
+        .waitFor({ state: "visible" });
+      assert.equal(await table.isVisible(), true);
+      assert.equal(await table.getAttribute("aria-busy"), "false");
+    } finally {
+      await browser.close();
+    }
+  },
+);
 
 test(
   "the built navigation opens only at the mobile breakpoint",
