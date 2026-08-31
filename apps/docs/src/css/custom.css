@@ -89,6 +89,17 @@ input:focus-visible {
   align-items: center;
   justify-content: center;
 }
+.breadcrumbs__link,
+.theme-doc-toc-mobile button,
+.theme-code-block button {
+  min-width: var(--fasti-touch-target-min);
+  min-height: var(--fasti-touch-target-min);
+}
+.breadcrumbs__link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
 .navbar__item,
 .menu__link,
 .footer__link-item {
@@ -100,6 +111,13 @@ input:focus-visible {
   width: min(100% - 2rem, 70rem);
   margin-inline: auto;
   padding-block: 3rem 5rem;
+}
+.fasti-search-fallback,
+#pagefind-search {
+  min-height: calc(var(--fasti-touch-target-min) + 0.5rem);
+}
+.fasti-search-pending {
+  display: none;
 }
 .fasti-hero {
   max-width: 54rem;
@@ -199,6 +217,7 @@ input:focus-visible {
   overflow-wrap: anywhere;
   background: var(--fasti-surface-night);
   color: var(--fasti-overlay-contrast);
+  border: 1px solid var(--fasti-border);
   padding: 1rem;
 }
 .fasti-plan-output code {
