@@ -194,7 +194,7 @@
       const accessClient = new FastiClient({ baseUrl: window.location.origin });
       host = {
         networkConfigurationScope: "node",
-        profileDataAuthority: "browser_session",
+        profileDataAuthority: "scoped",
         startTrailBaseSignIn: (request) =>
           accessClient.startTrailBaseSignIn(request),
         readTrailBaseContinuation: (signal) =>

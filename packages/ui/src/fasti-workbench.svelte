@@ -606,10 +606,10 @@
   });
 
   function projectionIdentity(projection?: AccessProjectionResponse): string {
-    return projection
-      ? `${projection.current_session.browser_session_id}:${projection.current_session.rotation_generation}:${projection.current_session.selected_profile_grant_id}`
-      : host.profileDataAuthority === "scoped"
-        ? "scoped-host"
+    return host.profileDataAuthority === "scoped"
+      ? "scoped-host"
+      : projection
+        ? `${projection.current_session.browser_session_id}:${projection.current_session.rotation_generation}:${projection.current_session.selected_profile_grant_id}`
         : "signed-out";
   }
 
