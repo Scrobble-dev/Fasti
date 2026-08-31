@@ -1841,9 +1841,9 @@
         "state": "not_applicable"
       },
       "ui": {
-        "body": "c1",
-        "reason": "Gate 10 Account and Security and first-run UI are delivered in C1.4.",
-        "state": "later_body"
+        "binding": "ui:account-security",
+        "binding_visibility": "public",
+        "state": "required"
       }
     },
     "c1_browser_session_foundation": {

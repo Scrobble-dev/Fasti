@@ -771,11 +771,13 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
         case "ui":
           assert.equal(
             binding,
-            capability.id.startsWith("provider.")
-              ? "ui:provider-settings"
-              : capability.id.startsWith("metadata.")
-                ? "ui:metadata-provenance"
-                : `ui:${capability.id}`,
+            capability.id === "access.projection.read"
+              ? "ui:account-security"
+              : capability.id.startsWith("provider.")
+                ? "ui:provider-settings"
+                : capability.id.startsWith("metadata.")
+                  ? "ui:metadata-provenance"
+                  : `ui:${capability.id}`,
           );
           break;
         default:

@@ -455,12 +455,7 @@ surface_profiles:
         body: c1,
         reason: Authenticated projection smoke is delivered after the route is active.,
       }
-    ui:
-      {
-        state: later_body,
-        body: c1,
-        reason: Gate 10 Account and Security and first-run UI are delivered in C1.4.,
-      }
+    ui: { state: required, binding: "ui:account-security" }
 
   later_b2:
     domain_application:

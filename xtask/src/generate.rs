@@ -2533,6 +2533,38 @@ fn resolve_required_binding(
             _ => anyhow::bail!("unknown package-smoke binding"),
         },
         "ui" => match binding {
+            "ui:account-security" => {
+                ensure!(
+                    capability_id == "access.projection.read",
+                    "the Account and Security UI binding belongs only to the Access projection"
+                );
+                let types = fs::read_to_string(workspace_root.join("packages/ui/src/types.ts"))?;
+                let host = fs::read_to_string(workspace_root.join("apps/web/src/web-host.ts"))?;
+                let workbench = fs::read_to_string(
+                    workspace_root.join("packages/ui/src/fasti-workbench.svelte"),
+                )?;
+                let view = fs::read_to_string(
+                    workspace_root.join("packages/ui/src/account-security-view.svelte"),
+                )?;
+                let browser =
+                    fs::read_to_string(workspace_root.join("tests/e2e/access-c1.spec.ts"))?;
+                ensure!(
+                    types.contains("readAccessProjection?")
+                        && host.contains("const accessClient = new FastiClient")
+                        && host.contains("accessClient.readAccessProjection")
+                        && workbench.contains("function acceptAccessProjection")
+                        && workbench.contains("function readAccessProjection")
+                        && workbench.contains("clearProfileOwnedWorkbenchState")
+                        && workbench.contains("window.addEventListener(\"focus\"")
+                        && view.contains("const projection = await readAccessProjection()")
+                        && view.contains("onProjection?.(undefined)")
+                        && browser.contains("one shared projection read owns navigation")
+                        && browser.contains("an expired browser-session deadline clears profile authority")
+                        && browser.contains("window focus revalidates cached browser-session authority")
+                        && browser.contains("a committed revocation cannot resurrect stale session inventory"),
+                    "Account and Security UI does not preserve the governed Access projection boundary"
+                );
+            }
             "ui:provider-settings" => {
                 let view = fs::read_to_string(
                     workspace_root.join("packages/ui/src/runtime-settings-view.svelte"),

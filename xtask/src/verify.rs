@@ -1095,6 +1095,64 @@ mod tests {
     }
 
     #[test]
+    fn dirty_source_cannot_emit_a_gate_suite_receipt() {
+        let root = tempfile::tempdir().expect("temporary workspace");
+        for args in [
+            vec!["init", "--quiet"],
+            vec!["config", "user.email", "test@example.invalid"],
+            vec!["config", "user.name", "Fasti Test"],
+        ] {
+            assert!(Command::new("git")
+                .args(args)
+                .current_dir(root.path())
+                .status()
+                .expect("run Git")
+                .success());
+        }
+        fs::write(root.path().join("tracked.txt"), "clean\n").expect("write tracked file");
+        assert!(Command::new("git")
+            .args(["add", "tracked.txt"])
+            .current_dir(root.path())
+            .status()
+            .expect("stage tracked file")
+            .success());
+        assert!(Command::new("git")
+            .args(["commit", "--quiet", "-m", "fixture"])
+            .current_dir(root.path())
+            .status()
+            .expect("commit fixture")
+            .success());
+
+        fs::write(root.path().join("tracked.txt"), "dirty\n").expect("modify tracked file");
+        fs::write(root.path().join("untracked.txt"), "dirty\n").expect("write untracked file");
+        let receipt = Path::new("target/fasti-receipts/test-suite.json");
+        let gate = GateRecord {
+            id: "test.pass".to_owned(),
+            execution: "in_process".to_owned(),
+            command: vec!["test".to_owned()],
+            status: "pass".to_owned(),
+            exit_code: Some(0),
+            stdout_sha256: sha256_bytes(b"pass\n"),
+            stderr_sha256: sha256_bytes(&[]),
+            tool_version: "test 1".to_owned(),
+            stdout: "pass\n".to_owned(),
+            stderr: String::new(),
+        };
+
+        let error = write_gate_suite_receipt(
+            root.path(),
+            receipt,
+            "fasti.test.gates",
+            "cargo xtask test",
+            &[gate],
+        )
+        .expect_err("dirty source must fail closed");
+
+        assert!(error.to_string().contains("source tree is dirty"));
+        assert!(!root.path().join(receipt).exists());
+    }
+
+    #[test]
     fn stale_receipt_is_removed_before_verification() {
         let root = tempfile::tempdir().expect("temporary workspace");
         let receipt = root.path().join(RECEIPT_PATH);
