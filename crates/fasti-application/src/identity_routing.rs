@@ -603,6 +603,7 @@ impl ApplyAnimeGroupingPolicyChangeOutcome {
                 policy.source(),
             )
             || !previous_source.is_valid_for(policy.scope())
+            || policy.revision() < command.expected_revision()
             || possible_season_regroupings > affected_records
             || rolled_back_operation_id == Some(command.operation_id())
         {
@@ -1578,5 +1579,41 @@ mod tests {
         )
         .expect("valid set outcome");
         assert_eq!(set.rolled_back_operation_id(), None);
+    }
+
+    #[test]
+    fn apply_outcome_cannot_move_behind_the_expected_revision() {
+        let expected_policy = AnimeGroupingPolicyView::try_new(
+            ProfileId::new_v7(),
+            AnimeGroupingPolicyScope::Profile,
+            AnimeGroupingPolicySource::ProfileDefault,
+            AnimeGroupingPreference::Automatic,
+            2,
+        )
+        .expect("valid expected policy");
+        let command = apply_command(
+            expected_policy,
+            OperationId::new_v7(),
+            AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::Automatic),
+        );
+        let stale_result = AnimeGroupingPolicyView::try_new(
+            expected_policy.profile_id(),
+            expected_policy.scope(),
+            expected_policy.source(),
+            expected_policy.preference(),
+            1,
+        )
+        .expect("valid stale result");
+
+        assert!(ApplyAnimeGroupingPolicyChangeOutcome::try_new(
+            &command,
+            AnimeGroupingPreference::Automatic,
+            AnimeGroupingPolicySource::ProfileDefault,
+            stale_result,
+            0,
+            0,
+            0,
+        )
+        .is_err());
     }
 }

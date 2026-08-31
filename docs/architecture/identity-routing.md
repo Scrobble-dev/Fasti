@@ -158,6 +158,7 @@ season-regrouping counts cannot be lower than the rows already returned.
 Apply uses an operation ID, a semantic digest, and the expected policy
 revision. Its result is built from that exact command and must retain the same
 authenticated profile, target connection scope, operation ID, and change. The
+reported policy revision cannot precede the command's expected revision. The
 durable implementation stores an immutable receipt. Rollback is a new
 compare-and-set operation that refers to the receipt being reversed. It does
 not delete the original receipt or rewrite media history.
