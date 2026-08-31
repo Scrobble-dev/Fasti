@@ -74,7 +74,7 @@ Generated files are outputs, not sources of truth.
 - Resolve provider hosts once, reject every unsafe answer, disable redirects and system proxies, and pin the authorized addresses before loading a credential.
 - Treat `TMDB_API_READ_ACCESS_TOKEN` as a TMDB API Read Access Token. Send it only in a sensitive `Authorization: Bearer` header; never fall back to the v3 `api_key` URL parameter.
 - Keep provider credentials in environment variables or the platform credential store. Never return them to Svelte, browser storage, logs, URLs, screenshots, fixtures, or proof bundles.
-- PR A has no production human-account or browser-session route. Its final session model remains dormant until C1 proves TrailBase exchange, subject anchoring, membership, administrator continuity, and session issuance. Do not add or enable a development browser account as a substitute.
+- Mount C1 human-account and browser-session routes only when the durable listener is requested and bound as exactly `127.0.0.1:8420` with no fallback. Keep the route set mounted when TrailBase is unavailable so the projection can report the safe state. Require a verified installation receipt and persisted active activation before exchange or new session issuance. Every alternate-loopback, generic, integration, wildcard or container forwarding, and remote router must omit C1. Do not add or enable a development browser account as a substitute.
 - Scope app-managed provider credentials to the physical Fasti data root. They are node-wide across profiles until a real authenticated profile-private provider capability exists. Never fall back to an unscoped account.
 - Derive app-managed credential accounts from `SqliteKernel::data_root_identity()`, not from a configured path. Bind the identity to the opened root descriptor and its persisted random lock nonce. Renaming an opened root must keep its account; replacing that path with another root must select another account.
 - Keep node connection settings separate from provider outbound policy. A provider allow list must not block an operator-selected `.internal` Fasti service URL.
@@ -194,8 +194,8 @@ Read [`brand/DESIGN.md`](brand/DESIGN.md) before making any visual or UI decisio
   - All 10 Nielsen Norman usability heuristics
   - IxDF research topics (cognitive load reduction, progressive disclosure, dark mode halation prevention, motor precision)
 - **Accessibility & Regulatory Conformance**:
-  - WCAG 2.2 Level AA full compliance (3px high-contrast focus rings with 2px offset, >= 4.5:1 text contrast / 7.0:1 on paper cards, 44px hitboxes, non-obscured focus).
-  - EN 301 549 compliance across Clause 9 (Web), Clause 10 (Non-Web Docs), Clause 11 (Desktop/Software Assistive Tech Interoperability), and Clause 12 (Documentation).
+  - WCAG 2.2 Level AA is the required target (3px high-contrast focus rings with 2px offset, >= 4.5:1 text contrast / 7.0:1 on paper cards, 44px hitboxes, non-obscured focus). Do not claim conformance without exact-head automated and manual evidence.
+  - EN 301 549 Clauses 9 (Web), 10 (Non-Web Docs), 11 (Desktop/Software Assistive Tech Interoperability), and 12 (Documentation) require a clause-to-evidence record. Do not claim conformance from Axe or browser fixtures alone.
 
 In QA mode, flag any code that does not match `brand/DESIGN.md` or violates the Tabler-first ladder.
 
@@ -232,6 +232,11 @@ Document:
 - accessibility evidence (WCAG 2.2 AA & EN 301 549 audit + Axe-core zero-violation report);
 - tests;
 - rollback.
+
+For C1, `cargo xtask test milestone --body C1` writes a gate-suite receipt only.
+It is not a closure manifest. Keep package smoke, packaged WebView,
+cross-platform, assistive-technology, exact-head, merge, and release evidence
+pending until each named gate passes.
 
 ## Quality and Security Invariants
 

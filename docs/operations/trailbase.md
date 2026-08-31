@@ -1,8 +1,9 @@
 # TrailBase development operations
 
 This runbook covers the pinned TrailBase identity service used by Fasti
-development and conformance tests. It does not activate Fasti browser sessions.
-PR C1 owns the TrailBase-to-Fasti exchange.
+development and conformance tests. C1 implements the TrailBase-to-Fasti
+exchange in local source. This runbook does not claim a supported package,
+merge, release, or deployment.
 
 ## Locked release
 
@@ -53,8 +54,16 @@ documented authentication APIs, verifies the replacement, and prints the new
 administrator password once. Redirected output is rejected. No password is
 written to the bootstrap receipt, command arguments, or logs.
 
-Store the printed password in an operator-controlled password manager. If it is
-lost, use TrailBase's documented password-reset flow. Do not edit its database.
+Each installation has its own TrailBase administrator credential. Store that
+credential in an operator-selected password manager or equivalent private
+installation record. Fasti never copies, stores, logs, receipts, or browser-
+persists the administrator password. Do not create one shared administrator
+password across installations and do not add a Fasti secret store for it.
+
+Each person gets a distinct TrailBase account. Do not share the installation
+administrator credential as a human sign-in account. If the administrator
+credential is lost, use TrailBase's documented password-reset flow. Do not edit
+its database.
 
 The worktree-local root is `.dev-trailbase`. The root, depot, cache, receipt,
 and files must remain owned by the current user and inaccessible to group and
@@ -81,6 +90,12 @@ OCI:
 Use `--docker` instead of `--podman` only on a host with Docker and the exact
 image already prepared.
 
+The default native Fasti launcher and the Desktop review launcher auto-start
+TrailBase only when this worktree already has an initialized root. They verify
+the root, exact release, runtime identity, and installation receipt before they
+pass the root to Fasti. They never initialize TrailBase. An uninitialized root
+keeps sign-in unavailable and reports `trailbase_trust_unavailable`.
+
 The route-exposure contract is:
 
 | Mode | Account routes | Admin routes | Record API | Readiness evidence |
@@ -94,6 +109,21 @@ validator. Therefore remote account and OAuth routes are unavailable. The next
 action is to keep the service loopback-only until a pinned release proves safe
 redirect validation and the remote TLS and trusted-proxy package passes review.
 A reverse proxy, TLS endpoint, or public route is not part of this package.
+
+## Fasti Access activation
+
+Only a Fasti process with a data root that both requests and binds
+`127.0.0.1:8420` mounts the C1 browser-authentication and session route set.
+The routes remain mounted when TrailBase is unconfigured so Account and
+security can report the unavailable state and next action. Exchange and new
+Fasti session issuance remain disabled until Fasti verifies the installation
+receipt and persists active activation.
+
+Port fallback, alternate IPv4 or IPv6 loopback, generic local, integration,
+wildcard or container forwarding, and remote routers omit C1 routes. The Fasti
+OCI launcher does not mount the TrailBase root into the Fasti container and
+reports browser authentication unavailable. Use the native or Desktop launcher
+for C1 review.
 
 The process uses one CPU and the repository's 192 MiB memory ceiling. OCI mode
 also uses no extra swap, a 128-process limit, a read-only root filesystem,
@@ -186,3 +216,14 @@ TrailBase v0.33.5 social callbacks do not prove TOTP for the current sign-in.
 It also has no documented per-account disabled state. Those limits stay
 visible and cannot be simulated in Fasti. Its unsafe redirect acceptance keeps
 remote account and OAuth exposure unavailable.
+
+Run the local C1 gate suite with:
+
+```bash
+cargo xtask test milestone --body C1
+```
+
+The command writes `target/fasti-receipts/access-c1.json`. That file is a gate-
+suite receipt, not a C1 closure manifest. Package smoke, packaged WebView,
+cross-platform, assistive-technology, final review, exact-head CI, merge, and
+release evidence remain pending.

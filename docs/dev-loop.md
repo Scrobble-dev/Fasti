@@ -17,14 +17,17 @@ Run this command from the repository root:
 ./scripts/dev.sh
 ```
 
-This command builds and starts `fastid`, the production daemon. It waits until
-the health route answers and the durable initialization route returns its real
+This command builds and starts `fastid`, the production daemon. If this
+worktree already has an initialized TrailBase root, the launcher starts and
+verifies that service first. It never initializes TrailBase. It waits until the
+health route answers and the durable initialization route returns its real
 authorization response. Then it prints the API URL.
 
 `fastid` prefers `http://127.0.0.1:8420`. By default, startup fails if that
 port is already taken. Set `FASTI_PORT_FALLBACK=auto` to have `fastid` ask
 the operating system for a free port instead. In that case, the script
-prints the port it actually got. Automatic fallback is unavailable when
+prints the port it actually got. A fallback listener omits all C1 browser-
+authentication routes. Automatic fallback is unavailable when
 `FASTI_API_URL` or `FASTI_PUBLIC_URL` is configured, since those settings
 pin the URL other tooling should use. Run `./scripts/dev.sh --status` at
 any time to see the live URL.
@@ -55,10 +58,12 @@ FASTI_DATA_ROOT=/path/to/private/fasti-desktop-data ./scripts/dev.sh --desktop
 ```
 
 This command builds the static Workbench and starts the Tauri app in the
-foreground. The app embeds its local kernel. It does not start `fastid` or Vite.
-Close the window or press `Ctrl-C` to stop it. `--status` and `--stop` continue
-to manage only the daemon, web harness, and scoped container. Desktop remains an
-unpackaged review candidate.
+foreground. The app embeds its local kernel and requires the exact
+`127.0.0.1:8420` listener. It auto-starts only an already initialized and
+verified TrailBase root. It does not start `fastid` or Vite. Close the window
+or press `Ctrl-C` to stop it. `--status` and `--stop` continue to manage only
+the daemon, web harness, and scoped container. Desktop remains an unpackaged
+review candidate.
 
 Other commands:
 
@@ -72,7 +77,8 @@ Other commands:
 ./scripts/dev.sh --self-test # verify the launcher's own process handling
 ```
 
-TrailBase is explicit and does not start with the default loop:
+Initialize TrailBase explicitly once. The default native and Desktop loops
+then auto-start that initialized root after verification:
 
 ```bash
 ./scripts/dev.sh --prepare-offline
@@ -85,6 +91,13 @@ TrailBase is explicit and does not start with the default loop:
 Initialization must run in the owning terminal because it prints the rotated
 administrator password once. See the [TrailBase runbook](operations/trailbase.md)
 for native/OCI boundaries, backup, restore, and conformance.
+
+On the exact requested-and-bound `127.0.0.1:8420` durable listener, Fasti
+mounts the C1 route set even when TrailBase is not initialized. The projection
+then reports the exact unavailable state. Code exchange and new Fasti session
+issuance require a verified installation receipt and persisted active
+activation. Alternate loopback, generic local, integration, wildcard or
+container forwarding, and remote routers omit C1 routes.
 
 Useful environment variables: `FASTI_PORT` (preferred port, default 8420),
 `FASTI_LISTEN` (full bind address), `FASTI_PORT_FALLBACK` (`auto` or `fail`
@@ -119,6 +132,17 @@ cargo xtask test pr
 See [Definition of Done](definition-of-done.md) for the B1 conformance
 fixture and the Playwright/axe gates that apply once a change touches those
 surfaces.
+
+Run the C1 gate suite with:
+
+```bash
+cargo xtask test milestone --body C1
+```
+
+It writes `target/fasti-receipts/access-c1.json`. This is a gate-suite receipt,
+not a closure manifest. Package smoke and packaged WebView, cross-platform,
+assistive-technology, review, pull-request, merge, and release evidence remain
+pending.
 
 ## Desktop QA
 
@@ -178,6 +202,10 @@ wildcard listener. It runs the process as the invoking non-root user so the
 worktree-owned `.dev-data` directory stays writable without changing its
 ownership. Podman also keeps that user ID mapped into its rootless user
 namespace. Do not set the exposure assertion for a public port mapping.
+
+C1 browser authentication is unavailable in this Fasti container-forwarding
+topology. The launcher does not mount or export the TrailBase root to the Fasti
+container. Use the native or Desktop loop for C1 review.
 
 The native (default) dev loop above does not use a container at all. If your
 local dev environment happens to run inside a container that shares your

@@ -151,7 +151,7 @@ PR B file ownership during source audit:
 
 ### 2.3 C1 implementation checkpoint
 
-Recorded: 2026-08-30
+Recorded: 2026-08-31
 
 | Item                          | Exact evidence                                                                                                                                                                                                                                                                                                                                      | State                                                    |
 | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
@@ -159,18 +159,30 @@ Recorded: 2026-08-30
 | C1 implementation base       | Merged `origin/dev` `45fb31d906bec3f3ad2e5bf95edf2938c7c942b8`; tree `8263411e2ba193c4b88acdcafd89f0c48905b004`                                                                                                                                                                                                                                       | `VERIFIED`                                               |
 | Gate 10 artifacts             | All six SHA-256 values in `approved.json` match the current A, C, board, HTML, CSS, and design-review artifacts                                                                                                                                                                                                                                     | `VERIFIED`                                               |
 | Package B                     | PR #114 merged to `dev`; exact merged tree equals the reviewed PR tree                                                                                                                                                                                                                                                                              | `COMPLETE_WITH_EVIDENCE`                                 |
-| C1 written gate               | [`fasti-access-c1-trust-gate.md`](fasti-access-c1-trust-gate.md); C1.1 is frozen at `ba442c894a4189a12c9dccd7b1b24c44b3c3941c`; C1.2 is frozen at `ce278d667a10ccc531f8bf5edd0969f44eeb52f3`, tree `5757c73e6907023420fb7e1b82d07a36cfbec0f1`                                                                                                                     | `C1_2_COMPLETE_C1_3_APPROVED_FOR_IMPLEMENTATION`        |
+| C1 written gate               | [`fasti-access-c1-trust-gate.md`](fasti-access-c1-trust-gate.md); current local checkpoint `dde753d77aa5022cdcffc7b284f2abf78c94af79`, tree `a771a0f7d3f658398f55252e0d9aeabf0a4784ec`                                                                                                                                                                                 | `C1_5_SOURCE_COMPLETE_CLOSURE_EVIDENCE_PENDING`         |
 | TrailBase direct trust        | Exact `v0.33.5` source supports server-side code exchange, status recheck with the returned access and refresh tokens, and named refresh-session logout. Fasti accepts only that direct response from the exact supervised origin, discards every TrailBase token, and never performs offline TrailBase token validation.                           | `VERIFIED` for the D3-C backchannel profile              |
 | TrailBase account state       | Status with both returned tokens proves the current refresh session, current subject, and TrailBase-local accepted account-email state. It is not independent mailbox-ownership proof. TrailBase has no disabled/suspended field; Fasti separately enforces `AuthSubject` and membership lifecycle.                                                 | `VERIFIED_WITH_DOCUMENTED_LIMIT`                         |
-| Browser callback              | Exact source supports Proof Key for Code Exchange and a code-only redirect, but password-to-TOTP loses the original PKCE parameters. TrailBase does not round-trip Fasti state. C1 keeps that higher-assurance path unavailable until source-backed upstream support exists; the separate browser-binding cookie still requires real-browser proof. | `APPROVED_WITH_DOCUMENTED_LIMIT`; runtime proof required |
+| Browser callback              | Exact source supports Proof Key for Code Exchange and a code-only redirect, but password-to-TOTP loses the original PKCE parameters. TrailBase does not round-trip Fasti state. C1 keeps that higher-assurance path unavailable until source-backed upstream support exists. The source implementation uses separate callback and continuation bindings; packaged WebView proof remains pending.             | `IMPLEMENTED_LOCALLY_WITH_PLATFORM_PROOF_PENDING`        |
 | Metadata M2 ownership         | PR #117 is merged. Published v12 remains unchanged; final v13 owns immutable metadata refresh receipts; archive v3 remains frozen and archive v4 adds the receipt stream. The exact shared-file handoff releases migration v14, registry, generators, API, SDK, host, and Workbench to C1.                                                        | `MERGED_AND_HANDED_OFF`                                  |
-| Safe state at this checkpoint | C1.2 is committed locally and private: no public browser route, generated contract, host composition, push, pull request, merge, deployment, or release changed. C1.3 has a written sequential gate before shared registry, generator, API, SDK, host, or Workbench writes.                                                                          | `VERIFIED_AT_CHECKPOINT`                                 |
+| C1 route boundary             | Only the exact requested-and-bound `127.0.0.1:8420` durable listener mounts C1 routes, including the truthful unavailable projection when no TrailBase root is present. Exchange and new session issuance require verified installation evidence plus persisted active activation. Fallback, alternate-loopback, integration, container-forwarded, wildcard, and remote routers omit C1.                    | `IMPLEMENTED_LOCALLY`                                    |
+| Gate 10 implementation        | A is the permanent Account and security destination. C is the separate resumable first-run journey. Both use one Access projection. B is an in-context evidence pattern.                                                                                                                                                                                                                         | `IMPLEMENTED_LOCALLY`; package/platform evidence pending |
+| C1 milestone                 | `cargo xtask test milestone --body C1` writes `target/fasti-receipts/access-c1.json` as a gate-suite receipt. It rejects a C1 closure manifest while packaged WebView evidence is pending.                                                                                                                                                                                                        | `RUNNER_IMPLEMENTED`; execution and closure pending      |
+| Safe state at this checkpoint | The local C1 source is not pushed, merged, released, or deployed. The branch is one documentation-only commit behind `origin/dev`. Package smoke, closure manifest, packaged WebView, cross-platform, assistive-technology, conformance, final review, exact-head CI, pull-request, and merged-tree evidence remain pending.                                                                               | `VERIFIED_AT_CHECKPOINT`                                 |
 
 Decision result: the programme remains active. C1 uses the approved direct
 backchannel and opaque Fasti-session boundary. Do not replace TrailBase, read
 its depot or private keys, call undocumented endpoints, or accept a browser-
 supplied TrailBase token. Shared C1 writes now proceed from the verified merged
-implementation base. C1 must preserve M2's v12/v13 and archive v3/v4 contracts.
+implementation base. C1 preserves M2's v12/v13 and archive v3/v4 contracts.
+The programme is in C1.5 closure; local source completion is not a merge or
+release claim.
+
+Every installation has its own TrailBase administrator credential. The
+operator keeps it in a selected password manager or equivalent private
+installation record. Every person uses a distinct TrailBase account. Fasti
+never copies, stores, logs, receipts, or browser-persists the administrator
+password. Do not share it across installations or create a new Fasti secret
+store for it.
 
 ### 2.4 Primary source registry
 
@@ -1181,7 +1193,7 @@ Retain A-H as programme stages. Split broad stages into independently reversible
 
 Every sub-PR has its own written plan, forward migration, contracts, exact-head tests, failure injection, backup/restore effect, and rollback proof. Do not combine sub-PRs merely to reduce PR count.
 
-Extend the existing `cargo xtask test milestone --body <BODY>` selector with Access bodies A, B, C1, C2, C3, D, E1, E2, E3, E4, F, G, and H. Reuse its existing orchestration, evidence schema, canonical receipt writers, manifest verification, and fail-closed output. Do not add a `test package` command tree or a second receipt format. Any missing prerequisite, unsupported host, planted fault, stale receipt, or failed assertion exits nonzero with one exact next action. Every package also joins `cargo xtask test pr`; deep, high-resource, soak, or multi-repository proof joins `cargo xtask test deep`.
+Extend the existing `cargo xtask test milestone --body <BODY>` selector with Access bodies A, B, C1, C2, C3, D, E1, E2, E3, E4, F, G, and H. C1 now has a gate-suite runner that uses the existing receipt writer and rejects a closure manifest while packaged WebView evidence is pending. Reuse the existing orchestration, evidence schema, canonical receipt writers, manifest verification, and fail-closed output. Do not add a `test package` command tree or a second receipt format. Any missing prerequisite, unsupported host, planted fault, stale receipt, or failed assertion exits nonzero with one exact next action. Every package also joins `cargo xtask test pr`; deep, high-resource, soak, or multi-repository proof joins `cargo xtask test deep`.
 
 | Package | Hermetic fixture and focused gate                                                                                                                                   | CI/resource tier                                                                              |
 | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
@@ -1298,7 +1310,7 @@ Add:
 
 Reuse PR A's `AuthSubject`, `FastiBrowserSession`, `BrowserSessionId`, and `SessionPolicy` without a second model. Link the PR A subject to TrailBase only through the approved reset/bootstrap path. Replace `BrowserUser.is_admin` with membership and role. Do not dual-run human authentication.
 
-C1 replaces the A-only fixture journey with pinned TrailBase APIs and the real Fasti exchange. The closed-node developer bootstrap reads the owner-only data-root secret through the trusted local CLI or host, proves the descriptor-root and lock, selects and proves the TrailBase anchor, performs one transactional membership/role creation, and prints `Access ready` plus the browser session-inventory URL. It never sends the bootstrap secret to the browser or prints it. On interruption, `--status` reports whether no change occurred, the operation completed, or operator repair is required. A losing race creates no membership, role, profile, or grant and points to the winning initialized state. Test a local process that can connect to the loopback port but cannot read the data root; it must remain unauthorized.
+C1 replaces the A-only fixture journey with pinned TrailBase APIs and the real Fasti exchange. The packaged-host bootstrap reads the owner-only data-root secret, proves the descriptor-root and lock, selects and proves the TrailBase anchor, and performs one transactional membership/role creation. It never sends the bootstrap secret to the browser or prints it. A losing race creates no membership, role, profile, or grant. The route, host, and transaction source exists locally. Package smoke and packaged WebView evidence remain required before an `Access ready` operator claim.
 
 C1 freezes activation as inactive, active, or blocked with generation-bound
 proof. Release mismatch is the only C1-recoverable blocker; physical-root
@@ -1697,11 +1709,11 @@ Readiness requires the pinned TrailBase process, its version/capability check, t
 
 Golden-path success is a real TrailBase authentication, the one-use first-administrator membership bootstrap when needed, an opaque Fasti browser session, and a visible current-session row in Account and security. For a prepared machine, the TrailBase account and exact artifacts already exist. The target is at most 5 minutes and at most 3 user actions after launcher start: open the printed URL, authenticate, and confirm the local-operator bootstrap if needed. Measure first account creation and email delivery separately. Do not hide build, pull, registration, or email time inside the warm target.
 
-Current combined Fasti plus TrailBase authentication time to first success is `UNMEASURABLE`; no executable path exists at the current exact head. The target above is a proposed package gate, not current evidence.
+Current combined Fasti plus TrailBase authentication time to first success is `UNMEASURED`. A local executable fixed-listener path exists, but no qualifying prepared-machine or packaged time-to-first-success receipt exists. The target above is a proposed package gate, not current evidence.
 
 Write a time-to-first-success receipt with exact head, artifact/digest, environment, architecture, native or OCI mode, prepared/cold state, command, timestamps, user-action count, success assertion, failure, and receipt digest. This is a target, not a claimed result. A package does not pass until the measured receipt meets its approved target or returns for an explicit target/product decision.
 
-`--status` supports human and machine-readable output. It reports the exact safe state and next action for an unconfigured TrailBase service, dormant PR A, missing identity bootstrap, failed refresh-session cleanup, unsupported version, vault failure, migration failure, or resource-bound violation.
+`--status` supports human and machine-readable output. It reports the exact safe state and next action for an uninitialized TrailBase service, inactive or blocked C1 activation, missing identity bootstrap, failed refresh-session cleanup, unsupported version, vault failure, migration failure, or resource-bound violation.
 
 ### 21.2 Supported developer matrix and constrained hardware
 
@@ -1748,7 +1760,7 @@ Do not return for another premise gate. Return only when:
 
 Controlled risks:
 
-- TrailBase v0.33.5 does not round-trip caller state or atomically consume authorization codes. C1 contains callback replay through a Fasti-owned one-use browser ceremony, uses the direct token/status/logout profile, and fails closed on uncertain cleanup. Real-browser proof remains mandatory before activation.
+- TrailBase v0.33.5 does not round-trip caller state or atomically consume authorization codes. C1 contains callback replay through a Fasti-owned one-use browser ceremony, uses the direct token/status/logout profile, and fails closed on uncertain cleanup. Packaged real-browser proof remains mandatory before C1 closure.
 - `oauth-as 0.9.3` is only a candidate. PR E cannot start until E0 approves it or returns for a dependency decision.
 - Authentik 2026.8.0 is only a candidate until socket/resource and multi-architecture risks pass.
 - RAWG and ComicVine remain visible and unavailable until safe documented secret transport exists.
@@ -1771,4 +1783,4 @@ Branch-bound implementation ledgers: `tasks-ceo-review-20260829-183940.jsonl`, `
 
 VERDICT: `PLAN AND GATE 10 APPROVED`
 
-UNRESOLVED IMPLEMENTATION GATES: C1 requires v14 implementation and exact real-browser proof of the approved D3-C ceremony and direct backchannel. The M2 shared-file handoff is complete. C3 requires `C3-CRYPTO`. E2 requires E0 and E-HOST. E3/E4 require the exact Authentik tuple, tag-bound generated API, and section 12 conformance. These are package evidence gates; they do not reopen TrailBase selection or the approved final plan.
+UNRESOLVED IMPLEMENTATION GATES: C1 source and migration v14 are implemented locally. C1 still requires package smoke, a closure manifest, packaged WebView and cross-platform proof, assistive-technology evidence, final reviews, exact-head CI, pull-request, merge, and merged-tree proof. The M2 shared-file handoff is complete. C3 requires `C3-CRYPTO`. E2 requires E0 and E-HOST. E3/E4 require the exact Authentik tuple, tag-bound generated API, and section 12 conformance. These are package evidence gates; they do not reopen TrailBase selection or the approved final plan.

@@ -1,32 +1,47 @@
 # Account and session UI quality acceptance record
 
-Status: **PENDING — acceptance specification only**.
+Status: **LOCAL AUTOMATED EVIDENCE RECORDED — FULL ACCEPTANCE PENDING**.
 
-Earlier wording described planned behavior as implementation evidence. That
-wording is superseded. This record does not contain an exact-head test result,
-an accessibility conformance claim, or production identity proof.
+This record separates local source and automated fixture evidence from package,
+platform, assistive-technology, and accessibility conformance evidence. It is
+not a production identity, WCAG 2.2 Level AA, or EN 301 549 conformance claim.
 
 ## Product truth
 
-| Capability                                               | PR A state                                                                | Required evidence before activation                                                                                                          |
+| Capability                                               | Current local source state                                                | Remaining evidence                                                                                                                           |
 | -------------------------------------------------------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| Human sign-in                                            | Unavailable until PR C1                                                   | TrailBase proof exchange, stable subject resolution, membership and role checks, and administrator continuity.                               |
-| Fasti browser session                                    | Dormant foundation only; unavailable on production routes until PR C1     | Direct deterministic domain, application, and store tests in PR A. Route, cookie, CSRF, inventory, and revocation evidence belongs to PR C1. |
+| Human sign-in                                            | C1 fixed-origin source implemented; new issuance requires verified active TrailBase evidence | Package smoke, packaged WebView cookie behavior, platform evidence, final review, and delivery.                                               |
+| Fasti browser session                                    | C1 issuance, projection, inventory, rotation, profile selection, and revocation source implemented | Package smoke, platform evidence, final review, exact-head CI, and merged-tree proof.                                                         |
 | Session location and device                              | Not recorded                                                              | The product must say `Not recorded` until a governed collection contract exists.                                                             |
-| Profile switching                                        | Unavailable                                                               | PR C1 or a later package must prove session-local authorization.                                                                             |
-| TrailBase password, social OIDC/PKCE, and TOTP           | Service conformance passes in PR B; Fasti UI remains unavailable until C1 | Exact v0.33.5 source plus the prepared-machine account, collision, outage, and assurance fixture.                                            |
+| Profile switching                                        | Implemented through the current session and one Access projection         | Packaged-host and final authorization evidence.                                                                                              |
+| TrailBase password and supported social OIDC/PKCE        | C1 direct exchange source implemented; vendor tokens are revoked and discarded | Prepared native integration, packaged WebView, outage, and delivery evidence.                                                               |
+| TrailBase password plus TOTP                             | Unavailable in C1 because v0.33.5 loses the original PKCE ceremony        | A pinned official release that preserves and verifies the full ceremony.                                                                     |
 | Passkeys and recovery codes                              | Unavailable until PR D                                                    | Server-owned credential lifecycle and recovery evidence.                                                                                     |
 | Generic OIDC, Authentik, OAuth, and device authorization | Unavailable until the relevant PR E package                               | Protocol, management, consent, token, device, and revocation evidence for each named capability.                                             |
 
-PR A must not expose a production `BrowserUser`, local password account,
-development account, custom TOTP, simulated passkey, backup-code, or fabricated
-OIDC path.
+The superseded `BrowserUser`, local password account, development account,
+custom TOTP, simulated passkey, backup-code, and fabricated OIDC paths remain
+absent.
+
+## Local C1.4 automated evidence
+
+Commit `85b2e8036b5935f2326a6d95e371452a01040db2` implements A as the
+permanent Account and security destination and C as a separate resumable first-
+run journey. Both consume one Access projection. B remains an in-context detail
+pattern. Its focused Chrome Playwright suite passed 23 tests. The legacy
+Workbench suite passed 32 tests. Type checking, the Tabler policy check, the
+Impeccable detector, and the automated Axe/theme/reflow matrix also passed at
+that checkpoint.
+
+These are fixture and source checks. The C1 closure manifest, package smoke,
+packaged WebView, Linux/Windows/macOS, Orca/NVDA/VoiceOver, manual keyboard,
+and final exact-head evidence remain pending.
 
 ## Interaction acceptance checklist
 
 The first-run guided setup and the persistent account task map are separate
-purposes. Both must use Tabler before custom components. They must satisfy these
-checks when their owning package implements them.
+purposes. Both use Tabler before custom components. Final acceptance still
+requires the checks below.
 
 ### AskTog and Gestalt
 
@@ -60,9 +75,10 @@ progressive disclosure, and inclusive design.
 
 ## WCAG 2.2 Level AA acceptance matrix
 
-No criterion below has an exact-head pass result in this record.
+Automated source checks cover parts of this matrix. Every row stays pending
+until the packaged platform and manual evidence are attached to the exact head.
 
-| Success criterion                   | PR A result    | Required evidence                                                              |
+| Success criterion                   | C1 result      | Required evidence                                                              |
 | ----------------------------------- | -------------- | ------------------------------------------------------------------------------ |
 | 1.3.1 Info and Relationships        | Pending        | Semantic headings, labels, groups, tabs, lists, and dialog relationships.      |
 | 1.3.2 Meaningful Sequence           | Pending        | DOM, reading, and focus order match.                                           |

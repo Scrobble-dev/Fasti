@@ -1,6 +1,6 @@
 # Fasti Access C1 implementation gate
 
-Status: `C1_3D_CODE_COMPLETE_PLATFORM_PROOF_PENDING_C1_4_CONTINUATION_GATE`
+Status: `C1_5_SOURCE_COMPLETE_CLOSURE_EVIDENCE_PENDING`
 
 Recorded: 2026-08-30
 
@@ -53,6 +53,13 @@ Gate 10 remains:
 - A is the permanent Account and security destination.
 - C is a separate, resumable first-run journey.
 - B is the shared evidence and detail pattern, not another destination.
+
+Credential custody is also fixed. Each TrailBase installation has its own
+administrator credential, held in an operator-selected password manager or
+equivalent private installation record. Each person has a distinct TrailBase
+account. Fasti never copies, stores, logs, receipts, or browser-persists the
+administrator password. It does not share that password across installations
+or add a Fasti secret store for it.
 
 ### 2.1 Frozen C1.1 domain decisions
 
@@ -507,6 +514,9 @@ review the active gate and prepare the next one.
 
 ### 2.5 C1.3a-c completion record
 
+This historical checkpoint is superseded by the current local checkpoint in
+section 2.9.
+
 C1.3a-c is frozen at commit
 `5682073bdf54d3589b7815f3d5814ff52ab6c390`, tree
 `a764469e23b2c6deb28fd676e1e3dee39cbc3a59`. Nothing from this checkpoint was
@@ -542,6 +552,9 @@ pushed or merged.
   serving before C1.4 begins.
 
 ### 2.6 C1.3d code completion record
+
+This historical checkpoint is superseded by the current local checkpoint in
+section 2.9.
 
 C1.3d production code is frozen locally at commit
 `55cfd0809f6dd147587b37bd640c7c4b495f0ad5`, tree
@@ -729,6 +742,45 @@ golden path across three themes and four viewports; cover every canonical state
 once in a representative combination; and run forced-colors, reduced-motion,
 200% zoom, text-spacing, keyboard, focus, and screen-reader checks per surface.
 Static Gate 10 evidence is design evidence only, not WCAG or EN conformance.
+
+### 2.9 Current local implementation checkpoint
+
+The current local source checkpoint is commit
+`dde753d77aa5022cdcffc7b284f2abf78c94af79`, tree
+`a771a0f7d3f658398f55252e0d9aeabf0a4784ec`. The branch is one documentation-
+only commit behind `origin/dev`. It is not pushed, merged, released, or
+deployed.
+
+- Commit `2825d1c625f6b0e360fcea6725cfe28319c3070f` implements the bounded
+  identity-first continuation and the final C1.3 route and contract behavior.
+- Commit `85b2e8036b5935f2326a6d95e371452a01040db2` implements Gate 10 A and C
+  from one Access projection. B remains an in-context evidence pattern.
+- Commit `7092943a61650497af5933e618141e746251c0fd` binds activation to the exact
+  verified TrailBase release, artifact, and physical root. The native and
+  Desktop launchers auto-start only an already initialized TrailBase root. They
+  never initialize it.
+- Commit `0873e227027ff713a5fb40671cf40088e625a018` adds
+  `cargo xtask test milestone --body C1`. It writes the gate-suite receipt at
+  `target/fasti-receipts/access-c1.json`. It does not write or accept a C1
+  closure manifest.
+- Commit `0b14bd69c8d00bcc25fd8d63119e2e79106f10ec` binds the implemented Access
+  projection to the A+C UI evidence owner without claiming package smoke.
+- Commit `dde753d77aa5022cdcffc7b284f2abf78c94af79` preserves exact installation
+  identity across the pinned adjacent-version upgrade and rollback fixtures,
+  keeps the OCI runtime nonce stable, and makes the launcher self-test hermetic.
+
+Only the exact requested-and-bound `127.0.0.1:8420` durable listener mounts the
+C1 route set. It mounts those routes even when no TrailBase root is available,
+so the UI can report the exact unavailable state. Exchange and new Fasti
+session issuance require both a verified installation receipt and persisted
+active activation. Port fallback, alternate loopback, generic local,
+integration, wildcard or container forwarding, and remote routers omit the C1
+route set.
+
+Source implementation is not C1 closure. The closure manifest, package smoke,
+packaged WebView behavior, Linux/Windows/macOS evidence, assistive-technology
+evidence, full WCAG 2.2 Level AA and EN 301 549 evaluation, final reviews,
+exact-head CI, pull request, merge, release, and deployment remain pending.
 
 ## 3. Exact TrailBase evidence
 
@@ -1332,37 +1384,34 @@ C1 reuses these owners. It does not rebuild them.
   - Surfaced by: architecture and security review; no production callback orchestration exists.
   - Files: one concrete Access adapter, orchestration owner, focused fixtures/tests.
   - Verify: scripted positive/negative matrix and no-secret scan.
-- [ ] **T4 (P1, human: ~2 days / Codex: ~6 hours)** — Access API and contracts — Mount authorized operations and generate every applicable contract and SDK surface.
+- [x] **T4 (P1, human: ~2 days / Codex: ~6 hours)** — Access API and contracts — Mount authorized operations and generate every applicable contract and SDK surface.
   - Surfaced by: code-quality review; C1 capabilities are reserved but not mounted.
   - Files: API, capability registry, generators, SDK, host after M2 handoff.
-  - Verify: generated drift, mutation tests, authorization negatives, no-secret schemas. Current C1.3 operations are generated and green; the bounded identity-first continuation extension remains.
-- [ ] **T5 (P1, human: ~3 days / Codex: ~1 day)** — Gate 10 A+C — Implement permanent A, resumable C, and shared B evidence from one projection.
-  - Surfaced by: UI test review; only truthful unavailable shells exist today.
+  - Verify: generated drift, mutation tests, authorization negatives, and no-secret schemas. The local source implementation is complete; C1 closure evidence remains pending.
+- [x] **T5 (P1, human: ~3 days / Codex: ~1 day)** — Gate 10 A+C source — Implement permanent A, resumable C, and shared B evidence from one projection.
+  - Surfaced by: UI test review; the earlier truthful unavailable shells required one implemented projection and separate A and C purposes.
   - Files: existing runtime settings owner, host, types, and `access-c1.spec.ts` after M2 handoff.
-  - Verify: full browser, accessibility, cognitive-accessibility, and Impeccable evidence.
+  - Verify: focused browser, theme, reflow, automated Axe, Tabler-policy, and Impeccable source checks. Packaged and manual acceptance stays in T6.
 - [ ] **T6 (P1, human: ~2 days / Codex: ~6 hours)** — Closure — Add the C1 milestone, run all delivery gates, open one PR, merge the green exact head, and verify merged `dev`.
-  - Surfaced by: test and delivery review; the milestone runner has no C1 body yet.
+  - Surfaced by: test and delivery review; the gate-suite runner now exists, but the closure manifest and delivery evidence do not.
   - Files: existing xtask/test/evidence/documentation owners after M2 handoff.
-  - Verify: C1 milestone, canonical PR gate, native/OCI envelopes, reviews, rollback, exact-head and merged-head receipts.
+  - Verify: C1 milestone, canonical PR gate, native/OCI envelopes, full packaged browser, accessibility and cognitive-accessibility acceptance, reviews, rollback, exact-head and merged-head receipts.
 
 ## 19. Safe next action
 
-1. Preserve published migration v12, final migration v13, archive v3, and
-   archive v4. C1 continues to own unpublished migration v14.
-2. Keep C1.1 frozen at commit `ba442c894a4189a12c9dccd7b1b24c44b3c3941c`
-   and C1.2 frozen at commit
-   `ce278d667a10ccc531f8bf5edd0969f44eeb52f3`.
-3. Keep C1.3d code frozen at commit
-   `55cfd0809f6dd147587b37bd640c7c4b495f0ad5`; do not claim its platform gate
-   has passed.
-4. Freeze the bounded identity-first continuation and failure-evidence contract
-   through engineering and developer-experience review. Then implement it
-   before activating ordinary signed-out sign-in in C1.4.
-5. In parallel, prepare fixture-driven A+C UI against the existing projection,
-   Tabler, and three-theme contract. Keep runtime completion pending exact
-   packaged WebView evidence.
-6. Keep one writer for shared schema, registry, generator, host, and Workbench
-   files while later-slice agents remain read-only.
+1. Preserve published migrations v12 and v13, archive v3 and v4, and the
+   unpublished C1 migration v14.
+2. Keep the local source checkpoint at
+   `dde753d77aa5022cdcffc7b284f2abf78c94af79` while C1.5 reviews the combined
+   result.
+3. Run the C1 gate suite. Treat its receipt as gate evidence only, not a closure
+   manifest.
+4. Complete package smoke, packaged WebView, platform, assistive-technology,
+   security, design, developer-experience, and exact-head delivery evidence.
+5. Reconcile the one documentation-only `origin/dev` commit without changing
+   C1 behavior. Do not claim a merge or allocate v15 before merged-tree proof.
+6. Keep one writer for shared source surfaces while later-slice agents remain
+   read-only.
 7. AGY may add an outside challenge. It never replaces the subagent review,
    written gates, tests, or delivery evidence.
 8. Do not request another premise gate.
@@ -1386,8 +1435,8 @@ single-runtime, actor-provenance, problem-contract, native-cookie, and
 RegisterNamespace policy gaps. Additive AGY challenged the corrected contract;
 it did not replace the subagent review or an evidence gate.
 
-**VERDICT:** C1.3d CODE COMPLETE; PLATFORM PROOF PENDING. Freeze and implement
-the bounded identity-first continuation before activating ordinary sign-in,
-while A+C fixture work proceeds against the approved Tabler-first design.
+**VERDICT:** C1 SOURCE IMPLEMENTATION COMPLETE LOCALLY; C1.5 CLOSURE PENDING.
+Do not claim package, platform, accessibility conformance, pull request, merge,
+release, or deployment evidence before its exact gate passes.
 
 NO UNRESOLVED DECISIONS

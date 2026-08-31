@@ -40,17 +40,26 @@ Stop the daemon with `Ctrl-C`. This health call does not prove any B1 fixture ro
 
 ## Durable local setup
 
-Set `FASTI_DATA_ROOT` and keep the listener on loopback to mount durable node initialization and first-client enrollment. The generated client exposes these operations as `initializeDurableNode` and `enrollDurableFirstClient`. Both mutations run once and never retry. PR A provides no development browser account, local password path, or production browser-session route.
+Set `FASTI_DATA_ROOT` and keep the listener on loopback to mount durable node initialization and first-client enrollment. The generated client exposes these operations as `initializeDurableNode` and `enrollDurableFirstClient`. Both mutations run once and never retry. Fasti provides no development browser account or local password path.
 
 The initialization proof and bearer credential exist only in JSON bodies. A trusted local host shell must store them in permission-restricted credential storage. Do not print them or put them in URLs, command arguments, logs, `localStorage`, or `sessionStorage`.
 
 Integration clients use separately revocable scoped bearer credentials. Do not
 copy a bearer secret into browser storage. The generated production parsers
-cover the active observation, identity-record, and profile-state DTOs. PR A's
-dormant session model generates governed `later_body` capability and problem
-metadata, but no browser HTTP operation, DTO, client method, or security
-scheme. C1 owns the `HttpOnly`, `Secure`, and `SameSite` cookie, strict CSRF,
-session inventory, and revocation contract when production activation passes.
+cover the active observation, identity-record, profile-state, and C1 Access
+DTOs. C1 adds `startTrailBaseSignIn`, continuation read/complete/cancel,
+`readAccessProjection`, current-session read/end, session inventory and scoped
+revocation, rotation, and profile selection. The browser handles the
+`HttpOnly`, `Secure`, and `SameSite` cookies. The TrailBase callback is browser
+navigation and has no SDK method.
+
+These C1 methods exist only on the exact requested-and-bound
+`127.0.0.1:8420` durable listener. Exchange and new session issuance require a
+verified installation receipt and persisted active TrailBase activation.
+Fallback, alternate-loopback, generic, integration, wildcard or container
+forwarding, and remote routers omit C1. Package smoke, closure manifest,
+packaged WebView, platform, assistive-technology, exact-head, merge, and release
+evidence remain pending.
 
 ## Governed metadata projections
 
