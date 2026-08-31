@@ -41,11 +41,8 @@ export default function Status(): React.JSX.Element {
             <Link to="/capabilities.json">Open the raw registry.</Link>
           </div>
         )}
-        {!error && capabilities === null && (
-          <p role="status">Loading generated capability data…</p>
-        )}
-        {capabilities && (
-          <table className="table">
+        {!error && (
+          <table aria-busy={capabilities === null} className="table">
             <caption>Current generated capability states</caption>
             <thead>
               <tr>
@@ -58,20 +55,37 @@ export default function Status(): React.JSX.Element {
               <tr>
                 <th scope="row">Contract</th>
                 <td>finalized</td>
-                <td>{count("contract_state", "finalized")}</td>
+                <td>
+                  {capabilities === null
+                    ? "—"
+                    : count("contract_state", "finalized")}
+                </td>
               </tr>
               <tr>
                 <th scope="row">Runtime</th>
                 <td>implemented</td>
-                <td>{count("runtime_availability", "implemented")}</td>
+                <td>
+                  {capabilities === null
+                    ? "—"
+                    : count("runtime_availability", "implemented")}
+                </td>
               </tr>
               <tr>
                 <th scope="row">Runtime</th>
                 <td>unavailable</td>
-                <td>{count("runtime_availability", "unavailable")}</td>
+                <td>
+                  {capabilities === null
+                    ? "—"
+                    : count("runtime_availability", "unavailable")}
+                </td>
               </tr>
             </tbody>
           </table>
+        )}
+        {!error && capabilities === null && (
+          <span className="visually-hidden" role="status">
+            Loading generated capability data.
+          </span>
         )}
         <p>
           <Link to="/reference/capabilities/">
