@@ -1092,6 +1092,10 @@ mod tests {
     #[cfg(feature = "desktop-runtime")]
     #[test]
     fn packaged_capability_allows_only_the_main_exact_loopback_origin() {
+        let configuration: serde_json::Value = serde_json::from_str(include_str!(
+            "../tauri.conf.json"
+        ))
+        .expect("packaged Tauri configuration JSON");
         let desktop: serde_json::Value = serde_json::from_str(include_str!(
             "../capabilities/main-loopback.json"
         ))
@@ -1112,6 +1116,10 @@ mod tests {
             serde_json::json!(["http://127.0.0.1:8420/*"])
         );
         assert_eq!(desktop["permissions"], serde_json::json!(["main-runtime"]));
+        assert_eq!(
+            configuration["app"]["security"]["csp"],
+            "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost; img-src 'self' data: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'; font-src 'self'"
+        );
         assert_eq!(android["windows"], serde_json::json!(["main"]));
         assert_eq!(android["platforms"], serde_json::json!(["android"]));
         assert_eq!(android["local"], true);
