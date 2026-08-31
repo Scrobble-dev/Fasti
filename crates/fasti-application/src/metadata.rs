@@ -1881,12 +1881,14 @@ mod tests {
         })
         .into_iter()
         .collect();
-        let source = identity_claim_at("source.fixture", Grain::Release, "source");
-        IdentityAssertion::try_new(
-            assertion_id,
+        let source = fasti_domain::ExternalIdentifier::new(
+            ExternalIdentifierId::new_v7(),
             WorkspaceId::new_v7(),
             record_id,
-            ExternalIdentifierId::new_v7(),
+            identity_claim_at("source.fixture", Grain::Release, "source"),
+        );
+        IdentityAssertion::try_new(
+            assertion_id,
             &source,
             target,
             relation,

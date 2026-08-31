@@ -1,6 +1,6 @@
 use crate::{
-    ClientId, EvidenceId, ExternalIdentifierClaim, ExternalIdentifierId, IdentityAssertionId,
-    ReceivedAt, RecordId, Sha256Digest, WorkspaceId,
+    ClientId, EvidenceId, ExternalIdentifier, ExternalIdentifierClaim, ExternalIdentifierId,
+    IdentityAssertionId, ReceivedAt, RecordId, Sha256Digest, WorkspaceId,
 };
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
@@ -388,10 +388,7 @@ impl IdentityAssertion {
     #[allow(clippy::too_many_arguments)]
     pub fn try_new(
         assertion_id: IdentityAssertionId,
-        workspace_id: WorkspaceId,
-        record_id: RecordId,
-        source_external_identifier_id: ExternalIdentifierId,
-        source: &ExternalIdentifierClaim,
+        source: &ExternalIdentifier,
         target: ExternalIdentifierClaim,
         relation: IdentityAssertionRelation,
         coverage: Vec<IdentityCoverageSegment>,
@@ -442,7 +439,7 @@ impl IdentityAssertion {
         let reasoning_is_valid = reasoning
             .as_deref()
             .is_none_or(|value| valid_text(value, MAX_IDENTITY_REASONING_BYTES));
-        if source == &target {
+        if source.claim() == &target {
             return Err(IdentityAssertionError::SameCoordinate);
         }
         if !evidence_is_unique {
@@ -485,9 +482,9 @@ impl IdentityAssertion {
         }
         Ok(Self {
             assertion_id,
-            workspace_id,
-            record_id,
-            source_external_identifier_id,
+            workspace_id: source.workspace_id(),
+            record_id: source.record_id(),
+            source_external_identifier_id: source.external_identifier_id(),
             target,
             relation,
             coverage,
@@ -715,6 +712,15 @@ mod tests {
         ExternalIdentifierClaim::try_new(namespace, grain, value).expect("identifier")
     }
 
+    fn source_identifier(claim: ExternalIdentifierClaim) -> ExternalIdentifier {
+        ExternalIdentifier::new(
+            ExternalIdentifierId::new_v7(),
+            WorkspaceId::new_v7(),
+            RecordId::new_v7(),
+            claim,
+        )
+    }
+
     fn evidence(method: IdentityEvidenceMethod) -> IdentityAssertionEvidence {
         IdentityAssertionEvidence::try_new(
             method,
@@ -742,12 +748,10 @@ mod tests {
         reasoning: Option<String>,
         initial_status: IdentityAssertionStatus,
     ) -> Result<IdentityAssertion, IdentityAssertionError> {
+        let source = source_identifier(source.clone());
         IdentityAssertion::try_new(
             IdentityAssertionId::new_v7(),
-            WorkspaceId::new_v7(),
-            RecordId::new_v7(),
-            ExternalIdentifierId::new_v7(),
-            source,
+            &source,
             target,
             relation,
             coverage,
@@ -765,13 +769,10 @@ mod tests {
 
     #[test]
     fn exact_verified_assertion_retains_direction_and_provenance() {
-        let source = claim("mal.anime", Grain::Release, "49894");
+        let source = source_identifier(claim("mal.anime", Grain::Release, "49894"));
         let target = claim("imdb.title", Grain::Release, "tt28254942");
         let assertion = IdentityAssertion::try_new(
             IdentityAssertionId::new_v7(),
-            WorkspaceId::new_v7(),
-            RecordId::new_v7(),
-            ExternalIdentifierId::new_v7(),
             &source,
             target.clone(),
             IdentityAssertionRelation::Exact,
@@ -789,6 +790,12 @@ mod tests {
         .expect("accepted assertion");
 
         assert_eq!(assertion.target(), &target);
+        assert_eq!(assertion.workspace_id(), source.workspace_id());
+        assert_eq!(assertion.record_id(), source.record_id());
+        assert_eq!(
+            assertion.source_external_identifier_id(),
+            source.external_identifier_id()
+        );
         assert_eq!(assertion.relation(), IdentityAssertionRelation::Exact);
         assert_eq!(
             assertion.initial_status(),
@@ -799,16 +806,8 @@ mod tests {
 
     #[test]
     fn unsafe_assertion_shapes_fail_closed() {
-        let source = claim("mal.anime", Grain::Release, "49894");
+        let source = source_identifier(claim("mal.anime", Grain::Release, "49894"));
         let target = claim("tmdb.tv", Grain::Series, "1399");
-        let base = || {
-            (
-                IdentityAssertionId::new_v7(),
-                WorkspaceId::new_v7(),
-                RecordId::new_v7(),
-                ExternalIdentifierId::new_v7(),
-            )
-        };
 
         assert!(IdentityAssertionEvidence::try_new(
             IdentityEvidenceMethod::UpstreamDeclared,
@@ -820,12 +819,8 @@ mod tests {
         )
         .is_err());
 
-        let (assertion_id, workspace_id, record_id, source_id) = base();
         assert!(IdentityAssertion::try_new(
-            assertion_id,
-            workspace_id,
-            record_id,
-            source_id,
+            IdentityAssertionId::new_v7(),
             &source,
             target.clone(),
             IdentityAssertionRelation::SubsetOf,
@@ -842,12 +837,8 @@ mod tests {
         )
         .is_err());
 
-        let (assertion_id, workspace_id, record_id, source_id) = base();
         assert!(IdentityAssertion::try_new(
-            assertion_id,
-            workspace_id,
-            record_id,
-            source_id,
+            IdentityAssertionId::new_v7(),
             &source,
             target,
             IdentityAssertionRelation::Exact,
@@ -890,12 +881,8 @@ mod tests {
             })
             .into_iter()
             .collect();
-        let (assertion_id, workspace_id, record_id, source_id) = base();
         assert!(IdentityAssertion::try_new(
-            assertion_id,
-            workspace_id,
-            record_id,
-            source_id,
+            IdentityAssertionId::new_v7(),
             &source,
             claim("imdb.title", Grain::Release, "tt28254942"),
             IdentityAssertionRelation::Exact,
@@ -1202,12 +1189,9 @@ mod tests {
 
     #[test]
     fn effective_status_validates_the_complete_lifecycle_chain() {
-        let source = claim("mal.anime", Grain::Release, "49894");
+        let source = source_identifier(claim("mal.anime", Grain::Release, "49894"));
         let assertion = IdentityAssertion::try_new(
             IdentityAssertionId::new_v7(),
-            WorkspaceId::new_v7(),
-            RecordId::new_v7(),
-            ExternalIdentifierId::new_v7(),
             &source,
             claim("imdb.title", Grain::Release, "tt28254942"),
             IdentityAssertionRelation::Exact,
@@ -1313,12 +1297,9 @@ mod tests {
         )
         .is_err());
 
-        let source = claim("mal.anime", Grain::Release, "49894");
+        let source = source_identifier(claim("mal.anime", Grain::Release, "49894"));
         assert!(IdentityAssertion::try_new(
             IdentityAssertionId::new_v7(),
-            WorkspaceId::new_v7(),
-            RecordId::new_v7(),
-            ExternalIdentifierId::new_v7(),
             &source,
             claim("imdb.title", Grain::Release, "tt28254942"),
             IdentityAssertionRelation::Exact,
