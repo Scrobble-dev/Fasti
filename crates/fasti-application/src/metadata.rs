@@ -691,6 +691,8 @@ pub fn plan_purpose_identity_route_with_evidence(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AnimeGroupingRecordPreview {
     record_id: RecordId,
+    previous_preference: AnimeGroupingPreference,
+    proposed_preference: AnimeGroupingPreference,
     previous_status: PurposeIdentityRouteStatus,
     proposed_status: PurposeIdentityRouteStatus,
     previous_route: Option<PurposeIdentityRoute>,
@@ -702,6 +704,14 @@ pub struct AnimeGroupingRecordPreview {
 impl AnimeGroupingRecordPreview {
     pub const fn record_id(&self) -> RecordId {
         self.record_id
+    }
+
+    pub const fn previous_preference(&self) -> AnimeGroupingPreference {
+        self.previous_preference
+    }
+
+    pub const fn proposed_preference(&self) -> AnimeGroupingPreference {
+        self.proposed_preference
     }
 
     pub const fn previous_status(&self) -> PurposeIdentityRouteStatus {
@@ -794,6 +804,8 @@ pub fn preview_anime_grouping_change_for_record_with_evidence(
 
     AnimeGroupingRecordPreview {
         record_id,
+        previous_preference,
+        proposed_preference,
         previous_status: previous.status,
         proposed_status: proposed.status,
         previous_route: previous.selected_route,

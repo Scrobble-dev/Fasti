@@ -478,6 +478,10 @@ impl AnimeGroupingPolicyImpact {
                 .last()
                 .is_some_and(|record| record.record_id() == cursor)
         });
+        let records_match_policy_change = records.iter().all(|record| {
+            record.previous_preference() == policy.preference()
+                && record.proposed_preference() == proposed_preference
+        });
         if policy.profile_id() != query.access().profile_id()
             || policy.scope() != query.scope()
             || !policy_state_matches_change(
@@ -494,6 +498,7 @@ impl AnimeGroupingPolicyImpact {
             || !records_are_strictly_ordered
             || !page_advances
             || !cursor_is_valid
+            || !records_match_policy_change
         {
             return Err(AnimeGroupingPolicyResultError);
         }
@@ -1093,6 +1098,74 @@ mod tests {
             None,
         )
         .is_err());
+    }
+
+    #[test]
+    fn impact_result_rejects_record_rows_from_another_policy_change() {
+        let policy = AnimeGroupingPolicyView::try_new(
+            ProfileId::new_v7(),
+            AnimeGroupingPolicyScope::Profile,
+            AnimeGroupingPolicySource::ProfileDefault,
+            AnimeGroupingPreference::Automatic,
+            1,
+        )
+        .expect("valid profile policy");
+        let query = preview_query(
+            policy,
+            AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::Automatic),
+            None,
+            MAX_IDENTITY_IMPACT_PAGE,
+        );
+        let matching_record = crate::preview_anime_grouping_change_for_record(
+            RecordId::new_v7(),
+            AnimeGroupingPreference::Automatic,
+            AnimeGroupingPreference::Automatic,
+            &[],
+        );
+        assert!(AnimeGroupingPolicyImpact::try_new(
+            &query,
+            policy,
+            AnimeGroupingPreference::Automatic,
+            AnimeGroupingPolicySource::ProfileDefault,
+            1,
+            0,
+            0,
+            0,
+            vec![matching_record],
+            None,
+        )
+        .is_ok());
+
+        for (previous, proposed) in [
+            (
+                AnimeGroupingPreference::GroupByTvWork,
+                AnimeGroupingPreference::Automatic,
+            ),
+            (
+                AnimeGroupingPreference::Automatic,
+                AnimeGroupingPreference::KeepMalReleasesSeparate,
+            ),
+        ] {
+            let record = crate::preview_anime_grouping_change_for_record(
+                RecordId::new_v7(),
+                previous,
+                proposed,
+                &[],
+            );
+            assert!(AnimeGroupingPolicyImpact::try_new(
+                &query,
+                policy,
+                AnimeGroupingPreference::Automatic,
+                AnimeGroupingPolicySource::ProfileDefault,
+                1,
+                0,
+                0,
+                0,
+                vec![record],
+                None,
+            )
+            .is_err());
+        }
     }
 
     #[test]

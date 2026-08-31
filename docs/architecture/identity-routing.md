@@ -138,6 +138,8 @@ The preview result is built from that exact query. Its profile and target
 connection scope must match the query, and its proposed preference and
 ownership source must match the requested `Set` or `InheritProfile` change;
 rollback may restore either otherwise-valid state.
+Each returned Record row must be calculated from that exact current and
+proposed preference pair.
 The preview reports:
 
 - total and affected Records;
