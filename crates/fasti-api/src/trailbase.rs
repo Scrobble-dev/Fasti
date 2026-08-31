@@ -1675,7 +1675,7 @@ mod tests {
         assert_eq!(&csrf_attributes[3..], ["Secure", "SameSite=Strict"]);
         assert!(cookies.iter().any(|cookie| {
             *cookie
-                == "__Secure-fasti_auth_binding=; Domain=127.0.0.1; Path=/api/access/v1/trailbase/callback; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=Lax"
+                == "__Secure-fasti_auth_binding=; Path=/api/access/v1/trailbase/callback; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=Lax"
         }));
         assert!(to_bytes(response.into_body(), 1)
             .await
@@ -1803,7 +1803,7 @@ mod tests {
         );
         assert_eq!(
             expired_response.headers().get(header::SET_COOKIE),
-            Some(&HeaderValue::from_static("__Secure-fasti_auth_continuation=; Domain=127.0.0.1; Path=/api/access/v1/trailbase/continuation; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=Strict"))
+            Some(&HeaderValue::from_static("__Secure-fasti_auth_continuation=; Path=/api/access/v1/trailbase/continuation; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=Strict"))
         );
 
         let start_response = runtime
@@ -1945,7 +1945,7 @@ mod tests {
             if expected == StatusCode::UNAUTHORIZED {
                 assert_eq!(
                     response.headers().get(header::SET_COOKIE),
-                    Some(&HeaderValue::from_static("__Secure-fasti_auth_continuation=; Domain=127.0.0.1; Path=/api/access/v1/trailbase/continuation; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=Strict"))
+                    Some(&HeaderValue::from_static("__Secure-fasti_auth_continuation=; Path=/api/access/v1/trailbase/continuation; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=Strict"))
                 );
             }
         }
@@ -2015,7 +2015,7 @@ mod tests {
             .any(|cookie| cookie.starts_with("__Host-fasti_csrf=")));
         assert!(complete_cookies.iter().any(|cookie| {
             *cookie
-                == "__Secure-fasti_auth_continuation=; Domain=127.0.0.1; Path=/api/access/v1/trailbase/continuation; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=Strict"
+                == "__Secure-fasti_auth_continuation=; Path=/api/access/v1/trailbase/continuation; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=Strict"
         }));
         let session_cookie = complete_cookies
             .iter()
@@ -2073,7 +2073,7 @@ mod tests {
         );
         assert_eq!(
             dismiss_response.headers().get(header::SET_COOKIE),
-            Some(&HeaderValue::from_static("__Secure-fasti_auth_continuation=; Domain=127.0.0.1; Path=/api/access/v1/trailbase/continuation; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=Strict"))
+            Some(&HeaderValue::from_static("__Secure-fasti_auth_continuation=; Path=/api/access/v1/trailbase/continuation; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=Strict"))
         );
         assert_eq!(
             state.requests.lock().expect("requests").as_slice(),
@@ -2636,7 +2636,7 @@ mod tests {
         assert_eq!(cookies.len(), 2);
         assert!(cookies.iter().any(|cookie| {
             *cookie
-                == "__Secure-fasti_auth_binding=; Domain=127.0.0.1; Path=/api/access/v1/trailbase/callback; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=Lax"
+                == "__Secure-fasti_auth_binding=; Path=/api/access/v1/trailbase/callback; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=Lax"
         }));
         let continuation_cookie = cookies
             .iter()
@@ -2647,18 +2647,17 @@ mod tests {
             continuation_attributes[0],
             format!("{}={binding}", crate::FASTI_ACCESS_CONTINUATION_COOKIE)
         );
-        assert_eq!(continuation_attributes[1], "Domain=127.0.0.1");
         assert_eq!(
-            continuation_attributes[2],
+            continuation_attributes[1],
             format!("Path={}", crate::FASTI_ACCESS_CONTINUATION_PATH)
         );
-        assert!(continuation_attributes[3]
+        assert!(continuation_attributes[2]
             .strip_prefix("Max-Age=")
             .is_some_and(|value| value
                 .parse::<u64>()
                 .is_ok_and(|value| value > 0 && value <= 480)));
         assert_eq!(
-            &continuation_attributes[4..],
+            &continuation_attributes[3..],
             ["Secure", "HttpOnly", "SameSite=Strict"]
         );
         let continuation_cookie = continuation_attributes[0].to_owned();
@@ -2716,7 +2715,7 @@ mod tests {
         );
         assert_eq!(
             dismiss_response.headers().get(header::SET_COOKIE),
-            Some(&HeaderValue::from_static("__Secure-fasti_auth_continuation=; Domain=127.0.0.1; Path=/api/access/v1/trailbase/continuation; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=Strict"))
+            Some(&HeaderValue::from_static("__Secure-fasti_auth_continuation=; Path=/api/access/v1/trailbase/continuation; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=Strict"))
         );
 
         let terminal: (String, String, i64, i64) =

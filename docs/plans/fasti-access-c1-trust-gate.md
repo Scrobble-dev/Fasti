@@ -431,11 +431,11 @@ grant_owner_client_id }`. Only persistence that truly records source
   digest against the current session; equality of cookie and header alone is
   insufficient.
 - The one-use callback cookie is
-  `__Secure-fasti_auth_binding`: `Secure`, `HttpOnly`, `SameSite=Lax`, exact
-  `Domain=127.0.0.1`, and `Path=/api/access/v1/trailbase/callback`. Tauri
-  2.11.5 and Wry 0.55.1 require a domain for their native cookie managers
-  because the API accepts no target URL. Clear it with the same attributes on
-  success and every failure. The session and CSRF cookies remain `__Host-`
+  `__Secure-fasti_auth_binding`: `Secure`, `HttpOnly`, `SameSite=Lax`, host-only,
+  and `Path=/api/access/v1/trailbase/callback`. Tauri 2.11.5 and Wry 0.55.1
+  bind the cookie to the current WebView host when `Domain` is absent. Clear it
+  with the same attributes on success and every failure. The session and CSRF
+  cookies remain `__Host-`
   cookies with no `Domain`.
 - Authenticated reads require exact `Host: 127.0.0.1:8420`. Browser mutations
   require exact `Origin: http://127.0.0.1:8420`, exact Host, the Strict session
@@ -672,7 +672,7 @@ state store, provider abstraction, or polling loop.
   Ordinary sign-in never creates a Fasti session in the callback.
 - On selection-required or attributable post-claim failure, the response
   clears the callback cookie and writes the same high-entropy binding value to
-  `__Secure-fasti_auth_continuation` with `Domain=127.0.0.1`, exact
+  host-only `__Secure-fasti_auth_continuation` with exact
   `Path=/api/access/v1/trailbase/continuation`, `Secure`, `HttpOnly`,
   `SameSite=Strict`, and `Max-Age` no longer than the ceremony's remaining
   lifetime. Pre-claim noise clears the callback cookie and receives no
