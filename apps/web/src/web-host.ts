@@ -211,6 +211,10 @@ export function createWebHost(
     });
   let network = loadNetworkConfiguration(defaultApiUrl);
   let client = createClient(network.connection.service_url.value);
+  const accessClient = new FastiClient({
+    baseUrl:
+      typeof window === "undefined" ? defaultApiUrl : window.location.origin,
+  });
 
   const metadataHost: Partial<WorkbenchHost> = credential
     ? {
@@ -237,6 +241,22 @@ export function createWebHost(
 
   return {
     networkConfigurationScope: "client",
+    profileDataAuthority: credential ? "scoped" : "browser_session",
+    startTrailBaseSignIn: (request) =>
+      accessClient.startTrailBaseSignIn(request),
+    readTrailBaseContinuation: (signal) =>
+      accessClient.readTrailBaseContinuation({ signal }),
+    completeTrailBaseContinuation: (request) =>
+      accessClient.completeTrailBaseContinuation(request),
+    cancelTrailBaseContinuation: () =>
+      accessClient.cancelTrailBaseContinuation(),
+    readAccessProjection: (signal) =>
+      accessClient.readAccessProjection({ signal }),
+    endBrowserSession: () => accessClient.endBrowserSession(),
+    revokeBrowserSession: (browserSessionId) =>
+      accessClient.revokeBrowserSession(browserSessionId),
+    revokeOtherBrowserSessions: () => accessClient.revokeOtherBrowserSessions(),
+    rotateBrowserSession: () => accessClient.rotateBrowserSession(),
     async loadNetworkConfiguration(): Promise<NetworkConfiguration> {
       return network;
     },

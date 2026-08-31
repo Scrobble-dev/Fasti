@@ -1,13 +1,18 @@
 <script lang="ts">
   import { IconExternalLink, IconX } from "@tabler/icons-svelte";
+  import { dialogFocus } from "./dialog-focus.js";
+  import type { AccessProjectionResponse } from "./types.js";
 
   interface Props {
     show: boolean;
     onClose: () => void;
     onOpenAccountSecurity: () => void;
+    projection?: AccessProjectionResponse;
+    problem?: string;
   }
 
-  let { show, onClose, onOpenAccountSecurity }: Props = $props();
+  let { show, onClose, onOpenAccountSecurity, projection, problem }: Props =
+    $props();
   let dialog = $state<HTMLDialogElement>();
 
   $effect(() => {
@@ -22,6 +27,7 @@
 
 <dialog
   bind:this={dialog}
+  use:dialogFocus
   class="auth-dialog"
   aria-labelledby="auth-modal-title"
   oncancel={(event) => {
@@ -52,23 +58,43 @@
       </header>
 
       <div class="card-body modal-body">
+        {#if problem}
+          <div class="alert alert-warning" role="status">{problem}</div>
+        {/if}
         <div
-          class="alert alert-warning mb-3"
+          class="alert mb-3"
+          class:alert-success={projection}
+          class:alert-warning={problem && !projection}
+          class:alert-info={!projection && !problem}
           role="status"
-          data-testid="account-access-unavailable"
         >
           <div>
             <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
-              <strong>Unavailable</strong>
-              <span class="badge bg-warning-lt text-dark">PR C1 required</span>
+              <strong
+                >{projection
+                  ? "Signed in"
+                  : problem
+                    ? "Access state unavailable"
+                    : "Sign-in required"}</strong
+              >
+              <span
+                class="badge"
+                class:bg-success-lt={projection}
+                class:bg-secondary-lt={!projection}
+              >
+                {projection
+                  ? projection.authentication.method.replaceAll("_", " ")
+                  : problem
+                    ? "Not confirmed"
+                    : "No active Fasti session"}
+              </span>
             </div>
-            <p class="mb-2">
-              Browser sign-in and session management depend on PR C1: TrailBase
-              identity bootstrap and production browser sessions.
-            </p>
             <p class="mb-0">
-              Continue local work that does not need an account. Operators must
-              complete and merge PR C1 before enabling account access.
+              {projection
+                ? `${projection.sessions.length} active browser ${projection.sessions.length === 1 ? "session" : "sessions"}.`
+                : problem
+                  ? "Open Account and security to retry the governed access check."
+                  : "Open Account and security to sign in with TrailBase and review the exact access state."}
             </p>
           </div>
         </div>
@@ -122,6 +148,24 @@
 
   .modal-body {
     min-width: 0;
+  }
+
+  .auth-dialog :global(.text-secondary) {
+    color: var(--fasti-text-muted) !important;
+  }
+
+  .auth-dialog :global(.bg-secondary-lt) {
+    background: var(--fasti-surface-archive) !important;
+    color: var(--fasti-text-primary) !important;
+  }
+
+  .auth-dialog :global(.bg-success-lt) {
+    background: color-mix(
+      in srgb,
+      var(--fasti-state-verified) 14%,
+      var(--fasti-surface-paper)
+    ) !important;
+    color: var(--fasti-state-verified) !important;
   }
 
   :global(.auth-dialog .btn) {

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { FastiAbortError, FastiProblemError } from "@fasti/sdk";
   import { flushSync, onMount, tick } from "svelte";
   import {
     IconChevronRight,
@@ -13,6 +14,7 @@
     IconLogout,
     IconUserCircle,
   } from "@tabler/icons-svelte";
+  import AccountSecurityView from "./account-security-view.svelte";
   import AuthModal from "./auth-modal.svelte";
   import GlobalSearch from "./global-search.svelte";
   import HomeView from "./home-view.svelte";
@@ -33,6 +35,7 @@
   import { projectRecordSummary } from "./record-projection.js";
   import type {
     ActiveNavSection,
+    AccessProjectionResponse,
     CreateRecordResult,
     MediaRecord,
     MetadataFieldGroupDto,
@@ -57,6 +60,7 @@
     | "home"
     | "connections"
     | "settings"
+    | "first_run"
     | "discover"
     | "reconciliation"
     | "library"
@@ -186,6 +190,8 @@
         return "/connections";
       case "settings":
         return pathForSettingsTab(settingsTab);
+      case "first_run":
+        return "/first-run";
       case "discover":
         return "/discover";
       case "reconciliation":
@@ -203,7 +209,44 @@
 
   function sectionFromPath(): Section {
     if (typeof window === "undefined") return "home";
-    const path = window.location.pathname;
+    const url = new URL(window.location.href);
+    const path = url.pathname;
+    const authMarkers = url.searchParams.getAll("auth");
+    const callbackMarker = authMarkers[0];
+    const callbackIsExact =
+      authMarkers.length === 1 &&
+      (callbackMarker === "continue" || callbackMarker === "failed");
+    const scrubAccessCallback = (): void => {
+      url.searchParams.delete("auth");
+      url.searchParams.delete("correlation_id");
+      window.history.replaceState(
+        window.history.state,
+        "",
+        `${url.pathname}${url.search}${url.hash}`,
+      );
+    };
+    if ((path === "/" || path === "/settings/account") && callbackIsExact) {
+      accessCallbackMarker = callbackMarker;
+      settingsTab = "account";
+      url.pathname = "/settings/account";
+      scrubAccessCallback();
+      return "settings";
+    }
+    if (path === "/first-run" && callbackIsExact) {
+      accessCallbackMarker = callbackMarker;
+      scrubAccessCallback();
+      return "first_run";
+    }
+    if (path === "/first-run") {
+      accessCallbackMarker = undefined;
+      if (authMarkers.length || url.searchParams.has("correlation_id")) {
+        scrubAccessCallback();
+      }
+      return "first_run";
+    }
+    if (authMarkers.length || url.searchParams.has("correlation_id")) {
+      scrubAccessCallback();
+    }
     if (path === "/connections") return "connections";
     if (path.startsWith("/settings")) {
       settingsTab = settingsTabFromPath(path);
@@ -223,6 +266,14 @@
   }
 
   let activeSection = $state<Section>("home");
+  let accessCallbackMarker = $state<"continue" | "failed">();
+  let accessProjection = $state<AccessProjectionResponse>();
+  let accessProjectionProblem = $state<string>();
+  let accessNotice = $state<string>();
+  let accessReadController: AbortController | undefined;
+  let accessReadPromise: Promise<AccessProjectionResponse> | undefined;
+  let accessGeneration = 0;
+  let profileAuthorityIdentity = "signed-out";
   let selectedRecordId = $state<string | null>(null);
   let selectedRecordTab = $state<"overview" | "sources">("overview");
 
@@ -432,14 +483,134 @@
   function select(section: Section): void {
     mobileNavigationOpen = false;
     activeSection = section;
+    if (section !== "first_run") accessCallbackMarker = undefined;
     if (typeof window === "undefined") return;
     const path = pathForSection(section);
     if (window.location.pathname !== path) {
       window.history.pushState({}, "", path);
     }
+    if (section !== "first_run") {
+      window.requestAnimationFrame(() =>
+        document.getElementById("main-content")?.focus(),
+      );
+    }
+  }
+
+  function openAccountSecurity(): void {
+    settingsTab = "account";
+    select("settings");
     window.requestAnimationFrame(() =>
-      document.getElementById("main-content")?.focus(),
+      document.getElementById("account-security-title")?.focus(),
     );
+  }
+
+  function acceptAccessProjection(projection?: AccessProjectionResponse): void {
+    const nextIdentity = projectionIdentity(projection);
+    if (nextIdentity !== profileAuthorityIdentity) {
+      profileAuthorityIdentity = nextIdentity;
+      clearProfileOwnedWorkbenchState();
+    }
+    accessGeneration += 1;
+    accessReadController?.abort();
+    accessReadPromise = undefined;
+    accessProjection = projection;
+    accessProjectionProblem = undefined;
+  }
+
+  function readAccessProjection(): Promise<AccessProjectionResponse> {
+    if (accessReadPromise) return accessReadPromise;
+    if (!host.readAccessProjection) {
+      return Promise.reject(
+        new Error(
+          "This host does not expose the governed Fasti browser-session projection.",
+        ),
+      );
+    }
+    accessReadController?.abort();
+    const controller = new AbortController();
+    accessReadController = controller;
+    const currentGeneration = ++accessGeneration;
+    const promise = host
+      .readAccessProjection(controller.signal)
+      .then((projection) => {
+        if (currentGeneration !== accessGeneration) throw new FastiAbortError();
+        acceptAccessProjection(projection);
+        return projection;
+      })
+      .catch((error: unknown) => {
+        if (currentGeneration === accessGeneration) {
+          if (
+            error instanceof FastiProblemError &&
+            signedOutAccessCodes.has(error.problem.code)
+          ) {
+            acceptAccessProjection();
+          } else {
+            accessProjectionProblem = hostProblemText(
+              error,
+              "Fasti could not refresh account access.",
+            );
+          }
+        }
+        throw error;
+      })
+      .finally(() => {
+        if (accessReadPromise === promise) accessReadPromise = undefined;
+      });
+    accessReadPromise = promise;
+    return promise;
+  }
+
+  async function refreshAccessProjection(): Promise<void> {
+    try {
+      await readAccessProjection();
+    } catch {
+      // The shared reader records the governed state for the shell and modal.
+    }
+  }
+
+  const signedOutAccessCodes = new Set([
+    "authentication_failed",
+    "browser_session_expired",
+    "browser_session_revoked",
+    "session_policy_changed",
+  ]);
+  const canAccessProfileData = $derived(
+    host.profileDataAuthority === "scoped" || Boolean(accessProjection),
+  );
+  const accessProfileDataIdentity = $derived(
+    projectionIdentity(accessProjection),
+  );
+
+  $effect(() => {
+    const projection = accessProjection;
+    if (!projection || host.profileDataAuthority !== "browser_session") return;
+    const deadline = Math.min(
+      Date.parse(projection.current_session.idle_expires_at),
+      Date.parse(projection.current_session.absolute_expires_at),
+    );
+    let timeout: ReturnType<typeof setTimeout>;
+    const expire = () => {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        if (
+          projectionIdentity(accessProjection) ===
+          projectionIdentity(projection)
+        )
+          acceptAccessProjection();
+        return;
+      }
+      timeout = setTimeout(expire, Math.min(remaining, 2_147_483_647));
+    };
+    expire();
+    return () => clearTimeout(timeout);
+  });
+
+  function projectionIdentity(projection?: AccessProjectionResponse): string {
+    return projection
+      ? `${projection.current_session.browser_session_id}:${projection.current_session.rotation_generation}:${projection.current_session.selected_profile_grant_id}`
+      : host.profileDataAuthority === "scoped"
+        ? "scoped-host"
+        : "signed-out";
   }
 
   function openProviderSettings(): void {
@@ -521,6 +692,12 @@
   let discoverSectionActive = false;
 
   async function loadDiscover(): Promise<void> {
+    if (!canAccessProfileData) {
+      discoverProviders = undefined;
+      discoverHostProblem =
+        "Sign in to use configured metadata providers from this host.";
+      return;
+    }
     const loadId = ++discoverLoadId;
     discoverLoading = true;
     discoverHostProblem = undefined;
@@ -551,9 +728,15 @@
   let reviewsLoading = $state(false);
   let reviewsProblem = $state<string | undefined>(undefined);
   let reviewsLoaded = false;
+  let reviewsLoadId = 0;
   let resolvingReviewId = $state<string | undefined>(undefined);
 
   async function loadReviews(): Promise<void> {
+    if (!canAccessProfileData) {
+      reviewsProblem = "Sign in to review profile-scoped reconciliation items.";
+      return;
+    }
+    const loadId = ++reviewsLoadId;
     if (!host.listReviews) {
       reviewsProblem = "This host does not support review listing yet.";
       return;
@@ -561,24 +744,31 @@
     reviewsLoading = true;
     reviewsProblem = undefined;
     try {
-      reviews = await host.listReviews();
+      const loadedReviews = await host.listReviews();
+      if (loadId === reviewsLoadId) reviews = loadedReviews;
     } catch (error) {
-      reviewsProblem = hostProblemText(
-        error,
-        "Could not load the review inbox from the host.",
-      );
+      if (loadId === reviewsLoadId) {
+        reviewsProblem = hostProblemText(
+          error,
+          "Could not load the review inbox from the host.",
+        );
+      }
     } finally {
-      reviewsLoading = false;
+      if (loadId === reviewsLoadId) reviewsLoading = false;
     }
   }
 
   async function resolveReview(input: ResolveReviewInput): Promise<void> {
-    if (!host.resolveReview || resolvingReviewId) return;
+    if (!canAccessProfileData || !host.resolveReview || resolvingReviewId)
+      return;
+    const authorityIdentity = profileAuthorityIdentity;
     resolvingReviewId = input.review_item_id;
     try {
       await host.resolveReview(input);
+      if (authorityIdentity !== profileAuthorityIdentity) return;
       await loadReviews();
     } catch (error) {
+      if (authorityIdentity !== profileAuthorityIdentity) return;
       reviewsProblem = hostProblemText(error, "Could not resolve that review.");
     } finally {
       if (resolvingReviewId === input.review_item_id) {
@@ -598,6 +788,7 @@
   let recordActionProblem = $state<string | undefined>(undefined);
   let recordActionNotice = $state<string | undefined>(undefined);
   let recordsLoaded = false;
+  let recordsGeneration = 0;
   let metadataProjection = $state<MetadataProjectionResponse>();
   let metadataProjectionLoading = $state(false);
   let metadataProjectionProblem = $state<string>();
@@ -605,10 +796,15 @@
   let metadataProjectionGeneration = 0;
 
   async function loadRecords(restoreRetryFocus = false): Promise<boolean> {
+    if (!canAccessProfileData) {
+      recordsProblem = "Sign in to read workspace and profile media state.";
+      return false;
+    }
     if (!host.listRecords) {
       recordsProblem = "This host does not support record listing yet.";
       return false;
     }
+    const generation = ++recordsGeneration;
     const showLoading = mediaRecords.length === 0;
     if (showLoading) recordsLoading = true;
     recordsProblem = undefined;
@@ -616,7 +812,9 @@
       const statesPromise = host.listTrackingDispositions
         ? host.listTrackingDispositions().catch((error) => {
             const detail = hostProblemText(error, "Fasti request failed.");
-            recordActionNotice = `Could not load profile tracking state. Records still use their activity fallback. ${detail}`;
+            if (generation === recordsGeneration) {
+              recordActionNotice = `Could not load profile tracking state. Records still use their activity fallback. ${detail}`;
+            }
             return { states: [], truncated: false };
           })
         : Promise.resolve({ states: [], truncated: false });
@@ -624,6 +822,7 @@
         host.listRecords(),
         statesPromise,
       ]);
+      if (generation !== recordsGeneration) return false;
       if (recordPage.truncated) {
         recordActionProblem =
           "Only the first 500 records are shown. Additional records remain stored.";
@@ -639,14 +838,16 @@
         projectRecordSummary(summary, dispositions.get(summary.record_id)),
       );
     } catch (error) {
+      if (generation !== recordsGeneration) return false;
       recordsProblem = hostProblemText(
         error,
         "Could not load records from the host.",
       );
       return false;
     } finally {
-      if (showLoading) recordsLoading = false;
-      if (restoreRetryFocus) {
+      if (generation === recordsGeneration && showLoading)
+        recordsLoading = false;
+      if (generation === recordsGeneration && restoreRetryFocus) {
         await tick();
         document.getElementById("retry-records")?.focus();
       }
@@ -654,19 +855,49 @@
     return true;
   }
 
+  function clearProfileOwnedWorkbenchState(): void {
+    recordsGeneration += 1;
+    mediaRecords = [];
+    recordsLoaded = false;
+    recordsLoading = false;
+    recordsProblem = undefined;
+    recordActionProblem = undefined;
+    recordActionNotice = undefined;
+    metadataProjectionGeneration += 1;
+    metadataProjection = undefined;
+    metadataProjectionLoading = false;
+    metadataProjectionProblem = undefined;
+    metadataProjectionRecordId = "";
+    failedMetadataRefresh = undefined;
+    invalidateDiscoverProviders();
+    reviewsLoadId += 1;
+    reviews = [];
+    reviewsLoaded = false;
+    reviewsLoading = false;
+    reviewsProblem = undefined;
+    resolvingReviewId = undefined;
+    selectedRecordId = null;
+  }
+
   async function setTrackingDisposition(
     recordId: string,
     disposition: TrackingDispositionUpdate,
   ): Promise<void> {
+    if (!canAccessProfileData) {
+      recordActionProblem = "Sign in before changing profile tracking state.";
+      return;
+    }
     if (!host.setTrackingDisposition) {
       recordActionProblem =
         "Profile tracking state is not available on this host.";
       return;
     }
+    const authorityIdentity = profileAuthorityIdentity;
     recordActionProblem = undefined;
     recordActionNotice = undefined;
     try {
       const state = await host.setTrackingDisposition(recordId, disposition);
+      if (authorityIdentity !== profileAuthorityIdentity) return;
       mediaRecords = mediaRecords.map((record) =>
         record.id === recordId
           ? {
@@ -683,6 +914,7 @@
           ? "Tracking state now follows recorded activity."
           : `Tracking state set to ${disposition.replaceAll("_", " ")}.`;
     } catch (error) {
+      if (authorityIdentity !== profileAuthorityIdentity) return;
       recordActionProblem = hostProblemText(
         error,
         "Could not update the profile tracking state.",
@@ -693,19 +925,40 @@
   async function createRecordFromDiscover(
     candidate: ProviderSearchCandidate,
   ): Promise<CreateRecordResult> {
-    if (!host.trackProviderCandidate) {
+    if (!canAccessProfileData || !host.trackProviderCandidate) {
       throw new Error(
-        "Creating a Record from provider metadata is not available on this host.",
+        "Sign in before creating a Record from provider metadata.",
       );
     }
+    const authorityIdentity = profileAuthorityIdentity;
     const result = await host.trackProviderCandidate({
       provider: candidate.provider,
       provider_id: candidate.provider_id,
       kind: candidate.kind,
     });
+    if (authorityIdentity !== profileAuthorityIdentity) {
+      throw new Error(
+        "Account access changed before the Record was confirmed.",
+      );
+    }
     recordsLoaded = false;
     await loadRecords();
     return result;
+  }
+
+  async function searchProvider(
+    provider: string,
+    query: string,
+  ): Promise<ProviderSearchCandidate[]> {
+    if (!canAccessProfileData) {
+      throw new Error("Sign in before searching configured providers.");
+    }
+    const authorityIdentity = profileAuthorityIdentity;
+    const results = await host.searchProvider(provider, query);
+    if (authorityIdentity !== profileAuthorityIdentity) {
+      throw new Error("Account access changed before search completed.");
+    }
+    return results;
   }
 
   function resetClientEndpoint(): void {
@@ -725,18 +978,20 @@
     recordId: string,
     selection: ProviderSelection,
   ): Promise<void> {
-    if (!host.applyProviderMetadata) {
-      throw new Error(
-        "Metadata refresh is only available in the trusted desktop host.",
-      );
+    if (!canAccessProfileData || !host.applyProviderMetadata) {
+      throw new Error("Sign in before applying provider metadata.");
     }
+    const authorityIdentity = profileAuthorityIdentity;
     recordActionProblem = undefined;
     recordActionNotice = undefined;
     try {
       await host.applyProviderMetadata(recordId, selection);
+      if (authorityIdentity !== profileAuthorityIdentity) return;
       await loadRecords();
+      if (authorityIdentity !== profileAuthorityIdentity) return;
       recordActionNotice = `Metadata refreshed from ${selection.provider}.`;
     } catch (error) {
+      if (authorityIdentity !== profileAuthorityIdentity) return;
       recordActionProblem = hostProblemText(
         error,
         "Could not refresh metadata for this record.",
@@ -753,6 +1008,11 @@
     metadataProjectionRecordId = recordId;
     metadataProjection = undefined;
     metadataProjectionProblem = undefined;
+    if (!canAccessProfileData) {
+      metadataProjectionProblem =
+        "Sign in before reading profile-scoped metadata state.";
+      return;
+    }
     if (!host.readMetadataProjection) {
       metadataProjectionProblem =
         "This host does not expose the governed metadata projection.";
@@ -788,11 +1048,16 @@
   async function refreshMetadataProjectionClaims(
     providerId: string,
   ): Promise<void> {
-    if (!host.refreshMetadataClaims || !metadataProjection) {
+    if (
+      !canAccessProfileData ||
+      !host.refreshMetadataClaims ||
+      !metadataProjection
+    ) {
       throw new Error(
         "Governed metadata claim refresh is not available on this host.",
       );
     }
+    const authorityIdentity = profileAuthorityIdentity;
     const fieldGroups = metadataProjection.policy.enabled_field_groups.filter(
       (group) => refreshableMetadataFieldGroups.has(group),
     );
@@ -823,12 +1088,15 @@
         region: metadataProjection.policy.region,
         mode: "revalidate",
       });
+      if (authorityIdentity !== profileAuthorityIdentity) return;
       await Promise.all([
         loadMetadataProjection(metadataProjection.record_id),
         loadRecords(),
       ]);
+      if (authorityIdentity !== profileAuthorityIdentity) return;
       failedMetadataRefresh = undefined;
     } catch (error) {
+      if (authorityIdentity !== profileAuthorityIdentity) return;
       failedMetadataRefresh = { requestKey, operationId };
       throw error;
     }
@@ -868,17 +1136,25 @@
   $effect(() => {
     const needsDiscoverProviders =
       activeSection === "discover" || activeSection === "detail";
-    if (needsDiscoverProviders && !discoverSectionActive) {
+    if (
+      needsDiscoverProviders &&
+      canAccessProfileData &&
+      !discoverSectionActive
+    ) {
       discoverSectionActive = true;
       void loadDiscover();
-    } else if (!needsDiscoverProviders) {
+    } else if (!needsDiscoverProviders || !canAccessProfileData) {
       discoverSectionActive = false;
     }
-    if (activeSection === "reconciliation" && !reviewsLoaded) {
+    if (
+      canAccessProfileData &&
+      activeSection === "reconciliation" &&
+      !reviewsLoaded
+    ) {
       reviewsLoaded = true;
       void loadReviews();
     }
-    if (!recordsLoaded) {
+    if (canAccessProfileData && !recordsLoaded) {
       recordsLoaded = true;
       void loadRecords();
     }
@@ -908,9 +1184,24 @@
   });
 
   onMount(() => {
+    profileAuthorityIdentity = projectionIdentity(accessProjection);
     activeSection = sectionFromPath();
+    if (
+      activeSection !== "first_run" &&
+      !(activeSection === "settings" && settingsTab === "account")
+    )
+      void refreshAccessProjection();
     const sync = () => (activeSection = sectionFromPath());
+    const revalidateAccess = () => {
+      if (host.profileDataAuthority === "browser_session" && accessProjection)
+        void refreshAccessProjection();
+    };
+    const revalidateVisibleAccess = () => {
+      if (document.visibilityState === "visible") revalidateAccess();
+    };
     window.addEventListener("popstate", sync);
+    window.addEventListener("focus", revalidateAccess);
+    document.addEventListener("visibilitychange", revalidateVisibleAccess);
     const media = window.matchMedia("(max-width: 61.99rem)");
     const syncViewport = () => {
       isNarrowViewport = media.matches;
@@ -926,7 +1217,10 @@
     media.addEventListener("change", syncViewport);
     document.addEventListener("keydown", closeNavigationOnEscape);
     return () => {
+      accessReadController?.abort();
       window.removeEventListener("popstate", sync);
+      window.removeEventListener("focus", revalidateAccess);
+      document.removeEventListener("visibilitychange", revalidateVisibleAccess);
       media.removeEventListener("change", syncViewport);
       document.removeEventListener("keydown", closeNavigationOnEscape);
     };
@@ -937,6 +1231,7 @@
       home: "Overview",
       connections: "Connections",
       settings: "Settings",
+      first_run: "Secure your account",
       discover: "Discover",
       reconciliation: "Review Inbox",
       library: "Library",
@@ -970,7 +1265,7 @@
 
 <div class="page workbench-shell">
   <NavSidebar
-    {activeSection}
+    activeSection={activeSection === "first_run" ? "settings" : activeSection}
     navItems={workbenchPreferences.navItems}
     {openReviewCount}
     collapsed={workbenchPreferences.sidebarCollapsed}
@@ -1083,14 +1378,59 @@
         </p>
       {/if}
       {#if activeSection === "connections"}
-        <ConnectionsView {host} />
+        {#if canAccessProfileData}
+          <ConnectionsView {host} />
+        {:else}
+          <div class="state-message" role="alert">
+            <h1>Connections</h1>
+            <p>Sign in before reviewing clients and service connections.</p>
+            <button
+              type="button"
+              class="btn btn-primary"
+              onclick={() => {
+                settingsTab = "account";
+                select("settings");
+              }}>Open Account and security</button
+            >
+          </div>
+        {/if}
+      {:else if activeSection === "first_run"}
+        <AccountSecurityView
+          {host}
+          mode="first_run"
+          projection={accessProjection}
+          {readAccessProjection}
+          onProjection={acceptAccessProjection}
+          callbackMarker={accessCallbackMarker}
+          onCallbackConsumed={() => (accessCallbackMarker = undefined)}
+          onLeaveFirstRun={(completed) => {
+            if (completed) accessNotice = "Account setup is complete.";
+            if (completed) {
+              settingsTab = "account";
+              select("settings");
+            } else {
+              openAccountSecurity();
+            }
+          }}
+          onOpenAccountSecurity={openAccountSecurity}
+          onOpenConnections={() => select("connections")}
+        />
       {:else if activeSection === "settings"}
         <RuntimeSettingsView
           {host}
           {workbenchPreferences}
           metadataPolicyRecordId={mediaRecords[0]?.id}
-          canAccessProfileData={true}
-          profileDataIdentity="trusted-host"
+          {canAccessProfileData}
+          profileDataIdentity={accessProfileDataIdentity}
+          {accessProjection}
+          {readAccessProjection}
+          {accessNotice}
+          onAccessNoticeConsumed={() => (accessNotice = undefined)}
+          onAccessProjection={acceptAccessProjection}
+          callbackMarker={accessCallbackMarker}
+          onAccessCallbackConsumed={() => (accessCallbackMarker = undefined)}
+          onStartFirstRun={() => select("first_run")}
+          onOpenConnections={() => select("connections")}
           activeTab={settingsTab}
           onTabChange={(tab: SettingsTab) => {
             settingsTab = tab;
@@ -1108,26 +1448,31 @@
             (workbenchPreferences = { ...workbenchPreferences, ...patch })}
         />
       {:else if activeSection === "discover"}
-        <DiscoverView
-          providerCredentials={discoverProviders}
-          loading={discoverLoading}
-          hostProblem={discoverHostProblem}
-          bind:selectedProviderId={discoverSelectedProviderId}
-          bind:selectionExplicit={discoverSelectionExplicit}
-          onSearch={(provider, query) => host.searchProvider(provider, query)}
-          onOpenSettings={openProviderSettings}
-          onRetry={() => loadDiscover()}
-          onCandidateAction={host.trackProviderCandidate
-            ? createRecordFromDiscover
-            : undefined}
-        />
+        {#key accessProfileDataIdentity}
+          <DiscoverView
+            providerCredentials={discoverProviders}
+            loading={discoverLoading}
+            hostProblem={canAccessProfileData
+              ? discoverHostProblem
+              : "Sign in to use configured metadata providers from this host."}
+            bind:selectedProviderId={discoverSelectedProviderId}
+            bind:selectionExplicit={discoverSelectionExplicit}
+            onSearch={searchProvider}
+            onOpenSettings={openProviderSettings}
+            onRetry={() => loadDiscover()}
+            onCandidateAction={canAccessProfileData &&
+            host.trackProviderCandidate
+              ? createRecordFromDiscover
+              : undefined}
+          />
+        {/key}
       {:else if activeSection === "reconciliation"}
         <ReconciliationView
           items={reviewsProblem ? [] : reviews}
           loading={reviewsLoading}
           unavailableReason={reviewsProblem}
           {resolvingReviewId}
-          onResolveExisting={host.resolveReview
+          onResolveExisting={canAccessProfileData && host.resolveReview
             ? (reviewItemId, recordId) =>
                 resolveReview({
                   review_item_id: reviewItemId,
@@ -1135,7 +1480,7 @@
                   identifiers: [],
                 })
             : undefined}
-          onResolveNew={host.resolveReview
+          onResolveNew={canAccessProfileData && host.resolveReview
             ? (reviewItemId, grain) =>
                 resolveReview({
                   review_item_id: reviewItemId,
@@ -1151,8 +1496,10 @@
           availableCollections={[]}
           onSelectRecord={openRecord}
           contextMenuConfigs={workbenchPreferences.contextMenuItems}
-          onSetTrackingDisposition={(recordId, disposition) =>
-            void setTrackingDisposition(recordId, disposition)}
+          onSetTrackingDisposition={canAccessProfileData
+            ? (recordId, disposition) =>
+                void setTrackingDisposition(recordId, disposition)
+            : undefined}
           onOpenReconciliation={() => select("reconciliation")}
         />
       {:else if activeSection === "calendar"}
@@ -1184,20 +1531,22 @@
             providerLoading={discoverLoading}
             providerHostProblem={discoverHostProblem}
             onBack={() => select("library")}
-            onSearchMetadata={(provider, query) =>
-              host.searchProvider(provider, query)}
-            onApplyMetadata={host.applyProviderMetadata
+            onSearchMetadata={searchProvider}
+            onApplyMetadata={canAccessProfileData && host.applyProviderMetadata
               ? applyProviderMetadata
               : undefined}
             onOpenProviderSettings={openProviderSettings}
             onRetryProviders={() => loadDiscover()}
             onRetryMetadataProjection={() =>
               loadMetadataProjection(selectedRecord.id, true)}
-            onRefreshMetadataClaims={host.refreshMetadataClaims
+            onRefreshMetadataClaims={canAccessProfileData &&
+            host.refreshMetadataClaims
               ? refreshMetadataProjectionClaims
               : undefined}
-            onSetTrackingDisposition={(recordId, disposition) =>
-              void setTrackingDisposition(recordId, disposition)}
+            onSetTrackingDisposition={canAccessProfileData
+              ? (recordId, disposition) =>
+                  void setTrackingDisposition(recordId, disposition)
+              : undefined}
             onOpenReconciliation={() => select("reconciliation")}
           />
         {:else}
@@ -1341,6 +1690,8 @@
 
 <AuthModal
   show={authModalOpen}
+  projection={accessProjection}
+  problem={accessProjectionProblem}
   onClose={() => (authModalOpen = false)}
   onOpenAccountSecurity={() => {
     authModalOpen = false;

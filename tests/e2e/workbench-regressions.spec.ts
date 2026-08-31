@@ -1,5 +1,11 @@
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import {
+  expect,
+  test,
+  type Locator,
+  type Page,
+  type Route,
+} from "@playwright/test";
 import { expectNoHorizontalOverflow } from "./test-helpers";
 
 const mobileViewports = [
@@ -16,6 +22,49 @@ const desktopViewports = [
 
 async function expectAxeClean(page: Page): Promise<void> {
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+}
+
+async function fulfillSignedOut(route: Route) {
+  const code = new URL(route.request().url()).pathname.endsWith(
+    "/trailbase/continuation",
+  )
+    ? "auth_browser_binding_invalid"
+    : "browser_session_expired";
+  await route.fulfill({
+    status: 401,
+    contentType: "application/problem+json",
+    body: JSON.stringify({
+      actual: null,
+      capability_id:
+        code === "auth_browser_binding_invalid"
+          ? "browser.session.create"
+          : "access.projection.read",
+      code,
+      correlation_id: "req_018f0e0e7f7b70008000000000000009",
+      detail:
+        code === "auth_browser_binding_invalid"
+          ? "the browser request is not bound to one active Fasti authentication ceremony"
+          : "the Fasti browser session reached its idle or absolute expiry",
+      next_actions: [
+        code === "auth_browser_binding_invalid"
+          ? {
+              id: "restart_sign_in",
+              label: "Start a new sign-in ceremony",
+            }
+          : { id: "sign_in_again", label: "Sign in again to continue" },
+      ],
+      param: null,
+      retryability: "retry_after_correction",
+      safe_state: "no_mutation",
+      status: 401,
+      title:
+        code === "auth_browser_binding_invalid"
+          ? "Authentication browser binding invalid"
+          : "Browser session expired",
+      type: `https://fasti.scrobble.dev/v1/problems/${code.replaceAll("_", "-")}`,
+      violations: [],
+    }),
+  });
 }
 
 async function expectAdjacent(
@@ -491,57 +540,56 @@ test("direct canonical and compatibility Settings routes preserve one active sec
   }
 });
 
-test("Account and security stays unavailable and separate from first-run setup", async ({
+test("Account and security is live and separate from first-run setup", async ({
   page,
 }) => {
   const browserAuthRequests: string[] = [];
-  page.on("request", (request) => {
-    const path = new URL(request.url()).pathname;
-    if (path.startsWith("/api/v1/browser/")) browserAuthRequests.push(path);
+  const browserAuthMutations: string[] = [];
+  await page.route("**/api/access/v1/**", async (route) => {
+    const request = route.request();
+    browserAuthRequests.push(new URL(request.url()).pathname);
+    if (!["GET", "HEAD"].includes(request.method())) {
+      browserAuthMutations.push(request.method());
+    }
+    await fulfillSignedOut(route);
   });
 
   await page.goto("/settings/account");
   const taskMap = page.getByTestId("account-security-task-map");
-  const guidedSetup = page.getByTestId("first-run-guided-setup");
 
   await expect(
     taskMap.getByRole("heading", { name: "Account and security" }),
   ).toBeVisible();
-  await expect(taskMap.getByTestId("account-access-unavailable")).toContainText(
-    "PR C1",
-  );
   await expect(
-    taskMap.getByRole("heading", { name: "Browser sessions" }),
+    taskMap.getByRole("heading", { name: "Confirm account access" }),
   ).toBeVisible();
-  await expect(
-    guidedSetup.getByRole("heading", { name: "First-run guided setup" }),
-  ).toBeVisible();
-  await expect(guidedSetup).toContainText("separate first-run flow");
-  await expect(
-    taskMap.getByRole("heading", { name: "First-run guided setup" }),
-  ).toHaveCount(0);
-  await expect(
-    guidedSetup.getByRole("heading", { name: "Browser sessions" }),
-  ).toHaveCount(0);
-  await expect(taskMap).not.toContainText("Signed in");
-  await expect(taskMap).not.toContainText("Active & Protected");
   await expect(taskMap.getByLabel("Username")).toHaveCount(0);
   await expect(taskMap.getByLabel("Password")).toHaveCount(0);
+  await expect(taskMap).not.toContainText(
+    /enroll passkey|scan qr|recovery code generated/i,
+  );
+  await expect(page.getByTestId("first-run-guided-setup")).toHaveCount(0);
+
+  await page.goto("/first-run");
+  const guidedSetup = page.getByTestId("first-run-guided-setup");
   await expect(
-    taskMap.getByRole("button", {
-      name: /sign in|sign out|create account|manage sessions|revoke session|end session/i,
-    }),
-  ).toHaveCount(0);
-  await page.getByRole("link", { name: "Metadata credentials" }).click();
-  await page.getByRole("link", { name: "Account and security" }).click();
-  await page.waitForLoadState("networkidle");
-  expect(browserAuthRequests).toEqual([]);
+    guidedSetup.getByRole("heading", { name: "Secure your Fasti account" }),
+  ).toBeVisible();
+  await expect(page.getByTestId("account-security-task-map")).toHaveCount(0);
+  expect(browserAuthRequests).toEqual([
+    "/api/access/v1/projection",
+    "/api/access/v1/trailbase/continuation",
+    "/api/access/v1/projection",
+    "/api/access/v1/trailbase/continuation",
+  ]);
+  expect(browserAuthMutations).toEqual([]);
   await expectAxeClean(page);
 });
 
-test("account shortcut keeps the unavailable state and opens the task map", async ({
+test("account shortcut reports session state and opens the task map", async ({
   page,
 }) => {
+  await page.route("**/api/access/v1/**", fulfillSignedOut);
   await page.goto("/");
   const accountShortcut = page.getByRole("button", {
     name: "Open account access",
@@ -550,9 +598,7 @@ test("account shortcut keeps the unavailable state and opens the task map", asyn
 
   const dialog = page.getByRole("dialog", { name: "Account access" });
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByTestId("account-access-unavailable")).toContainText(
-    "PR C1",
-  );
+  await expect(dialog.getByText("Sign-in required")).toBeVisible();
   await expectAxeClean(page);
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
@@ -569,7 +615,9 @@ test("account shortcut keeps the unavailable state and opens the task map", asyn
       name: "Account and security",
     }),
   ).toBeVisible();
-  await expect(page.locator("#main-content")).toBeFocused();
+  await expect(
+    page.getByRole("heading", { name: "Account and security" }),
+  ).toBeFocused();
 });
 
 for (const viewport of [...mobileViewports, ...desktopViewports]) {

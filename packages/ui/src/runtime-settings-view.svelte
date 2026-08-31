@@ -17,9 +17,11 @@
     IconUser,
     IconWorld,
   } from "@tabler/icons-svelte";
+  import AccountSecurityView from "./account-security-view.svelte";
   import NetworkSettings from "./network-settings.svelte";
   import { hostProblemText } from "./host-problem.js";
   import type {
+    AccessProjectionResponse,
     CustomFieldDefinition,
     CustomMediaTypeDefinition,
     ConfigureMetadataProjectionRequest,
@@ -40,6 +42,12 @@
     metadataPolicyRecordId?: string;
     canAccessProfileData?: boolean;
     profileDataIdentity?: string;
+    accessProjection?: AccessProjectionResponse;
+    readAccessProjection: () => Promise<AccessProjectionResponse>;
+    accessNotice?: string;
+    callbackMarker?: "continue" | "failed";
+    onAccessNoticeConsumed?: () => void;
+    onAccessCallbackConsumed?: () => void;
     activeTab?:
       | "account"
       | "network"
@@ -64,6 +72,9 @@
     onClientEndpointChanged?: () => void;
     onProviderCredentialsChanged?: () => void;
     onMetadataPolicyChanged?: () => void;
+    onAccessProjection?: (projection?: AccessProjectionResponse) => void;
+    onStartFirstRun?: () => void;
+    onOpenConnections?: () => void;
     onClearCache?: (
       cache: "search" | "history" | "statistics" | "discover" | "all",
     ) => void;
@@ -75,12 +86,21 @@
     metadataPolicyRecordId,
     canAccessProfileData = true,
     profileDataIdentity = "trusted-host",
+    accessProjection,
+    readAccessProjection,
+    accessNotice,
+    callbackMarker,
+    onAccessNoticeConsumed,
+    onAccessCallbackConsumed,
     activeTab = "network",
     onTabChange,
     onUpdateWorkbenchPreferences,
     onClientEndpointChanged,
     onProviderCredentialsChanged,
     onMetadataPolicyChanged,
+    onAccessProjection,
+    onStartFirstRun,
+    onOpenConnections,
     onClearCache,
   }: Props = $props();
 
@@ -165,15 +185,18 @@
   }
 
   async function testProviderCredential(provider: ProviderCredentialStatus) {
-    if (credentialOperationBusy) return;
+    if (!canAccessProfileData || credentialOperationBusy) return;
+    const identity = profileDataIdentity;
     const key = providerRowKey(provider);
     testingProvider = key;
     testResults = { ...testResults, [key]: undefined };
     try {
-      providers = await host.testProviderCredential(
+      const nextProviders = await host.testProviderCredential(
         provider.provider,
         provider.capability_id,
       );
+      if (identity !== profileDataIdentity) return;
+      providers = nextProviders;
       testResults = {
         ...testResults,
         [key]: {
@@ -182,6 +205,7 @@
         },
       };
     } catch (error: unknown) {
+      if (identity !== profileDataIdentity) return;
       testResults = {
         ...testResults,
         [key]: {
@@ -193,16 +217,19 @@
         },
       };
     } finally {
-      testingProvider = undefined;
+      if (identity === profileDataIdentity) testingProvider = undefined;
     }
   }
 
   async function readProviderHealth(provider: ProviderCredentialStatus) {
-    if (credentialOperationBusy) return;
+    if (!canAccessProfileData || credentialOperationBusy) return;
+    const identity = profileDataIdentity;
     healthProvider = provider.provider;
     healthResults = { ...healthResults, [provider.provider]: undefined };
     try {
-      providers = await host.readProviderHealth(provider.provider);
+      const nextProviders = await host.readProviderHealth(provider.provider);
+      if (identity !== profileDataIdentity) return;
+      providers = nextProviders;
       healthResults = {
         ...healthResults,
         [provider.provider]: {
@@ -211,8 +238,11 @@
         },
       };
     } catch (error: unknown) {
+      if (identity !== profileDataIdentity) return;
       try {
-        providers = await host.providerCredentialStatus();
+        const nextProviders = await host.providerCredentialStatus();
+        if (identity !== profileDataIdentity) return;
+        providers = nextProviders;
       } catch {
         // Preserve the health failure. The regular Refresh action remains available.
       }
@@ -227,7 +257,7 @@
         },
       };
     } finally {
-      healthProvider = undefined;
+      if (identity === profileDataIdentity) healthProvider = undefined;
     }
   }
   let network = $state<NetworkConfiguration>();
@@ -240,7 +270,8 @@
   let editing = $state<Record<string, string>>({});
   let busyProvider = $state<string>();
   const credentialOperationBusy = $derived(
-    providerLoading ||
+    !canAccessProfileData ||
+      providerLoading ||
       Boolean(busyProvider) ||
       Boolean(testingProvider) ||
       Boolean(healthProvider),
@@ -306,11 +337,16 @@
       if (identity !== activeNuvioIdentity) {
         activeNuvioIdentity = identity;
         resetNuvioProfileState();
+        resetMetadataPolicyState();
+        resetProviderState();
       }
       if (tab) {
         active = tab;
         if (tab === "nuvio_collections" && canLoadProfileData) {
           void loadNuvioCollections();
+        }
+        if (tab === "providers" && canLoadProfileData) {
+          void loadProviders();
         }
         if (
           tab === "preferences" &&
@@ -387,28 +423,46 @@
 
   async function saveMetadataPolicy(): Promise<void> {
     if (
+      !canAccessProfileData ||
       !host.configureMetadataProjection ||
       !metadataPolicyDraft ||
       metadataPolicySaving
     )
       return;
+    const generation = ++metadataPolicyGeneration;
+    const identity = profileDataIdentity;
     metadataPolicySaving = true;
     metadataPolicyProblem = undefined;
     metadataPolicyNotice = undefined;
     try {
       const response =
         await host.configureMetadataProjection(metadataPolicyDraft);
+      if (
+        generation !== metadataPolicyGeneration ||
+        identity !== profileDataIdentity
+      )
+        return;
       metadataPolicy = response.policy;
       metadataPolicyDraft = policyDraftFrom(response.policy);
       onMetadataPolicyChanged?.();
       metadataPolicyNotice = `Saved the profile metadata policy. Fasti invalidated ${response.invalidated_cache_entries.toLocaleString()} affected cache entries.`;
     } catch (error) {
+      if (
+        generation !== metadataPolicyGeneration ||
+        identity !== profileDataIdentity
+      )
+        return;
       metadataPolicyProblem = hostProblemText(
         error,
         "Fasti could not save this profile's metadata policy.",
       );
     } finally {
-      metadataPolicySaving = false;
+      if (
+        generation === metadataPolicyGeneration &&
+        identity === profileDataIdentity
+      ) {
+        metadataPolicySaving = false;
+      }
     }
   }
 
@@ -420,6 +474,33 @@
     nuvioLoading = false;
     nuvioProblem = undefined;
     nuvioNotice = undefined;
+  }
+
+  function resetMetadataPolicyState(): void {
+    metadataPolicyGeneration += 1;
+    loadedMetadataPolicyRecordId = "";
+    metadataPolicy = undefined;
+    metadataPolicyDraft = undefined;
+    metadataPolicyLoading = false;
+    metadataPolicySaving = false;
+    metadataPolicyProblem = undefined;
+    metadataPolicyNotice = undefined;
+  }
+
+  function resetProviderState(): void {
+    providers = [];
+    providerLoading = false;
+    providerProblem = canAccessProfileData
+      ? undefined
+      : "Sign in before reviewing or changing provider credentials.";
+    providerNotice = undefined;
+    editing = {};
+    showPassword = {};
+    busyProvider = undefined;
+    testingProvider = undefined;
+    healthProvider = undefined;
+    testResults = {};
+    healthResults = {};
   }
 
   function isCurrentNuvioRequest(generation: number): boolean {
@@ -735,12 +816,18 @@
   }
 
   async function loadProviders(): Promise<void> {
+    if (!canAccessProfileData) {
+      resetProviderState();
+      return;
+    }
     if (credentialOperationBusy) return;
+    const identity = profileDataIdentity;
     providerLoading = true;
     providerProblem = undefined;
     testResults = {};
     try {
       const loaded = await host.providerCredentialStatus();
+      if (identity !== profileDataIdentity) return;
       const writable = new Set(
         loaded.filter((provider) => provider.writable).map(providerRowKey),
       );
@@ -754,12 +841,13 @@
       );
       providers = loaded;
     } catch (error) {
+      if (identity !== profileDataIdentity) return;
       providerProblem = hostProblemText(
         error,
         "Fasti could not load provider status.",
       );
     } finally {
-      providerLoading = false;
+      if (identity === profileDataIdentity) providerLoading = false;
     }
   }
 
@@ -768,22 +856,26 @@
   ): Promise<void> {
     const key = providerRowKey(provider);
     const credential = editing[key]?.trim();
-    if (!credential || credentialOperationBusy) return;
+    if (!canAccessProfileData || !credential || credentialOperationBusy) return;
+    const identity = profileDataIdentity;
     showPassword = { ...showPassword, [key]: false };
     busyProvider = key;
     providerProblem = undefined;
     providerNotice = undefined;
     try {
-      providers = await host.saveProviderCredential(
+      const nextProviders = await host.saveProviderCredential(
         provider.provider,
         provider.capability_id,
         credential,
       );
+      if (identity !== profileDataIdentity) return;
+      providers = nextProviders;
       testResults = { ...testResults, [key]: undefined };
       providerNotice = "Credential saved in the platform credential store.";
       editing = { ...editing, [key]: "" };
       onProviderCredentialsChanged?.();
     } catch (error) {
+      if (identity !== profileDataIdentity) return;
       providerProblem = hostProblemText(
         error,
         "Fasti rejected the provider credential.",
@@ -792,15 +884,18 @@
       await tick();
       document.getElementById(`provider-${key}`)?.focus();
     } finally {
-      showPassword = { ...showPassword, [key]: false };
-      busyProvider = undefined;
+      if (identity === profileDataIdentity) {
+        showPassword = { ...showPassword, [key]: false };
+        busyProvider = undefined;
+      }
     }
   }
 
   async function deleteProvider(
     provider: ProviderCredentialStatus,
   ): Promise<void> {
-    if (credentialOperationBusy) return;
+    if (!canAccessProfileData || credentialOperationBusy) return;
+    const identity = profileDataIdentity;
     const key = providerRowKey(provider);
     const label = provider.label;
     if (
@@ -815,10 +910,12 @@
     providerNotice = undefined;
     let removed = false;
     try {
-      providers = await host.deleteProviderCredential(
+      const nextProviders = await host.deleteProviderCredential(
         provider.provider,
         provider.capability_id,
       );
+      if (identity !== profileDataIdentity) return;
+      providers = nextProviders;
       editing = { ...editing, [key]: "" };
       showPassword = { ...showPassword, [key]: false };
       testResults = { ...testResults, [key]: undefined };
@@ -826,12 +923,13 @@
       onProviderCredentialsChanged?.();
       removed = true;
     } catch (error) {
+      if (identity !== profileDataIdentity) return;
       providerProblem = hostProblemText(
         error,
         "Fasti could not remove the provider credential.",
       );
     } finally {
-      busyProvider = undefined;
+      if (identity === profileDataIdentity) busyProvider = undefined;
     }
     if (removed) {
       await tick();
@@ -1069,152 +1167,19 @@
 
     <div class="settings-panel">
       {#if active === "account"}
-        <section
-          class="card mb-3"
-          aria-labelledby="account-security-title"
-          data-testid="account-security-task-map"
-        >
-          <div class="card-header">
-            <div>
-              <h2 id="account-security-title" class="card-title h3 mb-1">
-                Account and security
-              </h2>
-              <p class="card-subtitle text-secondary mb-0">
-                Use this permanent task map to review account protection and
-                access.
-              </p>
-            </div>
-          </div>
-          <div class="card-body">
-            <div
-              class="alert alert-warning"
-              role="status"
-              data-testid="account-access-unavailable"
-            >
-              <div>
-                <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
-                  <strong>Unavailable</strong>
-                  <span class="badge bg-warning-lt text-dark"
-                    >PR C1 required</span
-                  >
-                </div>
-                <p class="mb-2">
-                  Browser sign-in, authentication methods, and session inventory
-                  depend on PR C1: TrailBase identity bootstrap and production
-                  browser sessions.
-                </p>
-                <p class="mb-0">
-                  Continue local work that does not need an account. Operators
-                  must complete and merge PR C1 before enabling these controls.
-                </p>
-              </div>
-            </div>
-
-            <div class="list-group" aria-label="Account and security tasks">
-              <div class="list-group-item">
-                <div
-                  class="d-flex flex-column flex-sm-row align-items-start justify-content-sm-between gap-2 gap-sm-3"
-                >
-                  <div>
-                    <h3 class="h4 mb-1">Sign-in methods</h3>
-                    <p class="text-secondary mb-0">
-                      Password, TOTP, passkeys, and recovery codes.
-                    </p>
-                  </div>
-                  <span class="badge bg-secondary-lt text-dark"
-                    >Unavailable</span
-                  >
-                </div>
-              </div>
-              <div class="list-group-item">
-                <div
-                  class="d-flex flex-column flex-sm-row align-items-start justify-content-sm-between gap-2 gap-sm-3"
-                >
-                  <div>
-                    <h3 class="h4 mb-1">Browser sessions</h3>
-                    <p class="text-secondary mb-0">
-                      Review current access, expiry, and revocation after PR C1.
-                    </p>
-                  </div>
-                  <span class="badge bg-secondary-lt text-dark"
-                    >Unavailable</span
-                  >
-                </div>
-              </div>
-              <div class="list-group-item">
-                <div
-                  class="d-flex flex-column flex-sm-row align-items-start justify-content-sm-between gap-2 gap-sm-3"
-                >
-                  <div>
-                    <h3 class="h4 mb-1">Devices and clients</h3>
-                    <p class="text-secondary mb-0">
-                      Paired devices, registered clients, and personal access
-                      tokens.
-                    </p>
-                  </div>
-                  <span class="badge bg-secondary-lt text-dark"
-                    >Unavailable</span
-                  >
-                </div>
-              </div>
-              <div class="list-group-item">
-                <div
-                  class="d-flex flex-column flex-sm-row align-items-start justify-content-sm-between gap-2 gap-sm-3"
-                >
-                  <div>
-                    <h3 class="h4 mb-1">External identity providers</h3>
-                    <p class="text-secondary mb-0">
-                      Generic OpenID Connect and named Authentik support.
-                    </p>
-                  </div>
-                  <span class="badge bg-secondary-lt text-dark"
-                    >Unavailable</span
-                  >
-                </div>
-              </div>
-              <div class="list-group-item">
-                <div
-                  class="d-flex flex-column flex-sm-row align-items-start justify-content-sm-between gap-2 gap-sm-3"
-                >
-                  <div>
-                    <h3 class="h4 mb-1">Security policy</h3>
-                    <p class="text-secondary mb-0">
-                      Session duration, recent authentication, and access
-                      invalidation.
-                    </p>
-                  </div>
-                  <span class="badge bg-secondary-lt text-dark"
-                    >Unavailable</span
-                  >
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section
-          class="card card-sm"
-          aria-labelledby="first-run-setup-title"
-          data-testid="first-run-guided-setup"
-        >
-          <div class="card-body">
-            <div
-              class="d-flex flex-column flex-sm-row align-items-start justify-content-sm-between gap-2 gap-sm-3"
-            >
-              <div>
-                <h2 id="first-run-setup-title" class="h3 mb-1">
-                  First-run guided setup
-                </h2>
-                <p class="text-secondary mb-0">
-                  This remains a separate first-run flow. After PR C1, it will
-                  guide initial account, recovery, and external identity setup.
-                  It does not replace the permanent task map above.
-                </p>
-              </div>
-              <span class="badge bg-blue-lt text-dark">Separate flow</span>
-            </div>
-          </div>
-        </section>
+        <AccountSecurityView
+          {host}
+          mode="task_map"
+          projection={accessProjection}
+          {readAccessProjection}
+          initialNotice={accessNotice}
+          onInitialNoticeConsumed={onAccessNoticeConsumed}
+          onProjection={onAccessProjection}
+          {callbackMarker}
+          onCallbackConsumed={onAccessCallbackConsumed}
+          {onStartFirstRun}
+          {onOpenConnections}
+        />
       {:else if active === "network"}
         <NetworkSettings
           scope={host.networkConfigurationScope}
@@ -2417,6 +2382,7 @@
     max-width: none;
     margin: 0;
     padding: clamp(20px, 2vw, 32px) clamp(16px, 2.5vw, 40px) 64px;
+    overflow-wrap: anywhere;
   }
 
   .metadata-policy-card {
