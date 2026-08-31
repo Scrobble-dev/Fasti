@@ -1,6 +1,6 @@
 # Fasti Access C1 implementation gate
 
-Status: `C1_1_COMPLETE_C1_2_APPROVED_FOR_IMPLEMENTATION`
+Status: `C1_2_COMPLETE_C1_3_APPROVED_FOR_IMPLEMENTATION`
 
 Recorded: 2026-08-30
 
@@ -251,6 +251,250 @@ membership/grant/client denials, invitation binding and atomic acceptance,
 stale epochs, recent-auth unavailability,
 post-cleanup bootstrap, final-transaction atomicity, restart windows, response
 loss, and existing-session behavior during a later TrailBase outage.
+
+### 2.3 C1.2 completion record
+
+C1.2 is frozen at commit
+`ce278d667a10ccc531f8bf5edd0969f44eeb52f3`, tree
+`5757c73e6907023420fb7e1b82d07a36cfbec0f1`. Nothing from this checkpoint was
+pushed or merged.
+
+- The concrete private adapter performs only the approved fixed-origin
+  `/token` to `/status` to local authorization to `/logout` sequence. It drops
+  every vendor token before final Fasti session issuance.
+- The adapter owns the active installation ID and activation generation. A
+  browser cannot choose either value or any TrailBase origin, address, path,
+  or header.
+- The process-memory verifier vault reserves before secret generation, holds
+  at most 64 zeroizing verifiers, and gives a claimed ceremony one exchange
+  winner.
+- Sign-in and first-administrator completion repeat mutable authorization in
+  one final immediate transaction. Audit, provenance, invitation acceptance,
+  subject and membership bootstrap, and session issuance cannot partially
+  commit.
+- Active workspace membership is rechecked during session creation and every
+  browser-session authentication. The former first-administrator bypass was
+  deleted.
+- Exact C1.2 focused results are 11 TrailBase adapter/orchestration tests, 22
+  human-access store tests, 10 browser-session store tests, and 20 Access
+  domain tests. The full affected-package run passed 45 API, 75 application,
+  78 domain, 23 provider-runtime, 263 store, and three store-security tests,
+  plus documentation tests.
+- Strict clippy passed for every affected Rust package. Formatting, diff
+  checks, and a redacted Gitleaks scan passed.
+- The independent lifecycle/diff reviewer and the additive AGY review returned
+  clear with no actionable P0 or P1. The required Ponytail review returned
+  `Lean already. Ship.`
+- The signed-in shell temp directory crosses the `.cache` symlink. SQLite's
+  deliberate no-follow flag rejects snapshot destinations there. The untouched
+  snapshot suite failed for that environmental reason and passed 7/7 with
+  `TMPDIR=/tmp`; the complete affected-package gate then passed with the same
+  real temp root. No snapshot code changed.
+
+### 2.4 Frozen C1.3 public contract decisions
+
+C1.3 is split into four written, sequential gates. One writer owns shared
+registry, generator, API, SDK, host, and Workbench files. Read-only agents may
+review the active gate and prepare the next one.
+
+#### C1.3a — authorization, operations, and wire contract
+
+- A Fasti browser session authorizes the existing first-party application
+  routes that already promise credential-or-browser-session access. It never
+  becomes a client credential. Add one distinct
+  `BrowserSessionAccessContext`; keep the existing credential context intact,
+  and use a two-variant application access context only on these ten
+  capabilities: `AcceptObservation`, `CreateRecord`, `AttachIdentifier`,
+  `ListRecords`, `RegisterNamespace`, `ListTrackingDispositions`,
+  `SetTrackingDisposition`, `GetNuvioCollections`,
+  `ReplaceNuvioCollections`, and `ClearNuvioCollections`.
+- Add `AuthorizationKind::ScopedOrBrowserSession` only for that fixed
+  allowlist. The credential branch keeps every current credential, grant,
+  epoch, and scope check. The browser branch carries no credential identity or
+  browser-presented scopes. The store atomically reloads the selected grant's
+  current scopes and requires the capability's existing scope set; human
+  sign-in never grants a client scope by itself. It attributes domain work to
+  an explicit actor client: the active client that owns the selected profile
+  grant. It then rechecks the browser-session row, current subject, active
+  membership, selected grant and profile, active grant owner, both subject
+  epochs, and required scopes before data access or mutation. The mixed request
+  type exposes no client, credential, or actor identity before that
+  transactional authorization. The result preserves actor kind as
+  `AuthorizedActor::Credential { presented_client_id, credential_id }` or
+  `AuthorizedActor::BrowserSession { auth_subject_id, browser_session_id,
+  grant_owner_client_id }`. Only persistence that truly records source
+  attribution may call the explicitly named `attribution_client_id()`
+  projection; audit and provenance retain the actor variant. Reject a request
+  that supplies both a bearer credential and a session cookie.
+- Browser-session management routes continue to use the existing
+  `BrowserSessionPort`, `AuthenticatedBrowserSession`, and mutation-command
+  boundaries. Mutations repeat session, CSRF, subject, membership, grant,
+  client, authentication-epoch, and authorization-epoch checks in the same
+  transaction as the mutation.
+- Activate the nine existing browser-session capabilities without renaming
+  them. Add only `access.projection.read` for the server-derived Account and
+  security projection and `access.identity.bootstrap` for the local-operator
+  first-administrator start. The bootstrap capability has no public HTTP or
+  SDK method.
+- Keep membership lifecycle, role, subject lifecycle, activation repair, and
+  recent-authentication mutation controls visible but unavailable. Their
+  application/store owners remain intact. Do not mount a route that can never
+  satisfy recent authentication in C1.
+- Add the canonical non-enumerating C1 problem families
+  `identity_service_unavailable`, `trailbase_version_unsupported`,
+  `trailbase_trust_unavailable`, `trailbase_proof_invalid`,
+  `trailbase_session_cleanup_failed`, `auth_browser_binding_invalid`,
+  `auth_subject_unaffiliated`, `auth_identity_conflict`,
+  `auth_last_sign_in_method`, `auth_assurance_insufficient`, and
+  `recent_authentication_required`. Reuse existing browser-session, capacity,
+  forbidden, validation, integrity, and storage problems. No problem detail
+  identifies which authorization predicate failed.
+- Freeze their governed problem contracts before registry generation:
+
+  | Problem code | HTTP | Safe state | Retry | Exact default next action |
+  | --- | ---: | --- | --- | --- |
+  | `identity_service_unavailable` | 503 | `prior_state_retained` | `retry_safe` | `retry_identity_service` — Check TrailBase health and retry the same safe operation |
+  | `trailbase_version_unsupported` | 503 | `no_mutation` | `retry_after_correction` | `install_supported_trailbase` — Install the pinned supported TrailBase release |
+  | `trailbase_trust_unavailable` | 503 | `no_mutation` | `retry_after_correction` | `repair_trailbase_activation` — Repair the pinned TrailBase activation before retrying |
+  | `trailbase_proof_invalid` | 401 | `prior_state_retained` | `retry_after_correction` | `restart_sign_in` — Start a new sign-in ceremony |
+  | `trailbase_session_cleanup_failed` | 502 | `prior_state_retained` | `retry_after_correction` | `inspect_trailbase_cleanup` — Check TrailBase health, then start a new sign-in ceremony |
+  | `auth_browser_binding_invalid` | 401 | `no_mutation` | `retry_after_correction` | `restart_sign_in` — Start a new sign-in ceremony |
+  | `auth_subject_unaffiliated` | 403 | `prior_state_retained` | `retry_after_correction` | `request_workspace_membership` — Ask a workspace administrator for access |
+  | `auth_identity_conflict` | 409 | `prior_state_retained` | `not_retryable` | `inspect_identity_link` — Inspect the existing identity link before making changes |
+  | `auth_last_sign_in_method` | 409 | `prior_state_retained` | `retry_after_correction` | `add_sign_in_method` — Add another verified sign-in method before removal |
+  | `auth_assurance_insufficient` | 403 | `no_mutation` | `retry_after_correction` | `use_required_assurance` — Use a sign-in method that meets the required assurance level |
+  | `recent_authentication_required` | 403 | `no_mutation` | `retry_after_correction` | `authenticate_again` — Authenticate again before this sensitive action |
+
+- Correct the existing `register_namespace_definition` authorization key from
+  `AttachIdentifier` to `RegisterNamespace` before enabling the mixed-auth
+  matrix. This is a pre-existing root-cause defect, not a reason to retain the
+  wrong capability policy.
+- Freeze these HTTP operations and paths:
+
+  | Operation ID | Method and path | Capability |
+  | --- | --- | --- |
+  | `start_trailbase_sign_in` | `POST /api/access/v1/trailbase/sign-in` | `browser.session.create` |
+  | `complete_trailbase_authentication` | `GET /api/access/v1/trailbase/callback` | `browser.session.create` |
+  | `read_access_projection` | `GET /api/access/v1/projection` | `access.projection.read` |
+  | `read_browser_session` | `GET /api/access/v1/browser-session` | `browser.session.read` |
+  | `end_browser_session` | `DELETE /api/access/v1/browser-session` | `browser.session.end` |
+  | `list_browser_sessions` | `GET /api/access/v1/browser-sessions` | `browser.sessions.list` |
+  | `revoke_browser_session` | `DELETE /api/access/v1/browser-sessions/{browser_session_id}` | `browser.session.revoke` |
+  | `revoke_other_browser_sessions` | `DELETE /api/access/v1/browser-sessions/others` | `browser.sessions.revoke_others` |
+  | `revoke_all_browser_sessions` | `DELETE /api/access/v1/browser-sessions` | `browser.sessions.revoke_all` |
+  | `rotate_browser_session` | `POST /api/access/v1/browser-session/rotation` | `browser.session.rotate` |
+  | `select_browser_session_profile` | `PUT /api/access/v1/browser-session/profile` | `browser.session.profile.select` |
+
+- Sign-in start accepts only `workspace_id`, `profile_grant_id`, `remembered`,
+  and an optional exact `invited_membership_id`. It accepts no origin,
+  callback, return URL, TrailBase instance, provider, or vendor token. It
+  returns the fixed authorization URL, ceremony ID, and expiry after the
+  durable row and process-memory verifier both exist.
+- The callback accepts only the exact 48-character `code` query and the narrow
+  binding cookie. It never depends on the Strict Fasti session cookie. Success
+  redirects to the ceremony's fixed `application_home` or `first_run` target.
+  Failure redirects to the matching fixed target with only a server-generated
+  correlation ID and a fixed failed-state marker. The UI treats that query as
+  a hint and loads server evidence; it never treats query text as proof.
+
+#### C1.3b — cookie, CSRF, and host boundary
+
+- The opaque session cookie is `__Host-fasti_session`: `Secure`, `HttpOnly`,
+  `SameSite=Strict`, `Path=/`, and no `Domain`. Its maximum age never exceeds
+  the session's absolute expiry.
+- The CSRF cookie is `__Host-fasti_csrf`: `Secure`, `SameSite=Strict`,
+  `Path=/`, and no `Domain`. It is readable only so the first-party SDK can
+  copy it to the exact `X-CSRF-Token` header. The store also verifies its
+  digest against the current session; equality of cookie and header alone is
+  insufficient.
+- The one-use callback cookie is
+  `__Secure-fasti_auth_binding`: `Secure`, `HttpOnly`, `SameSite=Lax`, exact
+  `Domain=127.0.0.1`, and `Path=/api/access/v1/trailbase/callback`. Tauri
+  2.11.5 and Wry 0.55.1 require a domain for their native cookie managers
+  because the API accepts no target URL. Clear it with the same attributes on
+  success and every failure. The session and CSRF cookies remain `__Host-`
+  cookies with no `Domain`.
+- Authenticated reads require exact `Host: 127.0.0.1:8420`. Browser mutations
+  require exact `Origin: http://127.0.0.1:8420`, exact Host, the Strict session
+  cookie, and CSRF cookie/header proof. Sign-in start requires exact Origin and
+  Host. Callback requires exact Host but no Origin or Strict session cookie.
+- Mount browser authentication only on direct `127.0.0.1:8420`. Port fallback,
+  wildcard/remote listeners, `FASTI_PUBLIC_URL`, and a proxy do not activate
+  C1 authentication. The remote router keeps every C1 route absent.
+- Session rotation and profile selection rotate both session and CSRF values.
+  Ending or revoking the current session clears both cookies. No browser
+  credential is written to local storage, session storage, a URL, a log, an
+  example, or a generated schema.
+- Every Access response, including redirects and problems, sends
+  `Cache-Control: private, no-store`.
+
+#### C1.3c — projection and generated contracts
+
+- Add one Access application/store projection. It returns only current,
+  authorized, non-secret state: subject lifecycle; workspace membership and
+  role; current session and bounded session inventory; available and selected
+  profile grants; policy and expiry; recent-authentication availability and
+  expiry; TrailBase activation state and generation; first-run steps; and
+  bounded evidence/correlation identifiers and times.
+- The projection is the only source for Gate 10 A and C. It uses the shared B
+  evidence vocabulary: `unavailable`, `needs_attention`, `failed_safely`, and
+  `verified`, plus loading and empty states. It never reports passkeys,
+  recovery, devices, Authentik management, or other later packages as
+  verified.
+- Update the authored registry and capability/problem enums first. Then update
+  authored DTO and OpenAPI sources and the generator operation table. Regenerate
+  OpenAPI 3.1, JSON Schema, problem and capability catalogs, SDK types and
+  methods, and OKF from those owners. Do not edit generated output manually.
+- The navigation callback is documented in OpenAPI but has no SDK method.
+  AsyncAPI remains not applicable because C1 adds finite request/response
+  operations and no event channel. JSON-LD remains not applicable because
+  identity and session state are private security state.
+
+#### C1.3d — trusted composition and exit gate
+
+- The packaged Tauri host is the sole first-administrator bootstrap owner in
+  C1. It reuses the opened `SqliteKernel`, `DesktopState.setup_gate`, owner-only
+  `bootstrap.secret`, data-root descriptor/permissions, and exclusive lock. In
+  packaged mode it embeds the existing local `fasti-api` router and owns the
+  fixed `127.0.0.1:8420` listener. The host command, HTTP callback, kernel,
+  active TrailBase generation, and process-memory PKCE verifier vault all use
+  that one Access runtime. It never starts or connects to a second `fastid`
+  process for the same data root.
+  A Rust host command loads and constant-time checks the bootstrap secret,
+  starts the one-use bootstrap ceremony through the in-process Access runtime,
+  and uses the locked Tauri/Webview cookie facility to set the narrow binding
+  cookie before navigation. JavaScript receives only the fixed authorization
+  URL and ceremony expiry. It never receives the bootstrap secret, ceremony
+  binding secret, or a privileged HTTP operation. Do not add another launcher,
+  wizard framework, provider abstraction, or loopback-only bootstrap
+  substitute.
+- After the callback has claimed a ceremony that the packaged host already
+  opened for first-administrator bootstrap, the server loads the owner-only
+  bootstrap secret again inside the process for final transactional
+  verification. The callback never accepts that secret from a cookie, header,
+  query, body, JavaScript, or SDK. A normal sign-in ceremony cannot be promoted
+  to bootstrap by this internal composition.
+- Composition roots are mutually exclusive. Standalone `fastid` owns one
+  concrete local router and Access runtime for ordinary sign-in and application
+  access. Packaged Tauri mode embeds and reuses that same router/runtime shape
+  in the host process so first-administrator ceremony start and callback share
+  one verifier vault. No second process may own the data root or fixed port.
+  Either root mounts browser-session routes only after the exact supervised
+  TrailBase release and active installation/generation have been verified.
+  The browser cannot construct or replace the runtime.
+- Before using a Tauri cookie API, verify the exact locked Tauri version and
+  primary source. The locked Tauri 2.11.5/Wry 0.55.1 native facility is the
+  selected minimum and receives the exact loopback domain above. Do not add a
+  cookie dependency or custom cookie store. Linux, Windows, and macOS WebView
+  tests must prove that the native-set binding cookie is returned only to the
+  exact loopback callback. A platform that rejects it keeps first-run
+  bootstrap unavailable; do not weaken the cookie.
+- Exit only after operation authorization matrices, transaction rollback,
+  cookie/path/origin/two-tab/replay tests, generated drift, SDK parsing,
+  no-secret scans, local/remote router negatives, packaged-host bootstrap,
+  restart, and exact TrailBase outage behavior pass. Real-browser cookie
+  behavior is also an entry gate for C1.4; unit HTTP tests alone do not prove
+  `Secure` and `SameSite` behavior on the fixed loopback origin.
 
 ## 3. Exact TrailBase evidence
 
@@ -842,11 +1086,11 @@ C1 reuses these owners. It does not rebuild them.
   - Surfaced by: architecture review; the former plan incorrectly required offline TrailBase token validation.
   - Files: C1 plan, canonical authentication plan, decision and context records.
   - Verify: document source links, exact hashes, review report, and clean diff.
-- [ ] **T2 (P1, human: ~3 days / Codex: ~1 day)** — Access domain and store — Implement the frozen activation, anchors, versioned memberships/roles, ceremonies, provenance, recent proof, audit, first-admin bootstrap, and continuity.
+- [x] **T2 (P1, human: ~3 days / Codex: ~1 day)** — Access domain and store — Implement the frozen activation, anchors, versioned memberships/roles, ceremonies, provenance, recent proof, audit, first-admin bootstrap, and continuity.
   - Surfaced by: code-quality and test review; the current viable-administrator count is a placeholder and no membership aggregate exists.
   - Files: Access domain/application/store modules and migration v14 after M2.
   - Verify: focused unit and SQLite integration tests, restart, migration, rollback, restore, and race proof.
-- [ ] **T3 (P1, human: ~3 days / Codex: ~1 day)** — TrailBase adapter — Implement the fixed-origin exchange, status recheck, cleanup, token discard, and D2 recovery policy.
+- [x] **T3 (P1, human: ~3 days / Codex: ~1 day)** — TrailBase adapter — Implement the fixed-origin exchange, status recheck, cleanup, token discard, and D2 recovery policy.
   - Surfaced by: architecture and security review; no production callback orchestration exists.
   - Files: one concrete Access adapter, orchestration owner, focused fixtures/tests.
   - Verify: scripted positive/negative matrix and no-secret scan.
@@ -866,34 +1110,39 @@ C1 reuses these owners. It does not rebuild them.
 ## 19. Safe next action
 
 1. Preserve published migration v12, final migration v13, archive v3, and
-   archive v4.
+   archive v4. C1 continues to own unpublished migration v14.
 2. Keep C1.1 frozen at commit `ba442c894a4189a12c9dccd7b1b24c44b3c3941c`
-   and tree `33a0e31f6b6a794115218d4e064ff82e27962641`.
-3. Implement the frozen C1.2 private adapter, ceremony associations, and
-   post-cleanup transactional finalization without mounting public routes.
-4. Run one independent C1.2 diff/test review. AGY may add another outside
-   challenge only when available; it never replaces that review or any gate.
+   and C1.2 frozen at commit
+   `ce278d667a10ccc531f8bf5edd0969f44eeb52f3`.
+3. Keep the independently reviewed C1.3 contract frozen.
+4. Implement C1.3a through C1.3d in order. Do not begin generated or host
+   writes before their preceding authored contract gate is green.
 5. Keep one writer for shared schema, registry, generator, host, and Workbench
    files while later-slice agents remain read-only.
-6. Do not request another premise gate.
+6. AGY may add an outside challenge. It never replaces the subagent review,
+   written gates, tests, or delivery evidence.
+7. Do not request another premise gate.
 
 ## GSTACK REVIEW REPORT
 
 | Review        | Trigger               | Why                             | Runs | Status          | Findings                                                                                                                                              |
 | ------------- | --------------------- | ------------------------------- | ---- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | CEO Review    | `/plan-ceo-review`    | Scope & strategy                | 0    | —               | Gate 10 and canonical programme approvals are existing source decisions, not a new run.                                                               |
-| Codex Review  | `/codex review`       | Independent 2nd opinion         | 0    | —               | Nested Codex review was not run. Read-only subagents challenged D3-C and the C1 slices. Optional AGY required host login and supplied no review evidence. |
+| Codex Review  | `/codex review`       | Independent 2nd opinion         | 0    | CLEAR BY EQUIVALENT READ-ONLY REVIEWS | The independent lifecycle/diff subagent and additive signed-in AGY review challenged the exact C1.2 diff and returned no actionable P0 or P1. |
 | Eng Review    | `/plan-eng-review`    | Architecture & tests (required) | 2    | CLEAR           | C1 trust profile plus activation, membership, ceremony, audit-retention, archive-compatibility, and TOTP decisions are frozen.                       |
 | Design Review | `/plan-design-review` | UI/UX gaps                      | 0    | —               | Existing approved Gate 10 A+C review and artifact hashes remain binding. Runtime design evidence stays in C1.4.                                       |
 | DX Review     | `/plan-devex-review`  | Developer experience gaps       | 0    | PENDING RUNTIME | The live review runs after C1 has an executable path.                                                                                                 |
 
 **OUTSIDE REVIEW:** Read-only subagents support direct backchannel C1 plus
 separate upstream hardening and identified the callback, association,
-selection, and finalization gaps frozen above. Optional AGY was unavailable
-because its host session required login. It did not replace or satisfy any
-review gate.
+selection, and finalization gaps frozen above. After the user supplied the
+signed-in zsh environment, AGY reviewed the exact C1.2 diff and returned clear.
+For C1.3, the independent contract reviewer found and closed required-scope,
+single-runtime, actor-provenance, problem-contract, native-cookie, and
+RegisterNamespace policy gaps. Additive AGY challenged the corrected contract;
+it did not replace the subagent review or an evidence gate.
 
-**VERDICT:** C1.1 COMPLETE — implement the frozen C1.2 private exchange and
-session-issuance slice on unpublished v14.
+**VERDICT:** C1.2 COMPLETE; C1.3 CONTRACT APPROVED — implement C1.3a through
+C1.3d without changing unpublished v14 or the frozen archive v4.
 
 NO UNRESOLVED DECISIONS
