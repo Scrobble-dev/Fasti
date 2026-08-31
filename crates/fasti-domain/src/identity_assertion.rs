@@ -403,6 +403,7 @@ impl IdentityAssertion {
         created_at: ReceivedAt,
     ) -> Result<Self, IdentityAssertionError> {
         let id_source = id_source.into();
+        let created_at = created_at.value();
         let relation_needs_coverage = matches!(
             relation,
             IdentityAssertionRelation::SubsetOf
@@ -442,7 +443,11 @@ impl IdentityAssertion {
         if source.claim() == &target {
             return Err(IdentityAssertionError::SameCoordinate);
         }
-        if !evidence_is_unique {
+        if !evidence_is_unique
+            || evidence
+                .iter()
+                .any(|item| item.observed_at() > created_at.date_naive())
+        {
             return Err(IdentityAssertionError::InvalidEvidence);
         }
         if !valid_provenance_text(&id_source, MAX_IDENTITY_SOURCE_BYTES)
@@ -496,7 +501,7 @@ impl IdentityAssertion {
             authority,
             reasoning,
             initial_status,
-            created_at: created_at.value(),
+            created_at,
         })
     }
 
@@ -816,6 +821,33 @@ mod tests {
             None,
             NaiveDate::from_ymd_opt(2026, 8, 30).expect("date"),
             None,
+        )
+        .is_err());
+
+        let future_evidence = IdentityAssertionEvidence::try_new(
+            IdentityEvidenceMethod::HumanVerified,
+            "future evidence",
+            Some("future-evidence-root".to_owned()),
+            Some("fixture-reviewer".to_owned()),
+            NaiveDate::from_ymd_opt(2027, 1, 16).expect("future date"),
+            None,
+        )
+        .expect("individually valid future evidence");
+        assert!(IdentityAssertion::try_new(
+            IdentityAssertionId::new_v7(),
+            &source,
+            target.clone(),
+            IdentityAssertionRelation::Exact,
+            Vec::new(),
+            Vec::new(),
+            IdentityAssertionEvidenceClass::Verified,
+            vec![future_evidence],
+            "source:route",
+            None,
+            None,
+            None,
+            IdentityAssertionStatus::Candidate,
+            at(),
         )
         .is_err());
 
