@@ -179,6 +179,30 @@ impl AnimeGroupingPolicyChange {
     }
 }
 
+fn policy_state_matches_change(
+    scope: AnimeGroupingPolicyScope,
+    change: AnimeGroupingPolicyChange,
+    preference: AnimeGroupingPreference,
+    source: AnimeGroupingPolicySource,
+) -> bool {
+    if !change.is_valid_for(scope) {
+        return false;
+    }
+    match change {
+        AnimeGroupingPolicyChange::Set(expected_preference) => {
+            let expected_source = match scope {
+                AnimeGroupingPolicyScope::Profile => AnimeGroupingPolicySource::ProfileDefault,
+                AnimeGroupingPolicyScope::Client(_) => AnimeGroupingPolicySource::ClientOverride,
+            };
+            preference == expected_preference && source == expected_source
+        }
+        AnimeGroupingPolicyChange::InheritProfile => {
+            source == AnimeGroupingPolicySource::ProfileDefault
+        }
+        AnimeGroupingPolicyChange::Rollback { .. } => source.is_valid_for(scope),
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PreviewAnimeGroupingPolicyChangeQuery {
     correlation_id: RequestCorrelationId,
@@ -375,6 +399,7 @@ impl AnimeGroupingPolicyImpact {
     #[allow(clippy::too_many_arguments)]
     pub fn try_new(
         policy: AnimeGroupingPolicyView,
+        change: AnimeGroupingPolicyChange,
         proposed_preference: AnimeGroupingPreference,
         proposed_source: AnimeGroupingPolicySource,
         total_records: u64,
@@ -396,8 +421,12 @@ impl AnimeGroupingPolicyImpact {
                 .last()
                 .is_some_and(|record| record.record_id() == cursor)
         });
-        if !proposed_source.is_valid_for(policy.scope())
-            || records.len() > usize::from(MAX_IDENTITY_IMPACT_PAGE)
+        if !policy_state_matches_change(
+            policy.scope(),
+            change,
+            proposed_preference,
+            proposed_source,
+        ) || records.len() > usize::from(MAX_IDENTITY_IMPACT_PAGE)
             || records.len() as u64 > total_records
             || affected_records > total_records
             || unresolved_routes > total_records
@@ -489,25 +518,12 @@ impl ApplyAnimeGroupingPolicyChangeOutcome {
             } => Some(applied_operation_id),
             AnimeGroupingPolicyChange::Set(_) | AnimeGroupingPolicyChange::InheritProfile => None,
         };
-        let change_matches_policy = match change {
-            AnimeGroupingPolicyChange::Set(preference) => {
-                let expected_source = match policy.scope() {
-                    AnimeGroupingPolicyScope::Profile => AnimeGroupingPolicySource::ProfileDefault,
-                    AnimeGroupingPolicyScope::Client(_) => {
-                        AnimeGroupingPolicySource::ClientOverride
-                    }
-                };
-                policy.preference() == preference && policy.source() == expected_source
-            }
-            AnimeGroupingPolicyChange::InheritProfile => {
-                matches!(policy.scope(), AnimeGroupingPolicyScope::Client(_))
-                    && policy.source() == AnimeGroupingPolicySource::ProfileDefault
-            }
-            AnimeGroupingPolicyChange::Rollback { .. } => true,
-        };
-        if !change.is_valid_for(policy.scope())
-            || !change_matches_policy
-            || !previous_source.is_valid_for(policy.scope())
+        if !policy_state_matches_change(
+            policy.scope(),
+            change,
+            policy.preference(),
+            policy.source(),
+        ) || !previous_source.is_valid_for(policy.scope())
             || possible_season_regroupings > affected_records
             || rolled_back_operation_id == Some(operation_id)
         {
@@ -630,6 +646,7 @@ mod tests {
 
         assert!(AnimeGroupingPolicyImpact::try_new(
             policy,
+            AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::Automatic),
             AnimeGroupingPreference::Automatic,
             AnimeGroupingPolicySource::ProfileDefault,
             u64::from(MAX_IDENTITY_IMPACT_PAGE) + 1,
@@ -643,6 +660,7 @@ mod tests {
         .is_err());
         assert!(AnimeGroupingPolicyImpact::try_new(
             policy,
+            AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::Automatic),
             AnimeGroupingPreference::Automatic,
             AnimeGroupingPolicySource::ProfileDefault,
             1,
@@ -681,6 +699,7 @@ mod tests {
 
         assert!(AnimeGroupingPolicyImpact::try_new(
             policy,
+            AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::Automatic),
             AnimeGroupingPreference::Automatic,
             AnimeGroupingPolicySource::ClientOverride,
             2,
@@ -701,6 +720,7 @@ mod tests {
         ] {
             assert!(AnimeGroupingPolicyImpact::try_new(
                 policy,
+                AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::Automatic),
                 AnimeGroupingPreference::Automatic,
                 AnimeGroupingPolicySource::ProfileDefault,
                 total,
@@ -718,6 +738,7 @@ mod tests {
         unordered.reverse();
         assert!(AnimeGroupingPolicyImpact::try_new(
             policy,
+            AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::Automatic),
             AnimeGroupingPreference::Automatic,
             AnimeGroupingPolicySource::ProfileDefault,
             2,
@@ -731,6 +752,7 @@ mod tests {
         .is_err());
         assert!(AnimeGroupingPolicyImpact::try_new(
             policy,
+            AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::Automatic),
             AnimeGroupingPreference::Automatic,
             AnimeGroupingPolicySource::ProfileDefault,
             2,
@@ -744,6 +766,7 @@ mod tests {
         .is_err());
         assert!(AnimeGroupingPolicyImpact::try_new(
             policy,
+            AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::Automatic),
             AnimeGroupingPreference::Automatic,
             AnimeGroupingPolicySource::ProfileDefault,
             2,
@@ -755,6 +778,71 @@ mod tests {
             Some(RecordId::new_v7()),
         )
         .is_err());
+    }
+
+    #[test]
+    fn impact_result_binds_proposal_to_the_requested_change() {
+        let impact = |policy, change, preference, source| {
+            AnimeGroupingPolicyImpact::try_new(
+                policy,
+                change,
+                preference,
+                source,
+                0,
+                0,
+                0,
+                0,
+                None,
+                Vec::new(),
+                None,
+            )
+        };
+        let profile_policy = AnimeGroupingPolicyView::try_new(
+            ProfileId::new_v7(),
+            AnimeGroupingPolicyScope::Profile,
+            AnimeGroupingPolicySource::ProfileDefault,
+            AnimeGroupingPreference::Automatic,
+            1,
+        )
+        .expect("valid profile policy");
+
+        assert!(impact(
+            profile_policy,
+            AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::KeepMalReleasesSeparate),
+            AnimeGroupingPreference::Automatic,
+            AnimeGroupingPolicySource::ProfileDefault,
+        )
+        .is_err());
+        assert!(impact(
+            profile_policy,
+            AnimeGroupingPolicyChange::InheritProfile,
+            AnimeGroupingPreference::Automatic,
+            AnimeGroupingPolicySource::ProfileDefault,
+        )
+        .is_err());
+
+        let client_policy = AnimeGroupingPolicyView::try_new(
+            ProfileId::new_v7(),
+            AnimeGroupingPolicyScope::Client(ClientId::new_v7()),
+            AnimeGroupingPolicySource::ClientOverride,
+            AnimeGroupingPreference::KeepMalReleasesSeparate,
+            2,
+        )
+        .expect("valid client policy");
+        assert!(impact(
+            client_policy,
+            AnimeGroupingPolicyChange::InheritProfile,
+            AnimeGroupingPreference::Automatic,
+            AnimeGroupingPolicySource::ClientOverride,
+        )
+        .is_err());
+        assert!(impact(
+            client_policy,
+            AnimeGroupingPolicyChange::InheritProfile,
+            AnimeGroupingPreference::Automatic,
+            AnimeGroupingPolicySource::ProfileDefault,
+        )
+        .is_ok());
     }
 
     #[test]

@@ -125,6 +125,9 @@ and safe provider routes. It cannot change:
 ## Preview and rollback
 
 A change is previewed against the authenticated profile before it is applied.
+The returned proposed preference and ownership source must match that exact
+`Set` or `InheritProfile` change; rollback may restore either otherwise-valid
+state.
 The preview reports:
 
 - total and affected Records;
