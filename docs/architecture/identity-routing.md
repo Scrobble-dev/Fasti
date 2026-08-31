@@ -138,6 +138,9 @@ The preview reports:
 - the current policy revision; and
 - a keyset cursor for the next bounded impact page.
 
+Each page must advance beyond the requested cursor and must not exceed the
+exact requested page limit.
+
 Apply uses an operation ID, a semantic digest, and the expected policy
 revision. The durable implementation stores an immutable receipt. Rollback is
 a new compare-and-set operation that refers to the receipt being reversed. It

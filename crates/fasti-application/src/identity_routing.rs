@@ -407,6 +407,7 @@ impl AnimeGroupingPolicyImpact {
         unresolved_routes: u64,
         possible_season_regroupings: u64,
         requested_after_record_id: Option<RecordId>,
+        requested_limit: IdentityImpactPageLimit,
         records: Vec<AnimeGroupingRecordPreview>,
         next_after_record_id: Option<RecordId>,
     ) -> Result<Self, AnimeGroupingPolicyResultError> {
@@ -426,7 +427,7 @@ impl AnimeGroupingPolicyImpact {
             change,
             proposed_preference,
             proposed_source,
-        ) || records.len() > usize::from(MAX_IDENTITY_IMPACT_PAGE)
+        ) || records.len() > usize::from(requested_limit.get())
             || records.len() as u64 > total_records
             || affected_records > total_records
             || unresolved_routes > total_records
@@ -610,6 +611,10 @@ pub trait IdentityRoutingPort: Send + Sync {
 mod tests {
     use super::*;
 
+    fn impact_limit(value: u16) -> IdentityImpactPageLimit {
+        IdentityImpactPageLimit::try_new(value).expect("valid impact page limit")
+    }
+
     #[test]
     fn impact_page_limit_is_non_zero_and_bounded() {
         assert!(IdentityImpactPageLimit::try_new(0).is_none());
@@ -654,6 +659,7 @@ mod tests {
             u64::from(MAX_IDENTITY_IMPACT_PAGE) + 1,
             0,
             None,
+            impact_limit(MAX_IDENTITY_IMPACT_PAGE),
             records,
             None,
         )
@@ -668,6 +674,7 @@ mod tests {
             0,
             1,
             None,
+            impact_limit(MAX_IDENTITY_IMPACT_PAGE),
             Vec::new(),
             None,
         )
@@ -707,6 +714,22 @@ mod tests {
             0,
             0,
             None,
+            impact_limit(MAX_IDENTITY_IMPACT_PAGE),
+            records.clone(),
+            Some(final_record_id),
+        )
+        .is_err());
+        assert!(AnimeGroupingPolicyImpact::try_new(
+            policy,
+            AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::Automatic),
+            AnimeGroupingPreference::Automatic,
+            AnimeGroupingPolicySource::ProfileDefault,
+            2,
+            0,
+            0,
+            0,
+            None,
+            impact_limit(1),
             records.clone(),
             Some(final_record_id),
         )
@@ -728,6 +751,7 @@ mod tests {
                 unresolved,
                 regroupings,
                 None,
+                impact_limit(MAX_IDENTITY_IMPACT_PAGE),
                 page,
                 None,
             )
@@ -746,6 +770,7 @@ mod tests {
             0,
             0,
             None,
+            impact_limit(MAX_IDENTITY_IMPACT_PAGE),
             unordered,
             None,
         )
@@ -760,6 +785,7 @@ mod tests {
             0,
             0,
             Some(records[0].record_id()),
+            impact_limit(MAX_IDENTITY_IMPACT_PAGE),
             records.clone(),
             Some(final_record_id),
         )
@@ -774,6 +800,7 @@ mod tests {
             0,
             0,
             None,
+            impact_limit(MAX_IDENTITY_IMPACT_PAGE),
             records,
             Some(RecordId::new_v7()),
         )
@@ -793,6 +820,7 @@ mod tests {
                 0,
                 0,
                 None,
+                impact_limit(MAX_IDENTITY_IMPACT_PAGE),
                 Vec::new(),
                 None,
             )
