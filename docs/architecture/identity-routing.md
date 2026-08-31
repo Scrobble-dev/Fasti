@@ -47,6 +47,10 @@ initial lifecycle state. Corroboration requires distinct known derivation roots;
 two mirrors of one upstream source count once. Later acceptance, dispute,
 rejection, and revocation are append-only lifecycle events.
 
+The assertion derives its workspace, Record, source identifier reference, and
+source coordinate from one `ExternalIdentifier` aggregate. Evidence cannot
+postdate the assertion's server-owned creation time.
+
 Only the effective `accepted` state can enter routing. An `exact` assertion can
 support compatible read and export routes. A `subset_of` assertion can support a
 Nuvio TV-work grouping projection when it carries explicit coverage; it is not a
