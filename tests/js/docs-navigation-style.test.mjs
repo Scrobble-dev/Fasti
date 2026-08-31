@@ -6,6 +6,14 @@ const css = await readFile(
   new URL("../../apps/docs/src/css/custom.css", import.meta.url),
   "utf8",
 );
+const searchPage = await readFile(
+  new URL("../../apps/docs/src/pages/search.tsx", import.meta.url),
+  "utf8",
+);
+const statusPage = await readFile(
+  new URL("../../apps/docs/src/pages/status.tsx", import.meta.url),
+  "utf8",
+);
 
 test("Docusaurus controls when the mobile navigation toggle is displayed", () => {
   const toggleRules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/gu)].filter(
@@ -41,6 +49,23 @@ test("Docusaurus documentation controls keep a 44 pixel target", () => {
   assert.match(
     css,
     /\.breadcrumbs__link,\s*\.theme-doc-toc-mobile button,\s*\.theme-code-block button\s*\{[^}]*min-width:\s*var\(--fasti-touch-target-min\);[^}]*min-height:\s*var\(--fasti-touch-target-min\);/u,
+  );
+});
+
+test("local search keeps an accessible fallback and waits for both assets", () => {
+  assert.match(searchPage, /aria-busy=\{!loadError\}/u);
+  assert.match(searchPage, /setAttribute\("role", "searchbox"\)/u);
+  assert.match(searchPage, /Local search could not load\./u);
+  assert.match(searchPage, /let mounted = true;/u);
+  assert.match(searchPage, /!scriptReady \|\| !stylesheetReady/u);
+  assert.match(searchPage, /mounted = false;/u);
+});
+
+test("status keeps its table visible while data loads or fails", () => {
+  assert.match(statusPage, /aria-busy=\{!error && capabilities === null\}/u);
+  assert.equal(
+    [...statusPage.matchAll(/capabilities === null\s*\? "—"/gu)].length,
+    3,
   );
 });
 

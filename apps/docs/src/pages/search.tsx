@@ -15,9 +15,17 @@ export default function Search(): React.JSX.Element {
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState(false);
   useEffect(() => {
+    let mounted = true;
+    let scriptReady = false;
+    let stylesheetReady = false;
+    const fail = () => {
+      if (mounted) setLoadError(true);
+    };
     const initialise = () => {
-      if (!window.PagefindUI) {
-        setLoadError(true);
+      if (!mounted || !scriptReady || !stylesheetReady) return;
+      const target = document.querySelector("#pagefind-search");
+      if (!window.PagefindUI || !target) {
+        fail();
         return;
       }
       new window.PagefindUI({
@@ -33,15 +41,23 @@ export default function Search(): React.JSX.Element {
     };
     const script = document.createElement("script");
     script.src = "/pagefind/pagefind-ui.js";
-    script.onload = initialise;
-    script.onerror = () => setLoadError(true);
+    script.onload = () => {
+      scriptReady = true;
+      initialise();
+    };
+    script.onerror = fail;
     document.head.append(script);
     const stylesheet = document.createElement("link");
     stylesheet.rel = "stylesheet";
     stylesheet.href = "/pagefind/pagefind-ui.css";
-    stylesheet.onerror = () => setLoadError(true);
+    stylesheet.onload = () => {
+      stylesheetReady = true;
+      initialise();
+    };
+    stylesheet.onerror = fail;
     document.head.append(stylesheet);
     return () => {
+      mounted = false;
       script.remove();
       stylesheet.remove();
     };
