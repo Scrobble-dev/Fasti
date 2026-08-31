@@ -47,6 +47,14 @@ VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 BOOTSTRAP_PASSWORD = re.compile(r"^\s*password:\s*'([^']+)'\s*$")
 TRAILBASE_LICENSE_SHA256 = "be4741d827008446e5e8bf9ee42f9e57b57245b6aed260fbdaf00ffebe958fb7"
 TRAILBASE_REPOSITORY_URL = "https://github.com/trailbaseio/trailbase"
+PREVIOUS_RELEASE_LOCK_IDENTITY = (
+    "sha256:72f07a2b4701ad187e8622b789f1e88c5d3d8072fcf43c7823244032ad8c01a2"
+)
+AUTH_UI_ARCHIVE_MEMBERS = {
+    "trailbase_auth_ui_component.wasm",
+    "CHANGELOG.md",
+    "LICENSE",
+}
 INSTALLATION_RECEIPT_NAME = ".fasti-installation.json"
 INSTALLATION_RECEIPT_SCHEMA = "fasti.trailbase-installation.v1"
 RUNTIME_NONCE_BYTES = 32
@@ -238,14 +246,18 @@ def validate_release(release: Any) -> None:
             "source_url",
             "license",
             "expected_version_line",
+            "supersedes_release_lock_identity",
+            "auth_ui",
             "upgrade_fixture",
             "native",
             "oci",
         },
         "release",
     )
-    if release["schema_version"] != "fasti.trailbase-release.v1":
+    if release["schema_version"] != "fasti.trailbase-release.v2":
         raise ReleaseError("unsupported TrailBase release-lock schema")
+    if release["supersedes_release_lock_identity"] != PREVIOUS_RELEASE_LOCK_IDENTITY:
+        raise ReleaseError("TrailBase release-lock predecessor identity differs")
     version = release["version"]
     if not isinstance(version, str) or not VERSION.fullmatch(version):
         raise ReleaseError("version must contain three numeric components")
@@ -288,6 +300,7 @@ def validate_release(release: Any) -> None:
         raise ReleaseError("expected_version_line does not identify the exact release")
 
     _validate_native_release(release, "release")
+    _validate_auth_ui_release(release)
 
     upgrade_fixture = release["upgrade_fixture"]
     if not isinstance(upgrade_fixture, dict):
@@ -412,6 +425,49 @@ def _validate_native_release(release: dict[str, Any], label: str) -> None:
             raise ReleaseError(f"{label}.native.{target}.executable must be trail")
 
 
+def _validate_auth_ui_release(release: dict[str, Any]) -> None:
+    version = release["version"]
+    artifact = release["auth_ui"]
+    if not isinstance(artifact, dict):
+        raise ReleaseError("auth_ui must be an object")
+    _require_keys(
+        artifact,
+        {
+            "component_id",
+            "url",
+            "bytes",
+            "sha256",
+            "component",
+            "component_bytes",
+            "component_sha256",
+            "install_path",
+        },
+        "auth_ui",
+    )
+    if artifact["component_id"] != "trailbase/auth_ui":
+        raise ReleaseError("auth_ui.component_id differs from the official component")
+    expected_url = (
+        f"{TRAILBASE_REPOSITORY_URL}/releases/download/v{version}/"
+        f"trailbase_v{version}_wasm_auth_ui.zip"
+    )
+    if _require_https(artifact["url"], "auth_ui.url") != expected_url:
+        raise ReleaseError("auth_ui.url is not pinned to the exact release")
+    if not isinstance(artifact["bytes"], int) or artifact["bytes"] <= 0:
+        raise ReleaseError("auth_ui.bytes must be positive")
+    if not isinstance(artifact["sha256"], str) or not SHA256.fullmatch(artifact["sha256"]):
+        raise ReleaseError("auth_ui.sha256 is invalid")
+    if artifact["component"] != "trailbase_auth_ui_component.wasm":
+        raise ReleaseError("auth_ui.component differs from the official archive member")
+    if not isinstance(artifact["component_bytes"], int) or artifact["component_bytes"] <= 0:
+        raise ReleaseError("auth_ui.component_bytes must be positive")
+    if not isinstance(artifact["component_sha256"], str) or not SHA256.fullmatch(
+        artifact["component_sha256"]
+    ):
+        raise ReleaseError("auth_ui.component_sha256 is invalid")
+    if artifact["install_path"] != "depot/wasm/trailbase_auth_ui_component.wasm":
+        raise ReleaseError("auth_ui.install_path differs from the official depot layout")
+
+
 def host_target() -> str:
     if platform.system() != "Linux":
         raise ReleaseError("native TrailBase is unavailable on this host; use a proven Linux host")
@@ -485,6 +541,152 @@ def verify_archive(path: Path, release: dict[str, Any], target: str | None = Non
         raise ReleaseError(
             f"TrailBase executable version mismatch: expected {release['expected_version_line']}, got {actual}"
         )
+
+
+def _verify_auth_ui_archive(path: Path, release: dict[str, Any]) -> bytes:
+    artifact = release["auth_ui"]
+    metadata = path.lstat()
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or stat.S_ISLNK(metadata.st_mode)
+        or metadata.st_uid != os.geteuid()
+        or metadata.st_nlink != 1
+        or stat.S_IMODE(metadata.st_mode) != 0o600
+    ):
+        raise ReleaseError("TrailBase Auth UI archive is not an owner-only regular file")
+    if metadata.st_size != artifact["bytes"]:
+        raise ReleaseError(
+            "TrailBase Auth UI archive size mismatch: "
+            f"expected {artifact['bytes']}, got {metadata.st_size}"
+        )
+    actual_digest = sha256_file(path)
+    if actual_digest != artifact["sha256"]:
+        raise ReleaseError(
+            "TrailBase Auth UI archive digest mismatch: "
+            f"expected {artifact['sha256']}, got {actual_digest}"
+        )
+    with zipfile.ZipFile(path) as archive:
+        entries = archive.infolist()
+        names = [entry.filename for entry in entries]
+        if len(entries) != len(AUTH_UI_ARCHIVE_MEMBERS) or set(names) != AUTH_UI_ARCHIVE_MEMBERS:
+            raise ReleaseError("TrailBase Auth UI archive members differ from the approved layout")
+        for entry in entries:
+            mode = entry.external_attr >> 16
+            maximum = (
+                artifact["component_bytes"]
+                if entry.filename == artifact["component"]
+                else 1024 * 1024
+            )
+            if (
+                entry.create_system != 3
+                or not stat.S_ISREG(mode)
+                or entry.is_dir()
+                or entry.flag_bits & 0x1
+                or entry.file_size <= 0
+                or entry.file_size > maximum
+            ):
+                raise ReleaseError(f"unsafe TrailBase Auth UI archive member: {entry.filename}")
+        if archive.testzip() is not None:
+            raise ReleaseError("TrailBase Auth UI archive failed its CRC check")
+        component = archive.read(artifact["component"])
+        if len(component) != artifact["component_bytes"]:
+            raise ReleaseError("TrailBase Auth UI component size differs from the release lock")
+        if hashlib.sha256(component).hexdigest() != artifact["component_sha256"]:
+            raise ReleaseError("TrailBase Auth UI component digest differs from the release lock")
+        if hashlib.sha256(archive.read("LICENSE")).hexdigest() != release["license"][
+            "file_sha256"
+        ]:
+            raise ReleaseError("TrailBase Auth UI archive licence differs from the reviewed text")
+    return component
+
+
+def _verify_installed_auth_ui(path: Path, release: dict[str, Any]) -> None:
+    artifact = release["auth_ui"]
+    metadata = path.lstat()
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or stat.S_ISLNK(metadata.st_mode)
+        or metadata.st_uid != os.geteuid()
+        or metadata.st_nlink != 1
+        or stat.S_IMODE(metadata.st_mode) != 0o600
+        or metadata.st_size != artifact["component_bytes"]
+    ):
+        raise ReleaseError("installed TrailBase Auth UI component is not an owner-only exact file")
+    if sha256_file(path) != artifact["component_sha256"]:
+        raise ReleaseError("installed TrailBase Auth UI component differs from the release lock")
+
+
+def _prepare_auth_ui(
+    root: Path,
+    release: dict[str, Any],
+    offline: bool,
+    *,
+    install: bool,
+) -> Path:
+    artifact = release["auth_ui"]
+    _private_directory(root)
+    cache = root / "cache"
+    _private_directory(cache)
+    archive_path = cache / f"trailbase-v{release['version']}-wasm-auth-ui.zip"
+    destination = root / artifact["install_path"]
+    installed = destination.exists() or destination.is_symlink()
+    if installed:
+        _verify_installed_auth_ui(destination, release)
+
+    if archive_path.exists() or archive_path.is_symlink():
+        _verify_auth_ui_archive(archive_path, release)
+    elif installed and offline:
+        return destination
+    else:
+        if offline:
+            raise ReleaseError(
+                f"exact TrailBase Auth UI archive is not cached: {archive_path}; "
+                "run './scripts/dev.sh --prepare-offline' with network access"
+            )
+        temporary = cache / f".{archive_path.name}.{os.getpid()}.{secrets.token_hex(8)}.tmp"
+        request = urllib.request.Request(
+            artifact["url"], headers={"User-Agent": "Fasti/TrailBase-pin"}
+        )
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        try:
+            with opener.open(request, timeout=60) as response:
+                _require_https(response.geturl(), "TrailBase Auth UI final download URL")
+                payload = response.read(artifact["bytes"] + 1)
+            if len(payload) != artifact["bytes"]:
+                raise ReleaseError(
+                    "TrailBase Auth UI download size mismatch: "
+                    f"expected {artifact['bytes']}, got {len(payload)}"
+                )
+            _write_private(temporary, payload, 0o600)
+            _verify_auth_ui_archive(temporary, release)
+            os.replace(temporary, archive_path)
+        finally:
+            temporary.unlink(missing_ok=True)
+    if not install or installed:
+        return destination
+
+    component = _verify_auth_ui_archive(archive_path, release)
+    wasm_directory = destination.parent
+    _private_directory(root / "depot")
+    _private_directory(wasm_directory)
+    temporary_component = wasm_directory / (
+        f".{destination.name}.{os.getpid()}.{secrets.token_hex(8)}.tmp"
+    )
+    try:
+        _write_private(temporary_component, component, 0o600)
+        os.replace(temporary_component, destination)
+        directory_descriptor = os.open(
+            wasm_directory,
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0),
+        )
+        try:
+            os.fsync(directory_descriptor)
+        finally:
+            os.close(directory_descriptor)
+    finally:
+        temporary_component.unlink(missing_ok=True)
+    _verify_installed_auth_ui(destination, release)
+    return destination
 
 
 def _write_private(path: Path, data: bytes, mode: int) -> None:
@@ -617,6 +819,7 @@ def _validate_installation_receipt(
     receipt: Any,
     release: dict[str, Any],
     physical_root_identity: str | None,
+    allowed_release_lock_identities: set[str] | None = None,
 ) -> dict[str, Any]:
     expected_fields = {
         "schema_version",
@@ -649,7 +852,10 @@ def _validate_installation_receipt(
         and receipt["physical_root_identity"] != physical_root_identity
     ):
         raise ReleaseError("TrailBase installation receipt belongs to a different physical root")
-    if receipt["release_lock_identity"] != _release_lock_identity():
+    allowed_release_lock_identities = allowed_release_lock_identities or {
+        _release_lock_identity()
+    }
+    if receipt["release_lock_identity"] not in allowed_release_lock_identities:
         raise ReleaseError("TrailBase installation receipt belongs to a different release lock")
     if receipt["runtime"] not in {"native", "oci"} or not isinstance(
         receipt["runtime_target"], str
@@ -672,6 +878,7 @@ def _read_installation_receipt(
     root: Path,
     release: dict[str, Any],
     physical_root_identity: str | None,
+    allowed_release_lock_identities: set[str] | None = None,
 ) -> dict[str, Any]:
     root_descriptor = _open_private_root(root)
     try:
@@ -683,7 +890,12 @@ def _read_installation_receipt(
             raise ReleaseError("TrailBase installation receipt is invalid JSON") from error
     finally:
         os.close(root_descriptor)
-    return _validate_installation_receipt(receipt, release, physical_root_identity)
+    return _validate_installation_receipt(
+        receipt,
+        release,
+        physical_root_identity,
+        allowed_release_lock_identities,
+    )
 
 
 def _write_installation_receipt(root: Path, receipt: dict[str, Any]) -> None:
@@ -833,7 +1045,15 @@ def _prepare_native_release(root: Path, release: dict[str, Any], offline: bool) 
 
 
 def prepare_native(root: Path, offline: bool) -> Path:
-    return _prepare_native_release(root, load_release(), offline)
+    release = load_release()
+    executable = _prepare_native_release(root, release, offline)
+    _prepare_auth_ui(
+        root,
+        release,
+        offline,
+        install=(root / "bootstrap.json").exists(),
+    )
+    return executable
 
 
 def prepare_upgrade_fixture(root: Path, offline: bool) -> Path:
@@ -947,7 +1167,16 @@ def prepare_installation(
     existing: dict[str, Any] | None = None
     if receipt_path.exists() or receipt_path.is_symlink():
         previous_release = _transition_source_release(release, previous_release_version, True)
-        existing = _read_installation_receipt(root, previous_release, physical_root_identity)
+        current_release = load_release()
+        existing = _read_installation_receipt(
+            root,
+            previous_release,
+            physical_root_identity,
+            {
+                _release_lock_identity(),
+                current_release["supersedes_release_lock_identity"],
+            },
+        )
     elif previous_release_version is not None:
         _transition_source_release(release, previous_release_version, False)
 
@@ -963,6 +1192,8 @@ def prepare_installation(
         artifact_identity = _artifact_identity(release, runtime, runtime_target)
     else:
         raise ReleaseError("TrailBase installation runtime must be native or oci")
+    if "auth_ui" in release:
+        _prepare_auth_ui(root, release, offline=True, install=True)
     if artifact_identity != _artifact_identity(release, runtime, runtime_target):
         raise ReleaseError("selected TrailBase artifact differs from the release lock")
 
@@ -987,12 +1218,21 @@ def prepare_installation(
 def verify_installation(
     root: Path,
     release_version: str | None = None,
+    *,
+    _release: dict[str, Any] | None = None,
+    _release_lock_identity_override: str | None = None,
 ) -> dict[str, Any]:
-    release = _locked_release(release_version or str(load_release()["version"]))
+    release = _release or _locked_release(release_version or str(load_release()["version"]))
+    release_lock_identity = _release_lock_identity_override or _release_lock_identity()
     verify_runtime_lock(root)
     verify_private_root(root, release["version"])
     physical_root_identity = _physical_root_identity(root)
-    receipt = _read_installation_receipt(root, release, physical_root_identity)
+    receipt = _read_installation_receipt(
+        root,
+        release,
+        physical_root_identity,
+        {release_lock_identity},
+    )
     if receipt["runtime"] == "native":
         executable = (
             root / "runtime" / f"v{release['version']}-{receipt['runtime_target']}" / "trail"
@@ -1002,6 +1242,8 @@ def verify_installation(
             release,
             receipt["artifact_identity"].removeprefix("sha256:"),
         )
+    if "auth_ui" in release:
+        _verify_installed_auth_ui(root / release["auth_ui"]["install_path"], release)
     return receipt
 
 
@@ -1178,6 +1420,12 @@ def prepare_oci(root: Path, runtime: str, offline: bool) -> str:
     platform_name = host_oci_platform()
     reference = f"{release['oci']['repository']}@{release['oci']['index_digest']}"
     _private_directory(root)
+    _prepare_auth_ui(
+        root,
+        release,
+        offline,
+        install=(root / "bootstrap.json").exists(),
+    )
     receipt_path = root / f"oci-{runtime}.json"
     if not offline:
         subprocess.run(  # nosec -- nosemgrep -- absolute allowlisted runtime; digest-pinned reference.
@@ -1388,6 +1636,7 @@ def bootstrap_native(
                 "TrailBase depot is non-empty without a bootstrap receipt; restore or remove it explicitly"
             )
         _private_directory(depot)
+        _prepare_auth_ui(root, load_release(), offline=True, install=True)
 
         initial_password: list[str] = []
         password_ready = threading.Event()
@@ -1516,6 +1765,8 @@ def run_native(
     _validate_listener_configuration(public_url, address, admin_address, cors_origin)
     verify_private_root(root)
     executable = prepare_native(root, offline=True)
+    release = load_release()
+    _verify_installed_auth_ui(root / release["auth_ui"]["install_path"], release)
     try:
         descriptor = _acquire_runtime_lock(root)
     except BlockingIOError as error:
@@ -1550,15 +1801,36 @@ def run_native(
 def _declare_restored_installation(
     root: Path,
     release_version: str | None = None,
+    *,
+    _release: dict[str, Any] | None = None,
+    _release_lock_identity_override: str | None = None,
 ) -> dict[str, Any]:
-    release = _locked_release(release_version or str(load_release()["version"]))
-    receipt = dict(_read_installation_receipt(root, release, None))
+    release = _release or _locked_release(release_version or str(load_release()["version"]))
+    current_identity = _release_lock_identity_override or _release_lock_identity()
+    allowed_identities = {current_identity}
+    predecessor = release.get("supersedes_release_lock_identity")
+    if isinstance(predecessor, str):
+        allowed_identities.add(predecessor)
+    receipt = dict(
+        _read_installation_receipt(root, release, None, allowed_identities)
+    )
+    receipt["release_lock_identity"] = current_identity
     receipt["physical_root_identity"] = _physical_root_identity(root)
     receipt["declared_restore"] = True
     receipt["verified_at"] = _utc_now()
-    _validate_installation_receipt(receipt, release, receipt["physical_root_identity"])
+    _validate_installation_receipt(
+        receipt,
+        release,
+        receipt["physical_root_identity"],
+        {current_identity},
+    )
     _write_installation_receipt(root, receipt)
-    return _read_installation_receipt(root, release, receipt["physical_root_identity"])
+    return _read_installation_receipt(
+        root,
+        release,
+        receipt["physical_root_identity"],
+        {current_identity},
+    )
 
 
 def _archive_path(value: str) -> Path:
@@ -1572,10 +1844,20 @@ def backup_depot(
     root: Path,
     output_dir: Path,
     release_version: str | None = None,
+    *,
+    _release: dict[str, Any] | None = None,
+    _release_lock_identity_override: str | None = None,
 ) -> tuple[Path, str]:
-    release_version = release_version or load_release()["version"]
+    release_version = release_version or str(
+        (_release or load_release())["version"]
+    )
     verify_private_root(root, release_version)
-    verify_installation(root, release_version)
+    verify_installation(
+        root,
+        release_version,
+        _release=_release,
+        _release_lock_identity_override=_release_lock_identity_override,
+    )
     try:
         runtime_lock = _acquire_runtime_lock(root)
     except BlockingIOError as error:
@@ -1697,8 +1979,13 @@ def restore_depot(
     archive_path: Path,
     target: Path,
     release_version: str | None = None,
+    *,
+    _release: dict[str, Any] | None = None,
+    _release_lock_identity_override: str | None = None,
 ) -> dict[str, Any]:
-    release_version = release_version or load_release()["version"]
+    release_version = release_version or str(
+        (_release or load_release())["version"]
+    )
     target = Path(os.path.abspath(target))
     if target.exists() or target.is_symlink():
         raise ReleaseError("isolated restore target already exists")
@@ -1828,7 +2115,18 @@ def restore_depot(
         prepare_runtime_lock(temporary)
         verify_runtime_lock(temporary)
         verify_private_root(temporary, release_version)
-        restored_receipt = _declare_restored_installation(temporary, release_version)
+        restored_receipt = _declare_restored_installation(
+            temporary,
+            release_version,
+            _release=_release,
+            _release_lock_identity_override=_release_lock_identity_override,
+        )
+        verify_installation(
+            temporary,
+            release_version,
+            _release=_release,
+            _release_lock_identity_override=_release_lock_identity_override,
+        )
         current_parent = _validate_restore_parent(parent)
         if (current_parent.st_dev, current_parent.st_ino) != (
             parent_metadata.st_dev,
@@ -1851,6 +2149,18 @@ def _backup_restore_self_test() -> None:
     with tempfile.TemporaryDirectory(prefix="fasti-trailbase-depot-test-", dir=Path.home()) as directory:
         base = Path(directory)
         os.chmod(base, 0o700)  # nosec B103 -- nosemgrep -- owner-only is required.
+        release = copy.deepcopy(load_release())
+        auth_ui_component = b"\x00asm\x0d\x00\x01\x00backup-restore-fixture"
+        release["auth_ui"]["component_bytes"] = len(auth_ui_component)
+        release["auth_ui"]["component_sha256"] = hashlib.sha256(
+            auth_ui_component
+        ).hexdigest()
+        release_lock_identity = (
+            "sha256:"
+            + hashlib.sha256(
+                json.dumps(release, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest()
+        )
         root = base / "source"
         _private_directory(root)
         receipt = {
@@ -1869,18 +2179,39 @@ def _backup_restore_self_test() -> None:
             "depot/secrets/keys/private_key.pem",
             "depot/secrets/keys/public_key.pem",
             "depot/uploads/example.bin",
+            release["auth_ui"]["install_path"],
         ]:
             path = root / relative
             _private_directory(path.parent)
-            _write_private(path, relative.encode(), 0o600)
+            payload = (
+                auth_ui_component
+                if relative == release["auth_ui"]["install_path"]
+                else relative.encode()
+            )
+            _write_private(path, payload, 0o600)
         prepare_runtime_lock(root)
-        release = load_release()
+
+        def verify_fixture(path: Path) -> dict[str, Any]:
+            return verify_installation(
+                path,
+                _release=release,
+                _release_lock_identity_override=release_lock_identity,
+            )
+
+        def restore_fixture(archive: Path, target: Path) -> dict[str, Any]:
+            return restore_depot(
+                archive,
+                target,
+                _release=release,
+                _release_lock_identity_override=release_lock_identity,
+            )
+
         created_at = "2026-08-30T00:00:00Z"
         source_receipt = {
             "schema_version": INSTALLATION_RECEIPT_SCHEMA,
             "instance_id": _new_trailbase_instance_id(),
             "physical_root_identity": _physical_root_identity(root),
-            "release_lock_identity": _release_lock_identity(),
+            "release_lock_identity": release_lock_identity,
             "runtime": "oci",
             "runtime_target": host_oci_platform(),
             "artifact_identity": _artifact_identity(release, "oci", host_oci_platform()),
@@ -1889,13 +2220,33 @@ def _backup_restore_self_test() -> None:
             "verified_at": created_at,
         }
         _write_installation_receipt(root, source_receipt)
-        verify_installation(root)
+        verify_fixture(root)
+        component_path = root / release["auth_ui"]["install_path"]
+        component_path.unlink()
+        try:
+            verify_fixture(root)
+        except (OSError, ReleaseError):
+            pass
+        else:
+            raise ReleaseError("installation verification accepted a missing Auth UI component")
+        _write_private(component_path, auth_ui_component, 0o600)
+        component_path.write_bytes(b"tampered")
+        os.chmod(component_path, 0o600)
+        try:
+            verify_fixture(root)
+        except ReleaseError:
+            pass
+        else:
+            raise ReleaseError("installation verification accepted a tampered Auth UI component")
+        component_path.unlink()
+        _write_private(component_path, auth_ui_component, 0o600)
         receipt_with_unknown_field = {**source_receipt, "unexpected": True}
         try:
             _validate_installation_receipt(
                 receipt_with_unknown_field,
                 release,
                 source_receipt["physical_root_identity"],
+                {release_lock_identity},
             )
         except ReleaseError:
             pass
@@ -1906,23 +2257,82 @@ def _backup_restore_self_test() -> None:
         renamed = base / "renamed"
         root.rename(renamed)
         root = renamed
-        if verify_installation(root)["instance_id"] != source_receipt["instance_id"]:
+        if verify_fixture(root)["instance_id"] != source_receipt["instance_id"]:
             raise ReleaseError("renamed installation did not keep its instance ID")
 
         unmanaged_copy = base / "unmanaged-copy"
         shutil.copytree(root, unmanaged_copy)
         try:
-            verify_installation(unmanaged_copy)
+            verify_fixture(unmanaged_copy)
         except ReleaseError:
             pass
         else:
             raise ReleaseError("unmanaged copy retained the source physical-root identity")
-        backup, _digest = backup_depot(root, base / "backups")
+        backup, _digest = backup_depot(
+            root,
+            base / "backups",
+            _release=release,
+            _release_lock_identity_override=release_lock_identity,
+        )
+
+        def rewrite_backup_lock(destination: Path, identity: str) -> None:
+            with zipfile.ZipFile(backup) as source:
+                manifest = json.loads(source.read("manifest.json"))
+                receipt_document = json.loads(source.read(INSTALLATION_RECEIPT_NAME))
+                receipt_document["release_lock_identity"] = identity
+                receipt_payload = (
+                    json.dumps(receipt_document, indent=2, sort_keys=True) + "\n"
+                ).encode()
+                receipt_entry = next(
+                    entry
+                    for entry in manifest["entries"]
+                    if entry["path"] == INSTALLATION_RECEIPT_NAME
+                )
+                receipt_entry["bytes"] = len(receipt_payload)
+                receipt_entry["sha256"] = hashlib.sha256(receipt_payload).hexdigest()
+                with zipfile.ZipFile(
+                    destination,
+                    "w",
+                    compression=zipfile.ZIP_DEFLATED,
+                ) as rewritten:
+                    for info in source.infolist():
+                        if info.filename == "manifest.json":
+                            payload = json.dumps(manifest, indent=2, sort_keys=True).encode()
+                        elif info.filename == INSTALLATION_RECEIPT_NAME:
+                            payload = receipt_payload
+                        else:
+                            payload = source.read(info.filename)
+                        rewritten.writestr(info, payload)
+            os.chmod(destination, 0o600)
+
+        legacy_backup = base / "legacy-release-lock.zip"
+        rewrite_backup_lock(legacy_backup, release["supersedes_release_lock_identity"])
+        legacy_restored = base / "legacy-restored"
+        legacy_receipt = restore_fixture(legacy_backup, legacy_restored)
+        if (
+            legacy_receipt["release_lock_identity"] != release_lock_identity
+            or legacy_receipt["instance_id"] != source_receipt["instance_id"]
+            or legacy_receipt["declared_restore"] is not True
+        ):
+            raise ReleaseError(
+                "legacy restore did not preserve identity, declare restore, and advance its lock"
+            )
+        verify_fixture(legacy_restored)
+
+        untrusted_backup = base / "untrusted-release-lock.zip"
+        rewrite_backup_lock(untrusted_backup, "sha256:" + "0" * 64)
+        try:
+            restore_fixture(untrusted_backup, base / "untrusted-lock-restored")
+        except ReleaseError:
+            pass
+        else:
+            raise ReleaseError("restore accepted an undeclared predecessor release lock")
+
         restored = base / "restored"
-        restore_depot(backup, restored)
+        restore_fixture(backup, restored)
         verify_runtime_lock(restored)
         verify_private_root(restored)
-        restored_receipt = verify_installation(restored)
+        restored_receipt = verify_fixture(restored)
         if (
             restored_receipt["instance_id"] != source_receipt["instance_id"]
             or restored_receipt["declared_restore"] is not True
@@ -2153,6 +2563,87 @@ def _runtime_lock_self_test() -> None:
             raise ReleaseError("runtime lock self-test accepted a directory")
 
 
+def _auth_ui_self_test() -> None:
+    component = b"\x00asm\x0d\x00\x01\x00auth-ui-fixture"
+    changelog = b"fixture changelog\n"
+    license_text = b"fixture licence\n"
+
+    def write_archive(path: Path, entries: list[tuple[str, bytes, int]]) -> None:
+        with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for name, payload, mode in entries:
+                info = zipfile.ZipInfo(name)
+                info.create_system = 3
+                info.external_attr = mode << 16
+                info.compress_type = zipfile.ZIP_DEFLATED
+                archive.writestr(info, payload)
+        os.chmod(path, 0o600)
+
+    def fixture_release(path: Path) -> dict[str, Any]:
+        release = copy.deepcopy(load_release())
+        release["license"]["file_sha256"] = hashlib.sha256(license_text).hexdigest()
+        release["auth_ui"].update(
+            {
+                "bytes": path.stat().st_size,
+                "sha256": sha256_file(path),
+                "component_bytes": len(component),
+                "component_sha256": hashlib.sha256(component).hexdigest(),
+            }
+        )
+        return release
+
+    regular_mode = stat.S_IFREG | 0o644
+    safe_entries = [
+        ("trailbase_auth_ui_component.wasm", component, regular_mode),
+        ("CHANGELOG.md", changelog, regular_mode),
+        ("LICENSE", license_text, regular_mode),
+    ]
+    with tempfile.TemporaryDirectory(prefix="fasti-trailbase-auth-ui-") as workspace:
+        base = Path(workspace)
+        archive = base / "auth-ui.zip"
+        write_archive(archive, safe_entries)
+        release = fixture_release(archive)
+        if _verify_auth_ui_archive(archive, release) != component:
+            raise ReleaseError("TrailBase Auth UI archive self-test returned the wrong component")
+
+        root = base / "root"
+        _private_directory(root)
+        cache = root / "cache"
+        cache.mkdir(mode=0o700)
+        cached = cache / f"trailbase-v{release['version']}-wasm-auth-ui.zip"
+        shutil.copyfile(archive, cached)
+        os.chmod(cached, 0o600)
+        installed = _prepare_auth_ui(root, release, offline=True, install=True)
+        _verify_installed_auth_ui(installed, release)
+        if stat.S_IMODE(installed.parent.stat().st_mode) != 0o700:
+            raise ReleaseError("TrailBase Auth UI directory self-test is not owner-only")
+        cached.unlink()
+        if _prepare_auth_ui(root, release, offline=True, install=True) != installed:
+            raise ReleaseError("TrailBase Auth UI installed-only self-test changed its path")
+
+        unsafe_archives = [
+            [*safe_entries, ("unexpected.wasm", component, regular_mode)],
+            [
+                ("../trailbase_auth_ui_component.wasm", component, regular_mode),
+                ("CHANGELOG.md", changelog, regular_mode),
+                ("LICENSE", license_text, regular_mode),
+            ],
+            [
+                ("trailbase_auth_ui_component.wasm", component, stat.S_IFLNK | 0o777),
+                ("CHANGELOG.md", changelog, regular_mode),
+                ("LICENSE", license_text, regular_mode),
+            ],
+        ]
+        for index, entries in enumerate(unsafe_archives, start=1):
+            unsafe = base / f"unsafe-{index}.zip"
+            write_archive(unsafe, entries)
+            unsafe_release = fixture_release(unsafe)
+            try:
+                _verify_auth_ui_archive(unsafe, unsafe_release)
+            except ReleaseError:
+                continue
+            raise ReleaseError(f"TrailBase Auth UI archive mutation {index} did not fail")
+
+
 def self_test() -> None:
     release = load_release()
     old_version = str(release["upgrade_fixture"]["version"])
@@ -2223,6 +2714,24 @@ def self_test() -> None:
     missing_oci_layer = copy.deepcopy(release)
     missing_oci_layer["oci"]["platform_manifests"]["linux-arm64"]["layers"] = []
     mutations.append(missing_oci_layer)
+
+    missing_auth_ui = copy.deepcopy(release)
+    del missing_auth_ui["auth_ui"]
+    mutations.append(missing_auth_ui)
+
+    floating_auth_ui = copy.deepcopy(release)
+    floating_auth_ui["auth_ui"]["url"] = (
+        "https://github.com/trailbaseio/trailbase/releases/latest/download/auth-ui.zip"
+    )
+    mutations.append(floating_auth_ui)
+
+    wrong_auth_ui_path = copy.deepcopy(release)
+    wrong_auth_ui_path["auth_ui"]["install_path"] = "depot/wasm/custom.wasm"
+    mutations.append(wrong_auth_ui_path)
+
+    wrong_predecessor = copy.deepcopy(release)
+    wrong_predecessor["supersedes_release_lock_identity"] = "sha256:" + "0" * 64
+    mutations.append(wrong_predecessor)
 
     for index, mutation in enumerate(mutations, start=1):
         try:
@@ -2297,6 +2806,7 @@ def self_test() -> None:
             raise ReleaseError("non-loopback or mismatched public URL self-test did not fail")
     _backup_restore_self_test()
     _runtime_lock_self_test()
+    _auth_ui_self_test()
     _managed_process_group_self_test()
     print("PASS: TrailBase release-lock mutation sentinels")
 

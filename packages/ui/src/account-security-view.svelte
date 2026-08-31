@@ -662,6 +662,10 @@
         <p>
           Sign in with TrailBase. Fasti issues its own private browser session
           only after local access is confirmed.
+          {#if mode === "first_run" && host.startFirstAdministratorBootstrap}
+            Use your own verified TrailBase account. Do not use the TrailBase
+            installation administrator as a shared person account.
+          {/if}
         </p>
         <label
           class="form-check remember-browser-check d-flex align-items-center mb-3"
@@ -689,7 +693,7 @@
               <IconUserCheck size={18} aria-hidden="true" />
               {busy === "bootstrap"
                 ? "Starting…"
-                : "Confirm first administrator"}
+                : "Confirm first Fasti administrator"}
             </button>
           {/if}
           <button

@@ -11,7 +11,10 @@ Fasti uses TrailBase `v0.33.5` at upstream commit
 `b4c85d5152d4e5f472e0b5da5303f7c938e3a083`.
 [`third_party/trailbase/release.json`](../../third_party/trailbase/release.json)
 binds both Linux native archives, the executable hashes, the OCI index and
-platform graphs, and the reviewed licence text. Floating tags are rejected.
+platform graphs, the official same-release Auth UI WASM archive and component,
+and the reviewed licence text. Floating tags are rejected. The server binary
+does not embed this UI; Fasti uses TrailBase's verified component instead of a
+custom sign-in page.
 It also binds TrailBase `v0.33.4` native artifacts as a test-only adjacent
 upgrade and rollback fixture. `v0.33.4` is not a supported runtime selection.
 
@@ -37,8 +40,10 @@ Run this once with network access:
 
 The command fetches the locked Rust and pnpm inputs and verifies and caches the
 exact TrailBase native and OCI artifacts and the exact prior-version upgrade
-fixture. A later offline start and conformance run use only those verified
-inputs.
+fixture. It also installs the verified Auth UI component into an initialized
+private TrailBase root. A later offline start and conformance run use only
+those verified inputs. A missing, unsafe, or mismatched component keeps sign-in
+unavailable; start never fetches a floating component.
 
 ## Initialize
 
@@ -64,6 +69,12 @@ Each person gets a distinct TrailBase account. Do not share the installation
 administrator credential as a human sign-in account. If the administrator
 credential is lost, use TrailBase's documented password-reset flow. Do not edit
 its database.
+
+Key the password-manager entry by the TrailBase installation ID and the account
+URL shown by `./scripts/dev.sh trailbase status`. When native TrailBase
+administration requires the credential, retrieve it from that entry and enter
+it only at the private Admin URL printed by the same status command. Fasti does
+not retrieve it for the operator. OCI mode does not publish the admin listener.
 
 The worktree-local root is `.dev-trailbase`. The root, depot, cache, receipt,
 and files must remain owned by the current user and inaccessible to group and
@@ -96,13 +107,29 @@ the root, exact release, runtime identity, and installation receipt before they
 pass the root to Fasti. They never initialize TrailBase. An uninitialized root
 keeps sign-in unavailable and reports `trailbase_trust_unavailable`.
 
+## Create human accounts and sign in
+
+Run `./scripts/dev.sh trailbase status` and open its Account URL. Create one
+TrailBase account for each person, complete TrailBase email verification, then
+use that verified personal account from Fasti's Account and security surface.
+Do not use `admin@localhost` as a shared person account. Fasti receives no human
+password; TrailBase owns password entry, hashing, change, reset, and account
+verification.
+
+Email verification and password reset are unavailable until the installation
+has working mail delivery. The C1 conformance fixture proves these functions
+with an isolated local SMTP service; it does not configure production mail.
+Configure and verify TrailBase mail delivery for the installation before
+inviting people or relying on password reset. Keep mail credentials out of
+Fasti, browser storage, command arguments, logs, and evidence receipts.
+
 The route-exposure contract is:
 
-| Mode | Account routes | Admin routes | Record API | Readiness evidence |
-|---|---|---|---|---|
-| Native | `127.0.0.1:4000` | `127.0.0.1:4001` only | Not configured; public root must return 404 | Health check plus public-route boundary |
-| OCI | `127.0.0.1:4000` | Container loopback only; not host-published | Not configured; public root must return 404 | Exact running image plus health and route boundary |
-| Remote | Unavailable | Unavailable | Unavailable | No claim; do not expose this release remotely |
+| Mode   | Account routes   | Admin routes                                | Record API                                  | Readiness evidence                                 |
+| ------ | ---------------- | ------------------------------------------- | ------------------------------------------- | -------------------------------------------------- |
+| Native | `127.0.0.1:4000` | `127.0.0.1:4001` only                       | Not configured; public root must return 404 | Health check plus public-route boundary            |
+| OCI    | `127.0.0.1:4000` | Container loopback only; not host-published | Not configured; public root must return 404 | Exact running image plus health and route boundary |
+| Remote | Unavailable      | Unavailable                                 | Unavailable                                 | No claim; do not expose this release remotely      |
 
 TrailBase `v0.33.5` accepts protocol-relative values in its shared redirect
 validator. Therefore remote account and OAuth routes are unavailable. The next
@@ -158,6 +185,10 @@ It excludes the downloaded runtime and OCI cache. Every entry has an exact
 type, mode, size, and SHA-256 value in the archive manifest. Active-depot
 backup, symlinks, unsafe paths, unexpected types, digest changes, and release
 mismatches fail closed.
+
+The backup preserves TrailBase account records and password hashes. It does not
+recover a forgotten plaintext administrator password. Recovery still requires
+the installation's working TrailBase password-reset channel.
 
 Restore only to a new isolated directory:
 

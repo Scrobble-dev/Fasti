@@ -61,6 +61,13 @@ account. Fasti never copies, stores, logs, receipts, or browser-persists the
 administrator password. It does not share that password across installations
 or add a Fasti secret store for it.
 
+The installation credential is operator-scoped, not a shared human sign-in.
+The operator retrieves it by installation ID and Account URL when TrailBase
+administration requires it. Each person enters only that person's TrailBase
+password in TrailBase's authentication UI. Tests use generated disposable
+installation and human credentials and keep their values out of output and
+evidence receipts.
+
 ### 2.1 Frozen C1.1 domain decisions
 
 The dependency-ordered engineering review freezes these values before schema
@@ -181,9 +188,9 @@ browser routes or generated contracts owned by C1.3.
   - first-administrator bootstrap: workspace and an existing active selected
     grant chosen by the trusted operator path, no bound session or invited
     membership, and `remembered = false`.
-  The browser may request a selection, but the durable ceremony stores the
-  server-normalized identifiers and the final transaction proves the subject
-  owns the grant. TrailBase proof never selects or grants a profile.
+    The browser may request a selection, but the durable ceremony stores the
+    server-normalized identifiers and the final transaction proves the subject
+    owns the grant. TrailBase proof never selects or grants a profile.
 - First-administrator start proves the existing owner-only `bootstrap.secret`,
   descriptor root, permissions, and exclusive data-root lock before the
   ceremony becomes usable. After successful TrailBase cleanup, one final
@@ -238,17 +245,17 @@ browser routes or generated contracts owned by C1.3.
 
 C1.2 fails closed with the existing exact ceremony failures:
 
-| Boundary | Durable result |
-| --- | --- |
-| Binding, code, claim, replay, or missing verifier before exchange | No remote call; the applicable one-use or validation denial remains authoritative. |
-| Definite exchange rejection before a successful token response | `failed/exchange_failed`. |
-| Exchange timeout, response loss, or malformed successful response with uncertain token creation | `cleanup_uncertain/exchange_outcome_uncertain`. |
-| Status or local authorization fails and logout succeeds | `failed/status_rejected` or `failed/local_authorization_denied`. |
-| Logout is not an exact 200 after tokens exist | `cleanup_uncertain/logout_uncertain`. |
-| Logout succeeds but the final local authorization or trust recheck fails | No session; the store records the exact `failed/local_authorization_denied` or `failed/trust_unavailable` evidence. |
-| Logout succeeds but the selection transition has a localized persistence failure | No session; one subsequent writable fallback transaction records `failed/local_persistence_failed`. A continuing or ambiguous database failure returns local-state failure and does not claim durable terminal evidence. |
-| Pending or claimed ceremony is recovered after restart | `failed/verifier_lost_on_restart` or `cleanup_uncertain/exchange_outcome_uncertain`; never retry. |
-| A committed session response is lost | Do not reproduce its digest-only secret; start a fresh ceremony. |
+| Boundary                                                                                        | Durable result                                                                                                                                                                                                           |
+| ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Binding, code, claim, replay, or missing verifier before exchange                               | No remote call; the applicable one-use or validation denial remains authoritative.                                                                                                                                       |
+| Definite exchange rejection before a successful token response                                  | `failed/exchange_failed`.                                                                                                                                                                                                |
+| Exchange timeout, response loss, or malformed successful response with uncertain token creation | `cleanup_uncertain/exchange_outcome_uncertain`.                                                                                                                                                                          |
+| Status or local authorization fails and logout succeeds                                         | `failed/status_rejected` or `failed/local_authorization_denied`.                                                                                                                                                         |
+| Logout is not an exact 200 after tokens exist                                                   | `cleanup_uncertain/logout_uncertain`.                                                                                                                                                                                    |
+| Logout succeeds but the final local authorization or trust recheck fails                        | No session; the store records the exact `failed/local_authorization_denied` or `failed/trust_unavailable` evidence.                                                                                                      |
+| Logout succeeds but the selection transition has a localized persistence failure                | No session; one subsequent writable fallback transaction records `failed/local_persistence_failed`. A continuing or ambiguous database failure returns local-state failure and does not claim durable terminal evidence. |
+| Pending or claimed ceremony is recovered after restart                                          | `failed/verifier_lost_on_restart` or `cleanup_uncertain/exchange_outcome_uncertain`; never retry.                                                                                                                        |
+| A committed session response is lost                                                            | Do not reproduce its digest-only secret; start a fresh ceremony.                                                                                                                                                         |
 
 C1.2 exits only when a private scripted loopback fixture proves the exact
 methods, paths, headers, bodies, content types, bounds, redirect refusal,
@@ -330,7 +337,7 @@ review the active gate and prepare the next one.
   transactional authorization. The result preserves actor kind as
   `AuthorizedActor::Credential { presented_client_id, credential_id }` or
   `AuthorizedActor::BrowserSession { auth_subject_id, browser_session_id,
-  grant_owner_client_id }`. Only persistence that truly records source
+grant_owner_client_id }`. Only persistence that truly records source
   attribution may call the explicitly named `attribution_client_id()`
   projection; audit and provenance retain the actor variant. Reject a request
   that supplies both a bearer credential and a session cookie.
@@ -360,20 +367,20 @@ review the active gate and prepare the next one.
   identifies which authorization predicate failed.
 - Freeze their governed problem contracts before registry generation:
 
-  | Problem code | HTTP | Safe state | Retry | Exact default next action |
-  | --- | ---: | --- | --- | --- |
-  | `identity_service_unavailable` | 503 | `prior_state_retained` | `retry_safe` | `retry_identity_service` — Check TrailBase health and retry the same safe operation |
-  | `trailbase_version_unsupported` | 503 | `no_mutation` | `retry_after_correction` | `install_supported_trailbase` — Install the pinned supported TrailBase release |
-  | `trailbase_trust_unavailable` | 503 | `no_mutation` | `retry_after_correction` | `repair_trailbase_activation` — Repair the pinned TrailBase activation before retrying |
-  | `trailbase_proof_invalid` | 401 | `prior_state_retained` | `retry_after_correction` | `restart_sign_in` — Start a new sign-in ceremony |
-  | `trailbase_session_cleanup_failed` | 502 | `prior_state_retained` | `retry_after_correction` | `inspect_trailbase_cleanup` — Check TrailBase health, then start a new sign-in ceremony |
-  | `auth_browser_binding_invalid` | 401 | `no_mutation` | `retry_after_correction` | `restart_sign_in` — Start a new sign-in ceremony |
-  | `auth_subject_unaffiliated` | 403 | `prior_state_retained` | `retry_after_correction` | `request_workspace_membership` — Ask a workspace administrator for access |
-  | `auth_continuation_persistence_failed` | 503 | `prior_state_retained` | `retry_after_correction` | `restart_sign_in` — Start a new sign-in ceremony |
-  | `auth_identity_conflict` | 409 | `prior_state_retained` | `not_retryable` | `inspect_identity_link` — Inspect the existing identity link before making changes |
-  | `auth_last_sign_in_method` | 409 | `prior_state_retained` | `retry_after_correction` | `add_sign_in_method` — Add another verified sign-in method before removal |
-  | `auth_assurance_insufficient` | 403 | `no_mutation` | `retry_after_correction` | `use_required_assurance` — Use a sign-in method that meets the required assurance level |
-  | `recent_authentication_required` | 403 | `no_mutation` | `retry_after_correction` | `authenticate_again` — Authenticate again before this sensitive action |
+  | Problem code                           | HTTP | Safe state             | Retry                    | Exact default next action                                                               |
+  | -------------------------------------- | ---: | ---------------------- | ------------------------ | --------------------------------------------------------------------------------------- |
+  | `identity_service_unavailable`         |  503 | `prior_state_retained` | `retry_safe`             | `retry_identity_service` — Check TrailBase health and retry the same safe operation     |
+  | `trailbase_version_unsupported`        |  503 | `no_mutation`          | `retry_after_correction` | `install_supported_trailbase` — Install the pinned supported TrailBase release          |
+  | `trailbase_trust_unavailable`          |  503 | `no_mutation`          | `retry_after_correction` | `repair_trailbase_activation` — Repair the pinned TrailBase activation before retrying  |
+  | `trailbase_proof_invalid`              |  401 | `prior_state_retained` | `retry_after_correction` | `restart_sign_in` — Start a new sign-in ceremony                                        |
+  | `trailbase_session_cleanup_failed`     |  502 | `prior_state_retained` | `retry_after_correction` | `inspect_trailbase_cleanup` — Check TrailBase health, then start a new sign-in ceremony |
+  | `auth_browser_binding_invalid`         |  401 | `no_mutation`          | `retry_after_correction` | `restart_sign_in` — Start a new sign-in ceremony                                        |
+  | `auth_subject_unaffiliated`            |  403 | `prior_state_retained` | `retry_after_correction` | `request_workspace_membership` — Ask a workspace administrator for access               |
+  | `auth_continuation_persistence_failed` |  503 | `prior_state_retained` | `retry_after_correction` | `restart_sign_in` — Start a new sign-in ceremony                                        |
+  | `auth_identity_conflict`               |  409 | `prior_state_retained` | `not_retryable`          | `inspect_identity_link` — Inspect the existing identity link before making changes      |
+  | `auth_last_sign_in_method`             |  409 | `prior_state_retained` | `retry_after_correction` | `add_sign_in_method` — Add another verified sign-in method before removal               |
+  | `auth_assurance_insufficient`          |  403 | `no_mutation`          | `retry_after_correction` | `use_required_assurance` — Use a sign-in method that meets the required assurance level |
+  | `recent_authentication_required`       |  403 | `no_mutation`          | `retry_after_correction` | `authenticate_again` — Authenticate again before this sensitive action                  |
 
 - `auth_last_sign_in_method`, `auth_assurance_insufficient`, and
   `recent_authentication_required` keep these frozen descriptors but remain
@@ -387,19 +394,19 @@ review the active gate and prepare the next one.
   wrong capability policy.
 - Freeze these HTTP operations and paths:
 
-  | Operation ID | Method and path | Capability |
-  | --- | --- | --- |
-  | `start_trailbase_sign_in` | `POST /api/access/v1/trailbase/sign-in` | `browser.session.create` |
-  | `complete_trailbase_authentication` | `GET /api/access/v1/trailbase/callback` | `browser.session.create` |
-  | `read_access_projection` | `GET /api/access/v1/projection` | `access.projection.read` |
-  | `read_browser_session` | `GET /api/access/v1/browser-session` | `browser.session.read` |
-  | `end_browser_session` | `DELETE /api/access/v1/browser-session` | `browser.session.end` |
-  | `list_browser_sessions` | `GET /api/access/v1/browser-sessions` | `browser.sessions.list` |
-  | `revoke_browser_session` | `DELETE /api/access/v1/browser-sessions/{browser_session_id}` | `browser.session.revoke` |
-  | `revoke_other_browser_sessions` | `DELETE /api/access/v1/browser-sessions/others` | `browser.sessions.revoke_others` |
-  | `revoke_all_browser_sessions` | `DELETE /api/access/v1/browser-sessions` | `browser.sessions.revoke_all` |
-  | `rotate_browser_session` | `POST /api/access/v1/browser-session/rotation` | `browser.session.rotate` |
-  | `select_browser_session_profile` | `PUT /api/access/v1/browser-session/profile` | `browser.session.profile.select` |
+  | Operation ID                        | Method and path                                               | Capability                       |
+  | ----------------------------------- | ------------------------------------------------------------- | -------------------------------- |
+  | `start_trailbase_sign_in`           | `POST /api/access/v1/trailbase/sign-in`                       | `browser.session.create`         |
+  | `complete_trailbase_authentication` | `GET /api/access/v1/trailbase/callback`                       | `browser.session.create`         |
+  | `read_access_projection`            | `GET /api/access/v1/projection`                               | `access.projection.read`         |
+  | `read_browser_session`              | `GET /api/access/v1/browser-session`                          | `browser.session.read`           |
+  | `end_browser_session`               | `DELETE /api/access/v1/browser-session`                       | `browser.session.end`            |
+  | `list_browser_sessions`             | `GET /api/access/v1/browser-sessions`                         | `browser.sessions.list`          |
+  | `revoke_browser_session`            | `DELETE /api/access/v1/browser-sessions/{browser_session_id}` | `browser.session.revoke`         |
+  | `revoke_other_browser_sessions`     | `DELETE /api/access/v1/browser-sessions/others`               | `browser.sessions.revoke_others` |
+  | `revoke_all_browser_sessions`       | `DELETE /api/access/v1/browser-sessions`                      | `browser.sessions.revoke_all`    |
+  | `rotate_browser_session`            | `POST /api/access/v1/browser-session/rotation`                | `browser.session.rotate`         |
+  | `select_browser_session_profile`    | `PUT /api/access/v1/browser-session/profile`                  | `browser.session.profile.select` |
 
 - Sign-in start accepts only `workspace_id`, `profile_grant_id`, `remembered`,
   and an optional exact `invited_membership_id`. It accepts no origin,
@@ -681,10 +688,10 @@ state store, provider abstraction, or polling loop.
   - `DELETE` cancels or dismisses the bound continuation, returns `204`, and
     clears the cookie. It is the existing user-control/start-over path, not a
     second workflow.
-  `GET` requires the exact Host and exactly one well-formed continuation
-  cookie. `POST` and `DELETE` additionally require the exact Origin. None
-  accepts bearer authorization, browser-session CSRF, operation IDs, or
-  correlation IDs as authority.
+    `GET` requires the exact Host and exactly one well-formed continuation
+    cookie. `POST` and `DELETE` additionally require the exact Origin. None
+    accepts bearer authorization, browser-session CSRF, operation IDs, or
+    correlation IDs as authority.
 - A selection projection contains only `expires_at`, `remembered`, one
   canonical SHA-256 revision, and at most 64 choices. Each choice exposes an
   opaque ordinal plus safe presentation facts: deterministic workspace and
@@ -787,19 +794,20 @@ exact-head CI, pull request, merge, release, and deployment remain pending.
 Authority: TrailBase `v0.33.5`, tag commit
 `b4c85d5152d4e5f472e0b5da5303f7c938e3a083`.
 
-| Surface                           | Exact tagged-source result                                                                                                                                                                                              | C1 disposition                                                                                                                                                                                            |
-| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Release identity                  | Fasti pins the version, tag commit, native digests, OCI digests, licence digest, and executable version.                                                                                                                | Reuse the existing release lock and sole launcher.                                                                                                                                                        |
-| Authorization-code exchange       | `/api/auth/v1/token` requires the code and matching Proof Key for Code Exchange verifier, checks expiry, reloads the current user, and requires TrailBase-local accepted account-email state.                           | Call only from the server-held ceremony. Never accept browser tokens.                                                                                                                                     |
-| Current status                    | `/api/auth/v1/status` with both the access token and `Refresh-Token` checks the access proof, refresh-session row, expiry, current user, and TrailBase-local accepted account-email state, then returns current tokens. | Require all response fields. Treat a 200 response with null fields as failure. Do not describe this as independent mailbox-ownership proof.                                                               |
-| Refresh-session cleanup           | POST `/api/auth/v1/logout` deletes the named refresh session and returns 200 even when it is already absent.                                                                                                            | Require 200 before Fasti session creation. A timeout, redirect, or other response fails closed.                                                                                                           |
-| Subject                           | The current subject is in the status-returned authentication token payload.                                                                                                                                             | Decode only the bounded status-returned payload to read the current subject and authentication metadata. The trusted fact is the direct response from the pinned process, not an offline signature check. |
-| Password plus TOTP                | The password-to-MFA transition loses the original redirect, response type, Proof Key for Code Exchange challenge, and method in the exact pinned release.                                                               | Keep password-plus-TOTP authorization-code sign-in unavailable in C1 until an official source-backed TrailBase release preserves and verifies the complete ceremony.                                      |
-| Social sign-in with enrolled TOTP | Social callbacks do not prove a TrailBase TOTP challenge occurred.                                                                                                                                                      | Never describe social sign-in as TOTP-verified. Do not use enrollment as proof of recent multi-factor authentication.                                                                                     |
-| Authorization-code consumption    | TrailBase reads but does not delete the authorization code. The same code and verifier can mint more refresh sessions until expiry.                                                                                     | Fasti atomically consumes its own ceremony before exchange. This contains replay through Fasti but does not claim the upstream code is globally single use.                                               |
-| Account state                     | Status proves the current user still exists with a non-null email in TrailBase's locally accepted account state. TrailBase has no disabled or suspended account field.                                                  | Fasti enforces its own `AuthSubject` and membership lifecycle. Do not claim independent mailbox ownership or TrailBase account suspension support.                                                        |
-| Refresh rotation                  | TrailBase does not rotate refresh tokens.                                                                                                                                                                               | C1 revokes and discards the refresh token during sign-in. Fasti never uses it as a durable application credential.                                                                                        |
-| Token claims and keys             | Tokens have no issuer, audience, key identifier, token identifier, or not-before claim. There is no supported key overlap or retirement API.                                                                            | These facts block offline TrailBase token acceptance. C1 does not accept tokens offline, so they do not block the direct backchannel.                                                                     |
+| Surface                           | Exact tagged-source result                                                                                                                                                                                              | C1 disposition                                                                                                                                                                                                |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Release identity                  | Fasti pins the version, tag commit, native digests, OCI digests, licence digest, executable version, and the official same-release Auth UI WASM archive and component digests.                                          | Reuse the existing release lock and sole launcher. Install only the verified Auth UI component into the private TrailBase root before start.                                                                  |
+| Human authentication UI           | TrailBase v0.33.5 ships its default Auth UI as the separate release asset `trailbase_v0.33.5_wasm_auth_ui.zip`; the server alone returns 404 for `/_/auth/login`.                                                       | Use the official component. Do not build a Fasti login replacement. A missing, unsafe, mismatched, or mutated component keeps sign-in `trailbase_trust_unavailable`; no runtime floating download is allowed. |
+| Authorization-code exchange       | `/api/auth/v1/token` requires the code and matching Proof Key for Code Exchange verifier, checks expiry, reloads the current user, and requires TrailBase-local accepted account-email state.                           | Call only from the server-held ceremony. Never accept browser tokens.                                                                                                                                         |
+| Current status                    | `/api/auth/v1/status` with both the access token and `Refresh-Token` checks the access proof, refresh-session row, expiry, current user, and TrailBase-local accepted account-email state, then returns current tokens. | Require all response fields. Treat a 200 response with null fields as failure. Do not describe this as independent mailbox-ownership proof.                                                                   |
+| Refresh-session cleanup           | POST `/api/auth/v1/logout` deletes the named refresh session and returns 200 even when it is already absent.                                                                                                            | Require 200 before Fasti session creation. A timeout, redirect, or other response fails closed.                                                                                                               |
+| Subject                           | The current subject is in the status-returned authentication token payload.                                                                                                                                             | Decode only the bounded status-returned payload to read the current subject and authentication metadata. The trusted fact is the direct response from the pinned process, not an offline signature check.     |
+| Password plus TOTP                | The password-to-MFA transition loses the original redirect, response type, Proof Key for Code Exchange challenge, and method in the exact pinned release.                                                               | Keep password-plus-TOTP authorization-code sign-in unavailable in C1 until an official source-backed TrailBase release preserves and verifies the complete ceremony.                                          |
+| Social sign-in with enrolled TOTP | Social callbacks do not prove a TrailBase TOTP challenge occurred.                                                                                                                                                      | Never describe social sign-in as TOTP-verified. Do not use enrollment as proof of recent multi-factor authentication.                                                                                         |
+| Authorization-code consumption    | TrailBase reads but does not delete the authorization code. The same code and verifier can mint more refresh sessions until expiry.                                                                                     | Fasti atomically consumes its own ceremony before exchange. This contains replay through Fasti but does not claim the upstream code is globally single use.                                                   |
+| Account state                     | Status proves the current user still exists with a non-null email in TrailBase's locally accepted account state. TrailBase has no disabled or suspended account field.                                                  | Fasti enforces its own `AuthSubject` and membership lifecycle. Do not claim independent mailbox ownership or TrailBase account suspension support.                                                            |
+| Refresh rotation                  | TrailBase does not rotate refresh tokens.                                                                                                                                                                               | C1 revokes and discards the refresh token during sign-in. Fasti never uses it as a durable application credential.                                                                                            |
+| Token claims and keys             | Tokens have no issuer, audience, key identifier, token identifier, or not-before claim. There is no supported key overlap or retirement API.                                                                            | These facts block offline TrailBase token acceptance. C1 does not accept tokens offline, so they do not block the direct backchannel.                                                                         |
 
 Primary source:
 
@@ -809,7 +817,9 @@ Primary source:
 - [refresh-session logout](https://github.com/trailbaseio/trailbase/blob/v0.33.5/crates/core/src/auth/api/logout.rs)
 - [token and refresh checks](https://github.com/trailbaseio/trailbase/blob/v0.33.5/crates/core/src/auth/tokens.rs)
 - [token payload and key loading](https://github.com/trailbaseio/trailbase/blob/v0.33.5/crates/core/src/auth/jwt.rs)
-- [built-in authentication UI](https://github.com/trailbaseio/trailbase/blob/v0.33.5/crates/auth-ui/src/lib.rs)
+- [separate authentication UI component](https://github.com/trailbaseio/trailbase/blob/v0.33.5/crates/auth-ui/README.md)
+- [official component installation](https://github.com/trailbaseio/trailbase/blob/v0.33.5/docs/src/content/docs/getting-started/install.mdx)
+- [v0.33.5 release assets](https://github.com/trailbaseio/trailbase/releases/tag/v0.33.5)
 - [tagged OSL-3.0 licence](https://github.com/trailbaseio/trailbase/blob/v0.33.5/LICENSE)
 
 The existing written licence review approves only the exact unmodified
@@ -1250,14 +1260,18 @@ Required tests:
    every error creates zero sessions and zero cookies.
 4. Add direct TrailBase adapter mutation tests for null, malformed, oversized,
    redirected, slow, wrong-type, missing-subject, and implausible-time responses.
-5. Add `tests/e2e/access-c1.spec.ts` for the real callback, missing Strict Fasti
+5. Verify the exact Auth UI archive and extracted component size and digests.
+   Reject unsafe archive members, alternate layouts, missing files, version
+   drift, and mutation. Prove a prepared root serves `/_/auth/login` without a
+   runtime network fetch; absence or mismatch must fail closed.
+6. Add `tests/e2e/access-c1.spec.ts` for the real callback, missing Strict Fasti
    cookie, valid narrow cookie, copied callback, sibling cookie, wrong path,
    wrong origin, replay, two tabs, lost response, outage, and recovery.
-6. Add the A+C fixture matrix for loading, empty, unavailable, working,
+7. Add the A+C fixture matrix for loading, empty, unavailable, working,
    duplicate submit, partial membership, expired/revoked/conflict, resumable C,
    Save and leave, completion, B detail, authorization, focus, and live status.
-7. Retain the existing unavailable-state browser tests as regression controls.
-8. Add the C1 milestone runner only after M2 hands off `xtask`.
+8. Retain the existing unavailable-state browser tests as regression controls.
+9. Add the C1 milestone runner only after M2 hands off `xtask`.
 
 Final commands:
 
@@ -1418,13 +1432,13 @@ C1 reuses these owners. It does not rebuild them.
 
 ## GSTACK REVIEW REPORT
 
-| Review        | Trigger               | Why                             | Runs | Status                                | Findings                                                                                                                                                               |
-| ------------- | --------------------- | ------------------------------- | ---- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| CEO Review    | `/plan-ceo-review`    | Scope & strategy                | 0    | —                                     | Gate 10 and canonical programme approvals are existing source decisions, not a new run.                                                                                |
+| Review        | Trigger               | Why                             | Runs | Status                                | Findings                                                                                                                                                                                                                                     |
+| ------------- | --------------------- | ------------------------------- | ---- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CEO Review    | `/plan-ceo-review`    | Scope & strategy                | 0    | —                                     | Gate 10 and canonical programme approvals are existing source decisions, not a new run.                                                                                                                                                      |
 | Codex Review  | `/codex review`       | Independent 2nd opinion         | 0    | CLEAR BY EQUIVALENT READ-ONLY REVIEWS | Independent C1.3d review found and closed shared-runtime, Android-capability, two-start, PKCE-capacity, and shutdown-drain defects. Three continuation reviews then converged on the existing-row design. Platform evidence remains pending. |
-| Eng Review    | `/plan-eng-review`    | Architecture & tests (required) | 3    | CLEAR                                 | The identity-first state machine, persisted confirmation, expiry/restart rules, cookie rotation, bounded candidates, final transaction, and lean test matrix are frozen in section 2.8. |
-| Design Review | `/plan-design-review` | UI/UX gaps                      | 0    | —                                     | Existing approved Gate 10 A+C review and artifact hashes remain binding. Runtime design evidence stays in C1.4.                                                        |
-| DX Review     | `/plan-devex-review`  | Developer experience gaps       | 1    | CONTRACT CLEAR; LIVE AUDIT DEFERRED   | The request/response, SDK, cookie, retry, Workbench host, copy, and no-display-name limitation are frozen. The skill's required live product audit runs after the packaged C1.4 surface exists. |
+| Eng Review    | `/plan-eng-review`    | Architecture & tests (required) | 3    | CLEAR                                 | The identity-first state machine, persisted confirmation, expiry/restart rules, cookie rotation, bounded candidates, final transaction, and lean test matrix are frozen in section 2.8.                                                      |
+| Design Review | `/plan-design-review` | UI/UX gaps                      | 0    | —                                     | Existing approved Gate 10 A+C review and artifact hashes remain binding. Runtime design evidence stays in C1.4.                                                                                                                              |
+| DX Review     | `/plan-devex-review`  | Developer experience gaps       | 1    | CONTRACT CLEAR; LIVE AUDIT DEFERRED   | The request/response, SDK, cookie, retry, Workbench host, copy, and no-display-name limitation are frozen. The skill's required live product audit runs after the packaged C1.4 surface exists.                                              |
 
 **OUTSIDE REVIEW:** Read-only subagents support direct backchannel C1 plus
 separate upstream hardening and identified the callback, association,
