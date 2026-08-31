@@ -56,6 +56,8 @@ support compatible read and export routes. A `subset_of` assertion can support a
 Nuvio TV-work grouping projection when it carries explicit coverage; it is not a
 general alias. `superset_of`, `overlaps`, `alternate_cut_of`, `related`, and
 `not_same_as` remain review evidence and never become outbound routes.
+Immutable `candidate` and `disputed` evidence classes cannot be promoted by a
+lifecycle event; reviewed evidence is recorded as a new supported assertion.
 Inferred mappings start as candidates and require an append-only review event
 before they can become accepted routes.
 An `asserted` mapping remains audit evidence until its named authority and

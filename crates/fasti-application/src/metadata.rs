@@ -2139,7 +2139,7 @@ mod tests {
 
             assert_eq!(
                 assertion.effective_status(std::slice::from_ref(&accepted)),
-                Ok(IdentityAssertionStatus::Accepted)
+                Err(fasti_domain::IdentityAssertionLifecycleError::InvalidTransition)
             );
             assert!(IdentityRouteEvidence::accepted_crosswalk(&assertion, &[accepted]).is_none());
         }

@@ -594,7 +594,15 @@ impl IdentityAssertion {
             if event.sequence() != expected_sequence {
                 return Err(IdentityAssertionLifecycleError::InvalidSequence);
             }
-            if event.previous_status() != status || !status.can_transition_to(event.status()) {
+            if event.previous_status() != status
+                || !status.can_transition_to(event.status())
+                || (event.status() == IdentityAssertionStatus::Accepted
+                    && matches!(
+                        self.evidence_class,
+                        IdentityAssertionEvidenceClass::Candidate
+                            | IdentityAssertionEvidenceClass::Disputed
+                    ))
+            {
                 return Err(IdentityAssertionLifecycleError::InvalidTransition);
             }
             if event.occurred_at() < prior_time {
