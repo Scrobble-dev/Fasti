@@ -126,9 +126,10 @@ and safe provider routes. It cannot change:
 ## Preview and rollback
 
 A change is previewed against the authenticated profile before it is applied.
-The returned proposed preference and ownership source must match that exact
-`Set` or `InheritProfile` change; rollback may restore either otherwise-valid
-state.
+The preview result is built from that exact query. Its profile and target
+connection scope must match the query, and its proposed preference and
+ownership source must match the requested `Set` or `InheritProfile` change;
+rollback may restore either otherwise-valid state.
 The preview reports:
 
 - total and affected Records;
@@ -142,9 +143,11 @@ Each page must advance beyond the requested cursor and must not exceed the
 exact requested page limit.
 
 Apply uses an operation ID, a semantic digest, and the expected policy
-revision. The durable implementation stores an immutable receipt. Rollback is
-a new compare-and-set operation that refers to the receipt being reversed. It
-does not delete the original receipt or rewrite media history.
+revision. Its result is built from that exact command and must retain the same
+authenticated profile, target connection scope, operation ID, and change. The
+durable implementation stores an immutable receipt. Rollback is a new
+compare-and-set operation that refers to the receipt being reversed. It does
+not delete the original receipt or rewrite media history.
 
 ## Source evidence
 

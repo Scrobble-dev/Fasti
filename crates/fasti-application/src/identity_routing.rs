@@ -398,16 +398,14 @@ pub struct AnimeGroupingPolicyImpact {
 impl AnimeGroupingPolicyImpact {
     #[allow(clippy::too_many_arguments)]
     pub fn try_new(
+        query: &PreviewAnimeGroupingPolicyChangeQuery,
         policy: AnimeGroupingPolicyView,
-        change: AnimeGroupingPolicyChange,
         proposed_preference: AnimeGroupingPreference,
         proposed_source: AnimeGroupingPolicySource,
         total_records: u64,
         affected_records: u64,
         unresolved_routes: u64,
         possible_season_regroupings: u64,
-        requested_after_record_id: Option<RecordId>,
-        requested_limit: IdentityImpactPageLimit,
         records: Vec<AnimeGroupingRecordPreview>,
         next_after_record_id: Option<RecordId>,
     ) -> Result<Self, AnimeGroupingPolicyResultError> {
@@ -415,19 +413,24 @@ impl AnimeGroupingPolicyImpact {
             .windows(2)
             .all(|pair| pair[0].record_id().uuid() < pair[1].record_id().uuid());
         let page_advances = records.iter().all(|record| {
-            requested_after_record_id.is_none_or(|cursor| record.record_id().uuid() > cursor.uuid())
+            query
+                .after_record_id()
+                .is_none_or(|cursor| record.record_id().uuid() > cursor.uuid())
         });
         let cursor_is_valid = next_after_record_id.is_none_or(|cursor| {
             records
                 .last()
                 .is_some_and(|record| record.record_id() == cursor)
         });
-        if !policy_state_matches_change(
-            policy.scope(),
-            change,
-            proposed_preference,
-            proposed_source,
-        ) || records.len() > usize::from(requested_limit.get())
+        if policy.profile_id() != query.access().profile_id()
+            || policy.scope() != query.scope()
+            || !policy_state_matches_change(
+                query.scope(),
+                query.change(),
+                proposed_preference,
+                proposed_source,
+            )
+            || records.len() > usize::from(query.limit().get())
             || records.len() as u64 > total_records
             || affected_records > total_records
             || unresolved_routes > total_records
@@ -504,8 +507,7 @@ pub struct ApplyAnimeGroupingPolicyChangeOutcome {
 impl ApplyAnimeGroupingPolicyChangeOutcome {
     #[allow(clippy::too_many_arguments)]
     pub fn try_new(
-        operation_id: OperationId,
-        change: AnimeGroupingPolicyChange,
+        command: &ApplyAnimeGroupingPolicyChangeCommand,
         previous_preference: AnimeGroupingPreference,
         previous_source: AnimeGroupingPolicySource,
         policy: AnimeGroupingPolicyView,
@@ -513,26 +515,29 @@ impl ApplyAnimeGroupingPolicyChangeOutcome {
         unresolved_routes: u64,
         possible_season_regroupings: u64,
     ) -> Result<Self, AnimeGroupingPolicyResultError> {
-        let rolled_back_operation_id = match change {
+        let rolled_back_operation_id = match command.change() {
             AnimeGroupingPolicyChange::Rollback {
                 applied_operation_id,
             } => Some(applied_operation_id),
             AnimeGroupingPolicyChange::Set(_) | AnimeGroupingPolicyChange::InheritProfile => None,
         };
-        if !policy_state_matches_change(
-            policy.scope(),
-            change,
-            policy.preference(),
-            policy.source(),
-        ) || !previous_source.is_valid_for(policy.scope())
+        if policy.profile_id() != command.access().profile_id()
+            || policy.scope() != command.scope()
+            || !policy_state_matches_change(
+                command.scope(),
+                command.change(),
+                policy.preference(),
+                policy.source(),
+            )
+            || !previous_source.is_valid_for(policy.scope())
             || possible_season_regroupings > affected_records
-            || rolled_back_operation_id == Some(operation_id)
+            || rolled_back_operation_id == Some(command.operation_id())
         {
             return Err(AnimeGroupingPolicyResultError);
         }
         Ok(Self {
-            operation_id,
-            change,
+            operation_id: command.operation_id(),
+            change: command.change(),
             previous_preference,
             previous_source,
             policy,
@@ -611,8 +616,53 @@ pub trait IdentityRoutingPort: Send + Sync {
 mod tests {
     use super::*;
 
+    fn access(profile_id: ProfileId) -> RequestAccessContext {
+        RequestAccessContext::new(
+            fasti_domain::WorkspaceId::new_v7(),
+            profile_id,
+            ClientId::new_v7(),
+            fasti_domain::CredentialId::new_v7(),
+            fasti_domain::ProfileGrantId::new_v7(),
+            1,
+        )
+    }
+
     fn impact_limit(value: u16) -> IdentityImpactPageLimit {
         IdentityImpactPageLimit::try_new(value).expect("valid impact page limit")
+    }
+
+    fn preview_query(
+        policy: AnimeGroupingPolicyView,
+        change: AnimeGroupingPolicyChange,
+        after_record_id: Option<RecordId>,
+        limit: u16,
+    ) -> PreviewAnimeGroupingPolicyChangeQuery {
+        PreviewAnimeGroupingPolicyChangeQuery::try_new(
+            RequestCorrelationId::new_v7(),
+            access(policy.profile_id()),
+            policy.scope(),
+            change,
+            after_record_id,
+            impact_limit(limit),
+        )
+        .expect("valid preview query")
+    }
+
+    fn apply_command(
+        policy: AnimeGroupingPolicyView,
+        operation_id: OperationId,
+        change: AnimeGroupingPolicyChange,
+    ) -> ApplyAnimeGroupingPolicyChangeCommand {
+        ApplyAnimeGroupingPolicyChangeCommand::try_new(
+            RequestCorrelationId::new_v7(),
+            access(policy.profile_id()),
+            policy.scope(),
+            operation_id,
+            Sha256Digest::from_bytes(&[0; 32]),
+            policy.revision(),
+            change,
+        )
+        .expect("valid apply command")
     }
 
     #[test]
@@ -650,31 +700,37 @@ mod tests {
         records.sort_by_key(|record| record.record_id().uuid());
 
         assert!(AnimeGroupingPolicyImpact::try_new(
+            &preview_query(
+                policy,
+                AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::Automatic),
+                None,
+                MAX_IDENTITY_IMPACT_PAGE,
+            ),
             policy,
-            AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::Automatic),
             AnimeGroupingPreference::Automatic,
             AnimeGroupingPolicySource::ProfileDefault,
             u64::from(MAX_IDENTITY_IMPACT_PAGE) + 1,
             0,
             u64::from(MAX_IDENTITY_IMPACT_PAGE) + 1,
             0,
-            None,
-            impact_limit(MAX_IDENTITY_IMPACT_PAGE),
             records,
             None,
         )
         .is_err());
         assert!(AnimeGroupingPolicyImpact::try_new(
+            &preview_query(
+                policy,
+                AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::Automatic),
+                None,
+                MAX_IDENTITY_IMPACT_PAGE,
+            ),
             policy,
-            AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::Automatic),
             AnimeGroupingPreference::Automatic,
             AnimeGroupingPolicySource::ProfileDefault,
             1,
             0,
             0,
             1,
-            None,
-            impact_limit(MAX_IDENTITY_IMPACT_PAGE),
             Vec::new(),
             None,
         )
@@ -705,31 +761,37 @@ mod tests {
         let final_record_id = records[1].record_id();
 
         assert!(AnimeGroupingPolicyImpact::try_new(
+            &preview_query(
+                policy,
+                AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::Automatic),
+                None,
+                MAX_IDENTITY_IMPACT_PAGE,
+            ),
             policy,
-            AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::Automatic),
             AnimeGroupingPreference::Automatic,
             AnimeGroupingPolicySource::ClientOverride,
             2,
             0,
             0,
             0,
-            None,
-            impact_limit(MAX_IDENTITY_IMPACT_PAGE),
             records.clone(),
             Some(final_record_id),
         )
         .is_err());
         assert!(AnimeGroupingPolicyImpact::try_new(
+            &preview_query(
+                policy,
+                AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::Automatic),
+                None,
+                1,
+            ),
             policy,
-            AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::Automatic),
             AnimeGroupingPreference::Automatic,
             AnimeGroupingPolicySource::ProfileDefault,
             2,
             0,
             0,
             0,
-            None,
-            impact_limit(1),
             records.clone(),
             Some(final_record_id),
         )
@@ -742,16 +804,19 @@ mod tests {
             (1, 0, 0, 1, Vec::new()),
         ] {
             assert!(AnimeGroupingPolicyImpact::try_new(
+                &preview_query(
+                    policy,
+                    AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::Automatic),
+                    None,
+                    MAX_IDENTITY_IMPACT_PAGE,
+                ),
                 policy,
-                AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::Automatic),
                 AnimeGroupingPreference::Automatic,
                 AnimeGroupingPolicySource::ProfileDefault,
                 total,
                 affected,
                 unresolved,
                 regroupings,
-                None,
-                impact_limit(MAX_IDENTITY_IMPACT_PAGE),
                 page,
                 None,
             )
@@ -761,46 +826,55 @@ mod tests {
         let mut unordered = records.clone();
         unordered.reverse();
         assert!(AnimeGroupingPolicyImpact::try_new(
+            &preview_query(
+                policy,
+                AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::Automatic),
+                None,
+                MAX_IDENTITY_IMPACT_PAGE,
+            ),
             policy,
-            AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::Automatic),
             AnimeGroupingPreference::Automatic,
             AnimeGroupingPolicySource::ProfileDefault,
             2,
             0,
             0,
             0,
-            None,
-            impact_limit(MAX_IDENTITY_IMPACT_PAGE),
             unordered,
             None,
         )
         .is_err());
         assert!(AnimeGroupingPolicyImpact::try_new(
+            &preview_query(
+                policy,
+                AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::Automatic),
+                Some(records[0].record_id()),
+                MAX_IDENTITY_IMPACT_PAGE,
+            ),
             policy,
-            AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::Automatic),
             AnimeGroupingPreference::Automatic,
             AnimeGroupingPolicySource::ProfileDefault,
             2,
             0,
             0,
             0,
-            Some(records[0].record_id()),
-            impact_limit(MAX_IDENTITY_IMPACT_PAGE),
             records.clone(),
             Some(final_record_id),
         )
         .is_err());
         assert!(AnimeGroupingPolicyImpact::try_new(
+            &preview_query(
+                policy,
+                AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::Automatic),
+                None,
+                MAX_IDENTITY_IMPACT_PAGE,
+            ),
             policy,
-            AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::Automatic),
             AnimeGroupingPreference::Automatic,
             AnimeGroupingPolicySource::ProfileDefault,
             2,
             0,
             0,
             0,
-            None,
-            impact_limit(MAX_IDENTITY_IMPACT_PAGE),
             records,
             Some(RecordId::new_v7()),
         )
@@ -810,17 +884,16 @@ mod tests {
     #[test]
     fn impact_result_binds_proposal_to_the_requested_change() {
         let impact = |policy, change, preference, source| {
+            let query = preview_query(policy, change, None, MAX_IDENTITY_IMPACT_PAGE);
             AnimeGroupingPolicyImpact::try_new(
+                &query,
                 policy,
-                change,
                 preference,
                 source,
                 0,
                 0,
                 0,
                 0,
-                None,
-                impact_limit(MAX_IDENTITY_IMPACT_PAGE),
                 Vec::new(),
                 None,
             )
@@ -837,13 +910,6 @@ mod tests {
         assert!(impact(
             profile_policy,
             AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::KeepMalReleasesSeparate),
-            AnimeGroupingPreference::Automatic,
-            AnimeGroupingPolicySource::ProfileDefault,
-        )
-        .is_err());
-        assert!(impact(
-            profile_policy,
-            AnimeGroupingPolicyChange::InheritProfile,
             AnimeGroupingPreference::Automatic,
             AnimeGroupingPolicySource::ProfileDefault,
         )
@@ -871,6 +937,55 @@ mod tests {
             AnimeGroupingPolicySource::ProfileDefault,
         )
         .is_ok());
+
+        let query = preview_query(
+            profile_policy,
+            AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::Automatic),
+            None,
+            MAX_IDENTITY_IMPACT_PAGE,
+        );
+        let foreign_profile = AnimeGroupingPolicyView::try_new(
+            ProfileId::new_v7(),
+            AnimeGroupingPolicyScope::Profile,
+            AnimeGroupingPolicySource::ProfileDefault,
+            AnimeGroupingPreference::Automatic,
+            1,
+        )
+        .expect("valid foreign profile policy");
+        assert!(AnimeGroupingPolicyImpact::try_new(
+            &query,
+            foreign_profile,
+            AnimeGroupingPreference::Automatic,
+            AnimeGroupingPolicySource::ProfileDefault,
+            0,
+            0,
+            0,
+            0,
+            Vec::new(),
+            None,
+        )
+        .is_err());
+        let foreign_scope = AnimeGroupingPolicyView::try_new(
+            profile_policy.profile_id(),
+            AnimeGroupingPolicyScope::Client(ClientId::new_v7()),
+            AnimeGroupingPolicySource::ClientOverride,
+            AnimeGroupingPreference::Automatic,
+            1,
+        )
+        .expect("valid foreign client policy");
+        assert!(AnimeGroupingPolicyImpact::try_new(
+            &query,
+            foreign_scope,
+            AnimeGroupingPreference::Automatic,
+            AnimeGroupingPolicySource::ClientOverride,
+            0,
+            0,
+            0,
+            0,
+            Vec::new(),
+            None,
+        )
+        .is_err());
     }
 
     #[test]
@@ -948,30 +1063,8 @@ mod tests {
     }
 
     #[test]
-    fn apply_outcome_rejects_self_rollback() {
+    fn apply_command_rejects_self_rollback() {
         let operation_id = OperationId::new_v7();
-        let policy = AnimeGroupingPolicyView::try_new(
-            ProfileId::new_v7(),
-            AnimeGroupingPolicyScope::Profile,
-            AnimeGroupingPolicySource::ProfileDefault,
-            AnimeGroupingPreference::Automatic,
-            1,
-        )
-        .expect("valid profile policy");
-
-        assert!(ApplyAnimeGroupingPolicyChangeOutcome::try_new(
-            operation_id,
-            AnimeGroupingPolicyChange::Rollback {
-                applied_operation_id: operation_id,
-            },
-            AnimeGroupingPreference::Automatic,
-            AnimeGroupingPolicySource::ProfileDefault,
-            policy,
-            0,
-            0,
-            0,
-        )
-        .is_err());
 
         assert_eq!(
             ApplyAnimeGroupingPolicyChangeCommand::try_new(
@@ -1010,8 +1103,11 @@ mod tests {
         .expect("valid profile policy");
 
         assert!(ApplyAnimeGroupingPolicyChangeOutcome::try_new(
-            operation_id,
-            AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::Automatic),
+            &apply_command(
+                policy,
+                operation_id,
+                AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::Automatic),
+            ),
             AnimeGroupingPreference::Automatic,
             AnimeGroupingPolicySource::ClientOverride,
             policy,
@@ -1021,8 +1117,11 @@ mod tests {
         )
         .is_err());
         assert!(ApplyAnimeGroupingPolicyChangeOutcome::try_new(
-            operation_id,
-            AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::Automatic),
+            &apply_command(
+                policy,
+                operation_id,
+                AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::Automatic),
+            ),
             AnimeGroupingPreference::Automatic,
             AnimeGroupingPolicySource::ProfileDefault,
             policy,
@@ -1032,19 +1131,11 @@ mod tests {
         )
         .is_err());
         assert!(ApplyAnimeGroupingPolicyChangeOutcome::try_new(
-            operation_id,
-            AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::KeepMalReleasesSeparate),
-            AnimeGroupingPreference::Automatic,
-            AnimeGroupingPolicySource::ProfileDefault,
-            policy,
-            0,
-            0,
-            0,
-        )
-        .is_err());
-        assert!(ApplyAnimeGroupingPolicyChangeOutcome::try_new(
-            operation_id,
-            AnimeGroupingPolicyChange::InheritProfile,
+            &apply_command(
+                policy,
+                operation_id,
+                AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::KeepMalReleasesSeparate),
+            ),
             AnimeGroupingPreference::Automatic,
             AnimeGroupingPolicySource::ProfileDefault,
             policy,
@@ -1054,9 +1145,52 @@ mod tests {
         )
         .is_err());
 
-        let client_id = ClientId::new_v7();
-        let client_override = AnimeGroupingPolicyView::try_new(
+        let command = apply_command(
+            policy,
+            operation_id,
+            AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::Automatic),
+        );
+        let foreign_profile = AnimeGroupingPolicyView::try_new(
             ProfileId::new_v7(),
+            AnimeGroupingPolicyScope::Profile,
+            AnimeGroupingPolicySource::ProfileDefault,
+            AnimeGroupingPreference::Automatic,
+            2,
+        )
+        .expect("valid foreign profile policy");
+        assert!(ApplyAnimeGroupingPolicyChangeOutcome::try_new(
+            &command,
+            AnimeGroupingPreference::Automatic,
+            AnimeGroupingPolicySource::ProfileDefault,
+            foreign_profile,
+            0,
+            0,
+            0,
+        )
+        .is_err());
+        let foreign_scope = AnimeGroupingPolicyView::try_new(
+            policy.profile_id(),
+            AnimeGroupingPolicyScope::Client(ClientId::new_v7()),
+            AnimeGroupingPolicySource::ClientOverride,
+            AnimeGroupingPreference::Automatic,
+            2,
+        )
+        .expect("valid foreign client policy");
+        assert!(ApplyAnimeGroupingPolicyChangeOutcome::try_new(
+            &command,
+            AnimeGroupingPreference::Automatic,
+            AnimeGroupingPolicySource::ClientOverride,
+            foreign_scope,
+            0,
+            0,
+            0,
+        )
+        .is_err());
+
+        let client_id = ClientId::new_v7();
+        let client_profile_id = ProfileId::new_v7();
+        let client_override = AnimeGroupingPolicyView::try_new(
+            client_profile_id,
             AnimeGroupingPolicyScope::Client(client_id),
             AnimeGroupingPolicySource::ClientOverride,
             AnimeGroupingPreference::Automatic,
@@ -1064,8 +1198,11 @@ mod tests {
         )
         .expect("valid client override");
         assert!(ApplyAnimeGroupingPolicyChangeOutcome::try_new(
-            operation_id,
-            AnimeGroupingPolicyChange::InheritProfile,
+            &apply_command(
+                client_override,
+                operation_id,
+                AnimeGroupingPolicyChange::InheritProfile,
+            ),
             AnimeGroupingPreference::Automatic,
             AnimeGroupingPolicySource::ClientOverride,
             client_override,
@@ -1075,7 +1212,7 @@ mod tests {
         )
         .is_err());
         let inherited = AnimeGroupingPolicyView::try_new(
-            ProfileId::new_v7(),
+            client_profile_id,
             AnimeGroupingPolicyScope::Client(client_id),
             AnimeGroupingPolicySource::ProfileDefault,
             AnimeGroupingPreference::Automatic,
@@ -1083,8 +1220,11 @@ mod tests {
         )
         .expect("valid inherited policy");
         assert!(ApplyAnimeGroupingPolicyChangeOutcome::try_new(
-            operation_id,
-            AnimeGroupingPolicyChange::InheritProfile,
+            &apply_command(
+                inherited,
+                operation_id,
+                AnimeGroupingPolicyChange::InheritProfile,
+            ),
             AnimeGroupingPreference::KeepMalReleasesSeparate,
             AnimeGroupingPolicySource::ClientOverride,
             inherited,
@@ -1095,10 +1235,13 @@ mod tests {
         .is_ok());
 
         let rollback = ApplyAnimeGroupingPolicyChangeOutcome::try_new(
-            operation_id,
-            AnimeGroupingPolicyChange::Rollback {
-                applied_operation_id: rolled_back_operation_id,
-            },
+            &apply_command(
+                policy,
+                operation_id,
+                AnimeGroupingPolicyChange::Rollback {
+                    applied_operation_id: rolled_back_operation_id,
+                },
+            ),
             AnimeGroupingPreference::KeepMalReleasesSeparate,
             AnimeGroupingPolicySource::ProfileDefault,
             policy,
@@ -1107,6 +1250,7 @@ mod tests {
             1,
         )
         .expect("valid rollback outcome");
+        assert_eq!(rollback.operation_id(), operation_id);
         assert_eq!(
             rollback.change(),
             AnimeGroupingPolicyChange::Rollback {
@@ -1119,8 +1263,11 @@ mod tests {
         );
 
         let set = ApplyAnimeGroupingPolicyChangeOutcome::try_new(
-            operation_id,
-            AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::Automatic),
+            &apply_command(
+                policy,
+                operation_id,
+                AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::Automatic),
+            ),
             AnimeGroupingPreference::KeepMalReleasesSeparate,
             AnimeGroupingPolicySource::ProfileDefault,
             policy,
