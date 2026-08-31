@@ -74,6 +74,159 @@ test("metadata refresh parser enforces canonical operation IDs", () => {
   );
 });
 
+test("identity routing SDK binds queries, policy bodies, and response identity", async () => {
+  const policy = {
+    profile_id: contractIds.profile,
+    scope: { kind: "profile", client_id: null },
+    source: "profile_default",
+    preference: "automatic",
+    revision: 0,
+  };
+  const route = {
+    record_id: contractIds.record,
+    intent: "metadata_enrichment",
+    target_provider: "tmdb",
+    status: "missing",
+    known_identifiers: [],
+    candidate_routes: [],
+    selected_route: null,
+    nuvio_content_id: null,
+  };
+  const previewRequest = {
+    scope: policy.scope,
+    change: { kind: "set", preference: "group_by_tv_work" },
+    after_record_id: null,
+    limit: 10,
+  };
+  const preview = {
+    policy,
+    proposed_preference: "group_by_tv_work",
+    proposed_source: "profile_default",
+    total_records: 0,
+    affected_records: 0,
+    unresolved_routes: 0,
+    possible_season_regroupings: 0,
+    records: [],
+    next_after_record_id: null,
+  };
+  const applyRequest = {
+    operation_id: contractIds.operation,
+    scope: policy.scope,
+    expected_revision: 0,
+    change: previewRequest.change,
+  };
+  const applied = {
+    operation_id: contractIds.operation,
+    change: applyRequest.change,
+    previous_preference: "automatic",
+    previous_source: "profile_default",
+    policy: { ...policy, preference: "group_by_tv_work", revision: 1 },
+    affected_records: 0,
+    unresolved_routes: 0,
+    possible_season_regroupings: 0,
+    rolled_back_operation_id: null,
+  };
+  const requests = [];
+  const client = new FastiClient({
+    baseUrl: "http://127.0.0.1:8420",
+    credential: "credential",
+    fetch: async (url, init) => {
+      requests.push({ url: String(url), init });
+      const path = new URL(String(url)).pathname;
+      const response =
+        path.endsWith("/identity-route")
+          ? route
+          : path.endsWith("/preview")
+            ? preview
+            : init.method === "PUT"
+              ? applied
+              : { policy };
+      return new Response(JSON.stringify(response), {
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+
+  assert.deepEqual(
+    await client.resolveIdentityRoute(contractIds.record, {
+      intent: "metadata_enrichment",
+      target_provider: "tmdb",
+    }),
+    route,
+  );
+  assert.deepEqual(
+    await client.readAnimeGroupingPolicy({ scope: "profile" }),
+    { policy },
+  );
+  assert.deepEqual(
+    await client.previewAnimeGroupingPolicyChange(previewRequest),
+    preview,
+  );
+  assert.deepEqual(
+    await client.applyAnimeGroupingPolicyChange(applyRequest),
+    applied,
+  );
+  assert.deepEqual(
+    requests.map(({ url, init }) => ({
+      url,
+      method: init.method,
+      authorization: new Headers(init.headers).get("authorization"),
+      body: init.body,
+    })),
+    [
+      {
+        url: `http://127.0.0.1:8420/api/v1/records/${contractIds.record}/identity-route?intent=metadata_enrichment&target_provider=tmdb`,
+        method: "GET",
+        authorization: "Bearer credential",
+        body: undefined,
+      },
+      {
+        url: "http://127.0.0.1:8420/api/v1/profile/anime-grouping-policy?scope=profile",
+        method: "GET",
+        authorization: "Bearer credential",
+        body: undefined,
+      },
+      {
+        url: "http://127.0.0.1:8420/api/v1/profile/anime-grouping-policy/preview",
+        method: "POST",
+        authorization: "Bearer credential",
+        body: JSON.stringify(previewRequest),
+      },
+      {
+        url: "http://127.0.0.1:8420/api/v1/profile/anime-grouping-policy",
+        method: "PUT",
+        authorization: "Bearer credential",
+        body: JSON.stringify(applyRequest),
+      },
+    ],
+  );
+  assert.throws(
+    () =>
+      client.resolveIdentityRoute(contractIds.record, {
+        intent: "metadata_enrichment",
+        target_provider: "TMDB with spaces",
+      }),
+    TypeError,
+  );
+
+  const mismatched = new FastiClient({
+    baseUrl: "http://127.0.0.1:8420",
+    credential: "credential",
+    fetch: async () =>
+      new Response(
+        JSON.stringify({ ...route, record_id: v7("rec", "f") }),
+        { headers: { "content-type": "application/json" } },
+      ),
+  });
+  await assert.rejects(
+    mismatched.resolveIdentityRoute(contractIds.record, {
+      intent: "metadata_enrichment",
+      target_provider: "tmdb",
+    }),
+    FastiProtocolError,
+  );
+});
+
 test("browser authentication SDK exposes callable operations but never the callback", () => {
   const client = new FastiClient({
     baseUrl: "http://127.0.0.1:8420",
@@ -780,6 +933,7 @@ test("credentials are header-only on authenticated surfaces and no offline queue
         ).sort();
         assert.deepEqual(methods, [
           "acceptObservation",
+          "applyAnimeGroupingPolicyChange",
           "attachIdentifier",
           "cancelTrailBaseContinuation",
           "clearNuvioCollections",
@@ -802,7 +956,9 @@ test("credentials are header-only on authenticated surfaces and no offline queue
           "listProviders",
           "listRecords",
           "listTrackingDispositions",
+          "previewAnimeGroupingPolicyChange",
           "readAccessProjection",
+          "readAnimeGroupingPolicy",
           "readBrowserSession",
           "readMetadataProjection",
           "readProviderHealth",
@@ -813,6 +969,7 @@ test("credentials are header-only on authenticated surfaces and no offline queue
           "removeProviderCredential",
           "replaceNuvioCollections",
           "replayReceipt",
+          "resolveIdentityRoute",
           "revokeAllBrowserSessions",
           "revokeBrowserSession",
           "revokeCredential",
@@ -1120,10 +1277,10 @@ test("connection endpoints reject unsafe origins", () => {
   }
 });
 test("generated public metadata preserves complete registry and surface dispositions", () => {
-  assert.equal(PUBLIC_CAPABILITY_REGISTRY.capabilities.length, 48);
+  assert.equal(PUBLIC_CAPABILITY_REGISTRY.capabilities.length, 52);
   assert.equal(
     Object.keys(PUBLIC_CAPABILITY_REGISTRY.surface_profiles).length,
-    16,
+    17,
   );
   const stream = PUBLIC_CAPABILITY_REGISTRY.capabilities.find(
     (capability) => capability.id === "receipt.stream",
@@ -1657,7 +1814,7 @@ test("all implemented contract routes complete against the loopback Rust fixture
       discovery.surface_profiles,
       PUBLIC_CAPABILITY_REGISTRY.surface_profiles,
     );
-    assert.equal(discovery.capabilities.length, 48);
+    assert.equal(discovery.capabilities.length, 52);
     assert.ok(
       discovery.capabilities.some(
         (capability) =>

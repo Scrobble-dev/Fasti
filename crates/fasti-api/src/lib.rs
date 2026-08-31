@@ -38,6 +38,7 @@ pub const FASTI_ACCESS_CONTINUATION_PATH: &str = "/api/access/v1/trailbase/conti
 pub const FASTI_ACCESS_CONTINUATION_COOKIE: &str = "__Secure-fasti_auth_continuation";
 
 mod access;
+mod identity_routing;
 mod integrations;
 mod local;
 mod metadata;
@@ -219,6 +220,10 @@ impl Modify for ProductionSecurityAddon {
         metadata::refresh_metadata_claims,
         metadata::read_metadata_projection,
         metadata::configure_metadata_projection
+        ,identity_routing::resolve_identity_route
+        ,identity_routing::read_anime_grouping_policy
+        ,identity_routing::preview_anime_grouping_policy_change
+        ,identity_routing::apply_anime_grouping_policy_change
     ),
     components(schemas(
         HealthResponse,
@@ -294,6 +299,26 @@ impl Modify for ProductionSecurityAddon {
         fasti_contracts::MetadataCacheInvalidationReasonDto,
         fasti_contracts::MetadataDataClassificationDto,
         fasti_contracts::MetadataAttributionDto,
+        fasti_contracts::ResolutionIntentDto,
+        fasti_contracts::IdentityRouteStatusDto,
+        fasti_contracts::IdentityRouteKindDto,
+        fasti_contracts::IdentityAssertionRelationDto,
+        fasti_contracts::IdentityIdentifierDto,
+        fasti_contracts::AcceptedIdentityRouteAssertionDto,
+        fasti_contracts::IdentityRouteDto,
+        fasti_contracts::ResolveIdentityRouteResponse,
+        fasti_contracts::AnimeGroupingPreferenceDto,
+        fasti_contracts::AnimeGroupingPolicyScopeKindDto,
+        fasti_contracts::AnimeGroupingPolicySourceDto,
+        fasti_contracts::AnimeGroupingPolicyScopeDto,
+        fasti_contracts::AnimeGroupingPolicyChangeDto,
+        fasti_contracts::AnimeGroupingPolicyDto,
+        fasti_contracts::ReadAnimeGroupingPolicyResponse,
+        fasti_contracts::PreviewAnimeGroupingPolicyChangeRequest,
+        fasti_contracts::AnimeGroupingRecordPreviewDto,
+        fasti_contracts::AnimeGroupingPolicyImpactResponse,
+        fasti_contracts::ApplyAnimeGroupingPolicyChangeRequest,
+        fasti_contracts::ApplyAnimeGroupingPolicyChangeResponse,
         fasti_contracts::NodeInitializationResponse,
         fasti_contracts::NuvioCatalogSourceDto,
         fasti_contracts::NuvioCollectionDto,
@@ -1050,6 +1075,9 @@ mod tests {
             "/api/v1/metadata/claims/refresh",
             "/api/v1/records/{record_id}/metadata-projection",
             "/api/v1/profile/metadata-projection",
+            "/api/v1/records/{record_id}/identity-route",
+            "/api/v1/profile/anime-grouping-policy",
+            "/api/v1/profile/anime-grouping-policy/preview",
             "/api/access/v1/trailbase/sign-in",
             "/api/access/v1/trailbase/callback",
             "/api/access/v1/trailbase/continuation",
@@ -1063,7 +1091,7 @@ mod tests {
         ] {
             assert!(document.paths.paths.contains_key(path), "missing {path}");
         }
-        assert_eq!(document.paths.paths.len(), 33);
+        assert_eq!(document.paths.paths.len(), 36);
 
         let serialized = serde_json::to_string(&document).expect("serializable OpenAPI document");
         assert!(serialized.contains("#/components/schemas/HealthResponse"));
@@ -1323,6 +1351,174 @@ mod tests {
         )
         .expect("clear state");
         assert!(cleared.document.is_none());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn identity_routing_http_routes_authorize_preview_apply_and_replay() {
+        let (root, kernel) = test_kernel();
+        let app = api_router(kernel, test_bind_addr(), root.path());
+        let missing_record = fasti_domain::RecordId::new_v7();
+        let unauthorized = app
+            .clone()
+            .oneshot(
+                Request::get(format!(
+                    "/api/v1/records/{missing_record}/identity-route?intent=metadata_enrichment&target_provider=tmdb"
+                ))
+                .body(Body::empty())
+                .expect("identity route request"),
+            )
+            .await
+            .expect("identity route response");
+        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+        let credential = enroll_admin(&app, root.path()).await.credential;
+        let auth = |builder: axum::http::request::Builder| {
+            builder.header(header::AUTHORIZATION, format!("Bearer {credential}"))
+        };
+        let created = app
+            .clone()
+            .oneshot(
+                auth(Request::post("/api/v1/records"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"grain":"release"}"#))
+                    .expect("create record request"),
+            )
+            .await
+            .expect("create record response");
+        assert_eq!(created.status(), StatusCode::OK);
+        let created: fasti_contracts::CreateRecordResponse = serde_json::from_slice(
+            &to_bytes(created.into_body(), 4096)
+                .await
+                .expect("bounded record body"),
+        )
+        .expect("record response");
+
+        let route = app
+            .clone()
+            .oneshot(
+                auth(Request::get(format!(
+                    "/api/v1/records/{}/identity-route?intent=metadata_enrichment&target_provider=tmdb",
+                    created.record_id
+                )))
+                .body(Body::empty())
+                .expect("route request"),
+            )
+            .await
+            .expect("route response");
+        assert_eq!(route.status(), StatusCode::OK);
+        let route: fasti_contracts::ResolveIdentityRouteResponse = serde_json::from_slice(
+            &to_bytes(route.into_body(), 16 * 1024)
+                .await
+                .expect("bounded route body"),
+        )
+        .expect("route payload");
+        assert_eq!(route.record_id, created.record_id);
+        assert_eq!(
+            route.status,
+            fasti_contracts::IdentityRouteStatusDto::Missing
+        );
+
+        let read = app
+            .clone()
+            .oneshot(
+                auth(Request::get(
+                    "/api/v1/profile/anime-grouping-policy?scope=profile",
+                ))
+                .body(Body::empty())
+                .expect("read policy request"),
+            )
+            .await
+            .expect("read policy response");
+        assert_eq!(read.status(), StatusCode::OK);
+        let read: fasti_contracts::ReadAnimeGroupingPolicyResponse = serde_json::from_slice(
+            &to_bytes(read.into_body(), 4096)
+                .await
+                .expect("bounded policy body"),
+        )
+        .expect("policy payload");
+        assert_eq!(read.policy.revision, 0);
+
+        let other_client = fasti_domain::ClientId::new_v7();
+        let forbidden = app
+            .clone()
+            .oneshot(
+                auth(Request::get(format!(
+                    "/api/v1/profile/anime-grouping-policy?scope=client&client_id={other_client}"
+                )))
+                .body(Body::empty())
+                .expect("cross-client request"),
+            )
+            .await
+            .expect("cross-client response");
+        assert_eq!(forbidden.status(), StatusCode::FORBIDDEN);
+
+        let preview_body = serde_json::json!({
+            "scope": {"kind": "profile", "client_id": null},
+            "change": {"kind": "set", "preference": "group_by_tv_work"},
+            "after_record_id": null,
+            "limit": 10,
+        });
+        let preview = app
+            .clone()
+            .oneshot(
+                auth(Request::post(
+                    "/api/v1/profile/anime-grouping-policy/preview",
+                ))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(preview_body.to_string()))
+                .expect("preview request"),
+            )
+            .await
+            .expect("preview response");
+        assert_eq!(preview.status(), StatusCode::OK);
+        let preview: fasti_contracts::AnimeGroupingPolicyImpactResponse = serde_json::from_slice(
+            &to_bytes(preview.into_body(), 16 * 1024)
+                .await
+                .expect("bounded preview body"),
+        )
+        .expect("preview payload");
+        assert_eq!(preview.total_records, 1);
+
+        let operation_id = fasti_domain::OperationId::new_v7();
+        let apply_body = serde_json::json!({
+            "operation_id": operation_id,
+            "scope": {"kind": "profile", "client_id": null},
+            "expected_revision": 0,
+            "change": {"kind": "set", "preference": "group_by_tv_work"},
+        });
+        let send_apply = || {
+            auth(Request::put("/api/v1/profile/anime-grouping-policy"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(apply_body.to_string()))
+                .expect("apply request")
+        };
+        let applied = app
+            .clone()
+            .oneshot(send_apply())
+            .await
+            .expect("apply response");
+        assert_eq!(applied.status(), StatusCode::OK);
+        let applied: fasti_contracts::ApplyAnimeGroupingPolicyChangeResponse =
+            serde_json::from_slice(
+                &to_bytes(applied.into_body(), 16 * 1024)
+                    .await
+                    .expect("bounded apply body"),
+            )
+            .expect("apply payload");
+        assert_eq!(applied.operation_id, operation_id.to_string());
+        assert_eq!(applied.policy.revision, 1);
+
+        let replayed = app.oneshot(send_apply()).await.expect("replay response");
+        assert_eq!(replayed.status(), StatusCode::OK);
+        let replayed: fasti_contracts::ApplyAnimeGroupingPolicyChangeResponse =
+            serde_json::from_slice(
+                &to_bytes(replayed.into_body(), 16 * 1024)
+                    .await
+                    .expect("bounded replay body"),
+            )
+            .expect("replay payload");
+        assert_eq!(replayed, applied);
     }
 
     #[cfg(target_os = "linux")]

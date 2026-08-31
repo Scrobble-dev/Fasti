@@ -450,7 +450,7 @@ pub enum IdentityRouteEvidenceKind {
     AcceptedCrosswalk,
 }
 
-/// A profile or connection's anime grouping and export preference.
+/// A profile or application client's anime grouping and export preference.
 ///
 /// This value selects an outward projection only. It never identifies or
 /// re-keys a Fasti Record.

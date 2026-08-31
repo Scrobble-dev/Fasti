@@ -31,6 +31,9 @@ const PORTABILITY_V3_EXAMPLE_PATH: &str =
 const PORTABILITY_V4_SCHEMA_PATH: &str = "contracts/portability/v4/workspace-manifest.schema.json";
 const PORTABILITY_V4_EXAMPLE_PATH: &str =
     "contracts/portability/v4/workspace-manifest.example.json";
+const PORTABILITY_V5_SCHEMA_PATH: &str = "contracts/portability/v5/workspace-manifest.schema.json";
+const PORTABILITY_V5_EXAMPLE_PATH: &str =
+    "contracts/portability/v5/workspace-manifest.example.json";
 const SDK_GENERATED_PATH: &str = "packages/sdk/src/generated.ts";
 const RUST_CAPABILITY_IDS_PATH: &str = "crates/fasti-contracts/src/generated_capability_ids.rs";
 const PROVIDER_MANIFEST_SCHEMA_PATH: &str =
@@ -188,7 +191,7 @@ const PRODUCTION_BOOTSTRAP_OPERATIONS: [ConformanceOperation; 2] = [
 /// surface. Kept separate from `PRODUCTION_BOOTSTRAP_OPERATIONS` because that
 /// array also drives the bootstrap-only SDK slice in
 /// `render_production_bootstrap_contract`, which must not grow to include them.
-const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 36] = [
+const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 40] = [
     ConformanceOperation {
         alias: "submitObservation",
         operation_id: "submit_observation",
@@ -441,6 +444,50 @@ const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 36] = [
         request: Some("ConfigureMetadataProjectionRequest"),
         response: Some("MetadataProjectionConfigurationResponse"),
         retry: "never",
+    },
+    ConformanceOperation {
+        alias: "resolveIdentityRoute",
+        operation_id: "resolve_identity_route",
+        method: "get",
+        path: "/api/v1/records/{record_id}/identity-route",
+        capability_id: "identity.route.resolve",
+        authenticated: true,
+        request: None,
+        response: Some("ResolveIdentityRouteResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "readAnimeGroupingPolicy",
+        operation_id: "read_anime_grouping_policy",
+        method: "get",
+        path: "/api/v1/profile/anime-grouping-policy",
+        capability_id: "profile.anime_grouping_policy.read",
+        authenticated: true,
+        request: None,
+        response: Some("ReadAnimeGroupingPolicyResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "previewAnimeGroupingPolicyChange",
+        operation_id: "preview_anime_grouping_policy_change",
+        method: "post",
+        path: "/api/v1/profile/anime-grouping-policy/preview",
+        capability_id: "profile.anime_grouping_policy.preview",
+        authenticated: true,
+        request: Some("PreviewAnimeGroupingPolicyChangeRequest"),
+        response: Some("AnimeGroupingPolicyImpactResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "applyAnimeGroupingPolicyChange",
+        operation_id: "apply_anime_grouping_policy_change",
+        method: "put",
+        path: "/api/v1/profile/anime-grouping-policy",
+        capability_id: "profile.anime_grouping_policy.apply",
+        authenticated: true,
+        request: Some("ApplyAnimeGroupingPolicyChangeRequest"),
+        response: Some("ApplyAnimeGroupingPolicyChangeResponse"),
+        retry: "stable_body_operation_id",
     },
     ConformanceOperation {
         alias: "startTrailBaseSignIn",
@@ -835,6 +882,8 @@ fn build(workspace_root: &Path) -> anyhow::Result<Artifacts> {
     let portability_v3_example = portability_v3_example(workspace_root)?;
     let portability_v4_schema = portability_v4_schema()?;
     let portability_v4_example = portability_v4_example(workspace_root)?;
+    let portability_v5_schema = portability_v5_schema()?;
+    let portability_v5_example = portability_v5_example(workspace_root)?;
     let asyncapi = load_yaml(workspace_root, ASYNCAPI_PATH)?;
     let mut production_openapi = serde_json::to_value(fasti_api::openapi())
         .context("production OpenAPI is not serializable")?;
@@ -935,6 +984,16 @@ fn build(workspace_root: &Path) -> anyhow::Result<Artifacts> {
         &mut artifacts,
         PORTABILITY_V4_EXAMPLE_PATH,
         portability_v4_example,
+    )?;
+    insert(
+        &mut artifacts,
+        PORTABILITY_V5_SCHEMA_PATH,
+        portability_v5_schema,
+    )?;
+    insert(
+        &mut artifacts,
+        PORTABILITY_V5_EXAMPLE_PATH,
+        portability_v5_example,
     )?;
     insert_bytes(&mut artifacts, SDK_GENERATED_PATH, sdk_source.into_bytes())?;
     insert_bytes(
@@ -1198,7 +1257,11 @@ fn portability_v4_schema() -> anyhow::Result<Value> {
         .context("generated portability schema omits format_version")? = serde_json::json!({
         "const": 4
     });
-    let entities = WorkspaceExportEntity::ALL.map(WorkspaceExportEntity::as_str);
+    let entities = WorkspaceExportEntity::V4.map(WorkspaceExportEntity::as_str);
+    *schema
+        .pointer_mut("/$defs/WorkspaceExportEntityDto/enum")
+        .context("generated portability schema omits export entity enum")? =
+        serde_json::to_value(entities)?;
     *schema
         .pointer_mut("/$defs/WorkspaceManifestDto/properties/streams")
         .context("generated portability schema omits streams")? = serde_json::json!({
@@ -1231,7 +1294,7 @@ fn portability_v4_example(workspace_root: &Path) -> anyhow::Result<Value> {
         .and_then(Value::as_array_mut)
         .context("archive-v3 example omits streams")?;
     let empty_digest = format!("sha256:{}", crate::evidence::sha256_bytes(&[]));
-    for entity in WorkspaceExportEntity::ALL[WorkspaceExportEntity::V3.len()..]
+    for entity in WorkspaceExportEntity::V4[WorkspaceExportEntity::V3.len()..]
         .iter()
         .map(|entity| entity.as_str())
     {
@@ -1247,6 +1310,101 @@ fn portability_v4_example(workspace_root: &Path) -> anyhow::Result<Value> {
         .context("archive-v3 example omits manifest")?;
     let canonical = serde_json_canonicalizer::to_vec(manifest)
         .context("archive-v4 example manifest is not canonicalizable")?;
+    example["manifest_digest"] = Value::String(format!(
+        "sha256:{}",
+        crate::evidence::sha256_bytes(&canonical)
+    ));
+    Ok(example)
+}
+
+fn portability_v5_schema() -> anyhow::Result<Value> {
+    let mut schema = draft_2020_12_schema::<ChecksummedWorkspaceManifestDto>()?;
+    let root = schema
+        .as_object_mut()
+        .context("portability schema root must be an object")?;
+    root.insert(
+        "$id".to_owned(),
+        Value::String(
+            "https://fasti.scrobble.dev/schemas/internal-staged/portability/v5/workspace-manifest.json"
+                .to_owned(),
+        ),
+    );
+    root.insert(
+        "title".to_owned(),
+        Value::String("InternalStagedChecksummedWorkspaceManifestV5".to_owned()),
+    );
+    root.insert(
+        "$comment".to_owned(),
+        Value::String(
+            "Internal staged B3 archive v5. It extends the frozen v4 stream prefix with authoritative identity-routing and anime-grouping policy state."
+                .to_owned(),
+        ),
+    );
+    root.insert(
+        "x-fasti-contract-state".to_owned(),
+        Value::String("internal_staged_archive_v5".to_owned()),
+    );
+    *schema
+        .pointer_mut("/$defs/WorkspaceManifestDto/properties/format_version")
+        .context("generated portability schema omits format_version")? = serde_json::json!({
+        "const": 5
+    });
+    let entities = WorkspaceExportEntity::ALL
+        .iter()
+        .map(|entity| entity.as_str())
+        .collect::<Vec<_>>();
+    *schema
+        .pointer_mut("/$defs/WorkspaceExportEntityDto/enum")
+        .context("generated portability schema omits export entity enum")? =
+        serde_json::to_value(&entities)?;
+    *schema
+        .pointer_mut("/$defs/WorkspaceManifestDto/properties/streams")
+        .context("generated portability schema omits streams")? = serde_json::json!({
+        "type": "array",
+        "minItems": entities.len(),
+        "maxItems": entities.len(),
+        "prefixItems": entities.iter().map(|entity| serde_json::json!({
+            "allOf": [
+                { "$ref": "#/$defs/WorkspaceStreamDescriptorDto" },
+                {
+                    "type": "object",
+                    "properties": { "entity": { "const": entity } }
+                }
+            ]
+        })).collect::<Vec<_>>(),
+        "items": false
+    });
+    Ok(schema)
+}
+
+fn portability_v5_example(workspace_root: &Path) -> anyhow::Result<Value> {
+    let source = fs::read(workspace_root.join(PORTABILITY_V4_EXAMPLE_PATH))?;
+    let mut example: Value =
+        serde_json::from_slice(&source).context("archive-v4 manifest example is not valid JSON")?;
+    *example
+        .pointer_mut("/manifest/format_version")
+        .context("archive-v4 example omits format_version")? = serde_json::json!(5);
+    let streams = example
+        .pointer_mut("/manifest/streams")
+        .and_then(Value::as_array_mut)
+        .context("archive-v4 example omits streams")?;
+    let empty_digest = format!("sha256:{}", crate::evidence::sha256_bytes(&[]));
+    for entity in WorkspaceExportEntity::ALL[WorkspaceExportEntity::V4.len()..]
+        .iter()
+        .map(|entity| entity.as_str())
+    {
+        streams.push(serde_json::json!({
+            "entity": entity,
+            "row_count": 0,
+            "byte_length": 0,
+            "digest": empty_digest,
+        }));
+    }
+    let manifest = example
+        .get("manifest")
+        .context("archive-v4 example omits manifest")?;
+    let canonical = serde_json_canonicalizer::to_vec(manifest)
+        .context("archive-v5 example manifest is not canonicalizable")?;
     example["manifest_digest"] = Value::String(format!(
         "sha256:{}",
         crate::evidence::sha256_bytes(&canonical)
@@ -1627,7 +1785,7 @@ fn enrich_discovery_collection_schema(
         ),
         (
             "/components/schemas/CapabilitySurfaceDispositionDto/properties/body",
-            vec!["b0", "b1", "b2", "b3", "c1", "m1", "m2"],
+            vec!["b0", "b1", "b2", "b3", "c1", "m1", "m2", "m3"],
         ),
         (
             "/components/schemas/CapabilityUatDto/properties/relationship",
@@ -1635,7 +1793,7 @@ fn enrich_discovery_collection_schema(
         ),
         (
             "/components/schemas/CapabilityUatDto/properties/owner_body",
-            vec!["b1", "b2", "b3", "c1", "m1", "m2"],
+            vec!["b1", "b2", "b3", "c1", "m1", "m2", "m3"],
         ),
     ] {
         openapi
@@ -1708,6 +1866,20 @@ fn enrich_production_openapi(
     validate_production_security_schemes(openapi)?;
     enrich_production_health_openapi(workspace_root, openapi, public_registry)?;
     enrich_production_integration_status_openapi(workspace_root, openapi, public_registry)?;
+    let policy_changes = openapi
+        .pointer_mut("/components/schemas/AnimeGroupingPolicyChangeDto/oneOf")
+        .and_then(Value::as_array_mut)
+        .context("AnimeGroupingPolicyChangeDto variants are absent")?;
+    ensure!(
+        policy_changes.len() == 3,
+        "AnimeGroupingPolicyChangeDto variant count changed"
+    );
+    for variant in policy_changes {
+        variant
+            .as_object_mut()
+            .context("anime grouping policy change variant must be an object")?
+            .insert("additionalProperties".to_owned(), Value::Bool(false));
+    }
     let capabilities = array_at(public_registry, "/capabilities")?;
     for expected in PRODUCTION_BOOTSTRAP_OPERATIONS
         .into_iter()
@@ -2107,7 +2279,8 @@ fn validate_production_operation_security(
         | "register_namespace"
         | "set_tracking_disposition"
         | "replace_nuvio_collections"
-        | "clear_nuvio_collections" => Some(serde_json::json!([
+        | "clear_nuvio_collections"
+        | "apply_anime_grouping_policy_change" => Some(serde_json::json!([
             {"credential_bearer": []},
             {
                 "browser_session_cookie": [],
@@ -2133,7 +2306,12 @@ fn validate_production_operation_security(
     }
     let expected = match operation_id {
         "initialize_node" => vec!["bootstrap_bearer"],
-        "list_records" | "list_tracking_dispositions" | "get_nuvio_collections" => {
+        "list_records"
+        | "list_tracking_dispositions"
+        | "get_nuvio_collections"
+        | "resolve_identity_route"
+        | "read_anime_grouping_policy"
+        | "preview_anime_grouping_policy_change" => {
             vec!["credential_bearer", "browser_session_cookie"]
         }
         "list_providers"
@@ -2550,6 +2728,17 @@ fn resolve_required_binding(
                     "production metadata smoke is absent"
                 );
             }
+            "package-smoke:production-identity-routing" => {
+                let smoke = fs::read_to_string(workspace_root.join("scripts/smoke-native.sh"))?;
+                ensure!(
+                    smoke.contains("/identity-route?intent=metadata_lookup&target_provider=tmdb")
+                        && smoke.contains("/api/v1/profile/anime-grouping-policy?scope=profile")
+                        && smoke.contains("/api/v1/profile/anime-grouping-policy/preview")
+                        && smoke.contains("\"expected_revision\": 0")
+                        && smoke.contains("immutable receipt"),
+                    "production identity-routing smoke is absent"
+                );
+            }
             "package-smoke:c1-operator-bootstrap" => {
                 let smoke = fs::read_to_string(workspace_root.join("scripts/smoke-oci.sh"))?;
                 ensure!(
@@ -2630,6 +2819,27 @@ fn resolve_required_binding(
                         && settings.contains("metadata-projection-policy")
                         && settings.contains("configure-metadata-projection"),
                     "metadata UI does not cover projection, provenance, attribution, freshness, offline state, refresh, and profile policy"
+                );
+            }
+            "ui:anime-grouping-policy" => {
+                let types = fs::read_to_string(workspace_root.join("packages/ui/src/types.ts"))?;
+                let host = fs::read_to_string(workspace_root.join("apps/web/src/web-host.ts"))?;
+                let settings = fs::read_to_string(
+                    workspace_root.join("packages/ui/src/runtime-settings-view.svelte"),
+                )?;
+                ensure!(
+                    types.contains("readAnimeGroupingPolicy?")
+                        && types.contains("previewAnimeGroupingPolicyChange?")
+                        && types.contains("applyAnimeGroupingPolicyChange?")
+                        && host.contains("readAnimeGroupingPolicy: (query)")
+                        && host.contains("previewAnimeGroupingPolicyChange: (request)")
+                        && host.contains("applyAnimeGroupingPolicyChange: (request)")
+                        && settings.contains("data-testid=\"anime-grouping-policy\"")
+                        && settings.contains("data-testid=\"preview-anime-grouping-policy\"")
+                        && settings.contains("data-testid=\"apply-anime-grouping-policy\"")
+                        && settings.contains("record.proposed_route")
+                        && settings.contains("Application clients can keep a separate override"),
+                    "anime grouping UI does not expose governed read, preview, apply, route evidence, and application-client semantics"
                 );
             }
             _ => anyhow::bail!("unknown UI binding"),
@@ -3277,6 +3487,14 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         "AccessCeremonyStateDto",
         "AccessCeremonyFailureDto",
         "AccessFirstRunStepKeyDto",
+        "ResolutionIntentDto",
+        "IdentityRouteStatusDto",
+        "IdentityRouteKindDto",
+        "IdentityAssertionRelationDto",
+        "AnimeGroupingPreferenceDto",
+        "AnimeGroupingPolicyScopeKindDto",
+        "AnimeGroupingPolicySourceDto",
+        "AnimeGroupingPolicyChangeDto",
     ] {
         let schema = schemas
             .get(name)
@@ -3335,6 +3553,18 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         "MetadataOverrideMutationDto",
         "ConfigureMetadataProjectionRequest",
         "MetadataProjectionConfigurationResponse",
+        "IdentityIdentifierDto",
+        "AcceptedIdentityRouteAssertionDto",
+        "IdentityRouteDto",
+        "ResolveIdentityRouteResponse",
+        "AnimeGroupingPolicyScopeDto",
+        "AnimeGroupingPolicyDto",
+        "ReadAnimeGroupingPolicyResponse",
+        "PreviewAnimeGroupingPolicyChangeRequest",
+        "AnimeGroupingRecordPreviewDto",
+        "AnimeGroupingPolicyImpactResponse",
+        "ApplyAnimeGroupingPolicyChangeRequest",
+        "ApplyAnimeGroupingPolicyChangeResponse",
         "StartTrailBaseSignInRequest",
         "StartTrailBaseSignInResponse",
         "TrailBaseContinuationChoiceDto",
@@ -3533,6 +3763,30 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         (
             "parseMetadataProjectionConfigurationResponse",
             "MetadataProjectionConfigurationResponse",
+        ),
+        (
+            "parseResolveIdentityRouteResponse",
+            "ResolveIdentityRouteResponse",
+        ),
+        (
+            "parseReadAnimeGroupingPolicyResponse",
+            "ReadAnimeGroupingPolicyResponse",
+        ),
+        (
+            "parsePreviewAnimeGroupingPolicyChangeRequest",
+            "PreviewAnimeGroupingPolicyChangeRequest",
+        ),
+        (
+            "parseAnimeGroupingPolicyImpactResponse",
+            "AnimeGroupingPolicyImpactResponse",
+        ),
+        (
+            "parseApplyAnimeGroupingPolicyChangeRequest",
+            "ApplyAnimeGroupingPolicyChangeRequest",
+        ),
+        (
+            "parseApplyAnimeGroupingPolicyChangeResponse",
+            "ApplyAnimeGroupingPolicyChangeResponse",
         ),
         (
             "parseStartTrailBaseSignInRequest",
@@ -4892,6 +5146,8 @@ mod tests {
             Path::new(PORTABILITY_V3_EXAMPLE_PATH),
             Path::new(PORTABILITY_V4_SCHEMA_PATH),
             Path::new(PORTABILITY_V4_EXAMPLE_PATH),
+            Path::new(PORTABILITY_V5_SCHEMA_PATH),
+            Path::new(PORTABILITY_V5_EXAMPLE_PATH),
             Path::new(SDK_GENERATED_PATH),
             Path::new(RUST_CAPABILITY_IDS_PATH),
         ]
@@ -4923,7 +5179,7 @@ mod tests {
     }
 
     #[test]
-    fn archive_v3_and_v4_entity_enums_preserve_their_frozen_prefixes() {
+    fn archive_v3_v4_and_v5_entity_enums_preserve_their_frozen_prefixes() {
         for (schema, entities) in [
             (
                 portability_v3_schema().expect("archive-v3 schema"),
@@ -4931,6 +5187,10 @@ mod tests {
             ),
             (
                 portability_v4_schema().expect("archive-v4 schema"),
+                WorkspaceExportEntity::V4.as_slice(),
+            ),
+            (
+                portability_v5_schema().expect("archive-v5 schema"),
                 WorkspaceExportEntity::ALL.as_slice(),
             ),
         ] {

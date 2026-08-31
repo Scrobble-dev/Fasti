@@ -1,6 +1,6 @@
 use crate::{
-    AnimeGroupingRecordPreview, ApplicationResult, ProviderId, PurposeIdentityRoutePlan,
-    RequestAccessContext,
+    AnimeGroupingRecordPreview, ApplicationAccessContext, ApplicationResult, ProviderId,
+    PurposeIdentityRoutePlan,
 };
 use fasti_domain::{
     AnimeGroupingPreference, ClientId, OperationId, ProfileId, RecordId, RequestCorrelationId,
@@ -58,23 +58,23 @@ impl IdentityImpactPageLimit {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolveIdentityRouteQuery {
     correlation_id: RequestCorrelationId,
-    access: RequestAccessContext,
+    access: ApplicationAccessContext,
     record_id: RecordId,
     intent: ResolutionIntent,
     target_provider: ProviderId,
 }
 
 impl ResolveIdentityRouteQuery {
-    pub const fn new(
+    pub fn new(
         correlation_id: RequestCorrelationId,
-        access: RequestAccessContext,
+        access: impl Into<ApplicationAccessContext>,
         record_id: RecordId,
         intent: ResolutionIntent,
         target_provider: ProviderId,
     ) -> Self {
         Self {
             correlation_id,
-            access,
+            access: access.into(),
             record_id,
             intent,
             target_provider,
@@ -85,7 +85,7 @@ impl ResolveIdentityRouteQuery {
         self.correlation_id
     }
 
-    pub const fn access(&self) -> &RequestAccessContext {
+    pub const fn access(&self) -> &ApplicationAccessContext {
         &self.access
     }
 
@@ -102,7 +102,7 @@ impl ResolveIdentityRouteQuery {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IdentityRouteResultError;
 
 impl fmt::Display for IdentityRouteResultError {
@@ -137,22 +137,22 @@ impl ResolveIdentityRouteOutcome {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReadAnimeGroupingPolicyQuery {
     correlation_id: RequestCorrelationId,
-    access: RequestAccessContext,
+    access: ApplicationAccessContext,
     scope: AnimeGroupingPolicyScope,
 }
 
 impl ReadAnimeGroupingPolicyQuery {
-    pub const fn new(
+    pub fn new(
         correlation_id: RequestCorrelationId,
-        access: RequestAccessContext,
+        access: impl Into<ApplicationAccessContext>,
         scope: AnimeGroupingPolicyScope,
     ) -> Self {
         Self {
             correlation_id,
-            access,
+            access: access.into(),
             scope,
         }
     }
@@ -161,7 +161,7 @@ impl ReadAnimeGroupingPolicyQuery {
         self.correlation_id
     }
 
-    pub const fn access(&self) -> &RequestAccessContext {
+    pub const fn access(&self) -> &ApplicationAccessContext {
         &self.access
     }
 
@@ -238,10 +238,10 @@ fn policy_state_matches_change(
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreviewAnimeGroupingPolicyChangeQuery {
     correlation_id: RequestCorrelationId,
-    access: RequestAccessContext,
+    access: ApplicationAccessContext,
     scope: AnimeGroupingPolicyScope,
     change: AnimeGroupingPolicyChange,
     after_record_id: Option<RecordId>,
@@ -251,7 +251,7 @@ pub struct PreviewAnimeGroupingPolicyChangeQuery {
 impl PreviewAnimeGroupingPolicyChangeQuery {
     pub fn try_new(
         correlation_id: RequestCorrelationId,
-        access: RequestAccessContext,
+        access: impl Into<ApplicationAccessContext>,
         scope: AnimeGroupingPolicyScope,
         change: AnimeGroupingPolicyChange,
         after_record_id: Option<RecordId>,
@@ -262,7 +262,7 @@ impl PreviewAnimeGroupingPolicyChangeQuery {
         }
         Ok(Self {
             correlation_id,
-            access,
+            access: access.into(),
             scope,
             change,
             after_record_id,
@@ -274,7 +274,7 @@ impl PreviewAnimeGroupingPolicyChangeQuery {
         self.correlation_id
     }
 
-    pub const fn access(&self) -> &RequestAccessContext {
+    pub const fn access(&self) -> &ApplicationAccessContext {
         &self.access
     }
 
@@ -298,7 +298,7 @@ impl PreviewAnimeGroupingPolicyChangeQuery {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApplyAnimeGroupingPolicyChangeCommand {
     correlation_id: RequestCorrelationId,
-    access: RequestAccessContext,
+    access: ApplicationAccessContext,
     scope: AnimeGroupingPolicyScope,
     operation_id: OperationId,
     semantic_digest: Sha256Digest,
@@ -309,7 +309,7 @@ pub struct ApplyAnimeGroupingPolicyChangeCommand {
 impl ApplyAnimeGroupingPolicyChangeCommand {
     pub fn try_new(
         correlation_id: RequestCorrelationId,
-        access: RequestAccessContext,
+        access: impl Into<ApplicationAccessContext>,
         scope: AnimeGroupingPolicyScope,
         operation_id: OperationId,
         semantic_digest: Sha256Digest,
@@ -329,7 +329,7 @@ impl ApplyAnimeGroupingPolicyChangeCommand {
         }
         Ok(Self {
             correlation_id,
-            access,
+            access: access.into(),
             scope,
             operation_id,
             semantic_digest,
@@ -342,7 +342,7 @@ impl ApplyAnimeGroupingPolicyChangeCommand {
         self.correlation_id
     }
 
-    pub const fn access(&self) -> &RequestAccessContext {
+    pub const fn access(&self) -> &ApplicationAccessContext {
         &self.access
     }
 
@@ -427,7 +427,18 @@ impl ReadAnimeGroupingPolicyOutcome {
         query: &ReadAnimeGroupingPolicyQuery,
         policy: AnimeGroupingPolicyView,
     ) -> Result<Self, AnimeGroupingPolicyResultError> {
-        if policy.profile_id() != query.access().profile_id() || policy.scope() != query.scope() {
+        let ApplicationAccessContext::Credential(access) = query.access() else {
+            return Err(AnimeGroupingPolicyResultError);
+        };
+        Self::try_new_authorized(access.profile_id(), query, policy)
+    }
+
+    pub fn try_new_authorized(
+        profile_id: ProfileId,
+        query: &ReadAnimeGroupingPolicyQuery,
+        policy: AnimeGroupingPolicyView,
+    ) -> Result<Self, AnimeGroupingPolicyResultError> {
+        if policy.profile_id() != profile_id || policy.scope() != query.scope() {
             return Err(AnimeGroupingPolicyResultError);
         }
         Ok(Self { policy })
@@ -454,6 +465,38 @@ pub struct AnimeGroupingPolicyImpact {
 impl AnimeGroupingPolicyImpact {
     #[allow(clippy::too_many_arguments)]
     pub fn try_new(
+        query: &PreviewAnimeGroupingPolicyChangeQuery,
+        current_policy: AnimeGroupingPolicyView,
+        proposed_preference: AnimeGroupingPreference,
+        proposed_source: AnimeGroupingPolicySource,
+        total_records: u64,
+        affected_records: u64,
+        unresolved_routes: u64,
+        possible_season_regroupings: u64,
+        records: Vec<AnimeGroupingRecordPreview>,
+        next_after_record_id: Option<RecordId>,
+    ) -> Result<Self, AnimeGroupingPolicyResultError> {
+        let ApplicationAccessContext::Credential(access) = query.access() else {
+            return Err(AnimeGroupingPolicyResultError);
+        };
+        Self::try_new_authorized(
+            access.profile_id(),
+            query,
+            current_policy,
+            proposed_preference,
+            proposed_source,
+            total_records,
+            affected_records,
+            unresolved_routes,
+            possible_season_regroupings,
+            records,
+            next_after_record_id,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn try_new_authorized(
+        profile_id: ProfileId,
         query: &PreviewAnimeGroupingPolicyChangeQuery,
         policy: AnimeGroupingPolicyView,
         proposed_preference: AnimeGroupingPreference,
@@ -491,7 +534,7 @@ impl AnimeGroupingPolicyImpact {
             .iter()
             .filter(|record| record.possible_season_regrouping())
             .count() as u64;
-        if policy.profile_id() != query.access().profile_id()
+        if policy.profile_id() != profile_id
             || policy.scope() != query.scope()
             || !policy_state_matches_change(
                 query.scope(),
@@ -588,13 +631,39 @@ impl ApplyAnimeGroupingPolicyChangeOutcome {
         unresolved_routes: u64,
         possible_season_regroupings: u64,
     ) -> Result<Self, AnimeGroupingPolicyResultError> {
+        let ApplicationAccessContext::Credential(access) = command.access() else {
+            return Err(AnimeGroupingPolicyResultError);
+        };
+        Self::try_new_authorized(
+            access.profile_id(),
+            command,
+            previous_preference,
+            previous_source,
+            policy,
+            affected_records,
+            unresolved_routes,
+            possible_season_regroupings,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn try_new_authorized(
+        profile_id: ProfileId,
+        command: &ApplyAnimeGroupingPolicyChangeCommand,
+        previous_preference: AnimeGroupingPreference,
+        previous_source: AnimeGroupingPolicySource,
+        policy: AnimeGroupingPolicyView,
+        affected_records: u64,
+        unresolved_routes: u64,
+        possible_season_regroupings: u64,
+    ) -> Result<Self, AnimeGroupingPolicyResultError> {
         let rolled_back_operation_id = match command.change() {
             AnimeGroupingPolicyChange::Rollback {
                 applied_operation_id,
             } => Some(applied_operation_id),
             AnimeGroupingPolicyChange::Set(_) | AnimeGroupingPolicyChange::InheritProfile => None,
         };
-        if policy.profile_id() != command.access().profile_id()
+        if policy.profile_id() != profile_id
             || policy.scope() != command.scope()
             || !policy_state_matches_change(
                 command.scope(),
@@ -689,6 +758,7 @@ pub trait IdentityRoutingPort: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::RequestAccessContext;
 
     fn access(profile_id: ProfileId) -> RequestAccessContext {
         RequestAccessContext::new(

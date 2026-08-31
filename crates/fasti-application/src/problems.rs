@@ -696,7 +696,9 @@ impl ProblemCode {
             | Self::StorageUnavailable => ContractState::Finalized,
             _ => match self.introduced_in() {
                 CapabilityBody::B0 | CapabilityBody::B1 => ContractState::Finalized,
-                CapabilityBody::M1 | CapabilityBody::M2 => ContractState::Finalized,
+                CapabilityBody::M1 | CapabilityBody::M2 | CapabilityBody::M3 => {
+                    ContractState::Finalized
+                }
                 CapabilityBody::B2 | CapabilityBody::B3 | CapabilityBody::C1 => {
                     ContractState::Reserved
                 }

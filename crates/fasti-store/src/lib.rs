@@ -10,6 +10,7 @@ mod crypto;
 mod evidence;
 mod human_access;
 mod identity;
+mod identity_routing;
 mod kernel;
 mod metadata;
 mod nuvio_collections;

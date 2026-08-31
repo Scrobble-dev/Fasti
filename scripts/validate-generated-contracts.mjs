@@ -168,6 +168,8 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     "/api/v1/namespaces",
     "/api/v1/node/initialization",
     "/api/v1/observations",
+    "/api/v1/profile/anime-grouping-policy",
+    "/api/v1/profile/anime-grouping-policy/preview",
     "/api/v1/profile/metadata-projection",
     "/api/v1/profile/nuvio-collections",
     "/api/v1/profile/record-tracking-dispositions",
@@ -178,6 +180,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     "/api/v1/providers/{provider_id}/health",
     "/api/v1/records",
     "/api/v1/records/identifiers",
+    "/api/v1/records/{record_id}/identity-route",
     "/api/v1/records/{record_id}/metadata-projection",
   ]);
   assert.deepEqual(Object.keys(openapi.components.securitySchemes), [
@@ -258,7 +261,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
 
   assert.equal(registry.contract_version, "1.0.0");
   assert.equal(registry.capability_base_uri.endsWith("/v1/"), true);
-  assert.equal(registry.capabilities.length, 48);
+  assert.equal(registry.capabilities.length, 52);
   const capabilityIds = registry.capabilities.map(({ id }) => id);
   assert.equal(new Set(capabilityIds).size, capabilityIds.length);
   assert.deepEqual(capabilityIds, [...capabilityIds].sort());
@@ -288,6 +291,12 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     }
     if (capability.id.startsWith("provider.")) return "m1_providers";
     if (capability.id.startsWith("metadata.")) return "m2_metadata";
+    if (
+      capability.id === "identity.route.resolve" ||
+      capability.id.startsWith("profile.anime_grouping_policy.")
+    ) {
+      return "m3_identity_routing";
+    }
     if (
       capability.id.startsWith("profile.record.tracking_disposition.") ||
       capability.id.startsWith("profile.nuvio_collections.")
@@ -477,6 +486,10 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     "get_nuvio_collections",
     "replace_nuvio_collections",
     "clear_nuvio_collections",
+    "resolve_identity_route",
+    "read_anime_grouping_policy",
+    "preview_anime_grouping_policy_change",
+    "apply_anime_grouping_policy_change",
   ]);
   const hybridMutations = new Set([
     "submit_observation",
@@ -486,6 +499,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     "set_tracking_disposition",
     "replace_nuvio_collections",
     "clear_nuvio_collections",
+    "apply_anime_grouping_policy_change",
   ]);
 
   for (const pathItem of Object.values(openapi.paths)) {
@@ -788,11 +802,13 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
                   ? "package-smoke:production-providers"
                   : capability.id.startsWith("metadata.")
                     ? "package-smoke:production-metadata"
-                    : ["client.enroll", "node.initialize"].includes(
-                          capability.id,
-                        )
-                      ? "package-smoke:production-bootstrap"
-                      : "package-smoke:b1-conformance-fixture",
+                    : capability.surface_profile === "m3_identity_routing"
+                      ? "package-smoke:production-identity-routing"
+                      : ["client.enroll", "node.initialize"].includes(
+                            capability.id,
+                          )
+                        ? "package-smoke:production-bootstrap"
+                        : "package-smoke:b1-conformance-fixture",
           );
           break;
         case "ui":
@@ -804,7 +820,9 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
                 ? "ui:provider-settings"
                 : capability.id.startsWith("metadata.")
                   ? "ui:metadata-provenance"
-                  : `ui:${capability.id}`,
+                  : capability.surface_profile === "m3_identity_routing"
+                    ? "ui:anime-grouping-policy"
+                    : `ui:${capability.id}`,
           );
           break;
         default:

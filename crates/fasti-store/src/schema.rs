@@ -2385,6 +2385,9 @@ fn migrate_v15(connection: &Connection) -> Result<()> {
     let transaction = Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
     transaction.execute_batch(
         r#"
+        CREATE INDEX records_workspace_record_idx
+            ON records(workspace_id, record_id);
+
         CREATE TABLE identity_assertions (
             assertion_id TEXT PRIMARY KEY CHECK (
                 length(assertion_id) = 36
@@ -2664,6 +2667,7 @@ fn migrate_v15(connection: &Connection) -> Result<()> {
             ),
             created_at TEXT NOT NULL,
             PRIMARY KEY (workspace_id, actor_client_id, operation_id),
+            UNIQUE (workspace_id, operation_id),
             CHECK (
                 (scope_kind = 'profile' AND scope_client_id IS NULL)
                 OR (scope_kind = 'client' AND scope_client_id IS NOT NULL)
@@ -3855,6 +3859,30 @@ mod tests {
             )
             .expect("count M3 revision triggers");
         assert_eq!(revision_triggers, 15);
+        let records_index: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_schema WHERE type = 'index' AND name = 'records_workspace_record_idx'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count Record keyset index");
+        assert_eq!(records_index, 1);
+        let operation_uniqueness: i64 = connection
+            .query_row(
+                r#"
+                SELECT COUNT(*)
+                FROM pragma_index_list('anime_grouping_policy_receipts') AS index_list
+                WHERE index_list."unique" = 1
+                  AND (
+                    SELECT group_concat(index_info.name, ',')
+                    FROM pragma_index_info(index_list.name) AS index_info
+                  ) = 'workspace_id,operation_id'
+                "#,
+                [],
+                |row| row.get(0),
+            )
+            .expect("inspect operation uniqueness");
+        assert_eq!(operation_uniqueness, 1);
     }
 
     #[test]

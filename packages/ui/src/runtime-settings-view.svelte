@@ -20,8 +20,11 @@
   import AccountSecurityView from "./account-security-view.svelte";
   import NetworkSettings from "./network-settings.svelte";
   import { hostProblemText } from "./host-problem.js";
+  import { newOperationId } from "./operation-id.js";
   import type {
     AccessProjectionResponse,
+    AnimeGroupingPolicyImpactResponse,
+    AnimeGroupingPreferenceDto,
     CustomFieldDefinition,
     CustomMediaTypeDefinition,
     ConfigureMetadataProjectionRequest,
@@ -292,6 +295,27 @@
   let metadataPolicyNotice = $state<string>();
   let loadedMetadataPolicyRecordId = "";
   let metadataPolicyGeneration = 0;
+  let animePolicy =
+    $state<
+      Awaited<ReturnType<NonNullable<WorkbenchHost["readAnimeGroupingPolicy"]>>>
+    >();
+  let animePolicyDraft = $state<AnimeGroupingPreferenceDto>("automatic");
+  let animePolicyPreview = $state<AnimeGroupingPolicyImpactResponse>();
+  let animePolicyLoading = $state(false);
+  let animePolicySaving = $state(false);
+  let animePolicyProblem = $state<string>();
+  let animePolicyNotice = $state<string>();
+  let animePolicyOperationId = "";
+  let animePolicyGeneration = 0;
+
+  const animeGroupingPreferences = [
+    ["automatic", "Automatic"],
+    ["group_by_tv_work", "Group releases by TV work"],
+    ["keep_mal_releases_separate", "Keep MyAnimeList releases separate"],
+    ["keep_kitsu_releases_separate", "Keep Kitsu releases separate"],
+  ] as const satisfies ReadonlyArray<
+    readonly [AnimeGroupingPreferenceDto, string]
+  >;
 
   const metadataFieldGroups = [
     "artwork",
@@ -338,6 +362,7 @@
         activeNuvioIdentity = identity;
         resetNuvioProfileState();
         resetMetadataPolicyState();
+        resetAnimePolicyState();
         resetProviderState();
       }
       if (tab) {
@@ -354,6 +379,9 @@
           policyRecordId !== loadedMetadataPolicyRecordId
         ) {
           void loadMetadataPolicy(policyRecordId);
+        }
+        if (tab === "preferences" && canLoadProfileData && !animePolicy) {
+          void loadAnimePolicy();
         }
       }
     });
@@ -485,6 +513,158 @@
     metadataPolicySaving = false;
     metadataPolicyProblem = undefined;
     metadataPolicyNotice = undefined;
+  }
+
+  function resetAnimePolicyState(): void {
+    animePolicyGeneration += 1;
+    animePolicy = undefined;
+    animePolicyDraft = "automatic";
+    animePolicyPreview = undefined;
+    animePolicyLoading = false;
+    animePolicySaving = false;
+    animePolicyProblem = undefined;
+    animePolicyNotice = undefined;
+    animePolicyOperationId = "";
+  }
+
+  async function loadAnimePolicy(restoreRetryFocus = false): Promise<void> {
+    const generation = ++animePolicyGeneration;
+    const identity = profileDataIdentity;
+    animePolicyProblem = undefined;
+    animePolicyNotice = undefined;
+    if (!host.readAnimeGroupingPolicy) {
+      animePolicyProblem =
+        "This host does not expose the governed anime grouping policy.";
+      return;
+    }
+    animePolicyLoading = true;
+    try {
+      const response = await host.readAnimeGroupingPolicy({
+        scope: "profile",
+        client_id: null,
+      });
+      if (
+        generation !== animePolicyGeneration ||
+        identity !== profileDataIdentity
+      )
+        return;
+      animePolicy = response;
+      animePolicyDraft = response.policy.preference;
+      animePolicyPreview = undefined;
+      animePolicyOperationId = "";
+    } catch (error) {
+      if (
+        generation !== animePolicyGeneration ||
+        identity !== profileDataIdentity
+      )
+        return;
+      animePolicyProblem = hostProblemText(
+        error,
+        "Fasti could not load this profile's anime grouping policy.",
+      );
+    } finally {
+      if (
+        generation === animePolicyGeneration &&
+        identity === profileDataIdentity
+      ) {
+        animePolicyLoading = false;
+        if (restoreRetryFocus) {
+          await tick();
+          document.getElementById("retry-anime-grouping-policy")?.focus();
+        }
+      }
+    }
+  }
+
+  async function previewAnimePolicy(): Promise<void> {
+    if (!host.previewAnimeGroupingPolicyChange || animePolicyLoading) return;
+    const generation = ++animePolicyGeneration;
+    const identity = profileDataIdentity;
+    animePolicyLoading = true;
+    animePolicyProblem = undefined;
+    animePolicyNotice = undefined;
+    animePolicyOperationId = "";
+    try {
+      const preview = await host.previewAnimeGroupingPolicyChange({
+        scope: { kind: "profile", client_id: null },
+        change: { kind: "set", preference: animePolicyDraft },
+        after_record_id: null,
+        limit: 100,
+      });
+      if (
+        generation !== animePolicyGeneration ||
+        identity !== profileDataIdentity
+      )
+        return;
+      animePolicyPreview = preview;
+    } catch (error) {
+      if (
+        generation !== animePolicyGeneration ||
+        identity !== profileDataIdentity
+      )
+        return;
+      animePolicyPreview = undefined;
+      animePolicyProblem = hostProblemText(
+        error,
+        "Fasti could not preview this anime grouping change.",
+      );
+    } finally {
+      if (
+        generation === animePolicyGeneration &&
+        identity === profileDataIdentity
+      )
+        animePolicyLoading = false;
+    }
+  }
+
+  async function applyAnimePolicy(): Promise<void> {
+    if (
+      !host.applyAnimeGroupingPolicyChange ||
+      !animePolicy ||
+      !animePolicyPreview ||
+      animePolicySaving
+    )
+      return;
+    const generation = ++animePolicyGeneration;
+    const identity = profileDataIdentity;
+    animePolicySaving = true;
+    animePolicyProblem = undefined;
+    animePolicyNotice = undefined;
+    animePolicyOperationId ||= newOperationId();
+    try {
+      const applied = await host.applyAnimeGroupingPolicyChange({
+        operation_id: animePolicyOperationId,
+        scope: { kind: "profile", client_id: null },
+        expected_revision: animePolicy.policy.revision,
+        change: { kind: "set", preference: animePolicyDraft },
+      });
+      if (
+        generation !== animePolicyGeneration ||
+        identity !== profileDataIdentity
+      )
+        return;
+      animePolicy = { policy: applied.policy };
+      animePolicyDraft = applied.policy.preference;
+      animePolicyPreview = undefined;
+      animePolicyOperationId = "";
+      animePolicyNotice = `Saved the profile policy. ${applied.affected_records.toLocaleString()} Records changed route.`;
+    } catch (error) {
+      if (
+        generation !== animePolicyGeneration ||
+        identity !== profileDataIdentity
+      )
+        return;
+      animePolicyProblem = hostProblemText(
+        error,
+        "Fasti could not save this anime grouping policy.",
+      );
+    } finally {
+      if (
+        generation === animePolicyGeneration &&
+        identity === profileDataIdentity
+      )
+        animePolicySaving = false;
+    }
   }
 
   function resetProviderState(): void {
@@ -1431,6 +1611,147 @@
       {:else if active === "preferences"}
         <section aria-labelledby="preferences-settings-title">
           <h2 id="preferences-settings-title">Preferences & Metadata</h2>
+          <section
+            class="card metadata-policy-card"
+            data-testid="anime-grouping-policy"
+            aria-labelledby="anime-grouping-policy-title"
+          >
+            <div class="card-header">
+              <div>
+                <h3 id="anime-grouping-policy-title" class="card-title">
+                  Anime grouping
+                </h3>
+                <p class="card-subtitle text-secondary">
+                  Set the profile default used for identity routes and Nuvio
+                  exports. Application clients can keep a separate override
+                  through the same governed API.
+                </p>
+              </div>
+            </div>
+            <div class="card-body">
+              {#if animePolicyLoading && !animePolicyPreview}
+                <p role="status">Loading the anime grouping policy…</p>
+              {:else if animePolicyProblem && !animePolicy}
+                <div class="alert alert-danger" role="alert">
+                  <p>{animePolicyProblem}</p>
+                  <button
+                    id="retry-anime-grouping-policy"
+                    type="button"
+                    class="btn btn-outline-danger"
+                    onclick={() => void loadAnimePolicy(true)}
+                  >
+                    Retry policy read
+                  </button>
+                </div>
+              {:else if animePolicy}
+                <div class="metadata-policy-grid">
+                  <div>
+                    <label class="form-label" for="anime-grouping-preference"
+                      >Profile default</label
+                    >
+                    <select
+                      id="anime-grouping-preference"
+                      class="form-select"
+                      value={animePolicyDraft}
+                      disabled={animePolicySaving}
+                      onchange={(event) => {
+                        animePolicyDraft = event.currentTarget
+                          .value as AnimeGroupingPreferenceDto;
+                        animePolicyPreview = undefined;
+                        animePolicyOperationId = "";
+                        animePolicyNotice = undefined;
+                      }}
+                    >
+                      {#each animeGroupingPreferences as [value, label]}
+                        <option {value}>{label}</option>
+                      {/each}
+                    </select>
+                  </div>
+                  <div class="metadata-policy-actions">
+                    <button
+                      type="button"
+                      class="btn btn-outline-primary"
+                      data-testid="preview-anime-grouping-policy"
+                      disabled={!host.previewAnimeGroupingPolicyChange ||
+                        animePolicyLoading ||
+                        animePolicySaving}
+                      onclick={() => void previewAnimePolicy()}
+                    >
+                      {animePolicyLoading ? "Reviewing…" : "Review impact"}
+                    </button>
+                    <span class="text-secondary"
+                      >Revision {animePolicy.policy.revision.toLocaleString()}</span
+                    >
+                  </div>
+                </div>
+
+                {#if animePolicyPreview}
+                  <div class="alert alert-info mt-3" role="status">
+                    <strong
+                      >{animePolicyPreview.affected_records.toLocaleString()}
+                      affected Records.</strong
+                    >
+                    {animePolicyPreview.unresolved_routes.toLocaleString()}
+                    unresolved routes and
+                    {animePolicyPreview.possible_season_regroupings.toLocaleString()}
+                    possible season regroupings.
+                  </div>
+                  {#if animePolicyPreview.records.length > 0}
+                    <div class="table-responsive">
+                      <table class="table table-vcenter">
+                        <caption>
+                          First {animePolicyPreview.records.length.toLocaleString()}
+                          affected Records from a stable, paged preview
+                        </caption>
+                        <thead>
+                          <tr>
+                            <th scope="col">Record</th>
+                            <th scope="col">Proposed route</th>
+                            <th scope="col">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {#each animePolicyPreview.records as record}
+                            <tr>
+                              <td><code>{record.record_id}</code></td>
+                              <td>
+                                {record.proposed_route
+                                  ? `${record.proposed_route.identifier.namespace}:${record.proposed_route.identifier.value}`
+                                  : "No route"}
+                              </td>
+                              <td
+                                >{record.proposed_status.replaceAll(
+                                  "_",
+                                  " ",
+                                )}</td
+                              >
+                            </tr>
+                          {/each}
+                        </tbody>
+                      </table>
+                    </div>
+                  {/if}
+                  <button
+                    type="button"
+                    class="btn btn-primary"
+                    data-testid="apply-anime-grouping-policy"
+                    disabled={!host.applyAnimeGroupingPolicyChange ||
+                      animePolicySaving}
+                    onclick={() => void applyAnimePolicy()}
+                  >
+                    {animePolicySaving ? "Saving…" : "Apply profile policy"}
+                  </button>
+                {/if}
+
+                {#if animePolicyNotice}
+                  <p class="notice" role="status">{animePolicyNotice}</p>
+                {/if}
+                {#if animePolicyProblem}
+                  <p class="problem" role="alert">{animePolicyProblem}</p>
+                {/if}
+              {/if}
+            </div>
+          </section>
           <section
             class="card metadata-policy-card"
             data-testid="metadata-projection-policy"

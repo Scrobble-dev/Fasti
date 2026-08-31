@@ -14,6 +14,9 @@ import {
   parseCreateRecordResponse,
   parseConfigureProviderCredentialRequest,
   parseConfigureMetadataProjectionRequest,
+  parseApplyAnimeGroupingPolicyChangeRequest,
+  parseApplyAnimeGroupingPolicyChangeResponse,
+  parseAnimeGroupingPolicyImpactResponse,
   parseCompleteTrailBaseContinuationRequest,
   parseEnrollFirstClientRequest,
   parseEnrollFirstClientResponse,
@@ -34,6 +37,9 @@ import {
   parseProviderHealthResponse,
   parseRefreshMetadataClaimsRequest,
   parseRefreshMetadataClaimsResponse,
+  parseResolveIdentityRouteResponse,
+  parsePreviewAnimeGroupingPolicyChangeRequest,
+  parseReadAnimeGroupingPolicyResponse,
   parseReadBrowserSessionResponse,
   parseReadTrailBaseContinuationResponse,
   parseRevokeBrowserSessionsResponse,
@@ -63,6 +69,9 @@ import {
   type CreateRecordResponse,
   type ConfigureProviderCredentialRequest,
   type ConfigureMetadataProjectionRequest,
+  type ApplyAnimeGroupingPolicyChangeRequest,
+  type ApplyAnimeGroupingPolicyChangeResponse,
+  type AnimeGroupingPolicyImpactResponse,
   type CompleteTrailBaseContinuationRequest,
   type EnrollFirstClientRequest,
   type EnrollFirstClientResponse,
@@ -85,6 +94,10 @@ import {
   type ProviderHealthResponse,
   type RefreshMetadataClaimsRequest,
   type RefreshMetadataClaimsResponse,
+  type ResolveIdentityRouteResponse,
+  type PreviewAnimeGroupingPolicyChangeRequest,
+  type ReadAnimeGroupingPolicyResponse,
+  type ResolutionIntentDto,
   type ReadBrowserSessionResponse,
   type ReadTrailBaseContinuationResponse,
   type RevokeBrowserSessionsResponse,
@@ -178,6 +191,15 @@ export interface CallOptions {
   readonly retryPolicy?: Partial<RetryPolicy>;
 }
 
+export interface ResolveIdentityRouteQuery {
+  readonly intent: ResolutionIntentDto;
+  readonly target_provider: string;
+}
+
+export type ReadAnimeGroupingPolicyQuery =
+  | { readonly scope: "profile"; readonly client_id?: null }
+  | { readonly scope: "client"; readonly client_id: string };
+
 export interface ReceiptStreamOptions extends CallOptions {
   /** Last successfully handled SSE cursor. It is sent only as a header. */
   readonly cursor?: string;
@@ -263,6 +285,20 @@ const RECEIPT_ID = /^rcp_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/;
 const RECORD_ID = /^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/;
 const BROWSER_SESSION_ID = /^ses_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/;
 const PROVIDER_PATH_ID = /^[a-z0-9][a-z0-9._-]{0,127}$/;
+const RESOLUTION_INTENTS = new Set([
+  "metadata_search",
+  "metadata_lookup",
+  "metadata_enrichment",
+  "rating_lookup",
+  "catalog_lookup",
+  "display_projection",
+  "nuvio_export",
+  "nuvio_import_attachment",
+  "tracker_read",
+  "tracker_write",
+  "segment_translation",
+  "deduplication_review",
+]);
 const HEALTH_PROBLEM_CONTRACT = {
   capabilityId: "system.health",
   problemCodes: [],
@@ -922,6 +958,117 @@ export class FastiClient {
     });
   }
 
+  resolveIdentityRoute(
+    recordId: string,
+    query: ResolveIdentityRouteQuery,
+    options: CallOptions = {},
+  ): Promise<ResolveIdentityRouteResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.resolveIdentityRoute;
+    const safeRecordId = contractPathIdentifier(
+      recordId,
+      RECORD_ID,
+      "recordId",
+    );
+    if (!RESOLUTION_INTENTS.has(query.intent)) {
+      throw new TypeError("intent does not match the generated contract");
+    }
+    const targetProvider = contractPathIdentifier(
+      query.target_provider,
+      PROVIDER_PATH_ID,
+      "targetProvider",
+    );
+    const path = operation.path.replace(
+      "{record_id}",
+      encodeURIComponent(safeRecordId),
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: `${path}?${new URLSearchParams({ intent: query.intent, target_provider: targetProvider })}`,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      responseParser: (value) => {
+        const response = parseResolveIdentityRouteResponse(value);
+        if (
+          response.record_id !== safeRecordId ||
+          response.intent !== query.intent ||
+          response.target_provider !== targetProvider
+        ) {
+          throw new FastiContractParseError(
+            "Identity route response does not match the request",
+          );
+        }
+        return response;
+      },
+      responseLabel: "Identity route response",
+      options,
+    });
+  }
+
+  readAnimeGroupingPolicy(
+    query: ReadAnimeGroupingPolicyQuery,
+    options: CallOptions = {},
+  ): Promise<ReadAnimeGroupingPolicyResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.readAnimeGroupingPolicy;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: `${operation.path}?${animePolicyQuery(query)}`,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      responseParser: parseReadAnimeGroupingPolicyResponse,
+      responseLabel: "Anime grouping policy response",
+      options,
+    });
+  }
+
+  previewAnimeGroupingPolicyChange(
+    request: PreviewAnimeGroupingPolicyChangeRequest,
+    options: CallOptions = {},
+  ): Promise<AnimeGroupingPolicyImpactResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.previewAnimeGroupingPolicyChange;
+    const body = parseOutgoing(
+      parsePreviewAnimeGroupingPolicyChangeRequest,
+      request,
+      "Preview anime grouping policy request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      body,
+      responseParser: parseAnimeGroupingPolicyImpactResponse,
+      responseLabel: "Preview anime grouping policy response",
+      options,
+    });
+  }
+
+  applyAnimeGroupingPolicyChange(
+    request: ApplyAnimeGroupingPolicyChangeRequest,
+    options: CallOptions = {},
+  ): Promise<ApplyAnimeGroupingPolicyChangeResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.applyAnimeGroupingPolicyChange;
+    const body = parseOutgoing(
+      parseApplyAnimeGroupingPolicyChangeRequest,
+      request,
+      "Apply anime grouping policy request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      browserMutation: true,
+      problemContract: operation,
+      retryMode: "stable-idempotency",
+      body,
+      responseParser: parseApplyAnimeGroupingPolicyChangeResponse,
+      responseLabel: "Apply anime grouping policy response",
+      options,
+    });
+  }
+
   startTrailBaseSignIn(
     request: StartTrailBaseSignInRequest,
     options: CallOptions = {},
@@ -1389,7 +1536,7 @@ export class FastiClient {
         if (serializedBody !== undefined) {
           headers.set("Content-Type", "application/json");
         }
-        if (input.browserMutation) {
+        if (input.browserMutation && !headers.has("Authorization")) {
           headers.set("X-CSRF-Token", browserCsrfToken());
         }
 
@@ -2069,6 +2216,23 @@ function contractPathIdentifier(
     throw new TypeError(`${label} does not match the generated contract`);
   }
   return value;
+}
+
+function animePolicyQuery(
+  query: ReadAnimeGroupingPolicyQuery,
+): URLSearchParams {
+  if (query.scope !== "profile" && query.scope !== "client") {
+    throw new TypeError("scope does not match the generated contract");
+  }
+  if (query.scope === "profile" && query.client_id != null) {
+    throw new TypeError("profile scope must not include client_id");
+  }
+  if (query.scope === "client" && !query.client_id) {
+    throw new TypeError("client scope requires client_id");
+  }
+  const params = new URLSearchParams({ scope: query.scope });
+  if (query.scope === "client") params.set("client_id", query.client_id);
+  return params;
 }
 
 interface ProviderPathIdentifiers {

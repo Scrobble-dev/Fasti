@@ -645,6 +645,36 @@
       "uat": []
     },
     {
+      "authorization": "scoped_or_browser_session",
+      "bounded_context": "identity.routing",
+      "contract_body": "m3",
+      "examples": [],
+      "id": "identity.route.resolve",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "m3",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "browser_session_expired",
+        "browser_session_revoked",
+        "capability_unavailable",
+        "forbidden",
+        "integrity_failed",
+        "record_not_found",
+        "session_policy_changed",
+        "storage_unavailable",
+        "validation_failed"
+      ],
+      "runtime_body": "m3",
+      "scopes": [
+        "identity_read"
+      ],
+      "surface_profile": "m3_identity_routing",
+      "uat": []
+    },
+    {
       "authorization": "unauthenticated",
       "bounded_context": "observation.ingress",
       "contract_body": "b1",
@@ -944,6 +974,100 @@
         "workspace_verify"
       ],
       "surface_profile": "later_b3",
+      "uat": []
+    },
+    {
+      "authorization": "scoped_or_browser_session",
+      "bounded_context": "profile.projection_policy",
+      "contract_body": "m3",
+      "examples": [],
+      "id": "profile.anime_grouping_policy.apply",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "m3",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "browser_session_expired",
+        "browser_session_revoked",
+        "capability_unavailable",
+        "forbidden",
+        "idempotency_conflict",
+        "integrity_failed",
+        "malformed_json",
+        "payload_too_large",
+        "session_policy_changed",
+        "storage_unavailable",
+        "unsupported_media_type",
+        "validation_failed"
+      ],
+      "runtime_body": "m3",
+      "scopes": [
+        "profile_state_write"
+      ],
+      "surface_profile": "m3_identity_routing",
+      "uat": []
+    },
+    {
+      "authorization": "scoped_or_browser_session",
+      "bounded_context": "profile.projection_policy",
+      "contract_body": "m3",
+      "examples": [],
+      "id": "profile.anime_grouping_policy.preview",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "m3",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "browser_session_expired",
+        "browser_session_revoked",
+        "capability_unavailable",
+        "forbidden",
+        "integrity_failed",
+        "malformed_json",
+        "payload_too_large",
+        "session_policy_changed",
+        "storage_unavailable",
+        "unsupported_media_type",
+        "validation_failed"
+      ],
+      "runtime_body": "m3",
+      "scopes": [
+        "profile_state_read"
+      ],
+      "surface_profile": "m3_identity_routing",
+      "uat": []
+    },
+    {
+      "authorization": "scoped_or_browser_session",
+      "bounded_context": "profile.projection_policy",
+      "contract_body": "m3",
+      "examples": [],
+      "id": "profile.anime_grouping_policy.read",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "m3",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "browser_session_expired",
+        "browser_session_revoked",
+        "capability_unavailable",
+        "forbidden",
+        "integrity_failed",
+        "session_policy_changed",
+        "storage_unavailable",
+        "validation_failed"
+      ],
+      "runtime_body": "m3",
+      "scopes": [
+        "profile_state_read"
+      ],
+      "surface_profile": "m3_identity_routing",
       "uat": []
     },
     {
@@ -2214,6 +2338,60 @@
       },
       "ui": {
         "binding": "ui:metadata-provenance",
+        "binding_visibility": "public",
+        "state": "required"
+      }
+    },
+    "m3_identity_routing": {
+      "cli": {
+        "binding": "cli:capability-discovery",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "domain_application": {
+        "binding_visibility": "internal",
+        "state": "required"
+      },
+      "http_openapi": {
+        "binding": "openapi:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "json_ld": {
+        "reason": "Private identity evidence and profile projection policy are not public linked data.",
+        "state": "not_applicable"
+      },
+      "json_schema": {
+        "binding": "schema:production-openapi-operation:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "knowledge": {
+        "binding": "knowledge:problem-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "okf": {
+        "binding": "okf:capability-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "package_smoke": {
+        "binding": "package-smoke:production-identity-routing",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "sdk": {
+        "binding": "sdk:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "sse_asyncapi": {
+        "reason": "Identity routing and anime policy operations are finite requests with no event channel.",
+        "state": "not_applicable"
+      },
+      "ui": {
+        "binding": "ui:anime-grouping-policy",
         "binding_visibility": "public",
         "state": "required"
       }

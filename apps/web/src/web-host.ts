@@ -257,6 +257,16 @@ export function createWebHost(
       accessClient.revokeBrowserSession(browserSessionId),
     revokeOtherBrowserSessions: () => accessClient.revokeOtherBrowserSessions(),
     rotateBrowserSession: () => accessClient.rotateBrowserSession(),
+    readAnimeGroupingPolicy: (query) =>
+      (credential ? client : accessClient).readAnimeGroupingPolicy(query),
+    previewAnimeGroupingPolicyChange: (request) =>
+      (credential ? client : accessClient).previewAnimeGroupingPolicyChange(
+        request,
+      ),
+    applyAnimeGroupingPolicyChange: (request) =>
+      (credential ? client : accessClient).applyAnimeGroupingPolicyChange(
+        request,
+      ),
     async loadNetworkConfiguration(): Promise<NetworkConfiguration> {
       return network;
     },

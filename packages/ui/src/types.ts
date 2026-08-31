@@ -1,10 +1,16 @@
 import type { IntegrationRuntimeStatus } from "./integration-status.js";
 import type {
   AccessProjectionResponse,
+  AnimeGroupingPolicyImpactResponse,
+  ApplyAnimeGroupingPolicyChangeRequest,
+  ApplyAnimeGroupingPolicyChangeResponse,
   CompleteTrailBaseContinuationRequest,
   ConfigureMetadataProjectionRequest,
   MetadataProjectionConfigurationResponse,
   MetadataProjectionResponse,
+  PreviewAnimeGroupingPolicyChangeRequest,
+  ReadAnimeGroupingPolicyQuery,
+  ReadAnimeGroupingPolicyResponse,
   ReadTrailBaseContinuationResponse,
   RefreshMetadataClaimsRequest,
   RefreshMetadataClaimsResponse,
@@ -16,6 +22,10 @@ import type {
 
 export type {
   AccessProjectionResponse,
+  AnimeGroupingPolicyImpactResponse,
+  AnimeGroupingPreferenceDto,
+  ApplyAnimeGroupingPolicyChangeRequest,
+  ApplyAnimeGroupingPolicyChangeResponse,
   CompleteTrailBaseContinuationRequest,
   ConfigureMetadataProjectionRequest,
   EnrichmentPolicyDto,
@@ -25,6 +35,9 @@ export type {
   MetadataProjectedFieldDto,
   MetadataProjectionConfigurationResponse,
   MetadataProjectionResponse,
+  PreviewAnimeGroupingPolicyChangeRequest,
+  ReadAnimeGroupingPolicyQuery,
+  ReadAnimeGroupingPolicyResponse,
   ReadTrailBaseContinuationResponse,
   RatingClaimDto,
   RefreshMetadataClaimsRequest,
@@ -405,6 +418,15 @@ export interface WorkbenchHost {
   refreshMetadataClaims?(
     request: RefreshMetadataClaimsRequest,
   ): Promise<RefreshMetadataClaimsResponse>;
+  readAnimeGroupingPolicy?(
+    query: ReadAnimeGroupingPolicyQuery,
+  ): Promise<ReadAnimeGroupingPolicyResponse>;
+  previewAnimeGroupingPolicyChange?(
+    request: PreviewAnimeGroupingPolicyChangeRequest,
+  ): Promise<AnimeGroupingPolicyImpactResponse>;
+  applyAnimeGroupingPolicyChange?(
+    request: ApplyAnimeGroupingPolicyChangeRequest,
+  ): Promise<ApplyAnimeGroupingPolicyChangeResponse>;
   listIntegrations?(): Promise<IntegrationRuntimeStatus[]>;
   startFirstAdministratorBootstrap?(): Promise<StartTrailBaseSignInResponse>;
   startTrailBaseSignIn?(

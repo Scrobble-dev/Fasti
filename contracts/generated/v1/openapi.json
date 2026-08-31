@@ -1,6 +1,30 @@
 {
   "components": {
     "schemas": {
+      "AcceptedIdentityRouteAssertionDto": {
+        "additionalProperties": false,
+        "properties": {
+          "assertion_id": {
+            "type": "string"
+          },
+          "record_id": {
+            "type": "string"
+          },
+          "relation": {
+            "$ref": "#/components/schemas/IdentityAssertionRelationDto"
+          },
+          "source_grain": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "assertion_id",
+          "record_id",
+          "source_grain",
+          "relation"
+        ],
+        "type": "object"
+      },
       "AccessAuthenticationMethodDto": {
         "enum": [
           "trail_base_password",
@@ -382,6 +406,325 @@
           "administrator"
         ],
         "type": "string"
+      },
+      "AnimeGroupingPolicyChangeDto": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "enum": [
+                  "set"
+                ],
+                "type": "string"
+              },
+              "preference": {
+                "$ref": "#/components/schemas/AnimeGroupingPreferenceDto"
+              }
+            },
+            "required": [
+              "preference",
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "enum": [
+                  "inherit_profile"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "applied_operation_id": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "rollback"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "applied_operation_id",
+              "kind"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "AnimeGroupingPolicyDto": {
+        "additionalProperties": false,
+        "properties": {
+          "preference": {
+            "$ref": "#/components/schemas/AnimeGroupingPreferenceDto"
+          },
+          "profile_id": {
+            "type": "string"
+          },
+          "revision": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/AnimeGroupingPolicyScopeDto"
+          },
+          "source": {
+            "$ref": "#/components/schemas/AnimeGroupingPolicySourceDto"
+          }
+        },
+        "required": [
+          "profile_id",
+          "scope",
+          "source",
+          "preference",
+          "revision"
+        ],
+        "type": "object"
+      },
+      "AnimeGroupingPolicyImpactResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "affected_records": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "next_after_record_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "policy": {
+            "$ref": "#/components/schemas/AnimeGroupingPolicyDto"
+          },
+          "possible_season_regroupings": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "proposed_preference": {
+            "$ref": "#/components/schemas/AnimeGroupingPreferenceDto"
+          },
+          "proposed_source": {
+            "$ref": "#/components/schemas/AnimeGroupingPolicySourceDto"
+          },
+          "records": {
+            "items": {
+              "$ref": "#/components/schemas/AnimeGroupingRecordPreviewDto"
+            },
+            "type": "array"
+          },
+          "total_records": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "unresolved_routes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "policy",
+          "proposed_preference",
+          "proposed_source",
+          "total_records",
+          "affected_records",
+          "unresolved_routes",
+          "possible_season_regroupings",
+          "records"
+        ],
+        "type": "object"
+      },
+      "AnimeGroupingPolicyScopeDto": {
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "$ref": "#/components/schemas/AnimeGroupingPolicyScopeKindDto"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
+      "AnimeGroupingPolicyScopeKindDto": {
+        "enum": [
+          "profile",
+          "client"
+        ],
+        "type": "string"
+      },
+      "AnimeGroupingPolicySourceDto": {
+        "enum": [
+          "profile_default",
+          "client_override"
+        ],
+        "type": "string"
+      },
+      "AnimeGroupingPreferenceDto": {
+        "enum": [
+          "automatic",
+          "group_by_tv_work",
+          "keep_mal_releases_separate",
+          "keep_kitsu_releases_separate"
+        ],
+        "type": "string"
+      },
+      "AnimeGroupingRecordPreviewDto": {
+        "additionalProperties": false,
+        "properties": {
+          "possible_season_regrouping": {
+            "type": "boolean"
+          },
+          "previous_preference": {
+            "$ref": "#/components/schemas/AnimeGroupingPreferenceDto"
+          },
+          "previous_route": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/IdentityRouteDto"
+              }
+            ]
+          },
+          "previous_status": {
+            "$ref": "#/components/schemas/IdentityRouteStatusDto"
+          },
+          "proposed_preference": {
+            "$ref": "#/components/schemas/AnimeGroupingPreferenceDto"
+          },
+          "proposed_route": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/IdentityRouteDto"
+              }
+            ]
+          },
+          "proposed_status": {
+            "$ref": "#/components/schemas/IdentityRouteStatusDto"
+          },
+          "record_id": {
+            "type": "string"
+          },
+          "route_changed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "record_id",
+          "previous_preference",
+          "proposed_preference",
+          "previous_status",
+          "proposed_status",
+          "route_changed",
+          "possible_season_regrouping"
+        ],
+        "type": "object"
+      },
+      "ApplyAnimeGroupingPolicyChangeRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "change": {
+            "$ref": "#/components/schemas/AnimeGroupingPolicyChangeDto"
+          },
+          "expected_revision": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "operation_id": {
+            "type": "string"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/AnimeGroupingPolicyScopeDto"
+          }
+        },
+        "required": [
+          "operation_id",
+          "scope",
+          "expected_revision",
+          "change"
+        ],
+        "type": "object"
+      },
+      "ApplyAnimeGroupingPolicyChangeResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "affected_records": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "change": {
+            "$ref": "#/components/schemas/AnimeGroupingPolicyChangeDto"
+          },
+          "operation_id": {
+            "type": "string"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/AnimeGroupingPolicyDto"
+          },
+          "possible_season_regroupings": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "previous_preference": {
+            "$ref": "#/components/schemas/AnimeGroupingPreferenceDto"
+          },
+          "previous_source": {
+            "$ref": "#/components/schemas/AnimeGroupingPolicySourceDto"
+          },
+          "rolled_back_operation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "unresolved_routes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "operation_id",
+          "change",
+          "previous_preference",
+          "previous_source",
+          "policy",
+          "affected_records",
+          "unresolved_routes",
+          "possible_season_regroupings"
+        ],
+        "type": "object"
       },
       "AttachIdentifierRequest": {
         "additionalProperties": false,
@@ -803,6 +1146,77 @@
           "version"
         ],
         "type": "object"
+      },
+      "IdentityAssertionRelationDto": {
+        "enum": [
+          "exact",
+          "subset_of",
+          "superset_of",
+          "overlaps",
+          "alternate_cut_of",
+          "related",
+          "not_same_as"
+        ],
+        "type": "string"
+      },
+      "IdentityIdentifierDto": {
+        "additionalProperties": false,
+        "properties": {
+          "grain": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "namespace",
+          "grain",
+          "value"
+        ],
+        "type": "object"
+      },
+      "IdentityRouteDto": {
+        "additionalProperties": false,
+        "properties": {
+          "accepted_assertions": {
+            "items": {
+              "$ref": "#/components/schemas/AcceptedIdentityRouteAssertionDto"
+            },
+            "type": "array"
+          },
+          "identifier": {
+            "$ref": "#/components/schemas/IdentityIdentifierDto"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/IdentityRouteKindDto"
+          }
+        },
+        "required": [
+          "identifier",
+          "kind",
+          "accepted_assertions"
+        ],
+        "type": "object"
+      },
+      "IdentityRouteKindDto": {
+        "enum": [
+          "provider_native",
+          "verified_alias",
+          "accepted_crosswalk"
+        ],
+        "type": "string"
+      },
+      "IdentityRouteStatusDto": {
+        "enum": [
+          "selected",
+          "missing",
+          "ambiguous"
+        ],
+        "type": "string"
       },
       "InitializeNodeRequest": {
         "additionalProperties": false,
@@ -1912,6 +2326,35 @@
         ],
         "type": "object"
       },
+      "PreviewAnimeGroupingPolicyChangeRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "after_record_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "change": {
+            "$ref": "#/components/schemas/AnimeGroupingPolicyChangeDto"
+          },
+          "limit": {
+            "format": "int32",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/AnimeGroupingPolicyScopeDto"
+          }
+        },
+        "required": [
+          "scope",
+          "change",
+          "limit"
+        ],
+        "type": "object"
+      },
       "ProblemActionDto": {
         "additionalProperties": false,
         "properties": {
@@ -2288,6 +2731,18 @@
         ],
         "type": "object"
       },
+      "ReadAnimeGroupingPolicyResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "policy": {
+            "$ref": "#/components/schemas/AnimeGroupingPolicyDto"
+          }
+        },
+        "required": [
+          "policy"
+        ],
+        "type": "object"
+      },
       "ReadBrowserSessionResponse": {
         "additionalProperties": false,
         "properties": {
@@ -2640,6 +3095,77 @@
         "required": [
           "namespace",
           "created"
+        ],
+        "type": "object"
+      },
+      "ResolutionIntentDto": {
+        "enum": [
+          "metadata_search",
+          "metadata_lookup",
+          "metadata_enrichment",
+          "rating_lookup",
+          "catalog_lookup",
+          "display_projection",
+          "nuvio_export",
+          "nuvio_import_attachment",
+          "tracker_read",
+          "tracker_write",
+          "segment_translation",
+          "deduplication_review"
+        ],
+        "type": "string"
+      },
+      "ResolveIdentityRouteResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate_routes": {
+            "items": {
+              "$ref": "#/components/schemas/IdentityRouteDto"
+            },
+            "type": "array"
+          },
+          "intent": {
+            "$ref": "#/components/schemas/ResolutionIntentDto"
+          },
+          "known_identifiers": {
+            "items": {
+              "$ref": "#/components/schemas/IdentityIdentifierDto"
+            },
+            "type": "array"
+          },
+          "nuvio_content_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "record_id": {
+            "type": "string"
+          },
+          "selected_route": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/IdentityRouteDto"
+              }
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/IdentityRouteStatusDto"
+          },
+          "target_provider": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "record_id",
+          "intent",
+          "target_provider",
+          "status",
+          "known_identifiers",
+          "candidate_routes"
         ],
         "type": "object"
       },
@@ -6554,6 +7080,442 @@
         "x-fasti-runtime-availability": "implemented"
       }
     },
+    "/api/v1/profile/anime-grouping-policy": {
+      "get": {
+        "operationId": "read_anime_grouping_policy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scope",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/AnimeGroupingPolicyScopeKindDto"
+            }
+          },
+          {
+            "in": "path",
+            "name": "client_id",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadAnimeGroupingPolicyResponse"
+                }
+              }
+            },
+            "description": "Current profile or application-client anime projection policy"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Credential or browser session is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Authenticated principal lacks profile-state read scope"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Policy scope is invalid"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Policy state failed an integrity check"
+          },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Capability is unavailable in this runtime"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "credential_bearer": []
+          },
+          {
+            "browser_session_cookie": []
+          }
+        ],
+        "tags": [
+          "profile"
+        ],
+        "x-fasti-authorization": "scoped_or_browser_session",
+        "x-fasti-capability-id": "profile.anime_grouping_policy.read",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "browser_session_expired",
+          "browser_session_revoked",
+          "capability_unavailable",
+          "forbidden",
+          "integrity_failed",
+          "session_policy_changed",
+          "storage_unavailable",
+          "validation_failed"
+        ],
+        "x-fasti-required-scopes": [
+          "profile_state_read"
+        ],
+        "x-fasti-runtime-availability": "implemented"
+      },
+      "put": {
+        "operationId": "apply_anime_grouping_policy_change",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyAnimeGroupingPolicyChangeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplyAnimeGroupingPolicyChangeResponse"
+                }
+              }
+            },
+            "description": "Anime projection policy change committed with an immutable receipt"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Malformed JSON"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Credential or browser session is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Authenticated principal lacks profile-state write scope"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Expected revision or operation replay conflicts"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Request body exceeds the bounded transport limit"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Content-Type is not application/json"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Policy change is invalid"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Policy state failed an integrity check"
+          },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Capability is unavailable in this runtime"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "credential_bearer": []
+          },
+          {
+            "browser_session_cookie": [],
+            "csrf_cookie": [],
+            "csrf_header": []
+          }
+        ],
+        "tags": [
+          "profile"
+        ],
+        "x-fasti-authorization": "scoped_or_browser_session",
+        "x-fasti-capability-id": "profile.anime_grouping_policy.apply",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "browser_session_expired",
+          "browser_session_revoked",
+          "capability_unavailable",
+          "forbidden",
+          "idempotency_conflict",
+          "integrity_failed",
+          "malformed_json",
+          "payload_too_large",
+          "session_policy_changed",
+          "storage_unavailable",
+          "unsupported_media_type",
+          "validation_failed"
+        ],
+        "x-fasti-required-scopes": [
+          "profile_state_write"
+        ],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/v1/profile/anime-grouping-policy/preview": {
+      "post": {
+        "operationId": "preview_anime_grouping_policy_change",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewAnimeGroupingPolicyChangeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnimeGroupingPolicyImpactResponse"
+                }
+              }
+            },
+            "description": "Bounded impact preview without mutation"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Malformed JSON"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Credential or browser session is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Authenticated principal lacks profile-state read scope"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Request body exceeds the bounded transport limit"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Content-Type is not application/json"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Policy preview request is invalid"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Policy state failed an integrity check"
+          },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Capability is unavailable in this runtime"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "credential_bearer": []
+          },
+          {
+            "browser_session_cookie": []
+          }
+        ],
+        "tags": [
+          "profile"
+        ],
+        "x-fasti-authorization": "scoped_or_browser_session",
+        "x-fasti-capability-id": "profile.anime_grouping_policy.preview",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "browser_session_expired",
+          "browser_session_revoked",
+          "capability_unavailable",
+          "forbidden",
+          "integrity_failed",
+          "malformed_json",
+          "payload_too_large",
+          "session_policy_changed",
+          "storage_unavailable",
+          "unsupported_media_type",
+          "validation_failed"
+        ],
+        "x-fasti-required-scopes": [
+          "profile_state_read"
+        ],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
     "/api/v1/profile/metadata-projection": {
       "put": {
         "operationId": "configure_metadata_projection",
@@ -8654,6 +9616,152 @@
         ],
         "x-fasti-required-scopes": [
           "identity_write"
+        ],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/v1/records/{record_id}/identity-route": {
+      "get": {
+        "operationId": "resolve_identity_route",
+        "parameters": [
+          {
+            "description": "Canonical Fasti Record ID",
+            "in": "path",
+            "name": "record_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "intent",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ResolutionIntentDto"
+            }
+          },
+          {
+            "in": "path",
+            "name": "target_provider",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 2,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResolveIdentityRouteResponse"
+                }
+              }
+            },
+            "description": "Purpose-specific provider route with evidence"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Credential or browser session is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Authenticated principal lacks identity read scope"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Record does not exist"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Route request is invalid"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Identity evidence failed an integrity check"
+          },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Capability is unavailable in this runtime"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "credential_bearer": []
+          },
+          {
+            "browser_session_cookie": []
+          }
+        ],
+        "tags": [
+          "identity"
+        ],
+        "x-fasti-authorization": "scoped_or_browser_session",
+        "x-fasti-capability-id": "identity.route.resolve",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "browser_session_expired",
+          "browser_session_revoked",
+          "capability_unavailable",
+          "forbidden",
+          "integrity_failed",
+          "record_not_found",
+          "session_policy_changed",
+          "storage_unavailable",
+          "validation_failed"
+        ],
+        "x-fasti-required-scopes": [
+          "identity_read"
         ],
         "x-fasti-runtime-availability": "implemented"
       }
