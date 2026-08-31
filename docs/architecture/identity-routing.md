@@ -43,9 +43,10 @@ candidate, but it cannot attach an identifier or change a Record.
 A crosswalk assertion is directional and immutable. It retains its source
 identifier reference, target coordinate, relation, bounded coverage and episode
 links, evidence class, acquisition route, source version, derivation root, and
-initial lifecycle state. Corroboration requires distinct known derivation roots;
-two mirrors of one upstream source count once. Later acceptance, dispute,
-rejection, and revocation are append-only lifecycle events.
+initial lifecycle state. Corroboration requires at least two distinct known
+non-heuristic derivation roots; title similarity does not count, and two mirrors
+of one upstream source count once. Later acceptance, dispute, rejection, and
+revocation are append-only lifecycle events.
 
 The assertion derives its workspace, Record, source identifier reference, and
 source coordinate from one `ExternalIdentifier` aggregate. Evidence cannot

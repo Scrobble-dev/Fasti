@@ -428,8 +428,13 @@ impl IdentityAssertion {
             .collect::<HashSet<_>>()
             .len()
             == evidence.len();
-        let derivation_roots = evidence
+        let corroborating_evidence_count = evidence
             .iter()
+            .filter(|item| item.method() != IdentityEvidenceMethod::HeuristicTitleMatch)
+            .count();
+        let corroborating_roots = evidence
+            .iter()
+            .filter(|item| item.method() != IdentityEvidenceMethod::HeuristicTitleMatch)
             .filter_map(|item| item.derivation_root())
             .collect::<HashSet<_>>();
         let source_version_is_valid = source_version
@@ -476,7 +481,8 @@ impl IdentityAssertion {
                         && item.reviewer().is_some()
                 }))
             || (matches!(evidence_class, IdentityAssertionEvidenceClass::Corroborated)
-                && (evidence.len() < 2 || derivation_roots.len() != evidence.len()))
+                && (corroborating_evidence_count < 2
+                    || corroborating_roots.len() != corroborating_evidence_count))
             || (initial_status.can_route()
                 && matches!(
                     evidence_class,
@@ -965,6 +971,35 @@ mod tests {
         )
         .is_err());
 
+        let corroborated = |evidence| {
+            IdentityAssertion::try_new(
+                IdentityAssertionId::new_v7(),
+                &source,
+                claim("imdb.title", Grain::Release, "tt28254942"),
+                IdentityAssertionRelation::Exact,
+                Vec::new(),
+                Vec::new(),
+                IdentityAssertionEvidenceClass::Corroborated,
+                evidence,
+                "source:route",
+                None,
+                None,
+                None,
+                IdentityAssertionStatus::Accepted,
+                at(),
+            )
+        };
+        let evidence = |method, observed_source: &str, derivation_root: &str| {
+            IdentityAssertionEvidence::try_new(
+                method,
+                observed_source,
+                Some(derivation_root.to_owned()),
+                None,
+                NaiveDate::from_ymd_opt(2026, 8, 30).expect("date"),
+                None,
+            )
+            .expect("evidence")
+        };
         let duplicate_root_evidence = ["source-a", "source-b"]
             .map(|observed_source| {
                 IdentityAssertionEvidence::try_new(
@@ -979,23 +1014,33 @@ mod tests {
             })
             .into_iter()
             .collect();
-        assert!(IdentityAssertion::try_new(
-            IdentityAssertionId::new_v7(),
-            &source,
-            claim("imdb.title", Grain::Release, "tt28254942"),
-            IdentityAssertionRelation::Exact,
-            Vec::new(),
-            Vec::new(),
-            IdentityAssertionEvidenceClass::Corroborated,
-            duplicate_root_evidence,
-            "source:route",
-            None,
-            None,
-            None,
-            IdentityAssertionStatus::Accepted,
-            at(),
-        )
+        assert!(corroborated(duplicate_root_evidence).is_err());
+        assert!(corroborated(vec![
+            evidence(
+                IdentityEvidenceMethod::HeuristicTitleMatch,
+                "title match a",
+                "heuristic-a",
+            ),
+            evidence(
+                IdentityEvidenceMethod::HeuristicTitleMatch,
+                "title match b",
+                "heuristic-b",
+            ),
+        ])
         .is_err());
+        assert!(corroborated(vec![
+            evidence(
+                IdentityEvidenceMethod::UpstreamDeclared,
+                "upstream source a",
+                "upstream-a",
+            ),
+            evidence(
+                IdentityEvidenceMethod::DerivedAirDates,
+                "upstream source b",
+                "upstream-b",
+            ),
+        ])
+        .is_ok());
     }
 
     #[test]
