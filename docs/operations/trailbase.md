@@ -42,7 +42,7 @@ The command fetches the locked Rust and pnpm inputs and verifies and caches the
 exact TrailBase native and OCI artifacts and the exact prior-version upgrade
 fixture. Preparation creates the private root and cache, but it does not
 initialize a fresh TrailBase root. For an already initialized root, preparation
-also refreshes the verified Auth UI component. The subsequent `trailbase
+also verifies the installed Auth UI component. The subsequent `trailbase
 initialize` command creates the depot and bootstrap state and installs Auth UI
 for a fresh root. Later offline start and conformance commands use only those
 verified inputs. A missing, unsafe, or mismatched component keeps sign-in
