@@ -1,6 +1,6 @@
 # Fasti Access C1 implementation gate
 
-Status: `C1_3A_C_COMPLETE_C1_3D_IN_PROGRESS`
+Status: `C1_3D_CODE_COMPLETE_PLATFORM_PROOF_PENDING_C1_4_CONTINUATION_GATE`
 
 Recorded: 2026-08-30
 
@@ -537,6 +537,95 @@ pushed or merged.
   owner-only bootstrap secret only after a bootstrap ceremony is claimed, own
   the fixed listener without fallback, and resolve packaged `/first-run`
   serving before C1.4 begins.
+
+### 2.6 C1.3d code completion record
+
+C1.3d production code is frozen locally at commit
+`55cfd0809f6dd147587b37bd640c7c4b495f0ad5`, tree
+`6743f38590623654d215788a6afc18640e9fecc4`. Nothing from this checkpoint was
+pushed or merged.
+
+- The packaged desktop host opens the exact fixed `127.0.0.1:8420` listener,
+  embeds the existing Access router, serves packaged Workbench assets without
+  masking `/api` or non-navigation methods, and navigates the main WebView to
+  that origin. It does not fall back to another port.
+- The native first-administrator command, callback, kernel, TrailBase client,
+  and process-memory PKCE verifier use one shared runtime. Only that command
+  reads `bootstrap.secret`; ordinary sign-in does not. A native cookie failure
+  durably cancels the unclaimed ceremony before removing its verifier.
+- Unpublished migration v14 permits only one pending or claimed
+  first-administrator bootstrap. A second start fails before the host can
+  replace the first callback-path cookie. The first callback remains usable.
+- Desktop exit uses Tauri `run_return`, signals Axum graceful shutdown, and
+  waits up to 20 seconds. This covers the three sequential five-second
+  TrailBase request ceilings plus margin while keeping shutdown bounded.
+- Desktop and Android capabilities preserve every existing trusted-host
+  command. Desktop grants only the main window at the exact loopback origin;
+  Android keeps the packaged local WebView and reports first-administrator
+  bootstrap unavailable because its locked WebView cookie setter is a no-op.
+- The exact clean commit passed all 27 governed contract gates. Receipt:
+  `target/fasti-receipts/b1-contract-verification.json`, SHA-256
+  `69f51b1ffa7783f3b6da80609418b3dec6ec80029fbf62544468408737cc6716`.
+  Focused results also include 54 `fasti-api` tests, 43 packaged desktop tests,
+  34 schema tests, deterministic generated output, and staged no-secret scans.
+
+Code completion is not platform conformance. Real Linux, Windows, and macOS
+WebViews must still prove the native-set Secure callback cookie, exact-path
+delivery, two-start recovery, and one exchange before C1.3d closes. The local
+fixed port is currently owned by an unrelated `pasta.avx2` process, PID
+`1329362`; no shared process was stopped and no fallback was introduced.
+
+### 2.7 Bounded C1.4 continuation gate
+
+Two source-backed gaps must be corrected before ordinary signed-out sign-in or
+failure evidence becomes active in C1.4. This is not a new premise gate.
+
+1. Ordinary sign-in cannot require a signed-out browser to supply workspace or
+   profile-grant identifiers. TrailBase identity must be confirmed first. Fasti
+   must then expose only bounded choices owned by that confirmed subject,
+   require an explicit selection even when one choice exists, and recheck the
+   chosen membership, grant, client, subject epochs, and activation generation
+   in the final session-creation transaction. No unauthenticated enumeration,
+   implicit first choice, browser-stored identifier, or bootstrap authority is
+   permitted.
+2. A failed callback has no Fasti session and therefore cannot read the
+   authenticated Access projection. Attributable post-claim failures need one
+   browser-binding-protected continuation read that returns only durable safe
+   evidence. Pre-claim callback noise remains a generic failure with a
+   correlation reference and no invented evidence.
+
+The minimum design reuses the existing ceremony row and high-entropy browser
+binding. It adds no provisional Fasti session, second identity system,
+continuation table, polling loop, or browser state store. The exact typed
+states, authorization vocabulary, DTOs, expiry, candidate bound, revision
+digest, cookie path, and transaction races must be frozen in one bounded
+engineering and developer-experience review before production code changes.
+The D3-C order remains exact:
+
+```text
+TrailBase /token -> /status -> local subject check -> /logout -> discard
+-> explicit Fasti selection continuation -> final authorization transaction
+-> opaque Fasti session
+```
+
+The C1.4 UI may be authored and fixture-tested while packaged platform proof
+is pending, but it must not claim runtime completion or activate ordinary
+sign-in before both this continuation gate and the WebView cookie gate pass.
+
+Theme and accessibility ownership stays in the existing Workbench:
+
+- light: `data-bs-theme=light`, `data-fasti-theme=light`;
+- dark: `data-bs-theme=dark`, `data-fasti-theme=dark`;
+- night: `data-bs-theme=dark`, `data-fasti-theme=night`;
+- forced colors is an environment, never a saved fourth theme.
+
+Reuse `ThemeSettings`, `fasti-theme-settings`, current root attributes, tokens,
+and Tabler CSS. Do not add a theme provider, wizard store, UI framework, or
+custom control where Tabler or a native element already works. Test the A/C/B
+golden path across three themes and four viewports; cover every canonical state
+once in a representative combination; and run forced-colors, reduced-motion,
+200% zoom, text-spacing, keyboard, focus, and screen-reader checks per surface.
+Static Gate 10 evidence is design evidence only, not WCAG or EN conformance.
 
 ## 3. Exact TrailBase evidence
 
@@ -1143,7 +1232,7 @@ C1 reuses these owners. It does not rebuild them.
 - [ ] **T4 (P1, human: ~2 days / Codex: ~6 hours)** — Access API and contracts — Mount authorized operations and generate every applicable contract and SDK surface.
   - Surfaced by: code-quality review; C1 capabilities are reserved but not mounted.
   - Files: API, capability registry, generators, SDK, host after M2 handoff.
-  - Verify: generated drift, mutation tests, authorization negatives, no-secret schemas.
+  - Verify: generated drift, mutation tests, authorization negatives, no-secret schemas. Current C1.3 operations are generated and green; the bounded identity-first continuation extension remains.
 - [ ] **T5 (P1, human: ~3 days / Codex: ~1 day)** — Gate 10 A+C — Implement permanent A, resumable C, and shared B evidence from one projection.
   - Surfaced by: UI test review; only truthful unavailable shells exist today.
   - Files: existing runtime settings owner, host, types, and `access-c1.spec.ts` after M2 handoff.
@@ -1160,24 +1249,30 @@ C1 reuses these owners. It does not rebuild them.
 2. Keep C1.1 frozen at commit `ba442c894a4189a12c9dccd7b1b24c44b3c3941c`
    and C1.2 frozen at commit
    `ce278d667a10ccc531f8bf5edd0969f44eeb52f3`.
-3. Keep the independently reviewed C1.3 contract frozen.
-4. Implement C1.3a through C1.3d in order. Do not begin generated or host
-   writes before their preceding authored contract gate is green.
-5. Keep one writer for shared schema, registry, generator, host, and Workbench
+3. Keep C1.3d code frozen at commit
+   `55cfd0809f6dd147587b37bd640c7c4b495f0ad5`; do not claim its platform gate
+   has passed.
+4. Freeze the bounded identity-first continuation and failure-evidence contract
+   through engineering and developer-experience review. Then implement it
+   before activating ordinary signed-out sign-in in C1.4.
+5. In parallel, prepare fixture-driven A+C UI against the existing projection,
+   Tabler, and three-theme contract. Keep runtime completion pending exact
+   packaged WebView evidence.
+6. Keep one writer for shared schema, registry, generator, host, and Workbench
    files while later-slice agents remain read-only.
-6. AGY may add an outside challenge. It never replaces the subagent review,
+7. AGY may add an outside challenge. It never replaces the subagent review,
    written gates, tests, or delivery evidence.
-7. Do not request another premise gate.
+8. Do not request another premise gate.
 
 ## GSTACK REVIEW REPORT
 
-| Review        | Trigger               | Why                             | Runs | Status          | Findings                                                                                                                                              |
-| ------------- | --------------------- | ------------------------------- | ---- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| CEO Review    | `/plan-ceo-review`    | Scope & strategy                | 0    | —               | Gate 10 and canonical programme approvals are existing source decisions, not a new run.                                                               |
-| Codex Review  | `/codex review`       | Independent 2nd opinion         | 0    | CLEAR BY EQUIVALENT READ-ONLY REVIEWS | The independent lifecycle/diff subagent and additive signed-in AGY review challenged the exact C1.2 diff and returned no actionable P0 or P1. |
-| Eng Review    | `/plan-eng-review`    | Architecture & tests (required) | 2    | CLEAR           | C1 trust profile plus activation, membership, ceremony, audit-retention, archive-compatibility, and TOTP decisions are frozen.                       |
-| Design Review | `/plan-design-review` | UI/UX gaps                      | 0    | —               | Existing approved Gate 10 A+C review and artifact hashes remain binding. Runtime design evidence stays in C1.4.                                       |
-| DX Review     | `/plan-devex-review`  | Developer experience gaps       | 0    | PENDING RUNTIME | The live review runs after C1 has an executable path.                                                                                                 |
+| Review        | Trigger               | Why                             | Runs | Status                                | Findings                                                                                                                                                               |
+| ------------- | --------------------- | ------------------------------- | ---- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CEO Review    | `/plan-ceo-review`    | Scope & strategy                | 0    | —                                     | Gate 10 and canonical programme approvals are existing source decisions, not a new run.                                                                                |
+| Codex Review  | `/codex review`       | Independent 2nd opinion         | 0    | CLEAR BY EQUIVALENT READ-ONLY REVIEWS | Independent C1.3d review found and closed shared-runtime, Android-capability, two-start, PKCE-capacity, and shutdown-drain defects. Platform evidence remains pending. |
+| Eng Review    | `/plan-eng-review`    | Architecture & tests (required) | 2    | CLEAR                                 | C1 trust profile plus activation, membership, ceremony, audit-retention, archive-compatibility, and TOTP decisions are frozen.                                         |
+| Design Review | `/plan-design-review` | UI/UX gaps                      | 0    | —                                     | Existing approved Gate 10 A+C review and artifact hashes remain binding. Runtime design evidence stays in C1.4.                                                        |
+| DX Review     | `/plan-devex-review`  | Developer experience gaps       | 0    | REQUIRED NEXT                         | Review the bounded identity-first continuation and safe failure evidence before C1.4 activation.                                                                       |
 
 **OUTSIDE REVIEW:** Read-only subagents support direct backchannel C1 plus
 separate upstream hardening and identified the callback, association,
@@ -1188,7 +1283,6 @@ single-runtime, actor-provenance, problem-contract, native-cookie, and
 RegisterNamespace policy gaps. Additive AGY challenged the corrected contract;
 it did not replace the subagent review or an evidence gate.
 
-**VERDICT:** C1.2 COMPLETE; C1.3 CONTRACT APPROVED — implement C1.3a through
-C1.3d without changing unpublished v14 or the frozen archive v4.
-
-NO UNRESOLVED DECISIONS
+**VERDICT:** C1.3d CODE COMPLETE; PLATFORM PROOF PENDING. Freeze and implement
+the bounded identity-first continuation before activating ordinary sign-in,
+while A+C fixture work proceeds against the approved Tabler-first design.
