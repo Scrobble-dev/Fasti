@@ -163,6 +163,7 @@ impl DesktopState {
 #[cfg(feature = "desktop-runtime")]
 fn auth_binding_cookie(value: String, max_age_seconds: i64) -> Cookie<'static> {
     Cookie::build((FASTI_ACCESS_BINDING_COOKIE, value))
+        .domain("127.0.0.1")
         .path(FASTI_ACCESS_CALLBACK_PATH)
         .secure(true)
         .http_only(true)
@@ -1044,7 +1045,7 @@ mod tests {
 
         assert_eq!(cookie.name(), FASTI_ACCESS_BINDING_COOKIE);
         assert_eq!(cookie.value(), "binding");
-        assert_eq!(cookie.domain(), None);
+        assert_eq!(cookie.domain(), Some("127.0.0.1"));
         assert_eq!(cookie.path(), Some(FASTI_ACCESS_CALLBACK_PATH));
         assert_eq!(cookie.secure(), Some(true));
         assert_eq!(cookie.http_only(), Some(true));

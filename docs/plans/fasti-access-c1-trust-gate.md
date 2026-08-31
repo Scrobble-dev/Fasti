@@ -431,12 +431,12 @@ grant_owner_client_id }`. Only persistence that truly records source
   digest against the current session; equality of cookie and header alone is
   insufficient.
 - The one-use callback cookie is
-  `__Secure-fasti_auth_binding`: `Secure`, `HttpOnly`, `SameSite=Lax`, host-only,
-  and `Path=/api/access/v1/trailbase/callback`. Clear it with the same
-  attributes on success and every failure. Linux packaged-WebView proof must
-  establish how Tauri 2.11.5 and Wry 0.55.1 associate an omitted `Domain`;
-  Windows and macOS remain separate platform gates. The session and CSRF
-  cookies remain `__Host-` cookies with no `Domain`.
+  `__Secure-fasti_auth_binding`: `Secure`, `HttpOnly`, `SameSite=Lax`, exact
+  `Domain=127.0.0.1`, and `Path=/api/access/v1/trailbase/callback`. Clear it
+  with the same attributes on success and every failure. The locked Linux Wry
+  adapter requires the explicit IP domain; Windows and macOS remain separate
+  platform gates. The session and CSRF cookies remain `__Host-` cookies with
+  no `Domain`.
 - Authenticated reads require exact `Host: 127.0.0.1:8420`. Browser mutations
   require exact `Origin: http://127.0.0.1:8420`, exact Host, the Strict session
   cookie, and CSRF cookie/header proof. Sign-in start requires exact Origin and
@@ -507,9 +507,8 @@ grant_owner_client_id }`. Only persistence that truly records source
   The browser cannot construct or replace the runtime.
 - Before using a Tauri cookie API, verify the exact locked Tauri version and
   primary source. The locked Tauri 2.11.5/Wry 0.55.1 native facility is the
-  selected minimum and receives a host-only cookie at the fixed loopback
-  origin. Do not add a cookie dependency or custom cookie store. Linux,
-  Windows, and macOS WebView
+  selected minimum and receives the exact loopback domain above. Do not add a
+  cookie dependency or custom cookie store. Linux, Windows, and macOS WebView
   tests must prove that the native-set binding cookie is returned only to the
   exact loopback callback. A platform that rejects it keeps first-run
   bootstrap unavailable; do not weaken the cookie.
