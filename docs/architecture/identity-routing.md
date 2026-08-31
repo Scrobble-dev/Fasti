@@ -24,6 +24,9 @@ The routing contract uses these intents:
 An accepted read alias does not authorize a provider write. Tracker writes
 require the target provider's own identifier. Missing and equally ranked routes
 fail closed. The route plan retains all known identifiers for inspection.
+Its durable owner must load a bounded complete identifier and assertion set,
+detect overflow with one extra row, and fail closed instead of truncating
+evidence into an apparently complete plan.
 
 ## TMDB route order
 
