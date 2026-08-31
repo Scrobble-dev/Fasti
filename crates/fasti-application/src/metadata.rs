@@ -18,7 +18,7 @@ use fasti_domain::{
     ORIGINAL_TITLE_FIELD_KEY, OVERVIEW_FIELD_KEY, POSTER_FIELD_KEY, RELEASE_YEAR_FIELD_KEY,
     TITLE_FIELD_KEY,
 };
-use std::{future::Future, pin::Pin};
+use std::{collections::HashMap, future::Future, pin::Pin};
 
 pub const MAX_PROVIDER_METADATA_FIELDS: usize = 16;
 pub const GOOGLE_BOOKS_PROVIDER_ID: &str = "google-books";
@@ -639,6 +639,26 @@ pub fn plan_purpose_identity_route_with_evidence(
         } else {
             merged_candidates.push((priority, route));
         }
+    }
+    let mut supporting_assertions =
+        HashMap::<ExternalIdentifierClaim, Vec<AcceptedIdentityRouteAssertion>>::new();
+    for (_, route) in &merged_candidates {
+        supporting_assertions
+            .entry(route.identifier.clone())
+            .or_default()
+            .extend_from_slice(&route.accepted_assertions);
+    }
+    for (_, route) in &mut merged_candidates {
+        if route.kind == IdentityRouteKind::AcceptedCrosswalk {
+            continue;
+        }
+        if let Some(assertions) = supporting_assertions.get(&route.identifier) {
+            route.accepted_assertions.extend_from_slice(assertions);
+        }
+        route
+            .accepted_assertions
+            .sort_by_key(|assertion| assertion.assertion_id().uuid());
+        route.accepted_assertions.dedup();
     }
     let candidates = merged_candidates;
 
@@ -2690,12 +2710,14 @@ mod tests {
             AnimeGroupingPreference::KeepMalReleasesSeparate,
             &[accepted_mal, direct_mal],
         );
+        let direct_route = direct_plan
+            .selected_route()
+            .expect("direct preferred route");
+        assert_eq!(direct_route.kind(), IdentityRouteKind::VerifiedAlias);
+        assert_eq!(direct_route.accepted_assertions().len(), 1);
         assert_eq!(
-            direct_plan
-                .selected_route()
-                .expect("direct preferred route")
-                .kind(),
-            IdentityRouteKind::VerifiedAlias
+            direct_route.accepted_assertions()[0].assertion_id(),
+            assertion_id
         );
     }
 
