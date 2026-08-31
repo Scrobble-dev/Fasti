@@ -58,6 +58,8 @@ general alias. `superset_of`, `overlaps`, `alternate_cut_of`, `related`, and
 `not_same_as` remain review evidence and never become outbound routes.
 Inferred mappings start as candidates and require an append-only review event
 before they can become accepted routes.
+An `asserted` mapping remains audit evidence until its named authority and
+namespace scope have been verified against the pinned authority registry.
 The planner also requires the assertion owner to match the requested `RecordId`;
 evidence from another Record cannot enter that plan or become visible through it.
 

@@ -206,7 +206,9 @@ impl IdentityRouteEvidence {
     ) -> Option<Self> {
         if matches!(
             assertion.evidence_class(),
-            IdentityAssertionEvidenceClass::Candidate | IdentityAssertionEvidenceClass::Disputed
+            IdentityAssertionEvidenceClass::Asserted
+                | IdentityAssertionEvidenceClass::Candidate
+                | IdentityAssertionEvidenceClass::Disputed
         ) {
             return None;
         }
@@ -2141,6 +2143,51 @@ mod tests {
             );
             assert!(IdentityRouteEvidence::accepted_crosswalk(&assertion, &[accepted]).is_none());
         }
+    }
+
+    #[test]
+    fn unverified_authority_assertions_never_become_routes() {
+        let source = fasti_domain::ExternalIdentifier::new(
+            ExternalIdentifierId::new_v7(),
+            WorkspaceId::new_v7(),
+            RecordId::new_v7(),
+            identity_claim("mal.anime", "49894"),
+        );
+        let assertion = IdentityAssertion::try_new(
+            IdentityAssertionId::new_v7(),
+            &source,
+            identity_claim("imdb.title", "tt28254942"),
+            IdentityAssertionRelation::Exact,
+            Vec::new(),
+            Vec::new(),
+            IdentityAssertionEvidenceClass::Asserted,
+            vec![IdentityAssertionEvidence::try_new(
+                IdentityEvidenceMethod::RightsholderAsserted,
+                "unverified authority fixture",
+                Some("authority-fixture-root".to_owned()),
+                None,
+                NaiveDate::from_ymd_opt(2026, 8, 30).expect("date fixture"),
+                None,
+            )
+            .expect("asserted evidence")],
+            "test-fixture",
+            Some("fixture-v1".to_owned()),
+            Some("unverified:rightsholder".to_owned()),
+            None,
+            IdentityAssertionStatus::Accepted,
+            ReceivedAt::from_application_clock(
+                Utc.timestamp_opt(1_800_000_000, 0)
+                    .single()
+                    .expect("assertion time"),
+            ),
+        )
+        .expect("syntactically valid authority assertion");
+
+        assert_eq!(
+            assertion.effective_status(&[]),
+            Ok(IdentityAssertionStatus::Accepted)
+        );
+        assert!(IdentityRouteEvidence::accepted_crosswalk(&assertion, &[]).is_none());
     }
 
     #[test]
