@@ -461,6 +461,7 @@ impl AnimeGroupingPolicyImpact {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApplyAnimeGroupingPolicyChangeOutcome {
     operation_id: OperationId,
+    change: AnimeGroupingPolicyChange,
     previous_preference: AnimeGroupingPreference,
     previous_source: AnimeGroupingPolicySource,
     policy: AnimeGroupingPolicyView,
@@ -474,14 +475,20 @@ impl ApplyAnimeGroupingPolicyChangeOutcome {
     #[allow(clippy::too_many_arguments)]
     pub fn try_new(
         operation_id: OperationId,
+        change: AnimeGroupingPolicyChange,
         previous_preference: AnimeGroupingPreference,
         previous_source: AnimeGroupingPolicySource,
         policy: AnimeGroupingPolicyView,
         affected_records: u64,
         unresolved_routes: u64,
         possible_season_regroupings: u64,
-        rolled_back_operation_id: Option<OperationId>,
     ) -> Result<Self, AnimeGroupingPolicyResultError> {
+        let rolled_back_operation_id = match change {
+            AnimeGroupingPolicyChange::Rollback {
+                applied_operation_id,
+            } => Some(applied_operation_id),
+            AnimeGroupingPolicyChange::Set(_) | AnimeGroupingPolicyChange::InheritProfile => None,
+        };
         if !previous_source.is_valid_for(policy.scope())
             || possible_season_regroupings > affected_records
             || rolled_back_operation_id == Some(operation_id)
@@ -490,6 +497,7 @@ impl ApplyAnimeGroupingPolicyChangeOutcome {
         }
         Ok(Self {
             operation_id,
+            change,
             previous_preference,
             previous_source,
             policy,
@@ -502,6 +510,10 @@ impl ApplyAnimeGroupingPolicyChangeOutcome {
 
     pub const fn operation_id(&self) -> OperationId {
         self.operation_id
+    }
+
+    pub const fn change(&self) -> AnimeGroupingPolicyChange {
+        self.change
     }
 
     pub const fn previous_preference(&self) -> AnimeGroupingPreference {
@@ -815,13 +827,15 @@ mod tests {
 
         assert!(ApplyAnimeGroupingPolicyChangeOutcome::try_new(
             operation_id,
+            AnimeGroupingPolicyChange::Rollback {
+                applied_operation_id: operation_id,
+            },
             AnimeGroupingPreference::Automatic,
             AnimeGroupingPolicySource::ProfileDefault,
             policy,
             0,
             0,
             0,
-            Some(operation_id),
         )
         .is_err());
 
@@ -863,41 +877,62 @@ mod tests {
 
         assert!(ApplyAnimeGroupingPolicyChangeOutcome::try_new(
             operation_id,
+            AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::Automatic),
             AnimeGroupingPreference::Automatic,
             AnimeGroupingPolicySource::ClientOverride,
             policy,
             1,
             0,
             0,
-            None,
         )
         .is_err());
         assert!(ApplyAnimeGroupingPolicyChangeOutcome::try_new(
             operation_id,
+            AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::Automatic),
             AnimeGroupingPreference::Automatic,
             AnimeGroupingPolicySource::ProfileDefault,
             policy,
             0,
             0,
             1,
-            None,
         )
         .is_err());
 
         let rollback = ApplyAnimeGroupingPolicyChangeOutcome::try_new(
             operation_id,
+            AnimeGroupingPolicyChange::Rollback {
+                applied_operation_id: rolled_back_operation_id,
+            },
             AnimeGroupingPreference::KeepMalReleasesSeparate,
             AnimeGroupingPolicySource::ProfileDefault,
             policy,
             1,
             0,
             1,
-            Some(rolled_back_operation_id),
         )
         .expect("valid rollback outcome");
+        assert_eq!(
+            rollback.change(),
+            AnimeGroupingPolicyChange::Rollback {
+                applied_operation_id: rolled_back_operation_id
+            }
+        );
         assert_eq!(
             rollback.rolled_back_operation_id(),
             Some(rolled_back_operation_id)
         );
+
+        let set = ApplyAnimeGroupingPolicyChangeOutcome::try_new(
+            operation_id,
+            AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::Automatic),
+            AnimeGroupingPreference::KeepMalReleasesSeparate,
+            AnimeGroupingPolicySource::ProfileDefault,
+            policy,
+            1,
+            0,
+            0,
+        )
+        .expect("valid set outcome");
+        assert_eq!(set.rolled_back_operation_id(), None);
     }
 }
