@@ -1,6 +1,6 @@
 # Documentation portal design audit
 
-Status: implementation verified locally; pull request and exact-head CI review are pending.
+Status: implementation verified locally; pull request 118 is open.
 
 This record covers the Fasti documentation portal at
 https://fasti.scrobble.dev. It does not cover the Fasti Workbench or claim
@@ -31,6 +31,7 @@ tablet, and mobile widths. It also checked light and dark themes.
 | The planner command lost its boundary in dark mode. | The existing border token defines the command surface. | 12a582e0 |
 | Status lost its table when registry data failed. | The table stays visible with unknown counts and an error action. | 383503df |
 | Search had no recovery state when Pagefind failed. | A labelled fallback, failure action, and no-JavaScript action are present. | 756062c0 |
+| Search assets could finish after the page unmounted or before both assets were ready. | The page stops callbacks after unmount and starts Pagefind only after its script and style sheet load. | 3c69f5d0 |
 
 ## Verification
 
@@ -66,6 +67,11 @@ blue shades and off-scale spacing values. That cleanup is not required to fix
 the reported regressions. It must use a separate visual review because it can
 change the full documentation system.
 
+Codacy reported no static-analysis issues or duplicated code. Its AI review
+found the Search asset lifecycle issue listed above. The fix adds focused
+checks for Search loading, failure, and unmount behavior. It also checks the
+Status loading table. CodeRabbit review status remains in pull request 118.
+
 ## Evidence limits
 
 Automated axe checks do not prove WCAG 2.2 Level AA or EN 301 549 conformance.
@@ -75,5 +81,5 @@ human review is still required before a conformance claim.
 This change does not add or change an API. OpenAPI, AsyncAPI, JSON Schema, and
 JSON-LD files do not need an update.
 
-Codacy, CodeRabbit, and pull request checks are pending until the branch is
-published.
+Pull request checks and reviewer decisions remain the source for current review
+status.
