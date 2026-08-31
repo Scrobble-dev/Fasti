@@ -32,6 +32,75 @@ pub(crate) fn run_access_b(root: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+pub(crate) fn run_access_c1(root: &Path) -> anyhow::Result<()> {
+    let receipt = root.join("target/fasti-receipts/access-c1.json");
+    match fs::remove_file(&receipt) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("failed to remove stale receipt {}", receipt.display()));
+        }
+    }
+    let source_before = git_status(root)?;
+    let gates = access_c1_gates();
+    let records = run_additional_gates(root, &gates)?;
+    let source_after = git_status(root)?;
+    ensure!(
+        source_after == source_before,
+        "Access C1 gates changed the Git worktree; before={source_before:?}, after={source_after:?}"
+    );
+    write_gate_suite_receipt(
+        root,
+        Path::new("target/fasti-receipts/access-c1.json"),
+        "fasti.access-c1.gates",
+        "cargo xtask test milestone --body C1",
+        &records,
+    )?;
+    Ok(())
+}
+
+pub(crate) fn access_c1_gates() -> [CommandGate; 4] {
+    [
+        CommandGate::new(
+            "access.prepared_machine",
+            "cargo",
+            ["xtask", "test", "milestone", "--body", "B"],
+            "prepare the exact TrailBase assets and repair the native/OCI account-service gate",
+        ),
+        CommandGate::new(
+            "access.contract_profile",
+            "cargo",
+            ["xtask", "contract", "verify", "--locked"],
+            "repair the generated Access contract, SDK, package, and no-secret surfaces",
+        ),
+        CommandGate::new(
+            "access.desktop_host",
+            "cargo",
+            [
+                "test",
+                "--locked",
+                "--offline",
+                "--manifest-path",
+                "apps/desktop/src-tauri/Cargo.toml",
+            ],
+            "install the locked desktop prerequisites and repair the packaged-host Access boundary",
+        ),
+        CommandGate::new(
+            "access.browser_fixture",
+            "pnpm",
+            [
+                "exec",
+                "playwright",
+                "test",
+                "tests/e2e/access-c1.spec.ts",
+                "--project=chrome",
+            ],
+            "repair the approved Account and Security plus resumable first-run browser journey",
+        ),
+    ]
+}
+
 pub(crate) fn access_b_gates() -> [CommandGate; 8] {
     [
         CommandGate::new(
@@ -313,6 +382,33 @@ mod tests {
             .contains("scripts/smoke-trailbase-combined.sh"));
         assert!(gates[7].display().contains("scripts/smoke-trailbase.py"));
         assert!(gates[7].display().contains(".dev-trailbase"));
+    }
+
+    #[test]
+    fn access_c1_reuses_existing_release_contract_host_and_browser_gates() {
+        let gates = access_c1_gates();
+        assert_eq!(
+            gates.iter().map(CommandGate::id).collect::<Vec<_>>(),
+            [
+                "access.prepared_machine",
+                "access.contract_profile",
+                "access.desktop_host",
+                "access.browser_fixture",
+            ]
+        );
+        assert_eq!(
+            gates[0].display(),
+            "\"cargo\" \"xtask\" \"test\" \"milestone\" \"--body\" \"B\""
+        );
+        assert_eq!(
+            gates[1].display(),
+            "\"cargo\" \"xtask\" \"contract\" \"verify\" \"--locked\""
+        );
+        assert!(gates[2]
+            .display()
+            .contains("apps/desktop/src-tauri/Cargo.toml"));
+        assert!(gates[3].display().contains("tests/e2e/access-c1.spec.ts"));
+        assert!(gates[3].display().contains("--project=chrome"));
     }
 
     #[test]
