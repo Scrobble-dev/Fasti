@@ -51,9 +51,7 @@ try {
       await page.getByText("Account confirmed", { exact: true }).waitFor();
       await page.goto("http://127.0.0.1:8420/settings/account");
     }
-    await page
-      .getByRole("heading", { name: "Account and security" })
-      .waitFor();
+    await page.getByRole("heading", { name: "Account and security" }).waitFor();
 
     const cookies = await context.cookies();
     const sessionMatches = cookies.filter(
@@ -64,7 +62,10 @@ try {
     );
     if (sessionMatches.length !== 1 || csrfMatches.length !== 1) {
       throw new Error(
-        `opaque Fasti cookie count differs; names=${cookies.map(({ name }) => name).sort().join(",")}`,
+        `opaque Fasti cookie count differs; names=${cookies
+          .map(({ name }) => name)
+          .sort()
+          .join(",")}`,
       );
     }
     const [session] = sessionMatches;
