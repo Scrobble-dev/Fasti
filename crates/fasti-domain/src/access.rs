@@ -35,6 +35,8 @@ pub enum AccessInvariantError {
     InvalidCeremonyTransition,
     #[error("the authentication ceremony purpose and return target do not match")]
     InvalidCeremonyPurposeTarget,
+    #[error("the authentication ceremony selection binding is invalid")]
+    InvalidCeremonySelectionBinding,
     #[error("the authentication callback path is invalid")]
     InvalidCallbackPath,
     #[error("the authentication ceremony browser binding does not match")]
@@ -995,6 +997,74 @@ impl AuthCallbackPath {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AuthCeremonySelection {
+    workspace_id: WorkspaceId,
+    selected_profile_grant_id: ProfileGrantId,
+    bound_browser_session_id: Option<BrowserSessionId>,
+    invited_membership_id: Option<MembershipId>,
+    remembered: bool,
+}
+
+impl AuthCeremonySelection {
+    pub fn try_new(
+        purpose: AuthCeremonyPurpose,
+        workspace_id: WorkspaceId,
+        selected_profile_grant_id: ProfileGrantId,
+        bound_browser_session_id: Option<BrowserSessionId>,
+        invited_membership_id: Option<MembershipId>,
+        remembered: bool,
+    ) -> Result<Self, AccessInvariantError> {
+        let selection = Self {
+            workspace_id,
+            selected_profile_grant_id,
+            bound_browser_session_id,
+            invited_membership_id,
+            remembered,
+        };
+        if !selection.valid_for(purpose) {
+            return Err(AccessInvariantError::InvalidCeremonySelectionBinding);
+        }
+        Ok(selection)
+    }
+
+    const fn valid_for(self, purpose: AuthCeremonyPurpose) -> bool {
+        match purpose {
+            AuthCeremonyPurpose::SignIn => self.bound_browser_session_id.is_none(),
+            AuthCeremonyPurpose::RecentAuthentication => {
+                self.bound_browser_session_id.is_some()
+                    && self.invited_membership_id.is_none()
+                    && !self.remembered
+            }
+            AuthCeremonyPurpose::FirstAdministratorBootstrap => {
+                self.bound_browser_session_id.is_none()
+                    && self.invited_membership_id.is_none()
+                    && !self.remembered
+            }
+        }
+    }
+
+    pub const fn workspace_id(self) -> WorkspaceId {
+        self.workspace_id
+    }
+
+    pub const fn selected_profile_grant_id(self) -> ProfileGrantId {
+        self.selected_profile_grant_id
+    }
+
+    pub const fn bound_browser_session_id(self) -> Option<BrowserSessionId> {
+        self.bound_browser_session_id
+    }
+
+    pub const fn invited_membership_id(self) -> Option<MembershipId> {
+        self.invited_membership_id
+    }
+
+    pub const fn remembered(self) -> bool {
+        self.remembered
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthCeremony {
     id: OperationId,
@@ -1003,6 +1073,7 @@ pub struct AuthCeremony {
     trailbase_instance_id: TrailBaseInstanceId,
     activation_generation: u64,
     browser_binding_digest: Sha256Digest,
+    selection: AuthCeremonySelection,
     callback_path: AuthCallbackPath,
     return_target: AuthReturnTarget,
     correlation_id: RequestCorrelationId,
@@ -1023,6 +1094,7 @@ impl AuthCeremony {
         trailbase_instance_id: TrailBaseInstanceId,
         activation_generation: u64,
         browser_binding_digest: Sha256Digest,
+        selection: AuthCeremonySelection,
         callback_path: AuthCallbackPath,
         return_target: AuthReturnTarget,
         correlation_id: RequestCorrelationId,
@@ -1038,6 +1110,9 @@ impl AuthCeremony {
         if purpose.return_target() != return_target {
             return Err(AccessInvariantError::InvalidCeremonyPurposeTarget);
         }
+        if !selection.valid_for(purpose) {
+            return Err(AccessInvariantError::InvalidCeremonySelectionBinding);
+        }
         Ok(Self {
             id,
             purpose,
@@ -1045,6 +1120,7 @@ impl AuthCeremony {
             trailbase_instance_id,
             activation_generation,
             browser_binding_digest,
+            selection,
             callback_path,
             return_target,
             correlation_id,
@@ -1065,6 +1141,7 @@ impl AuthCeremony {
         trailbase_instance_id: TrailBaseInstanceId,
         activation_generation: u64,
         browser_binding_digest: Sha256Digest,
+        selection: AuthCeremonySelection,
         callback_path: AuthCallbackPath,
         return_target: AuthReturnTarget,
         correlation_id: RequestCorrelationId,
@@ -1082,6 +1159,7 @@ impl AuthCeremony {
             trailbase_instance_id,
             activation_generation,
             browser_binding_digest,
+            selection,
             callback_path,
             return_target,
             correlation_id,
@@ -1092,6 +1170,9 @@ impl AuthCeremony {
             claimed_at,
             terminal_at,
         };
+        if !ceremony.selection.valid_for(ceremony.purpose) {
+            return Err(AccessInvariantError::InvalidCeremonySelectionBinding);
+        }
         ceremony.validate_persisted_state()?;
         Ok(ceremony)
     }
@@ -1113,6 +1194,9 @@ impl AuthCeremony {
     }
     pub const fn browser_binding_digest(&self) -> &Sha256Digest {
         &self.browser_binding_digest
+    }
+    pub const fn selection(&self) -> AuthCeremonySelection {
+        self.selection
     }
     pub const fn callback_path(&self) -> &AuthCallbackPath {
         &self.callback_path
@@ -1763,6 +1847,19 @@ mod tests {
             0,
         )
         .expect("session")
+    }
+
+    fn ceremony_selection(purpose: AuthCeremonyPurpose) -> AuthCeremonySelection {
+        AuthCeremonySelection::try_new(
+            purpose,
+            WorkspaceId::new_v7(),
+            ProfileGrantId::new_v7(),
+            matches!(purpose, AuthCeremonyPurpose::RecentAuthentication)
+                .then(BrowserSessionId::new_v7),
+            None,
+            false,
+        )
+        .expect("ceremony selection")
     }
 
     fn membership(subject: &AuthSubject, role: WorkspaceRole) -> WorkspaceMembership {
@@ -2511,6 +2608,7 @@ mod tests {
             instance_id,
             7,
             binding.clone(),
+            ceremony_selection(AuthCeremonyPurpose::SignIn),
             callback.clone(),
             AuthReturnTarget::ApplicationHome,
             RequestCorrelationId::new_v7(),
@@ -2543,6 +2641,7 @@ mod tests {
             instance_id,
             7,
             binding.clone(),
+            ceremony_selection(AuthCeremonyPurpose::RecentAuthentication),
             callback.clone(),
             AuthReturnTarget::AccountSecurity,
             RequestCorrelationId::new_v7(),
@@ -2566,6 +2665,7 @@ mod tests {
             instance_id,
             7,
             binding.clone(),
+            ceremony_selection(AuthCeremonyPurpose::FirstAdministratorBootstrap),
             callback.clone(),
             AuthReturnTarget::FirstRun,
             RequestCorrelationId::new_v7(),
@@ -2591,6 +2691,7 @@ mod tests {
             instance_id,
             7,
             binding.clone(),
+            ceremony_selection(AuthCeremonyPurpose::SignIn),
             callback.clone(),
             AuthReturnTarget::ApplicationHome,
             RequestCorrelationId::new_v7(),
@@ -2611,6 +2712,7 @@ mod tests {
             instance_id,
             7,
             binding,
+            ceremony_selection(AuthCeremonyPurpose::SignIn),
             callback,
             AuthReturnTarget::ApplicationHome,
             RequestCorrelationId::new_v7(),
@@ -2636,6 +2738,7 @@ mod tests {
             TrailBaseInstanceId::new_v7(),
             1,
             Sha256Digest::from_bytes(&[2; 32]),
+            ceremony_selection(AuthCeremonyPurpose::SignIn),
             AuthCallbackPath::parse("/auth/trailbase/callback").expect("callback"),
             AuthReturnTarget::ApplicationHome,
             RequestCorrelationId::new_v7(),
@@ -2670,6 +2773,7 @@ mod tests {
                 instance_id,
                 7,
                 binding.clone(),
+                ceremony_selection(AuthCeremonyPurpose::SignIn),
                 callback.clone(),
                 AuthReturnTarget::ApplicationHome,
                 RequestCorrelationId::new_v7(),
@@ -2747,6 +2851,7 @@ mod tests {
                 instance_id,
                 1,
                 binding.clone(),
+                ceremony_selection(purpose),
                 callback.clone(),
                 target,
                 RequestCorrelationId::new_v7(),
@@ -2768,6 +2873,7 @@ mod tests {
                             instance_id,
                             1,
                             binding.clone(),
+                            ceremony_selection(purpose),
                             callback.clone(),
                             mismatched,
                             RequestCorrelationId::new_v7(),
@@ -2798,6 +2904,45 @@ mod tests {
     }
 
     #[test]
+    fn ceremony_selection_binds_invitations_only_to_sign_in() {
+        let workspace_id = WorkspaceId::new_v7();
+        let grant_id = ProfileGrantId::new_v7();
+        let invitation_id = MembershipId::new_v7();
+
+        assert!(AuthCeremonySelection::try_new(
+            AuthCeremonyPurpose::SignIn,
+            workspace_id,
+            grant_id,
+            None,
+            Some(invitation_id),
+            true,
+        )
+        .is_ok());
+        assert_eq!(
+            AuthCeremonySelection::try_new(
+                AuthCeremonyPurpose::RecentAuthentication,
+                workspace_id,
+                grant_id,
+                Some(BrowserSessionId::new_v7()),
+                Some(invitation_id),
+                false,
+            ),
+            Err(AccessInvariantError::InvalidCeremonySelectionBinding)
+        );
+        assert_eq!(
+            AuthCeremonySelection::try_new(
+                AuthCeremonyPurpose::FirstAdministratorBootstrap,
+                workspace_id,
+                grant_id,
+                None,
+                Some(invitation_id),
+                false,
+            ),
+            Err(AccessInvariantError::InvalidCeremonySelectionBinding)
+        );
+    }
+
+    #[test]
     fn ceremony_persistence_rejects_impossible_state_and_failure_combinations() {
         let instance_id = TrailBaseInstanceId::new_v7();
         let binding = Sha256Digest::from_bytes(&[6; 32]);
@@ -2810,6 +2955,7 @@ mod tests {
                 instance_id,
                 2,
                 binding.clone(),
+                ceremony_selection(AuthCeremonyPurpose::SignIn),
                 callback.clone(),
                 AuthReturnTarget::ApplicationHome,
                 RequestCorrelationId::new_v7(),
@@ -2892,6 +3038,7 @@ mod tests {
                 instance_id,
                 0,
                 binding,
+                ceremony_selection(AuthCeremonyPurpose::SignIn),
                 callback,
                 AuthReturnTarget::ApplicationHome,
                 RequestCorrelationId::new_v7(),
@@ -2914,6 +3061,7 @@ mod tests {
             instance_id,
             1,
             binding.clone(),
+            ceremony_selection(AuthCeremonyPurpose::SignIn),
             callback.clone(),
             AuthReturnTarget::ApplicationHome,
             RequestCorrelationId::new_v7(),

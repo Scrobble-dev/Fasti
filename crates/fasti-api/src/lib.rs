@@ -32,6 +32,7 @@ mod problem;
 mod profile_state;
 mod providers;
 mod records;
+mod trailbase;
 
 /// Provider-scoped gates shared by credential mutation, provider checks, and
 /// metadata refreshes in one API process.

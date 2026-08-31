@@ -10,8 +10,8 @@ pub use metadata::*;
 pub use platform_vault::*;
 pub use providers::*;
 pub use transport::{
-    bounded_body, configuration_digest, pinned_client, resolve_once, AuthorizedClient,
-    GovernedTransport,
+    bounded_body, configuration_digest, pinned_client, pinned_client_with_timeouts, resolve_once,
+    AuthorizedClient, GovernedTransport,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

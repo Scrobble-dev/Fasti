@@ -868,6 +868,7 @@ name = "fasti-api"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "base64 0.22.1",
  "chrono",
  "fasti-application",
  "fasti-contracts",
@@ -875,8 +876,10 @@ dependencies = [
  "fasti-provider-runtime",
  "fasti-store",
  "getrandom 0.4.3",
+ "reqwest",
  "serde",
  "serde_json",
+ "sha2",
  "static_assertions",
  "tempfile",
  "tokio",
@@ -884,6 +887,7 @@ dependencies = [
  "tower",
  "tower-http 0.7.0",
  "utoipa",
+ "zeroize",
 ]
 
 [[package]]

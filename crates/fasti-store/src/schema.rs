@@ -1982,6 +1982,39 @@ fn migrate_v14(connection: &Connection) -> Result<()> {
                 AND substr(browser_binding_digest, 1, 7) = 'sha256:'
                 AND substr(browser_binding_digest, 8) NOT GLOB '*[^0-9a-f]*'
             ),
+            workspace_id TEXT NOT NULL CHECK (
+                length(workspace_id) = 36
+                AND substr(workspace_id, 1, 4) = 'wsp_'
+                AND substr(workspace_id, 5) NOT GLOB '*[^0-9a-f]*'
+                AND substr(workspace_id, 17, 1) = '7'
+                AND substr(workspace_id, 21, 1) GLOB '[89ab]'
+            ),
+            selected_profile_grant_id TEXT NOT NULL CHECK (
+                length(selected_profile_grant_id) = 36
+                AND substr(selected_profile_grant_id, 1, 4) = 'grt_'
+                AND substr(selected_profile_grant_id, 5) NOT GLOB '*[^0-9a-f]*'
+                AND substr(selected_profile_grant_id, 17, 1) = '7'
+                AND substr(selected_profile_grant_id, 21, 1) GLOB '[89ab]'
+            ),
+            bound_browser_session_id TEXT CHECK (
+                bound_browser_session_id IS NULL OR (
+                    length(bound_browser_session_id) = 36
+                    AND substr(bound_browser_session_id, 1, 4) = 'ses_'
+                    AND substr(bound_browser_session_id, 5) NOT GLOB '*[^0-9a-f]*'
+                    AND substr(bound_browser_session_id, 17, 1) = '7'
+                    AND substr(bound_browser_session_id, 21, 1) GLOB '[89ab]'
+                )
+            ),
+            invited_membership_id TEXT CHECK (
+                invited_membership_id IS NULL OR (
+                    length(invited_membership_id) = 36
+                    AND substr(invited_membership_id, 1, 4) = 'mem_'
+                    AND substr(invited_membership_id, 5) NOT GLOB '*[^0-9a-f]*'
+                    AND substr(invited_membership_id, 17, 1) = '7'
+                    AND substr(invited_membership_id, 21, 1) GLOB '[89ab]'
+                )
+            ),
+            remembered INTEGER NOT NULL CHECK (remembered IN (0, 1)),
             callback_path TEXT NOT NULL CHECK (
                 length(callback_path) BETWEEN 1 AND 128
                 AND substr(callback_path, 1, 1) = '/'
@@ -2018,6 +2051,17 @@ fn migrate_v14(connection: &Connection) -> Result<()> {
                 (purpose = 'sign_in' AND return_target = 'application_home')
                 OR (purpose = 'recent_authentication' AND return_target = 'account_security')
                 OR (purpose = 'first_administrator_bootstrap' AND return_target = 'first_run')
+            ),
+            CHECK (
+                (purpose = 'sign_in' AND bound_browser_session_id IS NULL)
+                OR (purpose = 'recent_authentication'
+                    AND bound_browser_session_id IS NOT NULL
+                    AND invited_membership_id IS NULL
+                    AND remembered = 0)
+                OR (purpose = 'first_administrator_bootstrap'
+                    AND bound_browser_session_id IS NULL
+                    AND invited_membership_id IS NULL
+                    AND remembered = 0)
             ),
             CHECK (
                 (state = 'pending' AND failure IS NULL
@@ -2067,8 +2111,11 @@ fn migrate_v14(connection: &Connection) -> Result<()> {
                 'trailbase_password', 'trailbase_social'
             )),
             verified_at TEXT NOT NULL,
-            recent_authentication_expires_at TEXT NOT NULL,
-            CHECK (recent_authentication_expires_at > verified_at)
+            recent_authentication_expires_at TEXT,
+            CHECK (
+                recent_authentication_expires_at IS NULL
+                OR recent_authentication_expires_at > verified_at
+            )
         ) STRICT;
         CREATE INDEX fasti_browser_session_authentication_generation_idx
             ON fasti_browser_session_authentication(
@@ -3283,6 +3330,7 @@ mod tests {
         let instance_id = fasti_domain::TrailBaseInstanceId::new_v7().to_string();
         let membership_id = fasti_domain::MembershipId::new_v7().to_string();
         let next_membership_id = fasti_domain::MembershipId::new_v7().to_string();
+        let grant_id = fasti_domain::ProfileGrantId::new_v7().to_string();
         let operation_id = fasti_domain::OperationId::new_v7().to_string();
         let correlation_id = fasti_domain::RequestCorrelationId::new_v7().to_string();
         let root_digest = format!("sha256:{}", "11".repeat(32));
@@ -3360,23 +3408,50 @@ mod tests {
 
         assert!(connection
             .execute(
-                "INSERT INTO auth_ceremonies(operation_id, purpose, protocol, trailbase_instance_id, activation_generation, browser_binding_digest, callback_path, return_target, correlation_id, state, failure, created_at, expires_at, claimed_at, terminal_at) VALUES (?1, 'sign_in', 'trailbase_authorization_code_pkce', ?2, 1, ?3, '/auth/trailbase/callback', 'first_run', ?4, 'pending', NULL, ?5, '2026-08-24T00:05:00.000000Z', NULL, NULL)",
-                params![operation_id, instance_id, binding_digest, correlation_id, CREATED_AT],
+                "INSERT INTO auth_ceremonies(operation_id, purpose, protocol, trailbase_instance_id, activation_generation, browser_binding_digest, workspace_id, selected_profile_grant_id, bound_browser_session_id, invited_membership_id, remembered, callback_path, return_target, correlation_id, state, failure, created_at, expires_at, claimed_at, terminal_at) VALUES (?1, 'sign_in', 'trailbase_authorization_code_pkce', ?2, 1, ?3, ?4, ?5, NULL, NULL, 0, '/auth/trailbase/callback', 'first_run', ?6, 'pending', NULL, ?7, '2026-08-24T00:05:00.000000Z', NULL, NULL)",
+                params![operation_id, instance_id, binding_digest, workspace_id, grant_id, correlation_id, CREATED_AT],
             )
             .is_err());
         connection
             .execute(
-                "INSERT INTO auth_ceremonies(operation_id, purpose, protocol, trailbase_instance_id, activation_generation, browser_binding_digest, callback_path, return_target, correlation_id, state, failure, created_at, expires_at, claimed_at, terminal_at) VALUES (?1, 'sign_in', 'trailbase_authorization_code_pkce', ?2, 1, ?3, '/auth/trailbase/callback', 'application_home', ?4, 'pending', NULL, ?5, '2026-08-24T00:05:00.000000Z', NULL, NULL)",
-                params![operation_id, instance_id, binding_digest, correlation_id, CREATED_AT],
+                "INSERT INTO auth_ceremonies(operation_id, purpose, protocol, trailbase_instance_id, activation_generation, browser_binding_digest, workspace_id, selected_profile_grant_id, bound_browser_session_id, invited_membership_id, remembered, callback_path, return_target, correlation_id, state, failure, created_at, expires_at, claimed_at, terminal_at) VALUES (?1, 'sign_in', 'trailbase_authorization_code_pkce', ?2, 1, ?3, ?4, ?5, NULL, NULL, 0, '/auth/trailbase/callback', 'application_home', ?6, 'pending', NULL, ?7, '2026-08-24T00:05:00.000000Z', NULL, NULL)",
+                params![operation_id, instance_id, binding_digest, workspace_id, grant_id, correlation_id, CREATED_AT],
             )
             .expect("valid pending ceremony");
+        let browser_session_id = fasti_domain::BrowserSessionId::new_v7().to_string();
         assert!(connection
             .execute(
-                "INSERT INTO auth_ceremonies(operation_id, purpose, protocol, trailbase_instance_id, activation_generation, browser_binding_digest, callback_path, return_target, correlation_id, state, failure, created_at, expires_at, claimed_at, terminal_at) VALUES (?1, 'sign_in', 'trailbase_authorization_code_pkce', ?2, 1, ?3, '/auth/trailbase/callback', 'application_home', ?4, 'pending', NULL, ?5, '2026-08-24T00:05:00.000000Z', NULL, NULL)",
+                "UPDATE auth_ceremonies SET bound_browser_session_id = ?1 WHERE operation_id = ?2",
+                params![browser_session_id, operation_id],
+            )
+            .is_err());
+        connection
+            .execute(
+                "UPDATE auth_ceremonies SET purpose = 'recent_authentication', return_target = 'account_security', bound_browser_session_id = ?1, remembered = 0 WHERE operation_id = ?2",
+                params![browser_session_id, operation_id],
+            )
+            .expect("valid reserved recent-auth association");
+        assert!(connection
+            .execute(
+                "UPDATE auth_ceremonies SET invited_membership_id = ?1 WHERE operation_id = ?2",
+                params![next_membership_id, operation_id],
+            )
+            .is_err());
+        connection
+            .execute(
+                "UPDATE auth_ceremonies SET purpose = 'sign_in', return_target = 'application_home', bound_browser_session_id = NULL WHERE operation_id = ?1",
+                [operation_id.as_str()],
+            )
+            .expect("restore sign-in association");
+        assert!(connection
+            .execute(
+                "INSERT INTO auth_ceremonies(operation_id, purpose, protocol, trailbase_instance_id, activation_generation, browser_binding_digest, workspace_id, selected_profile_grant_id, bound_browser_session_id, invited_membership_id, remembered, callback_path, return_target, correlation_id, state, failure, created_at, expires_at, claimed_at, terminal_at) VALUES (?1, 'sign_in', 'trailbase_authorization_code_pkce', ?2, 1, ?3, ?4, ?5, NULL, NULL, 0, '/auth/trailbase/callback', 'application_home', ?6, 'pending', NULL, ?7, '2026-08-24T00:05:00.000000Z', NULL, NULL)",
                 params![
                     fasti_domain::OperationId::new_v7().to_string(),
                     instance_id,
                     binding_digest,
+                    workspace_id,
+                    grant_id,
                     correlation_id,
                     CREATED_AT,
                 ],
@@ -3406,11 +3481,13 @@ mod tests {
         let claimed_binding_digest = format!("sha256:{}", "33".repeat(32));
         connection
             .execute(
-                "INSERT INTO auth_ceremonies(operation_id, purpose, protocol, trailbase_instance_id, activation_generation, browser_binding_digest, callback_path, return_target, correlation_id, state, failure, created_at, expires_at, claimed_at, terminal_at) VALUES (?1, 'sign_in', 'trailbase_authorization_code_pkce', ?2, 1, ?3, '/auth/trailbase/callback', 'application_home', ?4, 'claimed', NULL, ?5, '2026-08-24T00:05:00.000000Z', '2026-08-24T00:00:01.000000Z', NULL)",
+                "INSERT INTO auth_ceremonies(operation_id, purpose, protocol, trailbase_instance_id, activation_generation, browser_binding_digest, workspace_id, selected_profile_grant_id, bound_browser_session_id, invited_membership_id, remembered, callback_path, return_target, correlation_id, state, failure, created_at, expires_at, claimed_at, terminal_at) VALUES (?1, 'sign_in', 'trailbase_authorization_code_pkce', ?2, 1, ?3, ?4, ?5, NULL, NULL, 0, '/auth/trailbase/callback', 'application_home', ?6, 'claimed', NULL, ?7, '2026-08-24T00:05:00.000000Z', '2026-08-24T00:00:01.000000Z', NULL)",
                 params![
                     claimed_operation_id,
                     instance_id,
                     claimed_binding_digest,
+                    workspace_id,
+                    grant_id,
                     correlation_id,
                     CREATED_AT,
                 ],

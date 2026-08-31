@@ -247,6 +247,14 @@ pub(crate) fn authenticate_session(
         }
         return Err(problem(session_problem(state), capability, correlation_id));
     }
+    validate_active_membership(
+        connection,
+        subject.id(),
+        session.workspace_id(),
+        ProblemCode::SessionPolicyChanged,
+        capability,
+        correlation_id,
+    )?;
     validate_grants(
         connection,
         subject.id(),
@@ -274,6 +282,37 @@ pub(crate) fn authenticate_session(
         session = parse_session(&row, capability, correlation_id)?;
     }
     Ok(AuthenticatedBrowserSession::new(subject, session))
+}
+
+fn validate_active_membership(
+    connection: &Connection,
+    subject_id: AuthSubjectId,
+    workspace_id: WorkspaceId,
+    invalid_code: ProblemCode,
+    capability: CapabilityKey,
+    correlation_id: fasti_domain::RequestCorrelationId,
+) -> ApplicationResult<()> {
+    let exists = map_sql(
+        connection.query_row(
+            r#"
+            SELECT EXISTS(
+                SELECT 1
+                FROM workspace_memberships
+                WHERE auth_subject_id = ?1
+                  AND workspace_id = ?2
+                  AND lifecycle = 'active'
+            )
+            "#,
+            params![subject_id.to_string(), workspace_id.to_string()],
+            |row| row.get::<_, i64>(0),
+        ),
+        capability,
+        correlation_id,
+    )?;
+    if exists != 1 {
+        return Err(problem(invalid_code, capability, correlation_id));
+    }
+    Ok(())
 }
 
 fn validate_grants(
@@ -320,7 +359,7 @@ fn validate_grants(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn insert_session(
+pub(crate) fn insert_session(
     transaction: &Transaction<'_>,
     subject: AuthSubject,
     workspace_id: WorkspaceId,
@@ -333,6 +372,14 @@ fn insert_session(
     capability: CapabilityKey,
     correlation_id: fasti_domain::RequestCorrelationId,
 ) -> ApplicationResult<CreatedBrowserSession> {
+    validate_active_membership(
+        transaction,
+        subject.id(),
+        workspace_id,
+        ProblemCode::Forbidden,
+        capability,
+        correlation_id,
+    )?;
     validate_grants(
         transaction,
         subject.id(),
@@ -1085,6 +1132,17 @@ mod tests {
                     )
                     .expect("subject profile grant");
             }
+            connection
+                .execute(
+                    "INSERT INTO workspace_memberships(membership_id, auth_subject_id, workspace_id, lifecycle, role, created_at, updated_at) VALUES (?1, ?2, ?3, 'active', 'member', ?4, ?4)",
+                    params![
+                        fasti_domain::MembershipId::new_v7().to_string(),
+                        subject_id.to_string(),
+                        workspace_id.to_string(),
+                        timestamp(created_at),
+                    ],
+                )
+                .expect("active membership");
         }
         Fixture {
             _root: root,
@@ -1141,12 +1199,10 @@ mod tests {
 
         connection
             .execute(
-                "INSERT INTO workspace_memberships(membership_id, auth_subject_id, workspace_id, lifecycle, role, created_at, updated_at) VALUES (?1, ?2, ?3, 'active', 'administrator', ?4, ?4)",
+                "UPDATE workspace_memberships SET role = 'administrator' WHERE auth_subject_id = ?1 AND workspace_id = ?2",
                 params![
-                    fasti_domain::MembershipId::new_v7().to_string(),
                     fixture.subject_id.to_string(),
                     fixture.workspace_id.to_string(),
-                    timestamp(fixture.created_at),
                 ],
             )
             .expect("administrator membership");
@@ -1602,8 +1658,8 @@ mod tests {
     }
 
     #[test]
-    fn session_authentication_rechecks_selected_grant_and_client_state() {
-        for revoke in ["grant", "client"] {
+    fn session_authentication_rechecks_membership_grant_and_client_state() {
+        for revoke in ["membership", "grant", "client"] {
             let fixture = fixture();
             let created = create_session(&fixture, &fixture.grants[..1], fixture.grants[0], 0);
             let connection = fixture
@@ -1613,7 +1669,17 @@ mod tests {
                     fasti_domain::RequestCorrelationId::new_v7(),
                 )
                 .expect("connection");
-            if revoke == "grant" {
+            if revoke == "membership" {
+                connection
+                    .execute(
+                        "UPDATE workspace_memberships SET lifecycle = 'suspended' WHERE auth_subject_id = ?1 AND workspace_id = ?2",
+                        params![
+                            fixture.subject_id.to_string(),
+                            fixture.workspace_id.to_string(),
+                        ],
+                    )
+                    .expect("suspend membership");
+            } else if revoke == "grant" {
                 connection
                     .execute(
                         "UPDATE profile_grants SET status = 'revoked', revoked_at = ?1 WHERE grant_id = ?2",

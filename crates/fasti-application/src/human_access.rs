@@ -1,9 +1,10 @@
 use crate::{ApplicationResult, BrowserSessionMutationCommand, SecretMaterial};
 use chrono::{DateTime, Utc};
 use fasti_domain::{
-    AuthCallbackPath, AuthCeremony, AuthSubjectId, AuthSubjectLifecycle, MembershipId,
-    MembershipLifecycleAction, OperationId, RequestCorrelationId, Sha256Digest,
-    TrailBaseInstallation, TrailBaseInstanceId, TrailBaseSubject, WorkspaceId, WorkspaceRole,
+    AuthCallbackPath, AuthCeremony, AuthCeremonyFailure, AuthSubjectId, AuthSubjectLifecycle,
+    AuthenticationProvenance, MembershipId, MembershipLifecycleAction, OperationId,
+    RequestCorrelationId, Sha256Digest, TrailBaseInstallation, TrailBaseInstanceId,
+    TrailBaseSubject, WorkspaceRole,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -52,6 +53,26 @@ impl VerifyTrailBaseInstallationCommand {
 #[derive(Debug, Clone)]
 pub struct StartAuthCeremonyCommand {
     ceremony: AuthCeremony,
+}
+
+pub struct StartTrailBaseBootstrapCommand {
+    ceremony: AuthCeremony,
+    bootstrap_secret: SecretMaterial,
+}
+
+impl StartTrailBaseBootstrapCommand {
+    pub const fn new(ceremony: AuthCeremony, bootstrap_secret: SecretMaterial) -> Self {
+        Self {
+            ceremony,
+            bootstrap_secret,
+        }
+    }
+    pub const fn ceremony(&self) -> &AuthCeremony {
+        &self.ceremony
+    }
+    pub const fn bootstrap_secret(&self) -> &SecretMaterial {
+        &self.bootstrap_secret
+    }
 }
 
 impl StartAuthCeremonyCommand {
@@ -117,57 +138,6 @@ pub struct CancelAuthCeremonyCommand {
     operation_id: OperationId,
     correlation_id: RequestCorrelationId,
     at: DateTime<Utc>,
-}
-
-pub struct BootstrapFirstAdministratorCommand {
-    bootstrap_secret: SecretMaterial,
-    operation_id: OperationId,
-    trailbase_subject: TrailBaseSubject,
-    correlation_id: RequestCorrelationId,
-    at: DateTime<Utc>,
-}
-
-impl BootstrapFirstAdministratorCommand {
-    pub const fn new(
-        bootstrap_secret: SecretMaterial,
-        operation_id: OperationId,
-        trailbase_subject: TrailBaseSubject,
-        correlation_id: RequestCorrelationId,
-        at: DateTime<Utc>,
-    ) -> Self {
-        Self {
-            bootstrap_secret,
-            operation_id,
-            trailbase_subject,
-            correlation_id,
-            at,
-        }
-    }
-    pub const fn bootstrap_secret(&self) -> &SecretMaterial {
-        &self.bootstrap_secret
-    }
-    pub const fn operation_id(&self) -> OperationId {
-        self.operation_id
-    }
-    pub const fn trailbase_subject(&self) -> TrailBaseSubject {
-        self.trailbase_subject
-    }
-    pub const fn correlation_id(&self) -> RequestCorrelationId {
-        self.correlation_id
-    }
-    pub const fn at(&self) -> DateTime<Utc> {
-        self.at
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BootstrapFirstAdministratorOutcome {
-    Created {
-        subject_id: AuthSubjectId,
-        membership_id: MembershipId,
-        workspace_id: WorkspaceId,
-    },
-    AlreadyBootstrapped,
 }
 
 pub struct ChangeMembershipLifecycleCommand {
@@ -316,12 +286,189 @@ impl CancelAuthCeremonyCommand {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConfirmedTrailBaseIdentity {
+    instance_id: TrailBaseInstanceId,
+    subject: TrailBaseSubject,
+    provenance: AuthenticationProvenance,
+}
+
+impl ConfirmedTrailBaseIdentity {
+    pub const fn new(
+        instance_id: TrailBaseInstanceId,
+        subject: TrailBaseSubject,
+        provenance: AuthenticationProvenance,
+    ) -> Self {
+        Self {
+            instance_id,
+            subject,
+            provenance,
+        }
+    }
+    pub const fn instance_id(&self) -> TrailBaseInstanceId {
+        self.instance_id
+    }
+    pub const fn subject(&self) -> TrailBaseSubject {
+        self.subject
+    }
+    pub const fn provenance(&self) -> AuthenticationProvenance {
+        self.provenance
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct PreauthorizeTrailBaseSignInCommand {
+    operation_id: OperationId,
+    identity: ConfirmedTrailBaseIdentity,
+    correlation_id: RequestCorrelationId,
+    at: DateTime<Utc>,
+}
+
+impl PreauthorizeTrailBaseSignInCommand {
+    pub const fn new(
+        operation_id: OperationId,
+        identity: ConfirmedTrailBaseIdentity,
+        correlation_id: RequestCorrelationId,
+        at: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            operation_id,
+            identity,
+            correlation_id,
+            at,
+        }
+    }
+    pub const fn operation_id(&self) -> OperationId {
+        self.operation_id
+    }
+    pub const fn identity(&self) -> ConfirmedTrailBaseIdentity {
+        self.identity
+    }
+    pub const fn correlation_id(&self) -> RequestCorrelationId {
+        self.correlation_id
+    }
+    pub const fn at(&self) -> DateTime<Utc> {
+        self.at
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct PreauthorizeTrailBaseBootstrapCommand {
+    operation_id: OperationId,
+    identity: ConfirmedTrailBaseIdentity,
+    correlation_id: RequestCorrelationId,
+    at: DateTime<Utc>,
+}
+
+impl PreauthorizeTrailBaseBootstrapCommand {
+    pub const fn new(
+        operation_id: OperationId,
+        identity: ConfirmedTrailBaseIdentity,
+        correlation_id: RequestCorrelationId,
+        at: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            operation_id,
+            identity,
+            correlation_id,
+            at,
+        }
+    }
+    pub const fn operation_id(&self) -> OperationId {
+        self.operation_id
+    }
+    pub const fn identity(&self) -> ConfirmedTrailBaseIdentity {
+        self.identity
+    }
+    pub const fn correlation_id(&self) -> RequestCorrelationId {
+        self.correlation_id
+    }
+    pub const fn at(&self) -> DateTime<Utc> {
+        self.at
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct CompleteTrailBaseSignInCommand(PreauthorizeTrailBaseSignInCommand);
+
+impl CompleteTrailBaseSignInCommand {
+    pub const fn new(command: PreauthorizeTrailBaseSignInCommand) -> Self {
+        Self(command)
+    }
+    pub const fn authorization(&self) -> PreauthorizeTrailBaseSignInCommand {
+        self.0
+    }
+}
+
+pub struct CompleteTrailBaseBootstrapCommand {
+    authorization: PreauthorizeTrailBaseBootstrapCommand,
+    bootstrap_secret: SecretMaterial,
+}
+
+impl CompleteTrailBaseBootstrapCommand {
+    pub const fn new(
+        authorization: PreauthorizeTrailBaseBootstrapCommand,
+        bootstrap_secret: SecretMaterial,
+    ) -> Self {
+        Self {
+            authorization,
+            bootstrap_secret,
+        }
+    }
+    pub const fn authorization(&self) -> &PreauthorizeTrailBaseBootstrapCommand {
+        &self.authorization
+    }
+    pub const fn bootstrap_secret(&self) -> &SecretMaterial {
+        &self.bootstrap_secret
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct FailAuthCeremonyCommand {
+    operation_id: OperationId,
+    failure: AuthCeremonyFailure,
+    correlation_id: RequestCorrelationId,
+    at: DateTime<Utc>,
+}
+
+impl FailAuthCeremonyCommand {
+    pub const fn new(
+        operation_id: OperationId,
+        failure: AuthCeremonyFailure,
+        correlation_id: RequestCorrelationId,
+        at: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            operation_id,
+            failure,
+            correlation_id,
+            at,
+        }
+    }
+    pub const fn operation_id(&self) -> OperationId {
+        self.operation_id
+    }
+    pub const fn failure(&self) -> AuthCeremonyFailure {
+        self.failure
+    }
+    pub const fn correlation_id(&self) -> RequestCorrelationId {
+        self.correlation_id
+    }
+    pub const fn at(&self) -> DateTime<Utc> {
+        self.at
+    }
+}
+
 pub trait HumanAccessPort: Send + Sync {
     fn verify_trailbase_installation(
         &self,
         command: VerifyTrailBaseInstallationCommand,
     ) -> ApplicationResult<TrailBaseInstallation>;
     fn start_auth_ceremony(&self, command: StartAuthCeremonyCommand) -> ApplicationResult<()>;
+    fn start_trailbase_bootstrap(
+        &self,
+        command: StartTrailBaseBootstrapCommand,
+    ) -> ApplicationResult<()>;
     fn claim_auth_ceremony(
         &self,
         command: ClaimAuthCeremonyCommand,
@@ -330,10 +477,26 @@ pub trait HumanAccessPort: Send + Sync {
         &self,
         command: CancelAuthCeremonyCommand,
     ) -> ApplicationResult<AuthCeremony>;
-    fn bootstrap_first_administrator(
+    fn preauthorize_trailbase_sign_in(
         &self,
-        command: BootstrapFirstAdministratorCommand,
-    ) -> ApplicationResult<BootstrapFirstAdministratorOutcome>;
+        command: PreauthorizeTrailBaseSignInCommand,
+    ) -> ApplicationResult<()>;
+    fn preauthorize_trailbase_bootstrap(
+        &self,
+        command: PreauthorizeTrailBaseBootstrapCommand,
+    ) -> ApplicationResult<()>;
+    fn fail_auth_ceremony(
+        &self,
+        command: FailAuthCeremonyCommand,
+    ) -> ApplicationResult<AuthCeremony>;
+    fn complete_trailbase_sign_in(
+        &self,
+        command: CompleteTrailBaseSignInCommand,
+    ) -> ApplicationResult<crate::CreatedBrowserSession>;
+    fn complete_trailbase_bootstrap(
+        &self,
+        command: CompleteTrailBaseBootstrapCommand,
+    ) -> ApplicationResult<crate::CreatedBrowserSession>;
     fn change_membership_lifecycle(
         &self,
         command: ChangeMembershipLifecycleCommand,
