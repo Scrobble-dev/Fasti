@@ -13,11 +13,17 @@ declare global {
 export default function Search(): React.JSX.Element {
   useEffect(() => {
     const initialise = () => {
-      if (window.PagefindUI)
+      if (window.PagefindUI) {
         new window.PagefindUI({
           element: "#pagefind-search",
           showSubResults: true,
         });
+        const input = document.querySelector<HTMLInputElement>(
+          "#pagefind-search input",
+        );
+        input?.setAttribute("aria-label", "Search documentation");
+        input?.setAttribute("role", "searchbox");
+      }
     };
     const script = document.createElement("script");
     script.src = "/pagefind/pagefind-ui.js";
