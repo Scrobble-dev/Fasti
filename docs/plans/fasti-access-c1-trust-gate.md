@@ -1,6 +1,6 @@
 # Fasti Access C1 implementation gate
 
-Status: `C1_2_COMPLETE_C1_3_APPROVED_FOR_IMPLEMENTATION`
+Status: `C1_3A_C_COMPLETE_C1_3D_IN_PROGRESS`
 
 Recorded: 2026-08-30
 
@@ -501,6 +501,42 @@ review the active gate and prepare the next one.
   restart, and exact TrailBase outage behavior pass. Real-browser cookie
   behavior is also an entry gate for C1.4; unit HTTP tests alone do not prove
   `Secure` and `SameSite` behavior on the fixed loopback origin.
+
+### 2.5 C1.3a-c completion record
+
+C1.3a-c is frozen at commit
+`5682073bdf54d3589b7815f3d5814ff52ab6c390`, tree
+`a764469e23b2c6deb28fd676e1e3dee39cbc3a59`. Nothing from this checkpoint was
+pushed or merged.
+
+- The exact direct `127.0.0.1:8420` listener mounts Access and browser-session
+  authorization only after the stored TrailBase installation is active. Port
+  fallback, alternate IPv4 or IPv6 loopback, wildcard/container forwarding,
+  generic local, integration, and remote routers keep those routes absent.
+- The nine browser-session capabilities and `access.projection.read` are
+  active. `access.identity.bootstrap` remains inactive until C1.3d owns the
+  one packaged-host runtime and first-administrator command.
+- OpenAPI 3.1, generated JSON Schema, capability and problem catalogs, OKF,
+  callable SDK methods, cookie and CSRF security declarations, and exact
+  operation problem subsets share the authored registry and application
+  capability owners. The navigation callback has no SDK method.
+- Rust and JavaScript validators walk every schema reachable from an Access
+  request or response and reject the complete frozen secret-property set.
+  Staged-diff Gitleaks found no secret.
+- The exact clean commit passed `cargo xtask contract verify --locked`,
+  including deterministic generation, generated drift, formatting, workspace
+  type checks, 110 JavaScript mutation/SDK tests, strict workspace clippy,
+  complete workspace tests, conformance tests, builds, and package policy.
+- Independent route, generator, error-mapping, and next-slice reviewers found
+  and closed the active-installation mount gate, operation-specific problems,
+  callable-SDK proof, and transitive no-secret gate. The optional AGY outside
+  review could not inspect the repository because its headless command
+  permission was denied; no AGY pass is claimed.
+- C1.3d remains open. It must share one TrailBase orchestrator and verifier
+  vault between packaged-host bootstrap start and the callback, reload the
+  owner-only bootstrap secret only after a bootstrap ceremony is claimed, own
+  the fixed listener without fallback, and resolve packaged `/first-run`
+  serving before C1.4 begins.
 
 ## 3. Exact TrailBase evidence
 
