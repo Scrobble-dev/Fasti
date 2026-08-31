@@ -1,5 +1,6 @@
+import Link from "@docusaurus/Link";
 import Layout from "@theme/Layout";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 declare global {
   interface Window {
@@ -11,27 +12,34 @@ declare global {
 }
 
 export default function Search(): React.JSX.Element {
+  const [ready, setReady] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   useEffect(() => {
     const initialise = () => {
-      if (window.PagefindUI) {
-        new window.PagefindUI({
-          element: "#pagefind-search",
-          showSubResults: true,
-        });
-        const input = document.querySelector<HTMLInputElement>(
-          "#pagefind-search input",
-        );
-        input?.setAttribute("aria-label", "Search documentation");
-        input?.setAttribute("role", "searchbox");
+      if (!window.PagefindUI) {
+        setLoadError(true);
+        return;
       }
+      new window.PagefindUI({
+        element: "#pagefind-search",
+        showSubResults: true,
+      });
+      const input = document.querySelector<HTMLInputElement>(
+        "#pagefind-search input",
+      );
+      input?.setAttribute("aria-label", "Search documentation");
+      input?.setAttribute("role", "searchbox");
+      setReady(true);
     };
     const script = document.createElement("script");
     script.src = "/pagefind/pagefind-ui.js";
     script.onload = initialise;
+    script.onerror = () => setLoadError(true);
     document.head.append(script);
     const stylesheet = document.createElement("link");
     stylesheet.rel = "stylesheet";
     stylesheet.href = "/pagefind/pagefind-ui.css";
+    stylesheet.onerror = () => setLoadError(true);
     document.head.append(stylesheet);
     return () => {
       script.remove();
@@ -49,7 +57,51 @@ export default function Search(): React.JSX.Element {
           The query stays in this browser. The site sends no search or telemetry
           request.
         </p>
-        <div id="pagefind-search" role="search" />
+        {!ready && (
+          <div
+            aria-busy={!loadError}
+            className="fasti-search-fallback"
+            role="search"
+          >
+            <label className="visually-hidden" htmlFor="fasti-search-fallback">
+              Search documentation
+            </label>
+            <input
+              aria-describedby={loadError ? undefined : "fasti-search-loading"}
+              className="form-control"
+              disabled
+              id="fasti-search-fallback"
+              placeholder="Search"
+              type="search"
+            />
+            {!loadError && (
+              <span
+                className="visually-hidden"
+                id="fasti-search-loading"
+                role="status"
+              >
+                Search is loading.
+              </span>
+            )}
+          </div>
+        )}
+        <div
+          className={ready ? undefined : "fasti-search-pending"}
+          id="pagefind-search"
+          role="search"
+        />
+        {loadError && (
+          <div className="alert alert-danger" role="alert">
+            Local search could not load.{" "}
+            <Link to="/start/choose-a-path/">Choose a path.</Link>
+          </div>
+        )}
+        <noscript>
+          <div className="alert alert-danger">
+            Search needs JavaScript.{" "}
+            <a href="/start/choose-a-path/">Choose a path.</a>
+          </div>
+        </noscript>
       </main>
     </Layout>
   );

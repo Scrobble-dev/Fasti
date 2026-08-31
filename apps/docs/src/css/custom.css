@@ -112,8 +112,12 @@ input:focus-visible {
   margin-inline: auto;
   padding-block: 3rem 5rem;
 }
+.fasti-search-fallback,
 #pagefind-search {
   min-height: calc(var(--fasti-touch-target-min) + 0.5rem);
+}
+.fasti-search-pending {
+  display: none;
 }
 .fasti-hero {
   max-width: 54rem;
