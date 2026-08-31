@@ -213,6 +213,7 @@ input:focus-visible {
   overflow-wrap: anywhere;
   background: var(--fasti-surface-night);
   color: var(--fasti-overlay-contrast);
+  border: 1px solid var(--fasti-border);
   padding: 1rem;
 }
 .fasti-plan-output code {
