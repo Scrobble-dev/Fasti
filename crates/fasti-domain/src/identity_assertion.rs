@@ -481,6 +481,7 @@ impl IdentityAssertion {
                     evidence_class,
                     IdentityAssertionEvidenceClass::Candidate
                         | IdentityAssertionEvidenceClass::Disputed
+                        | IdentityAssertionEvidenceClass::Inferred
                 ))
         {
             return Err(IdentityAssertionError::InvalidStatus);
@@ -872,7 +873,7 @@ mod tests {
         assert!(IdentityAssertion::try_new(
             IdentityAssertionId::new_v7(),
             &source,
-            target,
+            target.clone(),
             IdentityAssertionRelation::Exact,
             Vec::new(),
             Vec::new(),
@@ -886,6 +887,56 @@ mod tests {
             at(),
         )
         .is_err());
+
+        assert!(IdentityAssertion::try_new(
+            IdentityAssertionId::new_v7(),
+            &source,
+            target.clone(),
+            IdentityAssertionRelation::Exact,
+            Vec::new(),
+            Vec::new(),
+            IdentityAssertionEvidenceClass::Inferred,
+            vec![evidence(IdentityEvidenceMethod::HeuristicTitleMatch)],
+            "source:route",
+            None,
+            None,
+            None,
+            IdentityAssertionStatus::Accepted,
+            at(),
+        )
+        .is_err());
+
+        let inferred = IdentityAssertion::try_new(
+            IdentityAssertionId::new_v7(),
+            &source,
+            target,
+            IdentityAssertionRelation::Exact,
+            Vec::new(),
+            Vec::new(),
+            IdentityAssertionEvidenceClass::Inferred,
+            vec![evidence(IdentityEvidenceMethod::HeuristicTitleMatch)],
+            "source:route",
+            None,
+            None,
+            None,
+            IdentityAssertionStatus::Candidate,
+            at(),
+        )
+        .expect("inferred candidate");
+        let accepted = IdentityAssertionLifecycleEvent::try_new(
+            inferred.assertion_id(),
+            1,
+            IdentityAssertionStatus::Candidate,
+            IdentityAssertionStatus::Accepted,
+            ClientId::new_v7(),
+            at(),
+            None,
+        )
+        .expect("explicit acceptance");
+        assert_eq!(
+            inferred.effective_status(&[accepted]),
+            Ok(IdentityAssertionStatus::Accepted)
+        );
 
         assert!(IdentityCoverageSegment::try_new(
             IdentityCoverageMode::Flat,
