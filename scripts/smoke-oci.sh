@@ -146,6 +146,13 @@ if "$oci_runtime" run --rm --network none "$image" /usr/local/bin/fasti verify >
   echo "Unavailable verify command reported success" >&2
   exit 1
 fi
+if [[ -s "$cli_stdout" ]] || \
+  ! grep -Fq "capability_id=portability.workspace.verify" "$cli_stderr" || \
+  ! grep -Fq "not available in the current runtime" "$cli_stderr" || \
+  ! grep -Fq "owned by B3" "$cli_stderr"; then
+  echo "Unavailable verify command did not fail explicitly and quietly" >&2
+  exit 1
+fi
 
 if ! "$oci_runtime" run --rm --network none "$image" /usr/local/bin/fasti \
   access bootstrap-administrator --help >"$cli_stdout" 2>"$cli_stderr"; then
@@ -192,14 +199,6 @@ payload = json.loads(sys.argv[1])
 if payload.get("status") != "healthy" or not payload.get("version"):
     raise SystemExit(f"Unexpected network-denied health payload: {payload!r}")
 PY
-
-if [[ -s "$cli_stdout" ]] || \
-  ! grep -Fq "capability_id=portability.workspace.verify" "$cli_stderr" || \
-  ! grep -Fq "not available in the current runtime" "$cli_stderr" || \
-  ! grep -Fq "owned by B3" "$cli_stderr"; then
-  echo "Unavailable verify command did not fail explicitly and quietly" >&2
-  exit 1
-fi
 
 memory_field='{{.MemUsage}}'
 if [[ "$oci_runtime" == "podman" ]]; then
