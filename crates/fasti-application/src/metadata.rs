@@ -1964,6 +1964,27 @@ mod tests {
         )
         .is_some());
 
+        for status in [
+            IdentityAssertionStatus::Disputed,
+            IdentityAssertionStatus::Rejected,
+        ] {
+            let event = IdentityAssertionLifecycleEvent::try_new(
+                assertion.assertion_id(),
+                1,
+                IdentityAssertionStatus::Candidate,
+                status,
+                ClientId::new_v7(),
+                ReceivedAt::from_application_clock(
+                    Utc.timestamp_opt(1_800_000_001, 0)
+                        .single()
+                        .expect("negative lifecycle time"),
+                ),
+                Some(fasti_domain::Sha256Digest::from_bytes(&[1; 32])),
+            )
+            .expect("negative lifecycle event");
+            assert!(IdentityRouteEvidence::accepted_crosswalk(&assertion, &[event]).is_none());
+        }
+
         let revoked = IdentityAssertionLifecycleEvent::try_new(
             assertion.assertion_id(),
             2,

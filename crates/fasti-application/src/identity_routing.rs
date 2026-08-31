@@ -620,6 +620,90 @@ mod tests {
     }
 
     #[test]
+    fn impact_result_rejects_each_inconsistent_page_shape() {
+        let policy = AnimeGroupingPolicyView::try_new(
+            ProfileId::new_v7(),
+            AnimeGroupingPolicyScope::Profile,
+            AnimeGroupingPolicySource::ProfileDefault,
+            AnimeGroupingPreference::Automatic,
+            0,
+        )
+        .expect("valid profile policy");
+        let mut records = [RecordId::new_v7(), RecordId::new_v7()]
+            .map(|record_id| {
+                crate::preview_anime_grouping_change_for_record(
+                    record_id,
+                    AnimeGroupingPreference::Automatic,
+                    AnimeGroupingPreference::Automatic,
+                    &[],
+                )
+            })
+            .to_vec();
+        records.sort_by_key(|record| record.record_id().uuid());
+        let final_record_id = records[1].record_id();
+
+        assert!(AnimeGroupingPolicyImpact::try_new(
+            policy,
+            AnimeGroupingPreference::Automatic,
+            AnimeGroupingPolicySource::ClientOverride,
+            2,
+            0,
+            0,
+            0,
+            records.clone(),
+            Some(final_record_id),
+        )
+        .is_err());
+
+        for (total, affected, unresolved, regroupings, page) in [
+            (1, 0, 0, 0, records.clone()),
+            (1, 2, 0, 0, Vec::new()),
+            (1, 0, 2, 0, Vec::new()),
+            (1, 0, 0, 1, Vec::new()),
+        ] {
+            assert!(AnimeGroupingPolicyImpact::try_new(
+                policy,
+                AnimeGroupingPreference::Automatic,
+                AnimeGroupingPolicySource::ProfileDefault,
+                total,
+                affected,
+                unresolved,
+                regroupings,
+                page,
+                None,
+            )
+            .is_err());
+        }
+
+        let mut unordered = records.clone();
+        unordered.reverse();
+        assert!(AnimeGroupingPolicyImpact::try_new(
+            policy,
+            AnimeGroupingPreference::Automatic,
+            AnimeGroupingPolicySource::ProfileDefault,
+            2,
+            0,
+            0,
+            0,
+            unordered,
+            None,
+        )
+        .is_err());
+        assert!(AnimeGroupingPolicyImpact::try_new(
+            policy,
+            AnimeGroupingPreference::Automatic,
+            AnimeGroupingPolicySource::ProfileDefault,
+            2,
+            0,
+            0,
+            0,
+            records,
+            Some(RecordId::new_v7()),
+        )
+        .is_err());
+    }
+
+    #[test]
     fn policy_scope_distinguishes_profile_default_from_client_override() {
         let client_id = ClientId::new_v7();
         assert_eq!(AnimeGroupingPolicyScope::Profile.client_id(), None);
@@ -737,6 +821,59 @@ mod tests {
                 },
             ),
             Err(AnimeGroupingPolicyChangeError::SelfRollback)
+        );
+    }
+
+    #[test]
+    fn apply_outcome_validates_scope_counts_and_rollback_identity() {
+        let operation_id = OperationId::new_v7();
+        let rolled_back_operation_id = OperationId::new_v7();
+        let policy = AnimeGroupingPolicyView::try_new(
+            ProfileId::new_v7(),
+            AnimeGroupingPolicyScope::Profile,
+            AnimeGroupingPolicySource::ProfileDefault,
+            AnimeGroupingPreference::Automatic,
+            1,
+        )
+        .expect("valid profile policy");
+
+        assert!(ApplyAnimeGroupingPolicyChangeOutcome::try_new(
+            operation_id,
+            AnimeGroupingPreference::Automatic,
+            AnimeGroupingPolicySource::ClientOverride,
+            policy,
+            1,
+            0,
+            0,
+            None,
+        )
+        .is_err());
+        assert!(ApplyAnimeGroupingPolicyChangeOutcome::try_new(
+            operation_id,
+            AnimeGroupingPreference::Automatic,
+            AnimeGroupingPolicySource::ProfileDefault,
+            policy,
+            0,
+            0,
+            1,
+            None,
+        )
+        .is_err());
+
+        let rollback = ApplyAnimeGroupingPolicyChangeOutcome::try_new(
+            operation_id,
+            AnimeGroupingPreference::KeepMalReleasesSeparate,
+            AnimeGroupingPolicySource::ProfileDefault,
+            policy,
+            1,
+            0,
+            1,
+            Some(rolled_back_operation_id),
+        )
+        .expect("valid rollback outcome");
+        assert_eq!(
+            rollback.rolled_back_operation_id(),
+            Some(rolled_back_operation_id)
         );
     }
 }

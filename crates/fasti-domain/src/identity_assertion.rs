@@ -727,6 +727,42 @@ mod tests {
         .expect("evidence")
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn assertion_result(
+        source: &ExternalIdentifierClaim,
+        target: ExternalIdentifierClaim,
+        relation: IdentityAssertionRelation,
+        coverage: Vec<IdentityCoverageSegment>,
+        episode_links: Vec<IdentityEpisodeLink>,
+        evidence_class: IdentityAssertionEvidenceClass,
+        evidence: Vec<IdentityAssertionEvidence>,
+        id_source: &str,
+        source_version: Option<String>,
+        authority: Option<String>,
+        reasoning: Option<String>,
+        initial_status: IdentityAssertionStatus,
+    ) -> Result<IdentityAssertion, IdentityAssertionError> {
+        IdentityAssertion::try_new(
+            IdentityAssertionId::new_v7(),
+            WorkspaceId::new_v7(),
+            RecordId::new_v7(),
+            ExternalIdentifierId::new_v7(),
+            source,
+            target,
+            relation,
+            coverage,
+            episode_links,
+            evidence_class,
+            evidence,
+            id_source,
+            source_version,
+            authority,
+            reasoning,
+            initial_status,
+            at(),
+        )
+    }
+
     #[test]
     fn exact_verified_assertion_retains_direction_and_provenance() {
         let source = claim("mal.anime", Grain::Release, "49894");
@@ -878,6 +914,213 @@ mod tests {
     }
 
     #[test]
+    fn assertion_admission_controls_fail_closed() {
+        let source = claim("mal.anime", Grain::Release, "49894");
+        let target = || claim("imdb.title", Grain::Release, "tt28254942");
+        let verified = || vec![evidence(IdentityEvidenceMethod::HumanVerified)];
+        let coverage = IdentityCoverageSegment::try_new(
+            IdentityCoverageMode::Flat,
+            None,
+            IdentityNumberingSpace::Regular,
+            IdentityOrdering::Provider,
+            1,
+            1,
+            0,
+            Some("*".to_owned()),
+        )
+        .expect("coverage");
+        let episode_link =
+            IdentityEpisodeLink::try_new(vec![1], vec![1], IdentityEpisodeLinkKind::Exact, None)
+                .expect("episode link");
+
+        assert!(assertion_result(
+            &source,
+            target(),
+            IdentityAssertionRelation::Exact,
+            vec![coverage; MAX_IDENTITY_COVERAGE_SEGMENTS + 1],
+            Vec::new(),
+            IdentityAssertionEvidenceClass::Verified,
+            verified(),
+            "source:route",
+            None,
+            None,
+            None,
+            IdentityAssertionStatus::Candidate,
+        )
+        .is_err());
+        assert!(assertion_result(
+            &source,
+            target(),
+            IdentityAssertionRelation::Exact,
+            Vec::new(),
+            vec![episode_link; MAX_IDENTITY_EPISODE_LINKS + 1],
+            IdentityAssertionEvidenceClass::Verified,
+            verified(),
+            "source:route",
+            None,
+            None,
+            None,
+            IdentityAssertionStatus::Candidate,
+        )
+        .is_err());
+        assert!(assertion_result(
+            &source,
+            target(),
+            IdentityAssertionRelation::Exact,
+            Vec::new(),
+            Vec::new(),
+            IdentityAssertionEvidenceClass::Verified,
+            Vec::new(),
+            "source:route",
+            None,
+            None,
+            None,
+            IdentityAssertionStatus::Candidate,
+        )
+        .is_err());
+        assert!(assertion_result(
+            &source,
+            source.clone(),
+            IdentityAssertionRelation::Exact,
+            Vec::new(),
+            Vec::new(),
+            IdentityAssertionEvidenceClass::Verified,
+            verified(),
+            "source:route",
+            None,
+            None,
+            None,
+            IdentityAssertionStatus::Candidate,
+        )
+        .is_err());
+        assert!(assertion_result(
+            &source,
+            target(),
+            IdentityAssertionRelation::Exact,
+            Vec::new(),
+            Vec::new(),
+            IdentityAssertionEvidenceClass::Verified,
+            vec![
+                evidence(IdentityEvidenceMethod::HumanVerified),
+                evidence(IdentityEvidenceMethod::HumanVerified),
+            ],
+            "source:route",
+            None,
+            None,
+            None,
+            IdentityAssertionStatus::Candidate,
+        )
+        .is_err());
+
+        for (id_source, source_version, authority) in [
+            ("x", None, None),
+            ("source:route", Some(String::new()), None),
+            ("source:route", None, Some("\n".to_owned())),
+        ] {
+            assert!(assertion_result(
+                &source,
+                target(),
+                IdentityAssertionRelation::Exact,
+                Vec::new(),
+                Vec::new(),
+                IdentityAssertionEvidenceClass::Verified,
+                verified(),
+                id_source,
+                source_version,
+                authority,
+                None,
+                IdentityAssertionStatus::Candidate,
+            )
+            .is_err());
+        }
+
+        assert!(assertion_result(
+            &source,
+            target(),
+            IdentityAssertionRelation::NotSameAs,
+            Vec::new(),
+            Vec::new(),
+            IdentityAssertionEvidenceClass::Verified,
+            verified(),
+            "source:route",
+            None,
+            None,
+            Some("too short".to_owned()),
+            IdentityAssertionStatus::Candidate,
+        )
+        .is_err());
+        assert!(assertion_result(
+            &source,
+            target(),
+            IdentityAssertionRelation::Exact,
+            Vec::new(),
+            Vec::new(),
+            IdentityAssertionEvidenceClass::Asserted,
+            vec![evidence(IdentityEvidenceMethod::RightsholderAsserted)],
+            "source:route",
+            None,
+            None,
+            None,
+            IdentityAssertionStatus::Candidate,
+        )
+        .is_err());
+        assert!(assertion_result(
+            &source,
+            target(),
+            IdentityAssertionRelation::Exact,
+            Vec::new(),
+            Vec::new(),
+            IdentityAssertionEvidenceClass::Asserted,
+            vec![evidence(IdentityEvidenceMethod::UpstreamDeclared)],
+            "source:route",
+            None,
+            Some("rightsholder:studio".to_owned()),
+            None,
+            IdentityAssertionStatus::Candidate,
+        )
+        .is_err());
+        assert!(assertion_result(
+            &source,
+            target(),
+            IdentityAssertionRelation::Exact,
+            Vec::new(),
+            Vec::new(),
+            IdentityAssertionEvidenceClass::Asserted,
+            vec![evidence(IdentityEvidenceMethod::RightsholderAsserted)],
+            "source:route",
+            None,
+            Some("rightsholder:studio".to_owned()),
+            None,
+            IdentityAssertionStatus::Candidate,
+        )
+        .is_ok());
+        let unreviewed = IdentityAssertionEvidence::try_new(
+            IdentityEvidenceMethod::HumanVerified,
+            "pinned source record",
+            Some("pinned-source-root".to_owned()),
+            None,
+            NaiveDate::from_ymd_opt(2026, 8, 30).expect("date"),
+            None,
+        )
+        .expect("unreviewed evidence");
+        assert!(assertion_result(
+            &source,
+            target(),
+            IdentityAssertionRelation::Exact,
+            Vec::new(),
+            Vec::new(),
+            IdentityAssertionEvidenceClass::Verified,
+            vec![unreviewed],
+            "source:route",
+            None,
+            None,
+            None,
+            IdentityAssertionStatus::Candidate,
+        )
+        .is_err());
+    }
+
+    #[test]
     fn lifecycle_is_append_only_and_negative_transitions_need_evidence() {
         let assertion_id = IdentityAssertionId::new_v7();
         assert!(IdentityAssertionLifecycleEvent::try_new(
@@ -900,6 +1143,61 @@ mod tests {
             None,
         )
         .is_err());
+    }
+
+    #[test]
+    fn lifecycle_transition_matrix_is_exact() {
+        let statuses = [
+            IdentityAssertionStatus::Candidate,
+            IdentityAssertionStatus::Accepted,
+            IdentityAssertionStatus::Disputed,
+            IdentityAssertionStatus::Rejected,
+            IdentityAssertionStatus::Revoked,
+        ];
+        let allowed = [
+            (
+                IdentityAssertionStatus::Candidate,
+                IdentityAssertionStatus::Accepted,
+            ),
+            (
+                IdentityAssertionStatus::Candidate,
+                IdentityAssertionStatus::Disputed,
+            ),
+            (
+                IdentityAssertionStatus::Candidate,
+                IdentityAssertionStatus::Rejected,
+            ),
+            (
+                IdentityAssertionStatus::Accepted,
+                IdentityAssertionStatus::Disputed,
+            ),
+            (
+                IdentityAssertionStatus::Accepted,
+                IdentityAssertionStatus::Revoked,
+            ),
+            (
+                IdentityAssertionStatus::Disputed,
+                IdentityAssertionStatus::Accepted,
+            ),
+            (
+                IdentityAssertionStatus::Disputed,
+                IdentityAssertionStatus::Rejected,
+            ),
+            (
+                IdentityAssertionStatus::Disputed,
+                IdentityAssertionStatus::Revoked,
+            ),
+        ];
+
+        for previous in statuses {
+            for next in statuses {
+                assert_eq!(
+                    previous.can_transition_to(next),
+                    allowed.contains(&(previous, next)),
+                    "unexpected {previous:?} -> {next:?} transition",
+                );
+            }
+        }
     }
 
     #[test]
