@@ -382,6 +382,27 @@ impl AnimeGroupingPolicyView {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReadAnimeGroupingPolicyOutcome {
+    policy: AnimeGroupingPolicyView,
+}
+
+impl ReadAnimeGroupingPolicyOutcome {
+    pub fn try_new(
+        query: &ReadAnimeGroupingPolicyQuery,
+        policy: AnimeGroupingPolicyView,
+    ) -> Result<Self, AnimeGroupingPolicyResultError> {
+        if policy.profile_id() != query.access().profile_id() || policy.scope() != query.scope() {
+            return Err(AnimeGroupingPolicyResultError);
+        }
+        Ok(Self { policy })
+    }
+
+    pub const fn policy(&self) -> &AnimeGroupingPolicyView {
+        &self.policy
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AnimeGroupingPolicyImpact {
     policy: AnimeGroupingPolicyView,
@@ -599,7 +620,7 @@ pub trait IdentityRoutingPort: Send + Sync {
     fn authorize_and_read_anime_grouping_policy(
         &self,
         query: ReadAnimeGroupingPolicyQuery,
-    ) -> ApplicationResult<AnimeGroupingPolicyView>;
+    ) -> ApplicationResult<ReadAnimeGroupingPolicyOutcome>;
 
     fn authorize_and_preview_anime_grouping_policy_change(
         &self,
@@ -1018,6 +1039,50 @@ mod tests {
             0,
         )
         .is_err());
+    }
+
+    #[test]
+    fn read_outcome_binds_policy_to_the_requested_profile_and_scope() {
+        let profile_id = ProfileId::new_v7();
+        let client_id = ClientId::new_v7();
+        let query = ReadAnimeGroupingPolicyQuery::new(
+            RequestCorrelationId::new_v7(),
+            access(profile_id),
+            AnimeGroupingPolicyScope::Client(client_id),
+        );
+        let policy = AnimeGroupingPolicyView::try_new(
+            profile_id,
+            AnimeGroupingPolicyScope::Client(client_id),
+            AnimeGroupingPolicySource::ProfileDefault,
+            AnimeGroupingPreference::Automatic,
+            4,
+        )
+        .expect("valid inherited client policy");
+
+        assert_eq!(
+            ReadAnimeGroupingPolicyOutcome::try_new(&query, policy)
+                .expect("matching read outcome")
+                .policy(),
+            &policy,
+        );
+        let foreign_profile = AnimeGroupingPolicyView::try_new(
+            ProfileId::new_v7(),
+            policy.scope(),
+            policy.source(),
+            policy.preference(),
+            policy.revision(),
+        )
+        .expect("valid foreign profile policy");
+        assert!(ReadAnimeGroupingPolicyOutcome::try_new(&query, foreign_profile).is_err());
+        let foreign_scope = AnimeGroupingPolicyView::try_new(
+            profile_id,
+            AnimeGroupingPolicyScope::Profile,
+            AnimeGroupingPolicySource::ProfileDefault,
+            policy.preference(),
+            policy.revision(),
+        )
+        .expect("valid foreign scope policy");
+        assert!(ReadAnimeGroupingPolicyOutcome::try_new(&query, foreign_scope).is_err());
     }
 
     #[test]

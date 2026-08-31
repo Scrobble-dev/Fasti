@@ -128,6 +128,9 @@ and safe provider routes. It cannot change:
 
 ## Preview and rollback
 
+A policy read result is built from its exact authenticated query. It cannot
+return another profile or profile-versus-client scope.
+
 A change is previewed against the authenticated profile before it is applied.
 The preview result is built from that exact query. Its profile and target
 connection scope must match the query, and its proposed preference and
