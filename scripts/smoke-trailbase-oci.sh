@@ -27,7 +27,6 @@ grep -q 'Process: STOPPED' <<<"$stopped_status" || {
   echo "Stop the scoped native TrailBase runtime before the OCI conformance gate." >&2
   exit 1
 }
-rm -f -- "$repo_root/.dev-trailbase/runtime.lock"
 
 start_output="$("$repo_root/scripts/dev.sh" trailbase start --podman)"
 if grep -q 'is already running' <<<"$start_output"; then

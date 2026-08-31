@@ -1484,16 +1484,17 @@ PY
     echo "self-test accepted inferred Desktop data root" >&2
     return 1
   fi
-  pnpm() { printf 'pnpm:%s\n' "$*" >> "$desktop_calls"; }
-  cargo() { printf 'cargo:%s|data:%s\n' "$*" "$FASTI_DATA_ROOT" >> "$desktop_calls"; }
-  FASTI_DATA_ROOT_EXPLICIT=1
-  DATADIR="$RUNDIR/desktop-data"
-  _start_desktop
-  unset -f pnpm cargo
+  (
+    pnpm() { printf 'pnpm:%s\n' "$*" >> "$desktop_calls"; }
+    cargo() { printf 'cargo:%s|data:%s\n' "$*" "$FASTI_DATA_ROOT" >> "$desktop_calls"; }
+    _ensure_trailbase_for_fasti() { :; }
+    FASTI_DATA_ROOT_EXPLICIT=1
+    DATADIR="$RUNDIR/desktop-data"
+    _start_desktop
+  )
   mapfile -t desktop_invocations < "$desktop_calls"
   [[ "${desktop_invocations[0]}" == "pnpm:--dir $PROJECT_ROOT run build" ]]
-  [[ "${desktop_invocations[1]}" == "cargo:run --locked --manifest-path $PROJECT_ROOT/apps/desktop/src-tauri/Cargo.toml --bin fasti-desktop|data:$DATADIR" ]]
-  DATADIR="$old_datadir"
+  [[ "${desktop_invocations[1]}" == "cargo:run --locked --manifest-path $PROJECT_ROOT/apps/desktop/src-tauri/Cargo.toml --bin fasti-desktop|data:$RUNDIR/desktop-data" ]]
   FASTI_DATA_ROOT_EXPLICIT="$old_data_root_explicit"
   _validate_open_target 'https://fasti.internal/path?view=settings'
   if _validate_open_target 'https://userinfo-marker@fasti.internal/path' >/dev/null 2>&1; then
@@ -1515,12 +1516,13 @@ PY
   [[ "$help_output" == *"--desktop"* ]]
   [[ "$help_output" != *$'\n  fasti '* ]]
   [[ "$(bash "$0" trailbase --help)" == *"Prepare first: ./scripts/dev.sh --prepare-offline"* ]]
-  id() { printf '1000\n'; }
-  _tracked_pid() { return 1; }
-  _trailbase_container_runtime() { printf 'podman\n'; }
-  python3() { printf '%s\n' "$*" >> "$trailbase_calls"; }
-  _trailbase_start_container podman >/dev/null
-  unset -f id _tracked_pid _trailbase_container_runtime python3
+  (
+    id() { printf '1000\n'; }
+    _tracked_pid() { return 1; }
+    _trailbase_container_runtime() { printf 'podman\n'; }
+    python3() { printf '%s\n' "$*" >> "$trailbase_calls"; }
+    _trailbase_start_container podman >/dev/null
+  )
   mapfile -t trailbase_invocations < "$trailbase_calls"
   [[ "${trailbase_invocations[0]}" == "-B $PROJECT_ROOT/scripts/trailbase_runtime.py verify-root $TRAILBASE_ROOT" ]]
   [[ "${trailbase_invocations[1]}" == "-B $PROJECT_ROOT/scripts/trailbase_runtime.py verify-oci-container $TRAILBASE_ROOT --runtime podman --name $TRAILBASE_CONTAINER_NAME" ]]

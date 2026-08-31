@@ -837,9 +837,35 @@ def prepare_native(root: Path, offline: bool) -> Path:
 
 
 def prepare_upgrade_fixture(root: Path, offline: bool) -> Path:
-    release = load_release()
-    fixture = {**release["upgrade_fixture"], "license": release["license"]}
+    fixture = _locked_release(str(load_release()["upgrade_fixture"]["version"]))
     return _prepare_native_release(root, fixture, offline)
+
+
+def _locked_release(release_version: str) -> dict[str, Any]:
+    release = load_release()
+    if release_version == release["version"]:
+        return release
+    fixture = release["upgrade_fixture"]
+    if release_version == fixture["version"]:
+        return {**fixture, "license": release["license"]}
+    raise ReleaseError("TrailBase release is not pinned by the release lock")
+
+
+def _transition_source_release(
+    target_release: dict[str, Any],
+    previous_release_version: str | None,
+    receipt_exists: bool,
+) -> dict[str, Any]:
+    if previous_release_version is None:
+        return target_release
+    release = load_release()
+    if (
+        not receipt_exists
+        or previous_release_version != release["upgrade_fixture"]["version"]
+        or target_release["version"] != release["version"]
+    ):
+        raise ReleaseError("TrailBase activation must transition the pinned prior release to current")
+    return _locked_release(previous_release_version)
 
 
 def verify_executable(executable: Path, release: dict[str, Any], expected_sha256: str) -> None:
@@ -909,19 +935,25 @@ def prepare_installation(
     root: Path,
     runtime: str,
     oci_runtime: str | None = None,
+    *,
+    release_version: str | None = None,
+    previous_release_version: str | None = None,
 ) -> dict[str, Any]:
-    release = load_release()
+    release = _locked_release(release_version or str(load_release()["version"]))
     verify_runtime_lock(root)
     verify_private_root(root, release["version"])
     physical_root_identity = _physical_root_identity(root)
     receipt_path = root / INSTALLATION_RECEIPT_NAME
     existing: dict[str, Any] | None = None
     if receipt_path.exists() or receipt_path.is_symlink():
-        existing = _read_installation_receipt(root, release, physical_root_identity)
+        previous_release = _transition_source_release(release, previous_release_version, True)
+        existing = _read_installation_receipt(root, previous_release, physical_root_identity)
+    elif previous_release_version is not None:
+        _transition_source_release(release, previous_release_version, False)
 
     if runtime == "native":
         runtime_target = host_target()
-        executable = prepare_native(root, offline=True)
+        executable = _prepare_native_release(root, release, offline=True)
         artifact_identity = f"sha256:{sha256_file(executable)}"
     elif runtime == "oci":
         if oci_runtime is None:
@@ -949,11 +981,14 @@ def prepare_installation(
     }
     _validate_installation_receipt(receipt, release, physical_root_identity)
     _write_installation_receipt(root, receipt)
-    return verify_installation(root)
+    return verify_installation(root, str(release["version"]))
 
 
-def verify_installation(root: Path) -> dict[str, Any]:
-    release = load_release()
+def verify_installation(
+    root: Path,
+    release_version: str | None = None,
+) -> dict[str, Any]:
+    release = _locked_release(release_version or str(load_release()["version"]))
     verify_runtime_lock(root)
     verify_private_root(root, release["version"])
     physical_root_identity = _physical_root_identity(root)
@@ -1512,15 +1547,18 @@ def run_native(
     )
 
 
-def _declare_restored_installation(root: Path) -> dict[str, Any]:
-    release = load_release()
+def _declare_restored_installation(
+    root: Path,
+    release_version: str | None = None,
+) -> dict[str, Any]:
+    release = _locked_release(release_version or str(load_release()["version"]))
     receipt = dict(_read_installation_receipt(root, release, None))
     receipt["physical_root_identity"] = _physical_root_identity(root)
     receipt["declared_restore"] = True
     receipt["verified_at"] = _utc_now()
     _validate_installation_receipt(receipt, release, receipt["physical_root_identity"])
     _write_installation_receipt(root, receipt)
-    return verify_installation(root)
+    return _read_installation_receipt(root, release, receipt["physical_root_identity"])
 
 
 def _archive_path(value: str) -> Path:
@@ -1537,7 +1575,7 @@ def backup_depot(
 ) -> tuple[Path, str]:
     release_version = release_version or load_release()["version"]
     verify_private_root(root, release_version)
-    verify_installation(root)
+    verify_installation(root, release_version)
     try:
         runtime_lock = _acquire_runtime_lock(root)
     except BlockingIOError as error:
@@ -1659,7 +1697,7 @@ def restore_depot(
     archive_path: Path,
     target: Path,
     release_version: str | None = None,
-) -> None:
+) -> dict[str, Any]:
     release_version = release_version or load_release()["version"]
     target = Path(os.path.abspath(target))
     if target.exists() or target.is_symlink():
@@ -1790,7 +1828,7 @@ def restore_depot(
         prepare_runtime_lock(temporary)
         verify_runtime_lock(temporary)
         verify_private_root(temporary, release_version)
-        _declare_restored_installation(temporary)
+        restored_receipt = _declare_restored_installation(temporary, release_version)
         current_parent = _validate_restore_parent(parent)
         if (current_parent.st_dev, current_parent.st_ino) != (
             parent_metadata.st_dev,
@@ -1798,6 +1836,7 @@ def restore_depot(
         ):
             raise ReleaseError("isolated restore parent changed before publication")
         temporary.rename(target)
+        return restored_receipt
     finally:
         if temporary.exists():
             for path in sorted(temporary.rglob("*"), reverse=True):
@@ -2116,6 +2155,25 @@ def _runtime_lock_self_test() -> None:
 
 def self_test() -> None:
     release = load_release()
+    old_version = str(release["upgrade_fixture"]["version"])
+    if _transition_source_release(release, old_version, True)["version"] != old_version:
+        raise ReleaseError("pinned upgrade transition sentinel failed")
+    for target, previous, receipt_exists in [
+        (_locked_release(old_version), str(release["version"]), True),
+        (release, str(release["version"]), True),
+        (release, old_version, False),
+    ]:
+        try:
+            _transition_source_release(target, previous, receipt_exists)
+        except ReleaseError:
+            continue
+        raise ReleaseError("unsupported installation transition sentinel did not fail")
+    try:
+        _locked_release("0.0.0")
+    except ReleaseError:
+        pass
+    else:
+        raise ReleaseError("unpinned installation release sentinel did not fail")
     mutations = []
 
     floating_url = copy.deepcopy(release)
