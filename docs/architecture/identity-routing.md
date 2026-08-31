@@ -27,6 +27,8 @@ fail closed. The route plan retains all known identifiers for inspection.
 Its durable owner must load a bounded complete identifier and assertion set,
 detect overflow with one extra row, and fail closed instead of truncating
 evidence into an apparently complete plan.
+The returned plan is built from its exact query. Its Record, resolution intent,
+and target provider must match that query.
 
 ## TMDB route order
 

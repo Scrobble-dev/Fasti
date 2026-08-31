@@ -103,6 +103,41 @@ impl ResolveIdentityRouteQuery {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IdentityRouteResultError;
+
+impl fmt::Display for IdentityRouteResultError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("identity route result does not match its request")
+    }
+}
+
+impl Error for IdentityRouteResultError {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolveIdentityRouteOutcome {
+    plan: PurposeIdentityRoutePlan,
+}
+
+impl ResolveIdentityRouteOutcome {
+    pub fn try_new(
+        query: &ResolveIdentityRouteQuery,
+        plan: PurposeIdentityRoutePlan,
+    ) -> Result<Self, IdentityRouteResultError> {
+        if plan.record_id() != query.record_id()
+            || plan.intent() != query.intent()
+            || plan.target_provider() != query.target_provider()
+        {
+            return Err(IdentityRouteResultError);
+        }
+        Ok(Self { plan })
+    }
+
+    pub const fn plan(&self) -> &PurposeIdentityRoutePlan {
+        &self.plan
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ReadAnimeGroupingPolicyQuery {
     correlation_id: RequestCorrelationId,
     access: RequestAccessContext,
@@ -615,7 +650,7 @@ pub trait IdentityRoutingPort: Send + Sync {
     fn authorize_and_resolve_identity(
         &self,
         query: ResolveIdentityRouteQuery,
-    ) -> ApplicationResult<PurposeIdentityRoutePlan>;
+    ) -> ApplicationResult<ResolveIdentityRouteOutcome>;
 
     fn authorize_and_read_anime_grouping_policy(
         &self,
@@ -696,6 +731,57 @@ mod tests {
                 .get(),
             MAX_IDENTITY_IMPACT_PAGE
         );
+    }
+
+    #[test]
+    fn resolve_outcome_binds_plan_to_the_requested_record_intent_and_provider() {
+        let record_id = RecordId::new_v7();
+        let tmdb = ProviderId::try_new("tmdb").expect("TMDB provider");
+        let query = ResolveIdentityRouteQuery::new(
+            RequestCorrelationId::new_v7(),
+            access(ProfileId::new_v7()),
+            record_id,
+            fasti_domain::ResolutionIntent::MetadataLookup,
+            tmdb.clone(),
+        );
+        let plan = |record_id, intent, provider| {
+            crate::plan_purpose_identity_route(
+                record_id,
+                intent,
+                provider,
+                AnimeGroupingPreference::Automatic,
+                &[],
+            )
+        };
+
+        assert!(ResolveIdentityRouteOutcome::try_new(
+            &query,
+            plan(record_id, query.intent(), tmdb.clone()),
+        )
+        .is_ok());
+        assert!(ResolveIdentityRouteOutcome::try_new(
+            &query,
+            plan(RecordId::new_v7(), query.intent(), tmdb.clone()),
+        )
+        .is_err());
+        assert!(ResolveIdentityRouteOutcome::try_new(
+            &query,
+            plan(
+                record_id,
+                fasti_domain::ResolutionIntent::MetadataEnrichment,
+                tmdb,
+            ),
+        )
+        .is_err());
+        assert!(ResolveIdentityRouteOutcome::try_new(
+            &query,
+            plan(
+                record_id,
+                query.intent(),
+                ProviderId::try_new("google-books").expect("Google Books provider"),
+            ),
+        )
+        .is_err());
     }
 
     #[test]
