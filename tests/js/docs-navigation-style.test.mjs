@@ -37,6 +37,13 @@ test("Docusaurus controls when the mobile navigation toggle is displayed", () =>
     );
 });
 
+test("Docusaurus documentation controls keep a 44 pixel target", () => {
+  assert.match(
+    css,
+    /\.breadcrumbs__link,\s*\.theme-doc-toc-mobile button,\s*\.theme-code-block button\s*\{[^}]*min-width:\s*var\(--fasti-touch-target-min\);[^}]*min-height:\s*var\(--fasti-touch-target-min\);/u,
+  );
+});
+
 test(
   "the built navigation opens only at the mobile breakpoint",
   { skip: !process.env.FASTI_DOCS_BASE_URL },
