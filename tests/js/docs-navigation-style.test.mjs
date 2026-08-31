@@ -14,6 +14,10 @@ const statusPage = await readFile(
   new URL("../../apps/docs/src/pages/status.tsx", import.meta.url),
   "utf8",
 );
+const tokensSource = await readFile(
+  new URL("../../packages/tokens/src/index.ts", import.meta.url),
+  "utf8",
+);
 
 test("Docusaurus controls when the mobile navigation toggle is displayed", () => {
   const toggleRules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/gu)].filter(
@@ -46,6 +50,11 @@ test("Docusaurus controls when the mobile navigation toggle is displayed", () =>
 });
 
 test("Docusaurus documentation controls keep a 44 pixel target", () => {
+  assert.match(tokensSource, /minimum:\s*"44px"/u);
+  assert.match(
+    tokensSource,
+    /--fasti-touch-target-min:\s*\$\{touchTargets\.minimum\}/u,
+  );
   assert.match(
     css,
     /\.breadcrumbs__link,\s*\.theme-doc-toc-mobile button,\s*\.theme-code-block button\s*\{[^}]*min-width:\s*var\(--fasti-touch-target-min\);[^}]*min-height:\s*var\(--fasti-touch-target-min\);/u,
