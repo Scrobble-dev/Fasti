@@ -60,7 +60,7 @@ pub(crate) fn run_access_c1(root: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub(crate) fn access_c1_gates() -> [CommandGate; 7] {
+pub(crate) fn access_c1_gates() -> [CommandGate; 8] {
     [
         CommandGate::new(
             "access.prepared_machine",
@@ -123,6 +123,19 @@ pub(crate) fn access_c1_gates() -> [CommandGate; 7] {
                 "apps/desktop/src-tauri/Cargo.toml",
             ],
             "install the locked desktop prerequisites and repair the trusted-host Access source boundary",
+        ),
+        CommandGate::new(
+            "access.ordinary_browser_runtime",
+            "python3",
+            [
+                "-B",
+                "scripts/smoke-access-browser.py",
+                "--root",
+                ".dev-trailbase",
+                "--receipt",
+                "target/fasti-receipts/access-c1-ordinary-browser.json",
+            ],
+            "free exact loopback ports and repair the ordinary-browser TrailBase-to-Fasti session flow",
         ),
         CommandGate::new(
             "access.browser_fixture",
@@ -381,18 +394,38 @@ pub(crate) fn deep_b1_gates() -> [CommandGate; 3] {
     ]
 }
 
-fn git_status(root: &Path) -> anyhow::Result<String> {
-    let output = Command::new("git")
-        .args(["status", "--porcelain=v1", "--untracked-files=all"])
-        .current_dir(root)
-        .output()
-        .context("failed to start git while checking portable-gate cleanliness")?;
-    ensure!(
-        output.status.success(),
-        "git status failed while checking portable-gate cleanliness: {}",
-        String::from_utf8_lossy(&output.stderr).trim()
-    );
-    String::from_utf8(output.stdout).context("git status emitted non-UTF-8 output")
+#[derive(Debug, Eq, PartialEq)]
+struct GitSnapshot {
+    commit: String,
+    tree: String,
+    status: String,
+}
+
+fn git_status(root: &Path) -> anyhow::Result<GitSnapshot> {
+    fn output(root: &Path, arguments: &[&str]) -> anyhow::Result<String> {
+        let result = Command::new("git")
+            .args(arguments)
+            .current_dir(root)
+            .output()
+            .context("failed to start git while binding gate source state")?;
+        ensure!(
+            result.status.success(),
+            "git {} failed while binding gate source state: {}",
+            arguments.join(" "),
+            String::from_utf8_lossy(&result.stderr).trim()
+        );
+        String::from_utf8(result.stdout).context("git emitted non-UTF-8 source state")
+    }
+
+    Ok(GitSnapshot {
+        commit: output(root, &["rev-parse", "--verify", "HEAD"])?
+            .trim()
+            .to_owned(),
+        tree: output(root, &["rev-parse", "HEAD^{tree}"])?
+            .trim()
+            .to_owned(),
+        status: output(root, &["status", "--porcelain=v1", "--untracked-files=all"])?,
+    })
 }
 
 #[cfg(test)]
@@ -434,6 +467,7 @@ mod tests {
                 "access.operator_orchestration",
                 "access.operator_transaction",
                 "access.desktop_host",
+                "access.ordinary_browser_runtime",
                 "access.browser_fixture",
             ]
         );
@@ -451,24 +485,94 @@ mod tests {
         assert!(gates[5]
             .display()
             .contains("apps/desktop/src-tauri/Cargo.toml"));
-        assert!(gates[6].display().contains("tests/e2e/access-c1.spec.ts"));
-        assert!(gates[6].display().contains("--project=chrome"));
+        assert!(gates[6]
+            .display()
+            .contains("scripts/smoke-access-browser.py"));
+        assert!(gates[6]
+            .display()
+            .contains("access-c1-ordinary-browser.json"));
+        assert!(gates[7].display().contains("tests/e2e/access-c1.spec.ts"));
+        assert!(gates[7].display().contains("--project=chrome"));
     }
 
     #[test]
     fn worktree_snapshot_detects_new_untracked_files() {
         let root = tempfile::tempdir().expect("temporary workspace");
-        let status = Command::new("git")
-            .args(["init", "--quiet"])
+        for arguments in [
+            vec!["init", "--quiet"],
+            vec!["config", "user.email", "test@example.invalid"],
+            vec!["config", "user.name", "Fasti Test"],
+        ] {
+            assert!(Command::new("git")
+                .args(arguments)
+                .current_dir(root.path())
+                .status()
+                .expect("configure Git repository")
+                .success());
+        }
+        std::fs::write(root.path().join("tracked.txt"), b"one\n").expect("write tracked fixture");
+        assert!(Command::new("git")
+            .args(["add", "tracked.txt"])
             .current_dir(root.path())
             .status()
-            .expect("initialize Git repository");
-        assert!(status.success());
+            .expect("stage tracked fixture")
+            .success());
+        assert!(Command::new("git")
+            .args(["commit", "--quiet", "-m", "fixture"])
+            .current_dir(root.path())
+            .status()
+            .expect("commit tracked fixture")
+            .success());
         let before = git_status(root.path()).expect("initial status");
         std::fs::write(root.path().join("generated.pyc"), b"cache").expect("write generated cache");
         let after = git_status(root.path()).expect("changed status");
         assert_ne!(before, after);
-        assert!(after.contains("generated.pyc"));
+        assert!(after.status.contains("generated.pyc"));
+    }
+
+    #[test]
+    fn worktree_snapshot_detects_a_clean_head_advance() {
+        let root = tempfile::tempdir().expect("temporary workspace");
+        for arguments in [
+            vec!["init", "--quiet"],
+            vec!["config", "user.email", "test@example.invalid"],
+            vec!["config", "user.name", "Fasti Test"],
+        ] {
+            assert!(Command::new("git")
+                .args(arguments)
+                .current_dir(root.path())
+                .status()
+                .expect("configure Git repository")
+                .success());
+        }
+        std::fs::write(root.path().join("tracked.txt"), b"one\n").expect("write tracked fixture");
+        for arguments in [
+            vec!["add", "tracked.txt"],
+            vec!["commit", "--quiet", "-m", "first"],
+        ] {
+            assert!(Command::new("git")
+                .args(arguments)
+                .current_dir(root.path())
+                .status()
+                .expect("commit fixture")
+                .success());
+        }
+        let before = git_status(root.path()).expect("first snapshot");
+        std::fs::write(root.path().join("tracked.txt"), b"two\n").expect("update tracked fixture");
+        for arguments in [
+            vec!["add", "tracked.txt"],
+            vec!["commit", "--quiet", "-m", "second"],
+        ] {
+            assert!(Command::new("git")
+                .args(arguments)
+                .current_dir(root.path())
+                .status()
+                .expect("advance fixture")
+                .success());
+        }
+        let after = git_status(root.path()).expect("second snapshot");
+        assert!(before.status.is_empty() && after.status.is_empty());
+        assert_ne!(before, after);
     }
 
     #[test]

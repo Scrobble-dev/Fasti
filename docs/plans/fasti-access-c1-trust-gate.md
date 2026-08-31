@@ -1427,7 +1427,7 @@ C1 reuses these owners. It does not rebuild them.
 - [ ] **T6 (P1, human: ~2 days / Codex: ~6 hours)** — Delivery — Run the C1 milestone, open one PR, merge the green exact head, and verify merged `dev`.
   - Surfaced by: test and delivery review; the in-scope runner exists, but its exact-head receipt and delivery evidence are pending.
   - Files: existing xtask/test/evidence/documentation owners after M2 handoff.
-  - Verify: C1 milestone, canonical PR gate, native/OCI envelopes, browser A+C accessibility automation, reviews, rollback, exact-head and merged-head receipts. Packaged Tauri authentication is separately owned by `C1-TAURI-AUTH`.
+  - Verify: C1 milestone, canonical PR gate, native/OCI envelopes, browser A+C accessibility automation, and the real ordinary-browser TrailBase-to-Fasti session receipt bound to the exact clean commit and tree. Review rollback plus exact-head and merged-head receipts. Packaged Tauri authentication is separately owned by `C1-TAURI-AUTH`.
 
 ## 19. Safe next action
 

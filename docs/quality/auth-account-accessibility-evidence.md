@@ -10,7 +10,7 @@ not a production identity, WCAG 2.2 Level AA, or EN 301 549 conformance claim.
 
 | Capability                                               | Current local source state                                                | Remaining evidence                                                                                                                           |
 | -------------------------------------------------------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| Human sign-in                                            | C1 fixed-origin ordinary-browser source implemented; new issuance requires verified active TrailBase evidence | Browser exact-head evidence, final review, and delivery. Packaged Tauri authentication is a separate follow-up.                              |
+| Human sign-in                                            | C1 fixed-origin ordinary-browser source implemented; the canonical gate requires a real Chromium TrailBase-to-Fasti session bound to the exact clean source | Final exact-head execution, review, and delivery. Packaged Tauri authentication is a separate follow-up.                                    |
 | Fasti browser session                                    | C1 issuance, projection, inventory, rotation, profile selection, and revocation source implemented | Browser accessibility evidence, final review, exact-head CI, and merged-tree proof.                                                          |
 | Session location and device                              | Not recorded                                                              | The product must say `Not recorded` until a governed collection contract exists.                                                             |
 | Profile switching                                        | Implemented through the current session and one Access projection         | Browser and final authorization evidence.                                                                                                   |
@@ -37,6 +37,12 @@ These are fixture and source checks. Browser manual keyboard,
 assistive-technology, and final exact-head evidence remain pending. Packaged
 WebView, Linux/Windows/macOS desktop, and packaged assistive-technology proof
 are deferred to `C1-TAURI-AUTH` and are not C1 delivery claims.
+
+The C1 delivery runner separately executes the ordinary-browser runtime proof.
+It fails closed unless its strict receipt matches the current clean commit and
+tree, the locked TrailBase release, the Secure cookie policy, one active Fasti
+session, one active administrator, and absent vendor credentials in browser
+storage. The canonical C1 receipt records the proof receipt digest.
 
 ## Interaction acceptance checklist
 
