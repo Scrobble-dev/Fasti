@@ -70,6 +70,8 @@ An `asserted` mapping remains audit evidence until its named authority and
 namespace scope have been verified against the pinned authority registry.
 The planner also requires the assertion owner to match the requested `RecordId`;
 evidence from another Record cannot enter that plan or become visible through it.
+TMDB lookup accepts reviewed exact IMDb, TVDB-series, and Wikidata aliases after
+any compatible direct provider identifier or direct alias.
 
 Known provider identifiers must also match the provider's bounded wire format.
 Malformed evidence stays visible for review but cannot become an outbound

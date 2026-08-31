@@ -454,6 +454,33 @@ fn route_priority(
             ResolutionIntent::MetadataLookup
             | ResolutionIntent::MetadataEnrichment
             | ResolutionIntent::DisplayProjection,
+            "tmdb",
+            "imdb.title",
+            Grain::Film | Grain::Series | Grain::Release,
+            IdentityRouteEvidenceKind::AcceptedCrosswalk,
+        ) => Some((4, IdentityRouteKind::AcceptedCrosswalk)),
+        (
+            ResolutionIntent::MetadataLookup
+            | ResolutionIntent::MetadataEnrichment
+            | ResolutionIntent::DisplayProjection,
+            "tmdb",
+            "tvdb.series",
+            Grain::Series | Grain::Release,
+            IdentityRouteEvidenceKind::AcceptedCrosswalk,
+        )
+        | (
+            ResolutionIntent::MetadataLookup
+            | ResolutionIntent::MetadataEnrichment
+            | ResolutionIntent::DisplayProjection,
+            "tmdb",
+            "wikidata",
+            Grain::Film | Grain::Series | Grain::Release,
+            IdentityRouteEvidenceKind::AcceptedCrosswalk,
+        ) => Some((5, IdentityRouteKind::AcceptedCrosswalk)),
+        (
+            ResolutionIntent::MetadataLookup
+            | ResolutionIntent::MetadataEnrichment
+            | ResolutionIntent::DisplayProjection,
             "google-books",
             "googlebooks.volume",
             Grain::Edition,
@@ -2388,10 +2415,72 @@ mod tests {
     }
 
     #[test]
+    fn tmdb_metadata_accepts_reviewed_exact_alias_crosswalks() {
+        for identifier in [
+            identity_claim_at("imdb.title", Grain::Series, "tt0944947"),
+            identity_claim_at("tvdb.series", Grain::Series, "121361"),
+            identity_claim_at("wikidata", Grain::Series, "Q23572"),
+        ] {
+            let record_id = RecordId::new_v7();
+            let (crosswalk, assertion_id) = accepted_crosswalk_fixture(
+                record_id,
+                identifier.clone(),
+                IdentityAssertionRelation::Exact,
+            );
+            let plan = plan_purpose_identity_route_with_evidence(
+                record_id,
+                ResolutionIntent::MetadataEnrichment,
+                ProviderId::try_new("tmdb").expect("TMDB provider"),
+                AnimeGroupingPreference::Automatic,
+                &[crosswalk],
+            );
+
+            let route = plan.selected_route().expect("reviewed TMDB alias");
+            assert_eq!(route.identifier(), &identifier);
+            assert_eq!(route.kind(), IdentityRouteKind::AcceptedCrosswalk);
+            assert_eq!(route.accepted_assertions()[0].assertion_id(), assertion_id);
+        }
+
+        let record_id = RecordId::new_v7();
+        let evidence = [
+            identity_claim_at("tmdb.tv", Grain::Series, "1399"),
+            identity_claim_at("imdb.title", Grain::Series, "tt0944947"),
+            identity_claim_at("tvdb.series", Grain::Series, "121361"),
+            identity_claim_at("wikidata", Grain::Series, "Q23572"),
+        ]
+        .map(|identifier| {
+            accepted_crosswalk_fixture(record_id, identifier, IdentityAssertionRelation::Exact).0
+        });
+        let plan = plan_purpose_identity_route_with_evidence(
+            record_id,
+            ResolutionIntent::MetadataEnrichment,
+            ProviderId::try_new("tmdb").expect("TMDB provider"),
+            AnimeGroupingPreference::Automatic,
+            &evidence,
+        );
+        assert_eq!(
+            plan.selected_route()
+                .expect("highest-priority reviewed coordinate")
+                .identifier()
+                .namespace(),
+            "tmdb.tv"
+        );
+        assert_eq!(
+            plan.candidate_routes()
+                .iter()
+                .map(|route| route.identifier().namespace())
+                .collect::<Vec<_>>(),
+            ["tmdb.tv", "imdb.title", "tvdb.series", "wikidata"]
+        );
+    }
+
+    #[test]
     fn tmdb_crosswalk_routes_require_compatible_grains() {
         for identifier in [
             identity_claim_at("tmdb.movie", Grain::Series, "123"),
             identity_claim_at("tmdb.tv", Grain::Film, "456"),
+            identity_claim_at("tvdb.movie", Grain::Film, "789"),
+            identity_claim_at("tvdb.series", Grain::Film, "789"),
         ] {
             let record_id = RecordId::new_v7();
             let plan = plan_purpose_identity_route_with_evidence(
