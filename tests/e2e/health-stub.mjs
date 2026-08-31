@@ -98,12 +98,12 @@ const server = createServer((request, response) => {
   } else if (url.pathname === "/api/v1/profile/nuvio-collections") {
     payload = [];
   } else if (url.pathname === "/api/v1/profile/record-tracking-dispositions") {
-    payload = [];
+    payload = { states: [], truncated: false };
   } else if (
     url.pathname === "/api/v1/records" ||
     url.pathname.startsWith("/api/v1/records/")
   ) {
-    payload = [];
+    payload = { records: [], truncated: false };
   } else if (
     url.pathname === "/api/v1/reviews" ||
     url.pathname.startsWith("/api/v1/reviews/")
