@@ -98,7 +98,14 @@ try {
       session: Object.entries(sessionStorage),
     }));
     const credential =
-      /trailbase|(?:access|auth|id|refresh)[_:.-]?token|[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/i;
+      /trailbase|(?:access|auth|id|refresh)[_:.-]?token|\beyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/i;
+    if (
+      credential.test("fasti.workbench.state") ||
+      credential.test("1.2.3") ||
+      !credential.test("eyJhbGciOiJIUzI1NiJ9.c3ViamVjdA.signature")
+    ) {
+      throw new Error("vendor credential detector differs");
+    }
     if (
       [...storage.local, ...storage.session].some(([key, value]) =>
         credential.test(`${key}\n${value}`),

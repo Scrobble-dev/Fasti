@@ -122,6 +122,22 @@ class _Callback(http.server.BaseHTTPRequestHandler):
         return
 
 
+def _execv_or_exit(executable: Path, arguments: list[str]) -> None:
+    try:
+        os.execv(executable, arguments)
+    finally:
+        os._exit(127)
+
+
+def _execv_failure_self_test() -> None:
+    pid = os.fork()
+    if pid == 0:
+        _execv_or_exit(ROOT / "target/fasti-missing", ["fasti-missing"])
+    _, status = os.waitpid(pid, 0)
+    if os.waitstatus_to_exitcode(status) != 127:
+        raise RuntimeError("failed exec did not terminate only its child")
+
+
 def _bootstrap_cli(
     data_root: Path, trailbase_root: Path, email: str, password: str
 ) -> None:
@@ -130,7 +146,7 @@ def _bootstrap_cli(
     thread.start()
     pid, terminal = pty.fork()
     if pid == 0:
-        os.execv(
+        _execv_or_exit(
             ROOT / "target/debug/fasti",
             [
                 "fasti",
@@ -186,7 +202,7 @@ def _bootstrap_cli(
             if completed_pid == pid:
                 child_reaped = True
                 break
-        if status is None:
+        if not child_reaped:
             raise RuntimeError("trusted bootstrap CLI timed out")
         if status != 0 or b"first Fasti administrator is established" not in output:
             raise RuntimeError("trusted bootstrap CLI did not complete")
@@ -220,6 +236,7 @@ def _arguments() -> argparse.Namespace:
 
 def main() -> None:
     arguments = _arguments()
+    _execv_failure_self_test()
     if subprocess.check_output(
         ["git", "status", "--porcelain=v1", "--untracked-files=all"], cwd=ROOT
     ).strip():

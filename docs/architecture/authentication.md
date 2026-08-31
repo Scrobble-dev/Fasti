@@ -84,8 +84,11 @@ authorization, audit, and Chronicle state.
 
 Every TrailBase installation has its own administrator credential. The
 operator keeps it in a selected password manager or equivalent private
-installation record. Fasti never copies, stores, logs, receipts, or browser-
-persists that password. Every person uses a distinct TrailBase account. The
+installation record. The initial and replacement administrator passwords exist
+only in the initializing process memory. Fasti writes the replacement once to
+the controlling terminal. It never persists either password in Fasti data,
+command arguments, logs, receipts, or browser storage. Every person uses a
+distinct TrailBase account. The
 administrator credential is not a shared human account and does not justify a
 new Fasti secret store.
 

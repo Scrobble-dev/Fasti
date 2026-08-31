@@ -29,7 +29,7 @@ pub struct StartTrailBaseSignInResponse {
 #[serde(deny_unknown_fields)]
 #[into_params(parameter_in = Query)]
 pub struct CompleteTrailBaseAuthenticationQuery {
-    #[schemars(length(equal = 48))]
+    #[schemars(length(equal = 48), regex(pattern = r"^[A-Za-z0-9]{48}$"))]
     #[schema(min_length = 48, max_length = 48)]
     #[param(min_length = 48, max_length = 48, pattern = "^[A-Za-z0-9]{48}$")]
     pub code: String,

@@ -6134,7 +6134,9 @@
             "credential_bearer": []
           },
           {
-            "browser_session_cookie": []
+            "browser_session_cookie": [],
+            "csrf_cookie": [],
+            "csrf_header": []
           }
         ],
         "tags": [
@@ -6515,7 +6517,9 @@
             "credential_bearer": []
           },
           {
-            "browser_session_cookie": []
+            "browser_session_cookie": [],
+            "csrf_cookie": [],
+            "csrf_header": []
           }
         ],
         "tags": [
@@ -6786,7 +6790,9 @@
             "credential_bearer": []
           },
           {
-            "browser_session_cookie": []
+            "browser_session_cookie": [],
+            "csrf_cookie": [],
+            "csrf_header": []
           }
         ],
         "tags": [
@@ -7022,7 +7028,9 @@
             "credential_bearer": []
           },
           {
-            "browser_session_cookie": []
+            "browser_session_cookie": [],
+            "csrf_cookie": [],
+            "csrf_header": []
           }
         ],
         "tags": [
@@ -7345,7 +7353,9 @@
             "credential_bearer": []
           },
           {
-            "browser_session_cookie": []
+            "browser_session_cookie": [],
+            "csrf_cookie": [],
+            "csrf_header": []
           }
         ],
         "tags": [
@@ -8406,7 +8416,9 @@
             "credential_bearer": []
           },
           {
-            "browser_session_cookie": []
+            "browser_session_cookie": [],
+            "csrf_cookie": [],
+            "csrf_header": []
           }
         ],
         "tags": [
@@ -8610,7 +8622,9 @@
             "credential_bearer": []
           },
           {
-            "browser_session_cookie": []
+            "browser_session_cookie": [],
+            "csrf_cookie": [],
+            "csrf_header": []
           }
         ],
         "tags": [

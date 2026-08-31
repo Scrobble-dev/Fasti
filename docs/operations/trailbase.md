@@ -40,9 +40,12 @@ Run this once with network access:
 
 The command fetches the locked Rust and pnpm inputs and verifies and caches the
 exact TrailBase native and OCI artifacts and the exact prior-version upgrade
-fixture. It also installs the verified Auth UI component into an initialized
-private TrailBase root. A later offline start and conformance run use only
-those verified inputs. A missing, unsafe, or mismatched component keeps sign-in
+fixture. Preparation creates the private root and cache, but it does not
+initialize a fresh TrailBase root. For an already initialized root, preparation
+also refreshes the verified Auth UI component. The subsequent `trailbase
+initialize` command creates the depot and bootstrap state and installs Auth UI
+for a fresh root. Later offline start and conformance commands use only those
+verified inputs. A missing, unsafe, or mismatched component keeps sign-in
 unavailable; start never fetches a floating component.
 
 ## Initialize
@@ -61,9 +64,12 @@ written to the bootstrap receipt, command arguments, or logs.
 
 Each installation has its own TrailBase administrator credential. Store that
 credential in an operator-selected password manager or equivalent private
-installation record. Fasti never copies, stores, logs, receipts, or browser-
-persists the administrator password. Do not create one shared administrator
-password across installations and do not add a Fasti secret store for it.
+installation record. The initial and replacement passwords exist only in the
+initializing process memory. Fasti writes the replacement once to the
+controlling terminal. It never persists either password in Fasti data, command
+arguments, logs, receipts, or browser storage. Do not create one shared
+administrator password across installations and do not add a Fasti secret
+store for it.
 
 Each person gets a distinct TrailBase account. Do not share the installation
 administrator credential as a human sign-in account. If the administrator

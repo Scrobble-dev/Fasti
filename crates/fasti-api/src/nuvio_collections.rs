@@ -87,7 +87,7 @@ pub(crate) async fn get_nuvio_collections(
     put,
     path = "/api/v1/profile/nuvio-collections",
     tag = "profile",
-    security(("credential_bearer" = []), ("browser_session_cookie" = [])),
+    security(("credential_bearer" = []), ("browser_session_cookie" = [], "csrf_cookie" = [], "csrf_header" = [])),
     request_body = NuvioCollectionsDocumentDto,
     responses(
         (status = 200, description = "The authenticated profile's normalized Nuvio custom Collections document", body = NuvioCollectionsStateDto),
@@ -143,7 +143,7 @@ pub(crate) async fn replace_nuvio_collections(
     delete,
     path = "/api/v1/profile/nuvio-collections",
     tag = "profile",
-    security(("credential_bearer" = []), ("browser_session_cookie" = [])),
+    security(("credential_bearer" = []), ("browser_session_cookie" = [], "csrf_cookie" = [], "csrf_header" = [])),
     responses(
         (status = 200, description = "The authenticated profile no longer has a Nuvio custom Collections document", body = NuvioCollectionsStateDto),
         (status = 401, description = "Credential or browser session is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),

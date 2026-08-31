@@ -659,6 +659,30 @@ fn rotate_session(
             correlation_id,
         )?;
     }
+    let copied_authentication = map_sql(
+        transaction.execute(
+            r#"
+            INSERT INTO fasti_browser_session_authentication(
+                browser_session_id, trailbase_instance_id, activation_generation,
+                method, verified_at, recent_authentication_expires_at
+            )
+            SELECT ?1, trailbase_instance_id, activation_generation,
+                   method, verified_at, recent_authentication_expires_at
+            FROM fasti_browser_session_authentication
+            WHERE browser_session_id = ?2
+            "#,
+            params![rotated.id().to_string(), current_session.id().to_string()],
+        ),
+        capability,
+        correlation_id,
+    )?;
+    if copied_authentication != 1 {
+        return Err(problem(
+            ProblemCode::IntegrityFailed,
+            capability,
+            correlation_id,
+        ));
+    }
     map_sql(
         transaction.execute(
             "UPDATE fasti_browser_sessions SET revoked_at = ?1 WHERE browser_session_id = ?2 AND revoked_at IS NULL",
@@ -1039,13 +1063,14 @@ mod tests {
     use super::*;
     use chrono::TimeZone;
     use fasti_application::SecretMaterial;
-    use fasti_domain::{ClientId, ProfileId};
+    use fasti_domain::{ClientId, ProfileId, TrailBaseInstanceId};
 
     struct Fixture {
         _root: tempfile::TempDir,
         kernel: SqliteKernel,
         subject_id: AuthSubjectId,
         workspace_id: WorkspaceId,
+        instance_id: TrailBaseInstanceId,
         grants: [ProfileGrantId; 3],
         created_at: DateTime<Utc>,
     }
@@ -1090,6 +1115,7 @@ mod tests {
         let root = tempfile::tempdir().expect("temporary data root");
         let kernel = SqliteKernel::open(root.path()).expect("kernel");
         let workspace_id = WorkspaceId::new_v7();
+        let instance_id = TrailBaseInstanceId::new_v7();
         let client_id = ClientId::new_v7();
         let profiles = [
             ProfileId::new_v7(),
@@ -1121,6 +1147,23 @@ mod tests {
                     params![client_id.to_string(), workspace_id.to_string(), timestamp(created_at)],
                 )
                 .expect("client");
+            connection
+                .execute(
+                    r#"
+                    INSERT INTO trailbase_installation(
+                        singleton, trailbase_instance_id, physical_root_identity,
+                        release_lock_identity, activation_state, activation_blocker,
+                        activation_generation, created_at, updated_at
+                    ) VALUES (1, ?1, ?2, ?3, 'active', NULL, 1, ?4, ?4)
+                    "#,
+                    params![
+                        instance_id.to_string(),
+                        format!("sha256:{}", "0".repeat(64)),
+                        format!("sha256:{}", "1".repeat(64)),
+                        timestamp(created_at),
+                    ],
+                )
+                .expect("TrailBase installation");
             for (profile_id, grant_id) in profiles.into_iter().zip(grants) {
                 connection
                     .execute(
@@ -1183,6 +1226,7 @@ mod tests {
             kernel,
             subject_id,
             workspace_id,
+            instance_id,
             grants,
             created_at,
         }
@@ -1194,7 +1238,7 @@ mod tests {
         selected: ProfileGrantId,
         offset_seconds: i64,
     ) -> CreatedBrowserSession {
-        fixture
+        let created = fixture
             .kernel
             .create_browser_session(
                 CreateBrowserSessionCommand::try_new(
@@ -1209,7 +1253,28 @@ mod tests {
                 )
                 .expect("session command"),
             )
-            .expect("session")
+            .expect("session");
+        fixture
+            .kernel
+            .inner
+            .connection
+            .lock()
+            .expect("connection")
+            .execute(
+                r#"
+                INSERT INTO fasti_browser_session_authentication(
+                    browser_session_id, trailbase_instance_id, activation_generation,
+                    method, verified_at, recent_authentication_expires_at
+                ) VALUES (?1, ?2, 1, 'trailbase_password', ?3, NULL)
+                "#,
+                params![
+                    created.session().id().to_string(),
+                    fixture.instance_id.to_string(),
+                    timestamp(fixture.created_at + ChronoDuration::seconds(offset_seconds)),
+                ],
+            )
+            .expect("session authentication");
+        created
     }
 
     #[test]
@@ -1353,6 +1418,21 @@ mod tests {
     fn rotation_revokes_the_old_secret_without_extending_absolute_expiry() {
         let fixture = fixture();
         let created = create_session(&fixture, &fixture.grants[..1], fixture.grants[0], 0);
+        let recent_expires_at = fixture.created_at + ChronoDuration::seconds(60);
+        fixture
+            .kernel
+            .inner
+            .connection
+            .lock()
+            .expect("connection")
+            .execute(
+                "UPDATE fasti_browser_session_authentication SET recent_authentication_expires_at = ?1 WHERE browser_session_id = ?2",
+                params![
+                    timestamp(recent_expires_at),
+                    created.session().id().to_string(),
+                ],
+            )
+            .expect("recent authentication");
         let rotated = fixture
             .kernel
             .rotate_browser_session(mutation_command(
@@ -1362,6 +1442,41 @@ mod tests {
                 fixture.created_at + ChronoDuration::seconds(1),
             ))
             .expect("rotate");
+        let copied_authentication = fixture
+            .kernel
+            .inner
+            .connection
+            .lock()
+            .expect("connection")
+            .query_row(
+                r#"
+                SELECT trailbase_instance_id, activation_generation, method,
+                       verified_at, recent_authentication_expires_at
+                FROM fasti_browser_session_authentication
+                WHERE browser_session_id = ?1
+                "#,
+                [rotated.session().id().to_string()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                    ))
+                },
+            )
+            .expect("rotated session authentication");
+        assert_eq!(
+            copied_authentication,
+            (
+                fixture.instance_id.to_string(),
+                1,
+                "trailbase_password".to_owned(),
+                timestamp(fixture.created_at),
+                Some(timestamp(recent_expires_at)),
+            )
+        );
         assert_ne!(rotated.session().id(), created.session().id());
         assert_eq!(rotated.session().rotation_generation(), 1);
         assert_eq!(

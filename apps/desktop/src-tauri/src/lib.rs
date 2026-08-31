@@ -1025,8 +1025,11 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "desktop-runtime")]
     use std::sync::atomic::{AtomicBool, Ordering};
+    #[cfg(feature = "desktop-runtime")]
     use std::sync::Arc;
+    #[cfg(feature = "desktop-runtime")]
     use std::time::Duration;
 
     #[test]
@@ -1039,6 +1042,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "desktop-runtime")]
     #[test]
     fn first_administrator_binding_cookie_is_narrow_and_bounded() {
         let cookie = auth_binding_cookie("binding".to_owned(), 999);
@@ -1056,6 +1060,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "desktop-runtime")]
     #[test]
     fn first_administrator_command_response_contains_no_secret_or_ceremony_id() {
         let response = StartedFirstAdministratorBootstrap {
@@ -1074,7 +1079,7 @@ mod tests {
         assert!(!encoded.contains("ceremony"));
     }
 
-    #[cfg(not(target_os = "android"))]
+    #[cfg(all(feature = "desktop-runtime", not(target_os = "android")))]
     #[test]
     fn packaged_access_refuses_an_occupied_fixed_listener() {
         let occupied = std::net::TcpListener::bind(FASTI_ACCESS_HOST).ok();

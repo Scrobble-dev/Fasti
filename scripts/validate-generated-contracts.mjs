@@ -195,13 +195,21 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     "list_records security must match hybrid authorization",
   );
   const nuvioCollections = openapi.paths["/api/v1/profile/nuvio-collections"];
-  const profileSecurity = [
+  const hybridReadSecurity = [
     { credential_bearer: [] },
     { browser_session_cookie: [] },
   ];
-  assert.deepEqual(nuvioCollections.delete.security, profileSecurity);
-  assert.deepEqual(nuvioCollections.get.security, profileSecurity);
-  assert.deepEqual(nuvioCollections.put.security, profileSecurity);
+  const hybridMutationSecurity = [
+    { credential_bearer: [] },
+    {
+      browser_session_cookie: [],
+      csrf_cookie: [],
+      csrf_header: [],
+    },
+  ];
+  assert.deepEqual(nuvioCollections.delete.security, hybridMutationSecurity);
+  assert.deepEqual(nuvioCollections.get.security, hybridReadSecurity);
+  assert.deepEqual(nuvioCollections.put.security, hybridMutationSecurity);
 
   const ajv = new Ajv2020({ allErrors: true, strict: true });
   ajv.addFormat("uint16", {
@@ -470,6 +478,15 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     "replace_nuvio_collections",
     "clear_nuvio_collections",
   ]);
+  const hybridMutations = new Set([
+    "submit_observation",
+    "create_record",
+    "attach_identifier",
+    "register_namespace",
+    "set_tracking_disposition",
+    "replace_nuvio_collections",
+    "clear_nuvio_collections",
+  ]);
 
   for (const pathItem of Object.values(openapi.paths)) {
     for (const operation of Object.values(pathItem)) {
@@ -512,8 +529,10 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
             csrf_header: [],
           },
         ];
+      } else if (hybridMutations.has(operation.operationId)) {
+        security = hybridMutationSecurity;
       } else if (hybridOperations.has(operation.operationId)) {
-        security = [{ credential_bearer: [] }, { browser_session_cookie: [] }];
+        security = hybridReadSecurity;
       } else {
         security = [{ credential_bearer: [] }];
       }

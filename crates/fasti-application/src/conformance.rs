@@ -487,18 +487,18 @@ impl B1ConformanceFixture {
                 command.correlation_id(),
             )));
         };
-        let operation_id = command.operation_id().ok_or_else(|| {
-            Box::new(FastiProblem::integrity_failed(
-                CapabilityKey::AcceptObservation,
-                command.correlation_id(),
-            ))
-        })?;
         authorize_capability(
             CapabilityKey::AcceptObservation,
             Some(access),
             &enrolled.access_snapshot,
             command.correlation_id(),
         )?;
+        let operation_id = command.operation_id().ok_or_else(|| {
+            Box::new(FastiProblem::integrity_failed(
+                CapabilityKey::AcceptObservation,
+                command.correlation_id(),
+            ))
+        })?;
 
         if let Some(stored) = enrolled.operations.get(&operation_id) {
             if stored.capability == CapabilityKey::AcceptObservation

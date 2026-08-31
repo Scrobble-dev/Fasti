@@ -119,17 +119,17 @@ not automatically an implemented runtime. Read each entry together with the
 | `observation.accept`            | `observation.ingress`       | `scoped_or_browser_session` | Implemented                         |
 | `receipt.replay`                | `observation.receipts`      | `scoped`          | Fixture only; durable behavior belongs to B2 |
 | `receipt.stream`                | `observation.receipts`      | `scoped`          | Fixture only; durable behavior belongs to B2 |
-| `access.identity.bootstrap`     | `access.identity`           | `local_operator`  | C1 implementation in progress                |
-| `access.projection.read`        | `access.projection`         | `browser_session` | C1 implementation in progress                |
-| `browser.session.create`        | `browser.authentication`    | `unauthenticated` | C1 implementation in progress                |
-| `browser.session.end`           | `browser.authentication`    | `browser_session` | C1 implementation in progress                |
-| `browser.session.profile.select` | `browser.authentication`   | `browser_session` | C1 implementation in progress                |
-| `browser.session.read`          | `browser.authentication`    | `browser_session` | C1 implementation in progress                |
-| `browser.session.revoke`        | `browser.authentication`    | `browser_session` | C1 implementation in progress                |
-| `browser.session.rotate`        | `browser.authentication`    | `browser_session` | C1 implementation in progress                |
-| `browser.sessions.list`         | `browser.authentication`    | `browser_session` | C1 implementation in progress                |
-| `browser.sessions.revoke_all`   | `browser.authentication`    | `browser_session` | C1 implementation in progress                |
-| `browser.sessions.revoke_others` | `browser.authentication`   | `browser_session` | C1 implementation in progress                |
+| `access.identity.bootstrap`     | `access.identity`           | `local_operator`  | Implemented                                  |
+| `access.projection.read`        | `access.projection`         | `browser_session` | Implemented                                  |
+| `browser.session.create`        | `browser.authentication`    | `unauthenticated` | Implemented                                  |
+| `browser.session.end`           | `browser.authentication`    | `browser_session` | Implemented                                  |
+| `browser.session.profile.select` | `browser.authentication`   | `browser_session` | Implemented                                  |
+| `browser.session.read`          | `browser.authentication`    | `browser_session` | Implemented                                  |
+| `browser.session.revoke`        | `browser.authentication`    | `browser_session` | Implemented                                  |
+| `browser.session.rotate`        | `browser.authentication`    | `browser_session` | Implemented                                  |
+| `browser.sessions.list`         | `browser.authentication`    | `browser_session` | Implemented                                  |
+| `browser.sessions.revoke_all`   | `browser.authentication`    | `browser_session` | Implemented                                  |
+| `browser.sessions.revoke_others` | `browser.authentication`   | `browser_session` | Implemented                                  |
 | `identity.record.create`        | `identity.records`          | `scoped_or_browser_session` | Implemented                         |
 | `identity.identifier.attach`    | `identity.identifiers`      | `scoped_or_browser_session` | Implemented                         |
 | `identity.record.list`          | `identity.records`          | `scoped_or_browser_session` | Implemented                         |

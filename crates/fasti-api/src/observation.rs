@@ -271,7 +271,7 @@ pub(crate) async fn accept_observation_request(
     post,
     path = "/api/v1/observations",
     tag = "observations",
-    security(("credential_bearer" = []), ("browser_session_cookie" = [])),
+    security(("credential_bearer" = []), ("browser_session_cookie" = [], "csrf_cookie" = [], "csrf_header" = [])),
     request_body = SubmitObservationRequest,
     responses(
         (status = 200, description = "Durable observation receipt; a safe retry can return a replayed disposition", body = SubmitObservationResponse),

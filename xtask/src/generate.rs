@@ -2101,6 +2101,20 @@ fn validate_production_operation_security(
             "csrf_cookie": [],
             "csrf_header": []
         }])),
+        "submit_observation"
+        | "create_record"
+        | "attach_identifier"
+        | "register_namespace"
+        | "set_tracking_disposition"
+        | "replace_nuvio_collections"
+        | "clear_nuvio_collections" => Some(serde_json::json!([
+            {"credential_bearer": []},
+            {
+                "browser_session_cookie": [],
+                "csrf_cookie": [],
+                "csrf_header": []
+            }
+        ])),
         _ => None,
     };
     if let Some(expected) = access_security {
@@ -2119,16 +2133,7 @@ fn validate_production_operation_security(
     }
     let expected = match operation_id {
         "initialize_node" => vec!["bootstrap_bearer"],
-        "submit_observation"
-        | "create_record"
-        | "attach_identifier"
-        | "list_records"
-        | "register_namespace"
-        | "list_tracking_dispositions"
-        | "set_tracking_disposition"
-        | "get_nuvio_collections"
-        | "replace_nuvio_collections"
-        | "clear_nuvio_collections" => {
+        "list_records" | "list_tracking_dispositions" | "get_nuvio_collections" => {
             vec!["credential_bearer", "browser_session_cookie"]
         }
         "list_providers"
@@ -5213,22 +5218,37 @@ mod tests {
         )
         .expect("production OpenAPI JSON");
         for pointer in [
-            "/paths/~1api~1v1~1observations/post/security",
-            "/paths/~1api~1v1~1records/post/security",
             "/paths/~1api~1v1~1records/get/security",
-            "/paths/~1api~1v1~1records~1identifiers/post/security",
-            "/paths/~1api~1v1~1namespaces/post/security",
             "/paths/~1api~1v1~1profile~1record-tracking-dispositions/get/security",
-            "/paths/~1api~1v1~1profile~1record-tracking-dispositions~1{record_id}/put/security",
             "/paths/~1api~1v1~1profile~1nuvio-collections/get/security",
-            "/paths/~1api~1v1~1profile~1nuvio-collections/put/security",
-            "/paths/~1api~1v1~1profile~1nuvio-collections/delete/security",
         ] {
             assert_eq!(
                 value_at(&openapi, pointer).expect("hybrid operation security"),
                 &serde_json::json!([
                     {"credential_bearer": []},
                     {"browser_session_cookie": []}
+                ]),
+                "{pointer}"
+            );
+        }
+        for pointer in [
+            "/paths/~1api~1v1~1observations/post/security",
+            "/paths/~1api~1v1~1records/post/security",
+            "/paths/~1api~1v1~1records~1identifiers/post/security",
+            "/paths/~1api~1v1~1namespaces/post/security",
+            "/paths/~1api~1v1~1profile~1record-tracking-dispositions~1{record_id}/put/security",
+            "/paths/~1api~1v1~1profile~1nuvio-collections/put/security",
+            "/paths/~1api~1v1~1profile~1nuvio-collections/delete/security",
+        ] {
+            assert_eq!(
+                value_at(&openapi, pointer).expect("hybrid mutation security"),
+                &serde_json::json!([
+                    {"credential_bearer": []},
+                    {
+                        "browser_session_cookie": [],
+                        "csrf_cookie": [],
+                        "csrf_header": []
+                    }
                 ]),
                 "{pointer}"
             );

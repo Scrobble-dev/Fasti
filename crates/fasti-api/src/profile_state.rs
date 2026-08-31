@@ -94,7 +94,7 @@ pub(crate) async fn list_tracking_dispositions(
     put,
     path = "/api/v1/profile/record-tracking-dispositions/{record_id}",
     tag = "profile",
-    security(("credential_bearer" = []), ("browser_session_cookie" = [])),
+    security(("credential_bearer" = []), ("browser_session_cookie" = [], "csrf_cookie" = [], "csrf_header" = [])),
     params(("record_id" = String, Path, description = "Fasti Record identifier")),
     request_body = SetTrackingDispositionRequest,
     responses(

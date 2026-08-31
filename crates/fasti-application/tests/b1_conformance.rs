@@ -3,7 +3,7 @@
 use fasti_application::{
     conformance::{B1ConformanceFixture, FixtureDurability, FixturePhase, MAX_FIXTURE_OPERATIONS},
     AcceptObservationCommand, AcceptObservationOutcome, CapabilityKey, ProblemCode,
-    ReplayReceiptQuery, StreamReceiptsQuery, MAX_RECEIPT_STREAM_REPLAY,
+    ReplayReceiptQuery, SourceEvent, StreamReceiptsQuery, MAX_RECEIPT_STREAM_REPLAY,
 };
 use fasti_domain::{
     ClaimedTrust, EvidenceId, EvidenceReference, ObservedAt, OperationId, RequestCorrelationId,
@@ -157,6 +157,28 @@ fn authorization_is_rechecked_and_mismatched_access_cannot_accept() {
         0,
         "denial occurs without mutation"
     );
+
+    let source_event_error = fixture
+        .accept_fixture(
+            enrollment.credential_secret(),
+            AcceptObservationCommand::new_source_event(
+                RequestCorrelationId::new_v7(),
+                *other_enrollment.access(),
+                SourceEvent::try_new("test", "foreign-access").expect("source event"),
+                None,
+                ObservedAt::parse("2026-08-22T10:11:12Z", ClaimedTrust::DeviceObserved)
+                    .expect("valid observed time"),
+                EvidenceReference::new(
+                    EvidenceId::new_v7(),
+                    Sha256Digest::parse(format!("sha256:{}", "24".repeat(32)))
+                        .expect("canonical digest"),
+                    32,
+                ),
+            ),
+        )
+        .expect_err("authorization must precede source-event fixture validation");
+    assert_eq!(source_event_error.code(), ProblemCode::Forbidden);
+    assert_eq!(fixture.inspect_fixture().as_ref().operation_count, 0);
 
     let wrong_secret = fixture
         .accept_fixture(

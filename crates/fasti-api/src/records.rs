@@ -91,7 +91,7 @@ fn resolved_field_dto(field: &ResolvedField) -> ResolvedFieldDto {
     post,
     path = "/api/v1/records",
     tag = "records",
-    security(("credential_bearer" = []), ("browser_session_cookie" = [])),
+    security(("credential_bearer" = []), ("browser_session_cookie" = [], "csrf_cookie" = [], "csrf_header" = [])),
     request_body = CreateRecordRequest,
     responses(
         (status = 200, description = "The new record's identity", body = CreateRecordResponse),
@@ -147,7 +147,7 @@ pub(crate) async fn create_record(
     post,
     path = "/api/v1/records/identifiers",
     tag = "records",
-    security(("credential_bearer" = []), ("browser_session_cookie" = [])),
+    security(("credential_bearer" = []), ("browser_session_cookie" = [], "csrf_cookie" = [], "csrf_header" = [])),
     request_body = AttachIdentifierRequest,
     responses(
         (status = 200, description = "The attached (or already-present) identifier claim", body = AttachIdentifierResponse),
@@ -298,7 +298,7 @@ pub(crate) async fn list_records(
     post,
     path = "/api/v1/namespaces",
     tag = "records",
-    security(("credential_bearer" = []), ("browser_session_cookie" = [])),
+    security(("credential_bearer" = []), ("browser_session_cookie" = [], "csrf_cookie" = [], "csrf_header" = [])),
     request_body = RegisterNamespaceRequest,
     responses(
         (status = 200, description = "The registered (or already-present) namespace", body = RegisterNamespaceResponse),
