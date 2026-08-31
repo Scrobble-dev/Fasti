@@ -98,7 +98,7 @@ const server = createServer((request, response) => {
   } else if (url.pathname === "/api/v1/providers") {
     payload = { providers: [] };
   } else if (url.pathname === "/api/v1/profile/nuvio-collections") {
-    payload = [];
+    payload = { document: null };
   } else if (url.pathname === "/api/v1/profile/record-tracking-dispositions") {
     payload = { states: [], truncated: false };
   } else if (
