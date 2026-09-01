@@ -4,7 +4,7 @@ Fasti keeps two acceptance matrices. They answer different questions and use sep
 
 | File                                                       | Namespace | Rows | Scope                                                                                  |
 | ---------------------------------------------------------- | --------- | ---- | -------------------------------------------------------------------------------------- |
-| [`uat-matrix.csv`](uat-matrix.csv)                         | `ID-###`  | 80   | Product-wide acceptance across identity, resolution, sync, offline, API, and knowledge |
+| [`uat-matrix.csv`](uat-matrix.csv)                         | `ID-###`, `MDN-###` | 140 | Product-wide acceptance across identity, metadata, resolution, sync, offline, API, and knowledge |
 | [`identity-uat-matrix.v1.csv`](identity-uat-matrix.v1.csv) | `IDF-###` | 126  | Identity-first acceptance derived from the identity-first greenfield plan              |
 
 A row in either file describes required behavior. It does not claim that the behavior is implemented.
@@ -15,11 +15,13 @@ No UAT row passes from prose, syntax parsing, or a mocked UI. Evidence must iden
 
 ## Body ownership
 
-B0 owns repository-truth, guarded-command, workflow-policy, draft-syntax, native-build, and OCI-smoke evidence. B1 imports each UAT ID into the capability registry and marks it `direct`, `split`, or `deferred` with one owning body and reason. B2 and B3 bind implemented rows to executable API, CLI, SDK, persistence, recovery, and network-denied evidence.
+B0 owns repository-truth, guarded-command, workflow-policy, draft-syntax, native-build, and OCI-smoke evidence. Each implementation body promotes its applicable UAT IDs into the capability registry and marks them `direct`, `split`, or `deferred` with one owning body and reason. Executable cases bind to API, SDK, persistence, recovery, browser, and network-denied evidence as applicable.
 
 ## Why both matrices
 
-`uat-matrix.csv` is the release gate. [`uat-ownership.v1.json`](uat-ownership.v1.json) assigns every `ID-###` case a body and a status, and [`contracts/registry/v1/capabilities.yaml`](../../contracts/registry/v1/capabilities.yaml) traces B1 capabilities to specific `ID-###` cases. Those traces are load-bearing: `scripts/validate-okf-uat.mjs` asserts that the registry trace set and the B1-owned ownership set are identical.
+`uat-matrix.csv` is the release gate. [`uat-ownership.v1.json`](uat-ownership.v1.json) assigns every legacy `ID-###` case and each promoted `MDN-###` case a body and status. [`contracts/registry/v1/capabilities.yaml`](../../contracts/registry/v1/capabilities.yaml) traces promoted capabilities to those cases. The traces are load-bearing: `scripts/validate-okf-uat.mjs` asserts that registry and ownership trace sets are identical.
+
+M3 promotes `MDN-001`, `MDN-002`, and `MDN-018`. M3 proves deterministic MAL/Kitsu-to-IMDb routing and durable anime grouping policy changes. M8 still owns live TMDB enrichment. The production-router and store tests prove apply, replay, rollback, archive restore, and unchanged Record and Chronicle activity. The browser test proves bounded review pagination, retry idempotency, rollback review, cancellation during an in-flight page, focus return, responsive labelled rows, 44-pixel targets, screenshots, and Axe checks at 320, 768, and 1440 pixels in light and dark themes.
 
 `identity-uat-matrix.v1.csv` is deeper on identity but narrower on product. It has no counterpart for the capability-discovery case (`ID-065`) or the API exact-ID-conflict case (`ID-064`), both of which currently carry B1 registry traces. It therefore extends the product matrix; it does not replace it.
 

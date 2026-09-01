@@ -1860,7 +1860,19 @@ capabilities:
         validation_failed,
       ]
     examples: []
-    uat: []
+    uat:
+      - {
+          id: MDN-001,
+          relationship: split,
+          owner_body: m3,
+          reason: M3 proves the verified IMDb alias route while M8 owns live TMDB enrichment.,
+        }
+      - {
+          id: MDN-002,
+          relationship: split,
+          owner_body: m3,
+          reason: M3 proves the verified IMDb alias route while M8 owns live TMDB enrichment.,
+        }
 
   - application_key: read_anime_grouping_policy
     id: profile.anime_grouping_policy.read
@@ -1889,7 +1901,13 @@ capabilities:
         validation_failed,
       ]
     examples: []
-    uat: []
+    uat:
+      - {
+          id: MDN-018,
+          relationship: split,
+          owner_body: m3,
+          reason: M3 exposes the durable profile policy read used by the governed change flow.,
+        }
 
   - application_key: preview_anime_grouping_policy_change
     id: profile.anime_grouping_policy.preview
@@ -1921,7 +1939,13 @@ capabilities:
         validation_failed,
       ]
     examples: []
-    uat: []
+    uat:
+      - {
+          id: MDN-018,
+          relationship: split,
+          owner_body: m3,
+          reason: M3 previews the bounded projection impact before any governed policy change.,
+        }
 
   - application_key: apply_anime_grouping_policy_change
     id: profile.anime_grouping_policy.apply
@@ -1954,4 +1978,10 @@ capabilities:
         validation_failed,
       ]
     examples: []
-    uat: []
+    uat:
+      - {
+          id: MDN-018,
+          relationship: direct,
+          owner_body: m3,
+          reason: M3 durably changes projection policy without re-keying Records or Chronicle state.,
+        }

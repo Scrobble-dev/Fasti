@@ -5324,7 +5324,7 @@ const B1_CONFORMANCE_SCHEMAS = {
     "additionalProperties": false,
     "properties": {
       "id": {
-        "pattern": "^ID-[0-9]{3}$",
+        "pattern": "^(?:ID|MDN)-[0-9]{3}$",
         "type": "string"
       },
       "owner_body": {
@@ -6851,7 +6851,20 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "identity_read"
       ],
       "surface_profile": "m3_identity_routing",
-      "uat": []
+      "uat": [
+        {
+          "id": "MDN-001",
+          "owner_body": "m3",
+          "reason": "M3 proves the verified IMDb alias route while M8 owns live TMDB enrichment.",
+          "relationship": "split"
+        },
+        {
+          "id": "MDN-002",
+          "owner_body": "m3",
+          "reason": "M3 proves the verified IMDb alias route while M8 owns live TMDB enrichment.",
+          "relationship": "split"
+        }
+      ]
     },
     {
       "authorization": "unauthenticated",
@@ -7186,7 +7199,14 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "profile_state_write"
       ],
       "surface_profile": "m3_identity_routing",
-      "uat": []
+      "uat": [
+        {
+          "id": "MDN-018",
+          "owner_body": "m3",
+          "reason": "M3 durably changes projection policy without re-keying Records or Chronicle state.",
+          "relationship": "direct"
+        }
+      ]
     },
     {
       "authorization": "scoped_or_browser_session",
@@ -7218,7 +7238,14 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "profile_state_read"
       ],
       "surface_profile": "m3_identity_routing",
-      "uat": []
+      "uat": [
+        {
+          "id": "MDN-018",
+          "owner_body": "m3",
+          "reason": "M3 previews the bounded projection impact before any governed policy change.",
+          "relationship": "split"
+        }
+      ]
     },
     {
       "authorization": "scoped_or_browser_session",
@@ -7247,7 +7274,14 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "profile_state_read"
       ],
       "surface_profile": "m3_identity_routing",
-      "uat": []
+      "uat": [
+        {
+          "id": "MDN-018",
+          "owner_body": "m3",
+          "reason": "M3 exposes the durable profile policy read used by the governed change flow.",
+          "relationship": "split"
+        }
+      ]
     },
     {
       "authorization": "scoped_or_browser_session",

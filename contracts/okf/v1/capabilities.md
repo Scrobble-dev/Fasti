@@ -45,6 +45,10 @@ identifiers:
   - metadata.claim.refresh
   - metadata.projection.read
   - metadata.projection.configure
+  - identity.route.resolve
+  - profile.anime_grouping_policy.read
+  - profile.anime_grouping_policy.preview
+  - profile.anime_grouping_policy.apply
 authorization_postures:
   - unauthenticated
   - bootstrap_only
@@ -92,6 +96,10 @@ authorization_assignments:
   metadata.claim.refresh: scoped
   metadata.projection.read: scoped
   metadata.projection.configure: scoped
+  identity.route.resolve: scoped_or_browser_session
+  profile.anime_grouping_policy.read: scoped_or_browser_session
+  profile.anime_grouping_policy.preview: scoped_or_browser_session
+  profile.anime_grouping_policy.apply: scoped_or_browser_session
 sources:
   - id: fasti-capability-registry
     resource: ../../registry/v1/capabilities.yaml
@@ -146,6 +154,10 @@ not automatically an implemented runtime. Read each entry together with the
 | `metadata.claim.refresh`        | `metadata.claims`           | `scoped`          | Implemented in M2                            |
 | `metadata.projection.read`      | `metadata.projection`       | `scoped`          | Implemented in M2                            |
 | `metadata.projection.configure` | `metadata.projection`       | `scoped`          | Implemented in M2                            |
+| `identity.route.resolve`        | `identity.routing`          | `scoped_or_browser_session` | Implemented in M3                  |
+| `profile.anime_grouping_policy.read` | `profile.projection_policy` | `scoped_or_browser_session` | Implemented in M3           |
+| `profile.anime_grouping_policy.preview` | `profile.projection_policy` | `scoped_or_browser_session` | Implemented in M3        |
+| `profile.anime_grouping_policy.apply` | `profile.projection_policy` | `scoped_or_browser_session` | Implemented in M3          |
 
 `scoped` and `scoped_or_browser_session` capabilities use identifiers from the
 [scope catalogue](scopes.md). `browser_session` requires an active opaque Fasti
