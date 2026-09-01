@@ -1283,32 +1283,12 @@ fn verify_import_domain_invariants(
     )
     .map_err(|_| RestoreImportError::IdentityRoutingInvariant)?;
 
-    let invalid_rollbacks: i64 = transaction
-        .query_row(
-            r#"
-            SELECT COUNT(*)
-            FROM anime_grouping_policy_receipts rollback
-            LEFT JOIN anime_grouping_policy_receipts applied
-              ON applied.workspace_id = rollback.workspace_id
-             AND applied.profile_id = rollback.profile_id
-             AND applied.scope_kind = rollback.scope_kind
-             AND applied.scope_client_id IS rollback.scope_client_id
-             AND applied.operation_id = rollback.rollback_operation_id
-            WHERE rollback.workspace_id = ?1
-              AND rollback.change_kind = 'rollback'
-              AND (
-                  applied.operation_id IS NULL
-                  OR applied.created_at > rollback.created_at
-                  OR applied.result_revision >= rollback.result_revision
-              )
-            "#,
-            [workspace_id.to_string()],
-            |row| row.get(0),
-        )
-        .map_err(RestoreImportError::Sqlite)?;
-    if invalid_rollbacks != 0 {
-        return Err(RestoreImportError::PolicyReceiptInvariant);
-    }
+    crate::identity_routing::validate_workspace_anime_grouping_policy_receipts(
+        transaction,
+        workspace_id,
+        correlation_id,
+    )
+    .map_err(|_| RestoreImportError::PolicyReceiptInvariant)?;
     Ok(())
 }
 
@@ -3630,6 +3610,55 @@ mod tests {
                 .expect("client policy command"),
             )
             .expect("client policy");
+        node.kernel
+            .authorize_and_apply_anime_grouping_policy_change(
+                ApplyAnimeGroupingPolicyChangeCommand::try_new(
+                    RequestCorrelationId::new_v7(),
+                    node.access,
+                    AnimeGroupingPolicyScope::Client(client_id),
+                    OperationId::new_v7(),
+                    Sha256Digest::parse(format!("sha256:{}", "3c".repeat(32)))
+                        .expect("inherit semantic digest"),
+                    2,
+                    AnimeGroupingPolicyChange::InheritProfile,
+                )
+                .expect("inherit policy command"),
+            )
+            .expect("inherit profile policy");
+        node.kernel
+            .authorize_and_apply_anime_grouping_policy_change(
+                ApplyAnimeGroupingPolicyChangeCommand::try_new(
+                    RequestCorrelationId::new_v7(),
+                    node.access,
+                    AnimeGroupingPolicyScope::Profile,
+                    OperationId::new_v7(),
+                    Sha256Digest::parse(format!("sha256:{}", "4d".repeat(32)))
+                        .expect("advanced profile semantic digest"),
+                    1,
+                    AnimeGroupingPolicyChange::Set(
+                        AnimeGroupingPreference::KeepKitsuReleasesSeparate,
+                    ),
+                )
+                .expect("advanced profile policy command"),
+            )
+            .expect("profile policy after inherited client revision");
+        node.kernel
+            .authorize_and_apply_anime_grouping_policy_change(
+                ApplyAnimeGroupingPolicyChangeCommand::try_new(
+                    RequestCorrelationId::new_v7(),
+                    node.access,
+                    AnimeGroupingPolicyScope::Profile,
+                    OperationId::new_v7(),
+                    Sha256Digest::parse(format!("sha256:{}", "5e".repeat(32)))
+                        .expect("rollback semantic digest"),
+                    4,
+                    AnimeGroupingPolicyChange::Rollback {
+                        applied_operation_id: profile_operation_id,
+                    },
+                )
+                .expect("rollback policy command"),
+            )
+            .expect("rollback profile policy");
 
         crate::identity_routing::validate_workspace_identity_routing_state(
             &node
@@ -4845,7 +4874,7 @@ mod tests {
             ("identity_assertion_lifecycle_events", 1),
             ("profile_anime_grouping_policies", 1),
             ("client_anime_grouping_policies", 1),
-            ("anime_grouping_policy_receipts", 2),
+            ("anime_grouping_policy_receipts", 5),
         ] {
             let count: i64 = database
                 .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
@@ -4862,17 +4891,17 @@ mod tests {
                     |row| row.get::<_, String>(0),
                 )
                 .expect("profile policy"),
-            "group_by_tv_work"
+            "automatic"
         );
         assert_eq!(
             database
                 .query_row(
                     "SELECT preference FROM client_anime_grouping_policies WHERE client_id = ?1",
                     [fixture.client_id.to_string()],
-                    |row| row.get::<_, String>(0),
+                    |row| row.get::<_, Option<String>>(0),
                 )
                 .expect("client policy"),
-            "keep_mal_releases_separate"
+            None
         );
         assert!(database
             .execute(
@@ -4895,39 +4924,198 @@ mod tests {
     #[test]
     fn archive_v5_rejects_invalid_identity_lifecycle_and_payloads() {
         let fixture = identity_routing_archive_fixture();
-        for hostile in [
-            rewrite_stream(
-                &fixture.archive,
-                WorkspaceExportEntity::IdentityAssertionLifecycleEvents,
-                |bytes| {
+        let maximum_profile_revision = rewrite_stream(
+            &fixture.archive,
+            WorkspaceExportEntity::ProfileAnimeGroupingPolicies,
+            |bytes| {
+                let mut row: serde_json::Value =
+                    serde_json::from_slice(&bytes[..bytes.len().saturating_sub(1)])
+                        .expect("profile anime policy row");
+                row["revision"] = serde_json::json!(9_007_199_254_740_991_u64);
+                *bytes = serde_json::to_vec(&row).expect("profile policy mutation");
+                bytes.push(b'\n');
+            },
+        );
+        let maximum_profile_revision = rewrite_stream(
+            &maximum_profile_revision,
+            WorkspaceExportEntity::AnimeGroupingPolicyReceipts,
+            |bytes| {
+                let mut rewritten = Vec::with_capacity(bytes.len());
+                for line in bytes
+                    .split(|byte| *byte == b'\n')
+                    .filter(|line| !line.is_empty())
+                {
                     let mut row: serde_json::Value =
-                        serde_json::from_slice(&bytes[..bytes.len().saturating_sub(1)])
-                            .expect("identity lifecycle row");
-                    row["sequence"] = serde_json::json!(2);
-                    *bytes = serde_json::to_vec(&row).expect("sequence mutation");
-                    bytes.push(b'\n');
-                },
-            ),
-            rewrite_stream(
-                &fixture.archive,
-                WorkspaceExportEntity::IdentityAssertions,
-                |bytes| {
+                        serde_json::from_slice(line).expect("policy receipt row");
+                    if row["scope_kind"] == "profile" && row["change_kind"] == "rollback" {
+                        row["result_revision"] = serde_json::json!(9_007_199_254_740_991_u64);
+                    }
+                    rewritten.extend_from_slice(
+                        &serde_json::to_vec(&row).expect("policy receipt mutation"),
+                    );
+                    rewritten.push(b'\n');
+                }
+                *bytes = rewritten;
+            },
+        );
+        let duplicate_profile_revision = rewrite_stream(
+            &fixture.archive,
+            WorkspaceExportEntity::ProfileAnimeGroupingPolicies,
+            |bytes| {
+                let mut row: serde_json::Value =
+                    serde_json::from_slice(&bytes[..bytes.len().saturating_sub(1)])
+                        .expect("profile anime policy row");
+                row["revision"] = serde_json::json!(4);
+                *bytes = serde_json::to_vec(&row).expect("profile policy mutation");
+                bytes.push(b'\n');
+            },
+        );
+        let duplicate_profile_revision = rewrite_stream(
+            &duplicate_profile_revision,
+            WorkspaceExportEntity::AnimeGroupingPolicyReceipts,
+            |bytes| {
+                let mut rewritten = Vec::with_capacity(bytes.len());
+                for line in bytes
+                    .split(|byte| *byte == b'\n')
+                    .filter(|line| !line.is_empty())
+                {
                     let mut row: serde_json::Value =
-                        serde_json::from_slice(&bytes[..bytes.len().saturating_sub(1)])
-                            .expect("identity assertion row");
-                    row["evidence_json"] = serde_json::json!(serde_json::json!([{
-                        "method": "invented",
-                        "observed_source": "hostile",
-                        "derivation_root": null,
-                        "reviewer": null,
-                        "observed_at": "2026-08-30",
-                        "evidence_id": null,
-                    }])
-                    .to_string());
-                    *bytes = serde_json::to_vec(&row).expect("payload mutation");
-                    bytes.push(b'\n');
-                },
+                        serde_json::from_slice(line).expect("policy receipt row");
+                    if row["scope_kind"] == "profile" && row["change_kind"] == "rollback" {
+                        row["result_revision"] = serde_json::json!(4);
+                    }
+                    rewritten.extend_from_slice(
+                        &serde_json::to_vec(&row).expect("policy receipt mutation"),
+                    );
+                    rewritten.push(b'\n');
+                }
+                *bytes = rewritten;
+            },
+        );
+        let maximum_client_revision = rewrite_stream(
+            &fixture.archive,
+            WorkspaceExportEntity::ClientAnimeGroupingPolicies,
+            |bytes| {
+                let mut row: serde_json::Value =
+                    serde_json::from_slice(&bytes[..bytes.len().saturating_sub(1)])
+                        .expect("client anime policy row");
+                row["preference"] = serde_json::Value::Null;
+                row["revision"] = serde_json::json!(9_007_199_254_740_991_u64);
+                *bytes = serde_json::to_vec(&row).expect("client policy mutation");
+                bytes.push(b'\n');
+            },
+        );
+        let maximum_client_revision = rewrite_stream(
+            &maximum_client_revision,
+            WorkspaceExportEntity::AnimeGroupingPolicyReceipts,
+            |bytes| {
+                let mut rewritten = Vec::with_capacity(bytes.len());
+                for line in bytes
+                    .split(|byte| *byte == b'\n')
+                    .filter(|line| !line.is_empty())
+                {
+                    let mut row: serde_json::Value =
+                        serde_json::from_slice(line).expect("policy receipt row");
+                    if row["scope_kind"] == "client" {
+                        row["change_kind"] = serde_json::json!("inherit_profile");
+                        row["requested_preference"] = serde_json::Value::Null;
+                        row["result_preference"] = serde_json::json!("group_by_tv_work");
+                        row["result_source"] = serde_json::json!("profile_default");
+                        row["result_revision"] = serde_json::json!(9_007_199_254_740_991_u64);
+                    }
+                    rewritten.extend_from_slice(
+                        &serde_json::to_vec(&row).expect("policy receipt mutation"),
+                    );
+                    rewritten.push(b'\n');
+                }
+                *bytes = rewritten;
+            },
+        );
+        for (hostile, expected_policy_error) in [
+            (
+                rewrite_stream(
+                    &fixture.archive,
+                    WorkspaceExportEntity::IdentityAssertionLifecycleEvents,
+                    |bytes| {
+                        let mut row: serde_json::Value =
+                            serde_json::from_slice(&bytes[..bytes.len().saturating_sub(1)])
+                                .expect("identity lifecycle row");
+                        row["sequence"] = serde_json::json!(2);
+                        *bytes = serde_json::to_vec(&row).expect("sequence mutation");
+                        bytes.push(b'\n');
+                    },
+                ),
+                false,
             ),
+            (
+                rewrite_stream(
+                    &fixture.archive,
+                    WorkspaceExportEntity::IdentityAssertions,
+                    |bytes| {
+                        let mut row: serde_json::Value =
+                            serde_json::from_slice(&bytes[..bytes.len().saturating_sub(1)])
+                                .expect("identity assertion row");
+                        row["evidence_json"] = serde_json::json!(serde_json::json!([{
+                            "method": "invented",
+                            "observed_source": "hostile",
+                            "derivation_root": null,
+                            "reviewer": null,
+                            "observed_at": "2026-08-30",
+                            "evidence_id": null,
+                        }])
+                        .to_string());
+                        *bytes = serde_json::to_vec(&row).expect("payload mutation");
+                        bytes.push(b'\n');
+                    },
+                ),
+                false,
+            ),
+            (
+                rewrite_stream(
+                    &fixture.archive,
+                    WorkspaceExportEntity::AnimeGroupingPolicyReceipts,
+                    |bytes| {
+                        let line_end = bytes
+                            .iter()
+                            .position(|byte| *byte == b'\n')
+                            .expect("policy receipt line");
+                        let mut row: serde_json::Value =
+                            serde_json::from_slice(&bytes[..line_end]).expect("policy receipt row");
+                        row["previous_preference"] =
+                            serde_json::json!("keep_kitsu_releases_separate");
+                        let mut replacement =
+                            serde_json::to_vec(&row).expect("policy receipt mutation");
+                        replacement.push(b'\n');
+                        replacement.extend_from_slice(&bytes[line_end + 1..]);
+                        *bytes = replacement;
+                    },
+                ),
+                true,
+            ),
+            (
+                rewrite_stream(
+                    &fixture.archive,
+                    WorkspaceExportEntity::AnimeGroupingPolicyReceipts,
+                    |bytes| {
+                        let line_end = bytes
+                            .iter()
+                            .position(|byte| *byte == b'\n')
+                            .expect("policy receipt line");
+                        let mut row: serde_json::Value =
+                            serde_json::from_slice(&bytes[..line_end]).expect("policy receipt row");
+                        row["affected_records"] = serde_json::json!(999);
+                        let mut replacement =
+                            serde_json::to_vec(&row).expect("policy receipt mutation");
+                        replacement.push(b'\n');
+                        replacement.extend_from_slice(&bytes[line_end + 1..]);
+                        *bytes = replacement;
+                    },
+                ),
+                true,
+            ),
+            (maximum_client_revision, true),
+            (maximum_profile_revision, true),
+            (duplicate_profile_revision, true),
         ] {
             let restore_root = tempfile::tempdir().expect("restore root");
             let lock =
@@ -4943,10 +5131,11 @@ mod tests {
             )
             .err()
             .expect("invalid identity-routing state must fail");
-            assert!(matches!(
-                error,
-                RestoreImportError::IdentityRoutingInvariant
-            ));
+            assert!(if expected_policy_error {
+                matches!(error, RestoreImportError::PolicyReceiptInvariant)
+            } else {
+                matches!(error, RestoreImportError::IdentityRoutingInvariant)
+            });
             assert_attempt_removed(restore_root.path(), attempt_id);
         }
     }

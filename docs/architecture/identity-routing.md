@@ -89,7 +89,10 @@ connection, can have an explicit override. Both scopes use the same four values:
 A client without an override reads the profile default and its revision. The
 response says whether the value is inherited or client-owned, so compare-and-set
 apply detects a profile change between preview and apply. A client override can
-be cleared explicitly to resume profile inheritance.
+be cleared explicitly to resume profile inheritance. Revisions increase but are
+not required to be consecutive: a profile change advances the effective revision
+seen by every inheriting client, including a client that previously cleared an
+override. A stale inherited client token cannot overwrite that profile change.
 
 | Value | Behavior |
 | --- | --- |
@@ -162,6 +165,13 @@ reported policy revision cannot precede the command's expected revision. The
 durable implementation stores an immutable receipt. Rollback is a new
 compare-and-set operation that refers to the receipt being reversed. It does
 not delete the original receipt or rewrite media history.
+
+Archive v5 restore validates every policy and receipt chain before activation.
+It checks scope ownership, action semantics, rollback targets, revision order,
+impact bounds, and the terminal policy state. The v5 semantic digest remains an
+opaque compatibility field because that format does not store every command
+input needed to recompute it. Restore never treats that limitation as authority
+to change a policy, receipt, Record, or Chronicle row.
 
 ## Source evidence
 
