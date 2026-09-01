@@ -120,3 +120,46 @@ cargo xtask contract verify --locked
 ```
 
 M0 changes planning, design, preview-contract, and acceptance-evidence files only. It does not activate a capability, change a schema, alter generated contracts, or modify production behavior.
+
+## M3 merged checkpoint — 2026-09-01
+
+| Evidence | Exact value |
+| --- | --- |
+| Pull request | `Scrobble-dev/Fasti#120` |
+| Reviewed PR head | `1c8fb5db15036d6d13b703adda116f01b08baf83` |
+| Reviewed PR tree | `5552947a30b82497c7fa279a6932fe7877ed612b` |
+| Merged `origin/dev` | `df09101028a988a92f4546313c5eed6dd20d238a` |
+| Merged tree | `5552947a30b82497c7fa279a6932fe7877ed612b` |
+| Merged at | `2026-09-01T02:29:37Z` |
+| Delivery evidence | 22 exact-head checks passed; zero unresolved review threads; the merged tree is byte-identical to the reviewed PR tree. |
+
+M3 publishes schema v15 and archive v5. Archive v4 remains frozen at its
+29-stream prefix. Archive v5 retains that prefix and appends five M3 streams,
+for 34 streams total. Historical restore must continue to accept archive v5
+with migration version 15. M4 owns the single append-only schema v16 migration.
+Archive v6 is not allocated; M4 may advance the archive only if frozen durable
+Search state proves that portability requires it.
+
+The merged M3 invariants are:
+
+- stable Record identity and purpose-specific identity routes;
+- profile defaults plus per-client anime grouping overrides without Record or Chronicle re-keying;
+- workspace-wide operation identity with replay bound to actor client, profile, action scope, and semantic digest;
+- bounded lifecycle loading that splits valid multi-Record batches and fails closed when one Record exceeds the per-Record limit;
+- literal same-origin browser-smoke endpoints with the existing CSRF, method, body, and credential behavior;
+- unchanged C1 TrailBase exchange, opaque Fasti browser-session, and zeroizing process-memory PKCE boundary;
+- unchanged M2 provider-operation serialization and bounded outbound policy.
+
+M4 is now the sole writer for schema v16, Search/provider candidate types,
+identity-routing integration, atomic Record actions, capability registry and
+generators, generated contracts, API, SDK, hosts, Workbench composition,
+portability extensions, and the related governed documentation and tests.
+M8 may prepare or edit only its isolated metadata-refresh leaf after explicit
+file allocation; it must not touch shared provider, metadata, contract, host,
+or UI composition files until M4 merges. M5 remains read-only preparation until
+M4 and the minimum Collections membership predecessor merge.
+
+Codex Security is intentionally disabled for this programme. Exact-diff review,
+canonical CI, CodeQL, Codacy, CodeRabbit, advisory checks, browser QA, OCI,
+coverage, documentation, contract parity, and both low-hardware envelopes are
+the retained M3 evidence.
