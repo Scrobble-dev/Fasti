@@ -4454,10 +4454,10 @@ export const LOCAL_RUNTIME_OPERATIONS = {
   refreshMetadataClaims: { operationId: "refresh_metadata_claims", method: "POST", path: "/api/v1/metadata/claims/refresh", capabilityId: "metadata.claim.refresh", authorization: "scoped", requiredScopes: ["metadata_claim_refresh"], problemCodes: ["authentication_failed","forbidden","idempotency_conflict","integrity_failed","malformed_json","metadata_claim_stale","payload_too_large","provider_credential_expired","provider_credential_invalid","provider_credential_missing","provider_rate_limited","provider_response_invalid","provider_route_unavailable","provider_unavailable","record_not_found","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["metadata.claim.refresh.metadata_claim_stale"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: "RefreshMetadataClaimsRequest", responseSchema: "RefreshMetadataClaimsResponse" },
   readMetadataProjection: { operationId: "read_metadata_projection", method: "GET", path: "/api/v1/records/{record_id}/metadata-projection", capabilityId: "metadata.projection.read", authorization: "scoped", requiredScopes: ["metadata_projection_read"], problemCodes: ["authentication_failed","forbidden","integrity_failed","record_not_found","storage_unavailable","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "MetadataProjectionResponse" },
   configureMetadataProjection: { operationId: "configure_metadata_projection", method: "PUT", path: "/api/v1/profile/metadata-projection", capabilityId: "metadata.projection.configure", authorization: "scoped", requiredScopes: ["metadata_projection_configure"], problemCodes: ["authentication_failed","forbidden","integrity_failed","malformed_json","payload_too_large","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["metadata.projection.configure.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "ConfigureMetadataProjectionRequest", responseSchema: "MetadataProjectionConfigurationResponse" },
-  resolveIdentityRoute: { operationId: "resolve_identity_route", method: "GET", path: "/api/v1/records/{record_id}/identity-route", capabilityId: "identity.route.resolve", authorization: "scoped_or_browser_session", requiredScopes: ["identity_read"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","integrity_failed","record_not_found","session_policy_changed","storage_unavailable","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ResolveIdentityRouteResponse" },
+  resolveIdentityRoute: { operationId: "resolve_identity_route", method: "GET", path: "/api/v1/records/{record_id}/identity-route", capabilityId: "identity.route.resolve", authorization: "scoped_or_browser_session", requiredScopes: ["identity_read"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","capacity_exceeded","forbidden","integrity_failed","record_not_found","session_policy_changed","storage_unavailable","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ResolveIdentityRouteResponse" },
   readAnimeGroupingPolicy: { operationId: "read_anime_grouping_policy", method: "GET", path: "/api/v1/profile/anime-grouping-policy", capabilityId: "profile.anime_grouping_policy.read", authorization: "scoped_or_browser_session", requiredScopes: ["profile_state_read"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","integrity_failed","session_policy_changed","storage_unavailable","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ReadAnimeGroupingPolicyResponse" },
-  previewAnimeGroupingPolicyChange: { operationId: "preview_anime_grouping_policy_change", method: "POST", path: "/api/v1/profile/anime-grouping-policy/preview", capabilityId: "profile.anime_grouping_policy.preview", authorization: "scoped_or_browser_session", requiredScopes: ["profile_state_read"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","integrity_failed","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: "PreviewAnimeGroupingPolicyChangeRequest", responseSchema: "AnimeGroupingPolicyImpactResponse" },
-  applyAnimeGroupingPolicyChange: { operationId: "apply_anime_grouping_policy_change", method: "PUT", path: "/api/v1/profile/anime-grouping-policy", capabilityId: "profile.anime_grouping_policy.apply", authorization: "scoped_or_browser_session", requiredScopes: ["profile_state_write"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","idempotency_conflict","integrity_failed","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: "ApplyAnimeGroupingPolicyChangeRequest", responseSchema: "ApplyAnimeGroupingPolicyChangeResponse" },
+  previewAnimeGroupingPolicyChange: { operationId: "preview_anime_grouping_policy_change", method: "POST", path: "/api/v1/profile/anime-grouping-policy/preview", capabilityId: "profile.anime_grouping_policy.preview", authorization: "scoped_or_browser_session", requiredScopes: ["profile_state_read"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","capacity_exceeded","forbidden","integrity_failed","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: "PreviewAnimeGroupingPolicyChangeRequest", responseSchema: "AnimeGroupingPolicyImpactResponse" },
+  applyAnimeGroupingPolicyChange: { operationId: "apply_anime_grouping_policy_change", method: "PUT", path: "/api/v1/profile/anime-grouping-policy", capabilityId: "profile.anime_grouping_policy.apply", authorization: "scoped_or_browser_session", requiredScopes: ["profile_state_write"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: "ApplyAnimeGroupingPolicyChangeRequest", responseSchema: "ApplyAnimeGroupingPolicyChangeResponse" },
   startTrailBaseSignIn: { operationId: "start_trailbase_sign_in", method: "POST", path: "/api/access/v1/trailbase/sign-in", capabilityId: "browser.session.create", authorization: "unauthenticated", requiredScopes: [], problemCodes: ["capacity_exceeded","forbidden","integrity_failed","malformed_json","payload_too_large","storage_unavailable","trailbase_trust_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: false, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "StartTrailBaseSignInRequest", responseSchema: "StartTrailBaseSignInResponse" },
   readTrailBaseContinuation: { operationId: "read_trailbase_continuation", method: "GET", path: "/api/access/v1/trailbase/continuation", capabilityId: "browser.session.create", authorization: "unauthenticated", requiredScopes: [], problemCodes: ["auth_browser_binding_invalid","auth_continuation_persistence_failed","auth_subject_unaffiliated","capacity_exceeded","forbidden","identity_service_unavailable","integrity_failed","storage_unavailable","trailbase_proof_invalid","trailbase_session_cleanup_failed","trailbase_trust_unavailable","validation_failed"], exampleIds: [], authenticated: false, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ReadTrailBaseContinuationResponse" },
   completeTrailBaseContinuation: { operationId: "complete_trailbase_continuation", method: "POST", path: "/api/access/v1/trailbase/continuation", capabilityId: "browser.session.create", authorization: "unauthenticated", requiredScopes: [], problemCodes: ["auth_browser_binding_invalid","auth_continuation_persistence_failed","auth_selection_changed","auth_subject_unaffiliated","capacity_exceeded","forbidden","identity_service_unavailable","integrity_failed","malformed_json","payload_too_large","storage_unavailable","trailbase_proof_invalid","trailbase_session_cleanup_failed","trailbase_trust_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: false, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "CompleteTrailBaseContinuationRequest", responseSchema: null },
@@ -6839,6 +6839,7 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "browser_session_expired",
         "browser_session_revoked",
         "capability_unavailable",
+        "capacity_exceeded",
         "forbidden",
         "integrity_failed",
         "record_not_found",
@@ -7171,6 +7172,7 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "browser_session_expired",
         "browser_session_revoked",
         "capability_unavailable",
+        "capacity_exceeded",
         "forbidden",
         "idempotency_conflict",
         "integrity_failed",
@@ -7204,6 +7206,7 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "browser_session_expired",
         "browser_session_revoked",
         "capability_unavailable",
+        "capacity_exceeded",
         "forbidden",
         "integrity_failed",
         "malformed_json",
@@ -11753,6 +11756,24 @@ export const PUBLIC_PROBLEM_CATALOG = {
     },
     {
       "capability_id": "identity.route.resolve",
+      "code": "capacity_exceeded",
+      "detail": "bounded application capacity has been reached",
+      "next_actions": [
+        {
+          "id": "release_capacity",
+          "label": "Release retained capacity before retrying"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 507,
+      "title": "Capacity exceeded",
+      "type": "https://fasti.scrobble.dev/v1/problems/capacity-exceeded"
+    },
+    {
+      "capability_id": "identity.route.resolve",
       "code": "forbidden",
       "detail": "request is not authorized for this capability",
       "next_actions": [
@@ -13085,6 +13106,24 @@ export const PUBLIC_PROBLEM_CATALOG = {
     },
     {
       "capability_id": "profile.anime_grouping_policy.apply",
+      "code": "capacity_exceeded",
+      "detail": "bounded application capacity has been reached",
+      "next_actions": [
+        {
+          "id": "release_capacity",
+          "label": "Release retained capacity before retrying"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 507,
+      "title": "Capacity exceeded",
+      "type": "https://fasti.scrobble.dev/v1/problems/capacity-exceeded"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.apply",
       "code": "forbidden",
       "detail": "request is not authorized for this capability",
       "next_actions": [
@@ -13316,6 +13355,24 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "status": 501,
       "title": "Capability unavailable",
       "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.preview",
+      "code": "capacity_exceeded",
+      "detail": "bounded application capacity has been reached",
+      "next_actions": [
+        {
+          "id": "release_capacity",
+          "label": "Release retained capacity before retrying"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 507,
+      "title": "Capacity exceeded",
+      "type": "https://fasti.scrobble.dev/v1/problems/capacity-exceeded"
     },
     {
       "capability_id": "profile.anime_grouping_policy.preview",

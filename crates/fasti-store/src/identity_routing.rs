@@ -423,9 +423,17 @@ fn load_lifecycle_events_for_record_batch(
         correlation_id,
     )?;
     let mut events = HashMap::<IdentityAssertionId, Vec<IdentityAssertionLifecycleEvent>>::new();
+    let mut row_count = 0_i64;
     for row in rows {
         let (assertion_id, sequence, previous, status, reviewer, occurred_at, evidence_digest) =
             map_sql(row, capability, correlation_id)?;
+        row_count += 1;
+        if row_count >= row_limit {
+            return Err(Box::new(FastiProblem::capacity_exceeded(
+                capability,
+                correlation_id,
+            )));
+        }
         let assertion_id = IdentityAssertionId::from_str(&assertion_id)
             .map_err(|_| integrity(capability, correlation_id))?;
         let lifecycle = events.entry(assertion_id).or_default();
@@ -1976,5 +1984,70 @@ mod tests {
             )
             .expect("preview at identifier limit");
         assert_eq!(impact.total_records(), 1);
+    }
+
+    #[test]
+    fn lifecycle_batch_loader_rejects_its_truncation_sentinel() {
+        let node = TestNode::new();
+        let record_id = create_anime_record(&node);
+        let assertion_id = IdentityAssertionId::new_v7();
+        let connection = node.kernel.inner.connection.lock().expect("connection");
+        let source_identifier_id: String = connection
+            .query_row(
+                "SELECT external_identifier_id FROM external_identifiers WHERE workspace_id = ?1 AND record_id = ?2 ORDER BY external_identifier_id LIMIT 1",
+                params![
+                    node.access.workspace_id().to_string(),
+                    record_id.to_string()
+                ],
+                |row| row.get(0),
+            )
+            .expect("source identifier");
+        connection
+            .execute(
+                r#"
+                INSERT INTO identity_assertions(
+                    assertion_id, workspace_id, record_id, source_external_identifier_id,
+                    target_namespace, target_grain, target_value, relation, coverage_json,
+                    episode_links_json, evidence_class, evidence_json, id_source,
+                    source_version, authority, reasoning, initial_status, created_at
+                ) VALUES (
+                    ?1, ?2, ?3, ?4, 'imdb.title', 'release', 'tt-sentinel', 'exact',
+                    '[]', '[]', 'verified',
+                    '[{"method":"human_verified","observed_source":"test","derivation_root":null,"reviewer":null,"observed_at":"2026-08-30","evidence_id":null}]',
+                    'test-fixture', NULL, NULL, NULL, 'candidate', ?5
+                )
+                "#,
+                params![
+                    assertion_id.to_string(),
+                    node.access.workspace_id().to_string(),
+                    record_id.to_string(),
+                    source_identifier_id,
+                    "2026-08-31T12:00:00.000000Z",
+                ],
+            )
+            .expect("identity assertion");
+        connection
+            .execute(
+                "INSERT INTO identity_assertion_lifecycle_events(workspace_id, assertion_id, sequence, previous_status, status, reviewer_client_id, occurred_at, evidence_digest) VALUES (?1, ?2, 1, 'candidate', 'accepted', ?3, ?4, NULL)",
+                params![
+                    node.access.workspace_id().to_string(),
+                    assertion_id.to_string(),
+                    node.access.client_id().to_string(),
+                    "2026-08-31T12:00:01.000000Z",
+                ],
+            )
+            .expect("identity lifecycle event");
+
+        let problem = load_lifecycle_events_for_record_batch(
+            &connection,
+            node.access.workspace_id(),
+            record_id,
+            record_id,
+            0,
+            CapabilityKey::PreviewAnimeGroupingPolicyChange,
+            RequestCorrelationId::new_v7(),
+        )
+        .expect_err("sentinel row must fail closed");
+        assert_eq!(problem.code(), ProblemCode::CapacityExceeded);
     }
 }

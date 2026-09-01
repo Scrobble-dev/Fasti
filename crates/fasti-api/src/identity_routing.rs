@@ -170,7 +170,8 @@ fn policy_semantic_digest(
         (status = 422, description = "Route request is invalid", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 500, description = "Identity evidence failed an integrity check", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 501, description = "Capability is unavailable in this runtime", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 503, description = "Local storage is unavailable", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 503, description = "Local storage is unavailable", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 507, description = "Identity evidence exceeds a bounded local limit", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 pub(crate) async fn resolve_identity_route(
@@ -322,7 +323,8 @@ pub(crate) async fn read_anime_grouping_policy(
         (status = 422, description = "Policy preview request is invalid", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 500, description = "Policy state failed an integrity check", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 501, description = "Capability is unavailable in this runtime", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 503, description = "Local storage is unavailable", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 503, description = "Local storage is unavailable", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 507, description = "Identity evidence exceeds a bounded local limit", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 pub(crate) async fn preview_anime_grouping_policy_change(
@@ -406,7 +408,8 @@ pub(crate) async fn preview_anime_grouping_policy_change(
         (status = 422, description = "Policy change is invalid", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 500, description = "Policy state failed an integrity check", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 501, description = "Capability is unavailable in this runtime", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 503, description = "Local storage is unavailable", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 503, description = "Local storage is unavailable", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 507, description = "Identity evidence exceeds a bounded local limit", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 pub(crate) async fn apply_anime_grouping_policy_change(
