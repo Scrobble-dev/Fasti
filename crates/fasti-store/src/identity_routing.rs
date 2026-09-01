@@ -29,7 +29,22 @@ use std::str::FromStr;
 
 const MAX_IDENTITY_ASSERTIONS_PER_RECORD: i64 = 256;
 const MAX_IDENTITY_LIFECYCLE_EVENTS_PER_ASSERTION: i64 = 64;
+const MAX_IDENTITY_LIFECYCLE_EVENTS_PER_PREVIEW_BATCH: i64 =
+    MAX_IDENTITY_ASSERTIONS_PER_RECORD * MAX_IDENTITY_LIFECYCLE_EVENTS_PER_ASSERTION;
 const POLICY_PREVIEW_BATCH_SIZE: i64 = 256;
+
+fn preview_lifecycle_split_at(
+    record_count: usize,
+    lifecycle_event_count: i64,
+) -> Result<Option<usize>, ()> {
+    if lifecycle_event_count <= MAX_IDENTITY_LIFECYCLE_EVENTS_PER_PREVIEW_BATCH {
+        return Ok(None);
+    }
+    (record_count > 1)
+        .then_some(record_count / 2)
+        .map(Some)
+        .ok_or(())
+}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1258,6 +1273,63 @@ fn load_preview_route_evidence(
         return Ok(HashMap::new());
     };
     let last = record_ids.last().expect("non-empty record batch");
+    let lifecycle_event_count = map_sql(
+        connection.query_row(
+            r#"
+            SELECT COUNT(*) FROM (
+                SELECT 1
+                FROM identity_assertion_lifecycle_events event
+                JOIN identity_assertions assertion
+                  ON assertion.workspace_id = event.workspace_id
+                 AND assertion.assertion_id = event.assertion_id
+                JOIN records record
+                  ON record.workspace_id = assertion.workspace_id
+                 AND record.record_id = assertion.record_id
+                 AND record.status = 'active'
+                WHERE event.workspace_id = ?1
+                  AND assertion.record_id >= ?2
+                  AND assertion.record_id <= ?3
+                LIMIT ?4
+            )
+            "#,
+            params![
+                workspace_id.to_string(),
+                first.to_string(),
+                last.to_string(),
+                MAX_IDENTITY_LIFECYCLE_EVENTS_PER_PREVIEW_BATCH + 1
+            ],
+            |row| row.get::<_, i64>(0),
+        ),
+        capability,
+        correlation_id,
+    )?;
+    let split_at = match preview_lifecycle_split_at(record_ids.len(), lifecycle_event_count) {
+        Ok(split_at) => split_at,
+        Err(()) => {
+            return Err(Box::new(FastiProblem::capacity_exceeded(
+                capability,
+                correlation_id,
+            )));
+        }
+    };
+    if let Some(split_at) = split_at {
+        let (left, right) = record_ids.split_at(split_at);
+        let mut evidence = load_preview_route_evidence(
+            connection,
+            workspace_id,
+            left,
+            capability,
+            correlation_id,
+        )?;
+        evidence.extend(load_preview_route_evidence(
+            connection,
+            workspace_id,
+            right,
+            capability,
+            correlation_id,
+        )?);
+        return Ok(evidence);
+    }
     let mut evidence = record_ids
         .iter()
         .copied()
@@ -1573,6 +1645,7 @@ fn receipt_scope(scope: AnimeGroupingPolicyScope) -> (&'static str, Option<Strin
 fn load_replay_receipt(
     connection: &Connection,
     workspace_id: WorkspaceId,
+    profile_id: ProfileId,
     actor_client_id: ClientId,
     command: &ApplyAnimeGroupingPolicyChangeCommand,
     capability: CapabilityKey,
@@ -1582,7 +1655,8 @@ fn load_replay_receipt(
         connection
             .query_row(
                 r#"
-                SELECT semantic_digest, previous_preference, previous_source,
+                SELECT profile_id, scope_kind, scope_client_id, semantic_digest,
+                       previous_preference, previous_source,
                        result_preference, result_source, result_revision,
                        affected_records, unresolved_routes,
                        possible_season_regroupings
@@ -1598,13 +1672,16 @@ fn load_replay_receipt(
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(2)?,
                         row.get::<_, String>(3)?,
                         row.get::<_, String>(4)?,
-                        row.get::<_, i64>(5)?,
-                        row.get::<_, i64>(6)?,
-                        row.get::<_, i64>(7)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, String>(6)?,
+                        row.get::<_, String>(7)?,
                         row.get::<_, i64>(8)?,
+                        row.get::<_, i64>(9)?,
+                        row.get::<_, i64>(10)?,
+                        row.get::<_, i64>(11)?,
                     ))
                 },
             )
@@ -1615,22 +1692,27 @@ fn load_replay_receipt(
     let Some(row) = row else {
         return Ok(None);
     };
-    if row.0 != command.semantic_digest().as_str() {
+    let (scope_kind, scope_client_id) = receipt_scope(command.scope());
+    if row.0 != profile_id.to_string()
+        || row.1 != scope_kind
+        || row.2 != scope_client_id
+        || row.3 != command.semantic_digest().as_str()
+    {
         return Err(idempotency_conflict(capability, correlation_id));
     }
     Ok(Some(ReceiptState {
-        previous_preference: preference(&row.1)
+        previous_preference: preference(&row.4)
             .ok_or_else(|| integrity(capability, correlation_id))?,
-        previous_source: policy_source(&row.2)
+        previous_source: policy_source(&row.5)
             .ok_or_else(|| integrity(capability, correlation_id))?,
-        result_preference: preference(&row.3)
+        result_preference: preference(&row.6)
             .ok_or_else(|| integrity(capability, correlation_id))?,
-        result_source: policy_source(&row.4)
+        result_source: policy_source(&row.7)
             .ok_or_else(|| integrity(capability, correlation_id))?,
-        result_revision: parse_u64(row.5, capability, correlation_id)?,
-        affected_records: parse_u64(row.6, capability, correlation_id)?,
-        unresolved_routes: parse_u64(row.7, capability, correlation_id)?,
-        possible_season_regroupings: parse_u64(row.8, capability, correlation_id)?,
+        result_revision: parse_u64(row.8, capability, correlation_id)?,
+        affected_records: parse_u64(row.9, capability, correlation_id)?,
+        unresolved_routes: parse_u64(row.10, capability, correlation_id)?,
+        possible_season_regroupings: parse_u64(row.11, capability, correlation_id)?,
     }))
 }
 
@@ -1800,6 +1882,7 @@ impl IdentityRoutingPort for SqliteKernel {
         if let Some(receipt) = load_replay_receipt(
             &transaction,
             authorized.workspace_id(),
+            authorized.profile_id(),
             actor_client_id,
             &command,
             capability,
@@ -2253,6 +2336,81 @@ mod tests {
     }
 
     #[test]
+    fn policy_replay_is_bound_to_the_original_profile_and_scope() {
+        let node = TestNode::new();
+        let operation_id = OperationId::new_v7();
+        let semantic_digest = digest(42);
+        node.kernel
+            .authorize_and_apply_anime_grouping_policy_change(
+                ApplyAnimeGroupingPolicyChangeCommand::try_new(
+                    RequestCorrelationId::new_v7(),
+                    node.access,
+                    AnimeGroupingPolicyScope::Profile,
+                    operation_id,
+                    semantic_digest.clone(),
+                    0,
+                    AnimeGroupingPolicyChange::Set(
+                        AnimeGroupingPreference::KeepMalReleasesSeparate,
+                    ),
+                )
+                .expect("original policy command"),
+            )
+            .expect("apply original profile policy");
+
+        let other_profile = node
+            .add_profile_with_scopes(&[ScopeKey::ProfileStateRead, ScopeKey::ProfileStateWrite]);
+        let cross_profile = ApplyAnimeGroupingPolicyChangeCommand::try_new(
+            RequestCorrelationId::new_v7(),
+            other_profile,
+            AnimeGroupingPolicyScope::Profile,
+            operation_id,
+            semantic_digest.clone(),
+            0,
+            AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::KeepMalReleasesSeparate),
+        )
+        .expect("cross-profile replay");
+        assert_eq!(
+            node.kernel
+                .authorize_and_apply_anime_grouping_policy_change(cross_profile)
+                .expect_err("receipt cannot cross profiles")
+                .code(),
+            ProblemCode::IdempotencyConflict
+        );
+
+        let cross_scope = ApplyAnimeGroupingPolicyChangeCommand::try_new(
+            RequestCorrelationId::new_v7(),
+            node.access,
+            AnimeGroupingPolicyScope::Client(node.access.client_id()),
+            operation_id,
+            semantic_digest,
+            0,
+            AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::KeepMalReleasesSeparate),
+        )
+        .expect("cross-scope replay");
+        assert_eq!(
+            node.kernel
+                .authorize_and_apply_anime_grouping_policy_change(cross_scope)
+                .expect_err("receipt cannot cross scopes")
+                .code(),
+            ProblemCode::IdempotencyConflict
+        );
+
+        let untouched = node
+            .kernel
+            .authorize_and_read_anime_grouping_policy(ReadAnimeGroupingPolicyQuery::new(
+                RequestCorrelationId::new_v7(),
+                other_profile,
+                AnimeGroupingPolicyScope::Profile,
+            ))
+            .expect("read untouched profile");
+        assert_eq!(untouched.policy().revision(), 0);
+        assert_eq!(
+            untouched.policy().preference(),
+            AnimeGroupingPreference::Automatic
+        );
+    }
+
+    #[test]
     fn client_override_can_return_to_inherited_profile_state() {
         let node = TestNode::new();
         let client_id = node.access.client_id();
@@ -2619,5 +2777,27 @@ mod tests {
         )
         .expect_err("sentinel row must fail closed");
         assert_eq!(problem.code(), ProblemCode::CapacityExceeded);
+    }
+
+    #[test]
+    fn preview_lifecycle_batches_split_before_dense_event_materialization() {
+        assert_eq!(
+            preview_lifecycle_split_at(
+                POLICY_PREVIEW_BATCH_SIZE as usize,
+                MAX_IDENTITY_LIFECYCLE_EVENTS_PER_PREVIEW_BATCH,
+            ),
+            Ok(None)
+        );
+        assert_eq!(
+            preview_lifecycle_split_at(
+                POLICY_PREVIEW_BATCH_SIZE as usize,
+                MAX_IDENTITY_LIFECYCLE_EVENTS_PER_PREVIEW_BATCH + 1,
+            ),
+            Ok(Some(POLICY_PREVIEW_BATCH_SIZE as usize / 2))
+        );
+        assert_eq!(
+            preview_lifecycle_split_at(1, MAX_IDENTITY_LIFECYCLE_EVENTS_PER_PREVIEW_BATCH + 1,),
+            Err(())
+        );
     }
 }
