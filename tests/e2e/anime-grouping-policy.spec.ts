@@ -180,6 +180,8 @@ test("browser anime policy review is complete, retry-safe, and recoverable", asy
   let failedOnce = false;
   let delayedNextPage:
     { started: () => void; response: Promise<void> } | undefined;
+  let delayedPreview:
+    { started: () => void; response: Promise<void> } | undefined;
   const applyRequests: Array<{
     authorization?: string;
     csrf?: string;
@@ -219,6 +221,11 @@ test("browser anime policy review is complete, retry-safe, and recoverable", asy
           delayedNextPage.started();
           await delayedNextPage.response;
           delayedNextPage = undefined;
+        }
+        if (!secondPage && delayedPreview) {
+          delayedPreview.started();
+          await delayedPreview.response;
+          delayedPreview = undefined;
         }
         return fulfillJson(route, {
           policy: {
@@ -312,10 +319,26 @@ test("browser anime policy review is complete, retry-safe, and recoverable", asy
   await pageStarted;
   await card.getByTestId("cancel-anime-grouping-policy").click();
   await expect(card.getByTestId("preview-anime-grouping-policy")).toBeFocused();
+  let markPreviewStarted: () => void = () => undefined;
+  let releasePreview: () => void = () => undefined;
+  const previewStarted = new Promise<void>((resolve) => {
+    markPreviewStarted = resolve;
+  });
+  delayedPreview = {
+    started: markPreviewStarted,
+    response: new Promise<void>((resolve) => {
+      releasePreview = resolve;
+    }),
+  };
+  await card.getByTestId("preview-anime-grouping-policy").click();
+  await previewStarted;
   releasePage();
   await expect(heading).toHaveCount(0);
+  await expect(
+    card.getByTestId("preview-anime-grouping-policy"),
+  ).toBeDisabled();
 
-  await card.getByTestId("preview-anime-grouping-policy").click();
+  releasePreview();
   await expect(heading).toBeFocused();
   await card.getByTestId("load-more-anime-grouping-policy").click();
   await expect(card.locator("tbody tr")).toHaveCount(2);

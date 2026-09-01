@@ -631,7 +631,11 @@
         "Fasti could not preview this anime grouping change.",
       );
     } finally {
-      if (identity === profileDataIdentity) animePolicyLoading = false;
+      if (
+        generation === animePolicyGeneration &&
+        identity === profileDataIdentity
+      )
+        animePolicyLoading = false;
     }
   }
 
