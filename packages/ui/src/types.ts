@@ -1,6 +1,7 @@
 import type { IntegrationRuntimeStatus } from "./integration-status.js";
 import type {
   AccessProjectionResponse,
+  AnimeGroupingPolicyChangeDto,
   AnimeGroupingPolicyImpactResponse,
   ApplyAnimeGroupingPolicyChangeRequest,
   ApplyAnimeGroupingPolicyChangeResponse,
@@ -22,6 +23,7 @@ import type {
 
 export type {
   AccessProjectionResponse,
+  AnimeGroupingPolicyChangeDto,
   AnimeGroupingPolicyImpactResponse,
   AnimeGroupingPreferenceDto,
   ApplyAnimeGroupingPolicyChangeRequest,

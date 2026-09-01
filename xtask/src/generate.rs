@@ -1765,7 +1765,7 @@ fn enrich_discovery_collection_schema(
         ),
         (
             "/components/schemas/CapabilityUatDto/properties/id",
-            r"^ID-[0-9]{3}$",
+            r"^(?:ID|MDN)-[0-9]{3}$",
         ),
     ] {
         openapi

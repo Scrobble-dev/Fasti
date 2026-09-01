@@ -23,6 +23,7 @@
   import { newOperationId } from "./operation-id.js";
   import type {
     AccessProjectionResponse,
+    AnimeGroupingPolicyChangeDto,
     AnimeGroupingPolicyImpactResponse,
     AnimeGroupingPreferenceDto,
     CustomFieldDefinition,
@@ -301,6 +302,9 @@
     >();
   let animePolicyDraft = $state<AnimeGroupingPreferenceDto>("automatic");
   let animePolicyPreview = $state<AnimeGroupingPolicyImpactResponse>();
+  let animePolicyPreviewChange = $state<AnimeGroupingPolicyChangeDto>();
+  let animePolicyPreviewHeading = $state<HTMLHeadingElement>();
+  let animePolicyRollbackOperationId = $state<string>();
   let animePolicyLoading = $state(false);
   let animePolicySaving = $state(false);
   let animePolicyProblem = $state<string>();
@@ -520,6 +524,8 @@
     animePolicy = undefined;
     animePolicyDraft = "automatic";
     animePolicyPreview = undefined;
+    animePolicyPreviewChange = undefined;
+    animePolicyRollbackOperationId = undefined;
     animePolicyLoading = false;
     animePolicySaving = false;
     animePolicyProblem = undefined;
@@ -551,6 +557,8 @@
       animePolicy = response;
       animePolicyDraft = response.policy.preference;
       animePolicyPreview = undefined;
+      animePolicyPreviewChange = undefined;
+      animePolicyRollbackOperationId = undefined;
       animePolicyOperationId = "";
     } catch (error) {
       if (
@@ -576,19 +584,26 @@
     }
   }
 
-  async function previewAnimePolicy(): Promise<void> {
+  async function previewAnimePolicy(
+    change: AnimeGroupingPolicyChangeDto = {
+      kind: "set",
+      preference: animePolicyDraft,
+    },
+    afterRecordId: string | null = null,
+  ): Promise<void> {
     if (!host.previewAnimeGroupingPolicyChange || animePolicyLoading) return;
     const generation = ++animePolicyGeneration;
     const identity = profileDataIdentity;
+    const priorPreview = afterRecordId ? animePolicyPreview : undefined;
     animePolicyLoading = true;
     animePolicyProblem = undefined;
     animePolicyNotice = undefined;
-    animePolicyOperationId = "";
+    if (!afterRecordId) animePolicyOperationId = "";
     try {
       const preview = await host.previewAnimeGroupingPolicyChange({
         scope: { kind: "profile", client_id: null },
-        change: { kind: "set", preference: animePolicyDraft },
-        after_record_id: null,
+        change,
+        after_record_id: afterRecordId,
         limit: 100,
       });
       if (
@@ -596,7 +611,14 @@
         identity !== profileDataIdentity
       )
         return;
-      animePolicyPreview = preview;
+      animePolicyPreview = priorPreview
+        ? { ...preview, records: [...priorPreview.records, ...preview.records] }
+        : preview;
+      animePolicyPreviewChange = change;
+      if (!afterRecordId) {
+        await tick();
+        animePolicyPreviewHeading?.focus();
+      }
     } catch (error) {
       if (
         generation !== animePolicyGeneration ||
@@ -613,12 +635,42 @@
     }
   }
 
+  async function cancelAnimePolicyPreview(): Promise<void> {
+    animePolicyGeneration += 1;
+    animePolicyLoading = false;
+    animePolicyPreview = undefined;
+    animePolicyPreviewChange = undefined;
+    animePolicyOperationId = "";
+    animePolicyProblem = undefined;
+    animePolicyNotice = undefined;
+    await tick();
+    document.getElementById("preview-anime-grouping-policy")?.focus();
+  }
+
+  function loadMoreAnimePolicyPreview(): void {
+    if (!animePolicyPreviewChange || !animePolicyPreview?.next_after_record_id)
+      return;
+    void previewAnimePolicy(
+      animePolicyPreviewChange,
+      animePolicyPreview.next_after_record_id,
+    );
+  }
+
+  function reviewAnimePolicyRollback(): void {
+    if (!animePolicyRollbackOperationId) return;
+    void previewAnimePolicy({
+      kind: "rollback",
+      applied_operation_id: animePolicyRollbackOperationId,
+    });
+  }
+
   async function applyAnimePolicy(): Promise<void> {
     if (
       !host.applyAnimeGroupingPolicyChange ||
       !animePolicy ||
       !animePolicyPreview ||
       animePolicyLoading ||
+      !animePolicyPreviewChange ||
       animePolicySaving
     )
       return;
@@ -633,7 +685,7 @@
         operation_id: animePolicyOperationId,
         scope: { kind: "profile", client_id: null },
         expected_revision: animePolicy.policy.revision,
-        change: { kind: "set", preference: animePolicyDraft },
+        change: animePolicyPreviewChange,
       });
       if (
         generation !== animePolicyGeneration ||
@@ -643,8 +695,15 @@
       animePolicy = { policy: applied.policy };
       animePolicyDraft = applied.policy.preference;
       animePolicyPreview = undefined;
+      animePolicyPreviewChange = undefined;
       animePolicyOperationId = "";
-      animePolicyNotice = `Saved the profile policy. ${applied.affected_records.toLocaleString()} Records changed route.`;
+      if (applied.change.kind === "rollback") {
+        animePolicyRollbackOperationId = undefined;
+        animePolicyNotice = `Rolled back the profile policy. ${applied.affected_records.toLocaleString()} Records changed route.`;
+      } else {
+        animePolicyRollbackOperationId = applied.operation_id;
+        animePolicyNotice = `Saved the profile policy. ${applied.affected_records.toLocaleString()} Records changed route.`;
+      }
     } catch (error) {
       if (
         generation !== animePolicyGeneration ||
@@ -1652,9 +1711,11 @@
                       value={animePolicyDraft}
                       disabled={animePolicyLoading || animePolicySaving}
                       onchange={(event) => {
+                        animePolicyGeneration += 1;
                         animePolicyDraft = event.currentTarget
                           .value as AnimeGroupingPreferenceDto;
                         animePolicyPreview = undefined;
+                        animePolicyPreviewChange = undefined;
                         animePolicyOperationId = "";
                         animePolicyNotice = undefined;
                       }}
@@ -1667,7 +1728,8 @@
                   <div class="metadata-policy-actions">
                     <button
                       type="button"
-                      class="btn btn-outline-primary"
+                      id="preview-anime-grouping-policy"
+                      class="btn btn-dark"
                       data-testid="preview-anime-grouping-policy"
                       disabled={!host.previewAnimeGroupingPolicyChange ||
                         animePolicyLoading ||
@@ -1683,26 +1745,53 @@
                 </div>
 
                 {#if animePolicyPreview}
-                  <div class="alert alert-info mt-3" role="status">
-                    <strong
-                      >{animePolicyPreview.affected_records.toLocaleString()}
-                      affected Records.</strong
-                    >
-                    {animePolicyPreview.unresolved_routes.toLocaleString()}
-                    unresolved routes and
-                    {animePolicyPreview.possible_season_regroupings.toLocaleString()}
-                    possible season regroupings.
+                  <div class="alert alert-info mt-3">
+                    <div>
+                      <h4
+                        id="anime-policy-preview-title"
+                        class="alert-title"
+                        tabindex="-1"
+                        bind:this={animePolicyPreviewHeading}
+                      >
+                        Review anime identifier changes
+                      </h4>
+                      <p>
+                        <strong
+                          >{animePolicyPreview.affected_records.toLocaleString()}
+                          affected Records.</strong
+                        >
+                        {animePolicyPreview.unresolved_routes.toLocaleString()}
+                        unresolved routes and
+                        {animePolicyPreview.possible_season_regroupings.toLocaleString()}
+                        possible season regroupings.
+                      </p>
+                      <p class="mb-0">
+                        Fasti Records, local identity, Chronicle events,
+                        history, watched state, and saved state do not change.
+                      </p>
+                    </div>
                   </div>
                   {#if animePolicyPreview.records.length > 0}
-                    <div class="table-responsive">
-                      <table class="table table-vcenter">
+                    <!-- svelte-ignore a11y_no_noninteractive_tabindex (keyboard access for the scrollable table region) -->
+                    <div
+                      class="table-responsive"
+                      role="region"
+                      tabindex="0"
+                      aria-label="Anime grouping policy preview table"
+                    >
+                      <table
+                        class="table table-vcenter anime-policy-preview-table"
+                        aria-labelledby="anime-policy-preview-title"
+                      >
                         <caption>
-                          First {animePolicyPreview.records.length.toLocaleString()}
-                          affected Records from a stable, paged preview
+                          Showing {animePolicyPreview.records.length.toLocaleString()}
+                          of {animePolicyPreview.total_records.toLocaleString()}
+                          reviewed Records
                         </caption>
                         <thead>
                           <tr>
                             <th scope="col">Record</th>
+                            <th scope="col">Current route</th>
                             <th scope="col">Proposed route</th>
                             <th scope="col">Status</th>
                           </tr>
@@ -1710,39 +1799,82 @@
                         <tbody>
                           {#each animePolicyPreview.records as record}
                             <tr>
-                              <td><code>{record.record_id}</code></td>
-                              <td>
+                              <td data-label="Record"
+                                ><code>{record.record_id}</code></td
+                              >
+                              <td data-label="Current route">
+                                {record.previous_route
+                                  ? `${record.previous_route.identifier.namespace}:${record.previous_route.identifier.value}`
+                                  : "No route"}
+                              </td>
+                              <td data-label="Proposed route">
                                 {record.proposed_route
                                   ? `${record.proposed_route.identifier.namespace}:${record.proposed_route.identifier.value}`
                                   : "No route"}
                               </td>
-                              <td
-                                >{record.proposed_status.replaceAll(
-                                  "_",
-                                  " ",
-                                )}</td
-                              >
+                              <td data-label="Status">
+                                {record.previous_status.replaceAll("_", " ")}
+                                →
+                                {record.proposed_status.replaceAll("_", " ")}
+                              </td>
                             </tr>
                           {/each}
                         </tbody>
                       </table>
                     </div>
                   {/if}
-                  <button
-                    type="button"
-                    class="btn btn-primary"
-                    data-testid="apply-anime-grouping-policy"
-                    disabled={!host.applyAnimeGroupingPolicyChange ||
-                      animePolicyLoading ||
-                      animePolicySaving}
-                    onclick={() => void applyAnimePolicy()}
-                  >
-                    {animePolicySaving ? "Saving…" : "Apply profile policy"}
-                  </button>
+                  {#if animePolicyPreview.next_after_record_id}
+                    <button
+                      type="button"
+                      class="btn btn-dark mb-3"
+                      data-testid="load-more-anime-grouping-policy"
+                      disabled={animePolicyLoading || animePolicySaving}
+                      onclick={loadMoreAnimePolicyPreview}
+                    >
+                      {animePolicyLoading ? "Loading…" : "Review more Records"}
+                    </button>
+                  {/if}
+                  <div class="btn-list">
+                    <button
+                      type="button"
+                      class="btn btn-primary"
+                      data-testid="apply-anime-grouping-policy"
+                      disabled={!host.applyAnimeGroupingPolicyChange ||
+                        animePolicySaving ||
+                        animePolicyLoading}
+                      onclick={() => void applyAnimePolicy()}
+                    >
+                      {animePolicySaving
+                        ? "Saving…"
+                        : animePolicyPreviewChange?.kind === "rollback"
+                          ? "Apply rollback"
+                          : "Apply profile policy"}
+                    </button>
+                    <button
+                      type="button"
+                      class="btn btn-outline-secondary"
+                      data-testid="cancel-anime-grouping-policy"
+                      disabled={animePolicySaving}
+                      onclick={() => void cancelAnimePolicyPreview()}
+                    >
+                      Cancel
+                    </button>
+                  </div>
                 {/if}
 
                 {#if animePolicyNotice}
                   <p class="notice" role="status">{animePolicyNotice}</p>
+                {/if}
+                {#if animePolicyRollbackOperationId && !animePolicyPreview}
+                  <button
+                    type="button"
+                    class="btn btn-outline-secondary"
+                    data-testid="review-anime-grouping-rollback"
+                    disabled={animePolicyLoading || animePolicySaving}
+                    onclick={reviewAnimePolicyRollback}
+                  >
+                    Review rollback
+                  </button>
                 {/if}
                 {#if animePolicyProblem}
                   <p class="problem" role="alert">{animePolicyProblem}</p>
@@ -2706,6 +2838,48 @@
 
   .metadata-policy-card {
     margin-block: 20px 28px;
+  }
+
+  .metadata-policy-card .btn,
+  .metadata-policy-card .form-select {
+    min-height: 44px;
+  }
+
+  @media (max-width: 767.98px) {
+    .anime-policy-preview-table,
+    .anime-policy-preview-table tbody,
+    .anime-policy-preview-table tr,
+    .anime-policy-preview-table td {
+      display: block;
+      width: 100%;
+    }
+
+    .anime-policy-preview-table thead {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      white-space: nowrap;
+    }
+
+    .anime-policy-preview-table tr {
+      padding-block: 0.5rem;
+      border-bottom: var(--tblr-border-width) solid var(--tblr-border-color);
+    }
+
+    .anime-policy-preview-table td {
+      display: grid;
+      grid-template-columns: minmax(7rem, 35%) minmax(0, 1fr);
+      gap: 0.75rem;
+      border: 0;
+      overflow-wrap: anywhere;
+    }
+
+    .anime-policy-preview-table td::before {
+      content: attr(data-label);
+      font-weight: var(--tblr-font-weight-semibold);
+    }
   }
 
   .metadata-policy-grid {

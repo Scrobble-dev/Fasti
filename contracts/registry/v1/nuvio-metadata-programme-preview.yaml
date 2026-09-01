@@ -61,6 +61,13 @@ capability_groups:
       - metadata.claim.refresh
       - metadata.projection.read
       - metadata.projection.configure
+  M3:
+    owner: identity_routing
+    ids:
+      - identity.route.resolve
+      - profile.anime_grouping_policy.read
+      - profile.anime_grouping_policy.preview
+      - profile.anime_grouping_policy.apply
   M4:
     owner: search
     ids:

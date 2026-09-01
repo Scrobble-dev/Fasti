@@ -569,7 +569,7 @@ fn validate_uat(label: &str, entries: &[UatOwnership]) -> anyhow::Result<()> {
     for entry in entries {
         ensure!(
             uat_id_is_well_formed(&entry.id),
-            "{label}: UAT ID must use ID-NNN: {}",
+            "{label}: UAT ID must use ID-NNN or MDN-NNN: {}",
             entry.id
         );
         ensure!(
@@ -616,9 +616,9 @@ fn segment_is_well_formed(segment: &str) -> bool {
 }
 
 fn uat_id_is_well_formed(value: &str) -> bool {
-    value.len() == 6
-        && value.starts_with("ID-")
-        && value[3..]
+    ((value.len() == 6 && value.starts_with("ID-"))
+        || (value.len() == 7 && value.starts_with("MDN-")))
+        && value[value.len() - 3..]
             .chars()
             .all(|character| character.is_ascii_digit())
 }
@@ -707,7 +707,9 @@ mod tests {
     #[test]
     fn uat_ids_are_fixed_width() {
         assert!(uat_id_is_well_formed("ID-065"));
+        assert!(uat_id_is_well_formed("MDN-018"));
         assert!(!uat_id_is_well_formed("ID-65"));
+        assert!(!uat_id_is_well_formed("MDN-18"));
     }
 
     #[test]

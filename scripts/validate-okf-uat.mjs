@@ -32,6 +32,8 @@ const ALLOWED_OKF_STATUS = new Set(["draft", "stable", "deprecated"]);
 const ALLOWED_UAT_STATUS = new Set([
   "executable-b1",
   "contract-b1",
+  "executable-m3",
+  "contract-m3",
   "deferred",
 ]);
 const IDENTITY_UAT_HEADER = [
@@ -112,6 +114,7 @@ const ALLOWED_BODIES = new Set([
   "post-b8",
   "m1",
   "m2",
+  "m3",
 ]);
 
 /**
@@ -449,7 +452,7 @@ async function validateOkf(registry) {
 
   const finalizedCatalog = registry.capabilities.filter(
     ({ contract_body: contractBody, lifecycle }) =>
-      ["b1", "b2", "c1", "m1", "m2"].includes(contractBody) &&
+      ["b1", "b2", "c1", "m1", "m2", "m3"].includes(contractBody) &&
       lifecycle.contract_state === "finalized",
   );
   const catalogueDefinitions = [
@@ -612,7 +615,7 @@ function parseCsv(source) {
 /**
  * Validates the product UAT matrix and its ownership mappings.
  * @param {Object} registry - The capability registry containing UAT trace identifiers.
- * @return {Promise<Object>} Counts of total, executable B1, contract B1, and deferred cases.
+ * @return {Promise<Object>} Counts of total, promoted, and deferred cases.
  */
 async function validateUat(registry) {
   const rows = parseCsv(await readFile(uatCsvPath, "utf8"));
@@ -683,7 +686,7 @@ async function validateUat(registry) {
   const previewCapabilities = Object.values(preview.capability_groups).flatMap(
     ({ ids }) => ids,
   );
-  assert.equal(previewCapabilities.length, 51);
+  assert.equal(previewCapabilities.length, 55);
   assert.equal(new Set(previewCapabilities).size, previewCapabilities.length);
   assert.ok(
     previewCapabilities.every(isDottedIdentifier),
@@ -704,15 +707,16 @@ async function validateUat(registry) {
     Array.isArray(ownership.cases),
     "UAT ownership cases must be a list",
   );
+  const promotedProgrammeIds = ["MDN-001", "MDN-002", "MDN-018"];
   assert.equal(
     ownership.cases.length,
-    LEGACY_UAT_ROW_COUNT,
-    `runtime UAT ownership must retain the ${LEGACY_UAT_ROW_COUNT} implemented/allocated legacy cases until programme slices promote MDN cases`,
+    LEGACY_UAT_ROW_COUNT + promotedProgrammeIds.length,
+    "runtime UAT ownership must retain legacy cases and each promoted programme case",
   );
   assert.deepEqual(
     ownership.cases.map(({ id }) => id),
-    legacyExpectedIds,
-    "runtime UAT ownership must map every legacy source ID exactly once and in source order",
+    [...legacyExpectedIds, ...promotedProgrammeIds],
+    "runtime UAT ownership must map legacy and promoted programme IDs once in source order",
   );
 
   for (const entry of ownership.cases) {
@@ -748,20 +752,32 @@ async function validateUat(registry) {
       );
       assertStringList(entry.evidence, `${entry.id} executable evidence`);
     }
+    if (entry.status === "executable-m3") {
+      assert.equal(
+        entry.owner_body,
+        "m3",
+        `${entry.id} executable M3 owner must be M3`,
+      );
+      assertStringList(entry.evidence, `${entry.id} executable evidence`);
+    }
   }
 
   const registryUatIds = new Set(
     registry.capabilities.flatMap(({ uat }) => uat.map(({ id }) => id)),
   );
-  const b1TraceIds = ownership.cases
+  const traceIds = ownership.cases
     .filter(
-      ({ status }) => status === "contract-b1" || status === "executable-b1",
+      ({ status }) =>
+        status === "contract-b1" ||
+        status === "executable-b1" ||
+        status === "contract-m3" ||
+        status === "executable-m3",
     )
     .map(({ id }) => id);
   assertSameSet(
-    b1TraceIds,
+    traceIds,
     registryUatIds,
-    "B1 UAT ownership and capability-registry trace IDs",
+    "promoted UAT ownership and capability-registry trace IDs",
   );
 
   return {
@@ -772,6 +788,12 @@ async function validateUat(registry) {
     ).length,
     contractCount: ownership.cases.filter(
       ({ status }) => status === "contract-b1",
+    ).length,
+    executableM3Count: ownership.cases.filter(
+      ({ status }) => status === "executable-m3",
+    ).length,
+    contractM3Count: ownership.cases.filter(
+      ({ status }) => status === "contract-m3",
     ).length,
     deferredCount: ownership.cases.filter(({ status }) => status === "deferred")
       .length,
@@ -873,5 +895,5 @@ const [okf, uat, identityUat] = await Promise.all([
 ]);
 
 console.log(
-  `PASS: OKF 0.2 catalogue concepts=${okf.conceptCount}; UAT cases=${uat.caseCount} planned-nuvio-metadata=${uat.plannedCount} executable-b1=${uat.executableCount} contract-b1=${uat.contractCount} deferred=${uat.deferredCount}; identity UAT cases=${identityUat.caseCount} critical=${identityUat.criticalCount} phases=${identityUat.phaseCount}`,
+  `PASS: OKF 0.2 catalogue concepts=${okf.conceptCount}; UAT cases=${uat.caseCount} planned-nuvio-metadata=${uat.plannedCount} executable-b1=${uat.executableCount} contract-b1=${uat.contractCount} executable-m3=${uat.executableM3Count} contract-m3=${uat.contractM3Count} deferred=${uat.deferredCount}; identity UAT cases=${identityUat.caseCount} critical=${identityUat.criticalCount} phases=${identityUat.phaseCount}`,
 );
