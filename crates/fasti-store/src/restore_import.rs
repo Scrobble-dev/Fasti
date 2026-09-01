@@ -837,7 +837,7 @@ fn accepted_archive_schema(
     if (format_version == WORKSPACE_ARCHIVE_V1_FORMAT_VERSION && version <= 11)
         || (format_version == WORKSPACE_ARCHIVE_V2_FORMAT_VERSION && (7..=11).contains(&version))
         || (format_version == WORKSPACE_ARCHIVE_V3_FORMAT_VERSION && version == 12)
-        || (format_version == WORKSPACE_ARCHIVE_V4_FORMAT_VERSION && version == 13)
+        || (format_version == WORKSPACE_ARCHIVE_V4_FORMAT_VERSION && matches!(version, 13 | 14))
     {
         // Continue to the exact historical fingerprint match below.
     } else if version == u32::try_from(SCHEMA_VERSION).unwrap_or(u32::MAX) {
@@ -860,6 +860,7 @@ fn accepted_archive_schema(
             11 => "sha256:c833fb634b64d0b9680e4734b22684e8eab36710fca5c95d4315f3141491687a",
             12 => "sha256:eea7d899b8c257b7bafa359a540bd25ba2cdc4d9ddb7f50ce0ec8f80e251cfb9",
             13 => "sha256:e470f2e8ae2972aa05fecd5b39642b79ef739de89eda204c37bf1d3e48f892c3",
+            14 => "sha256:630bc759b1bc6148931fe1b496e6e149553c5c005cf8d5956da683f2872c0375",
             _ => return false,
         }
 }
@@ -5133,6 +5134,23 @@ mod tests {
         .expect("forged schema fingerprint is rejected");
         assert!(matches!(error, RestoreImportError::SchemaMismatch));
         assert_attempt_removed(restore_root.path(), attempt_id);
+    }
+
+    #[test]
+    fn archive_v4_accepts_only_the_exact_v14_schema_fingerprint() {
+        let digest = "sha256:630bc759b1bc6148931fe1b496e6e149553c5c005cf8d5956da683f2872c0375";
+        assert!(accepted_archive_schema(
+            WORKSPACE_ARCHIVE_V4_FORMAT_VERSION,
+            14,
+            digest,
+            "unused-current-digest",
+        ));
+        assert!(!accepted_archive_schema(
+            WORKSPACE_ARCHIVE_V4_FORMAT_VERSION,
+            14,
+            "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "unused-current-digest",
+        ));
     }
 
     #[test]

@@ -609,11 +609,7 @@
         "Fasti could not preview this anime grouping change.",
       );
     } finally {
-      if (
-        generation === animePolicyGeneration &&
-        identity === profileDataIdentity
-      )
-        animePolicyLoading = false;
+      if (identity === profileDataIdentity) animePolicyLoading = false;
     }
   }
 
@@ -622,6 +618,7 @@
       !host.applyAnimeGroupingPolicyChange ||
       !animePolicy ||
       !animePolicyPreview ||
+      animePolicyLoading ||
       animePolicySaving
     )
       return;
@@ -1629,7 +1626,7 @@
               </div>
             </div>
             <div class="card-body">
-              {#if animePolicyLoading && !animePolicyPreview}
+              {#if animePolicyLoading && !animePolicy}
                 <p role="status">Loading the anime grouping policy…</p>
               {:else if animePolicyProblem && !animePolicy}
                 <div class="alert alert-danger" role="alert">
@@ -1653,7 +1650,7 @@
                       id="anime-grouping-preference"
                       class="form-select"
                       value={animePolicyDraft}
-                      disabled={animePolicySaving}
+                      disabled={animePolicyLoading || animePolicySaving}
                       onchange={(event) => {
                         animePolicyDraft = event.currentTarget
                           .value as AnimeGroupingPreferenceDto;
@@ -1736,6 +1733,7 @@
                     class="btn btn-primary"
                     data-testid="apply-anime-grouping-policy"
                     disabled={!host.applyAnimeGroupingPolicyChange ||
+                      animePolicyLoading ||
                       animePolicySaving}
                     onclick={() => void applyAnimePolicy()}
                   >

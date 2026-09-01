@@ -847,12 +847,6 @@ fn load_preview_route_evidence(
         let record_evidence = evidence
             .get_mut(&record_id)
             .ok_or_else(|| integrity(capability, correlation_id))?;
-        if record_evidence.len() >= MAX_IDENTITY_CLAIMS {
-            return Err(Box::new(FastiProblem::capacity_exceeded(
-                capability,
-                correlation_id,
-            )));
-        }
         record_evidence.push(IdentityRouteEvidence::direct(
             ExternalIdentifierClaim::try_new(
                 namespace,
@@ -861,6 +855,12 @@ fn load_preview_route_evidence(
             )
             .map_err(|_| integrity(capability, correlation_id))?,
         ));
+        if record_evidence.len() > MAX_IDENTITY_CLAIMS {
+            return Err(Box::new(FastiProblem::capacity_exceeded(
+                capability,
+                correlation_id,
+            )));
+        }
     }
     drop(identifiers);
 
@@ -1404,7 +1404,7 @@ impl IdentityRoutingPort for SqliteKernel {
 
         match command.scope() {
             AnimeGroupingPolicyScope::Profile => {
-                map_sql(
+                let changed = map_sql(
                     transaction.execute(
                         r#"
                         INSERT INTO profile_anime_grouping_policies(
@@ -1428,12 +1428,15 @@ impl IdentityRoutingPort for SqliteKernel {
                     capability,
                     correlation_id,
                 )?;
+                if changed != 1 {
+                    return Err(idempotency_conflict(capability, correlation_id));
+                }
             }
             AnimeGroupingPolicyScope::Client(client_id) => {
                 let stored_preference = (result_source
                     == AnimeGroupingPolicySource::ClientOverride)
                     .then_some(result_preference.as_str());
-                map_sql(
+                let changed = map_sql(
                     transaction.execute(
                         r#"
                         INSERT INTO client_anime_grouping_policies(
@@ -1443,6 +1446,7 @@ impl IdentityRoutingPort for SqliteKernel {
                             preference = excluded.preference,
                             revision = excluded.revision,
                             updated_at = excluded.updated_at
+                        WHERE client_anime_grouping_policies.revision = ?7
                         "#,
                         params![
                             authorized.workspace_id().to_string(),
@@ -1450,12 +1454,16 @@ impl IdentityRoutingPort for SqliteKernel {
                             client_id.to_string(),
                             stored_preference,
                             i64::try_from(next_revision).unwrap_or(i64::MAX),
-                            timestamp(now())
+                            timestamp(now()),
+                            i64::try_from(current.revision).unwrap_or(i64::MAX)
                         ],
                     ),
                     capability,
                     correlation_id,
                 )?;
+                if changed != 1 {
+                    return Err(idempotency_conflict(capability, correlation_id));
+                }
             }
         }
         let (scope_kind, scope_client_id) = receipt_scope(command.scope());
@@ -1849,5 +1857,65 @@ mod tests {
         assert_eq!(impact.total_records(), 10_000);
         assert_eq!(impact.records().len(), 100);
         assert!(impact.next_after_record_id().is_some());
+    }
+
+    #[test]
+    fn preview_accepts_the_exact_identifier_limit() {
+        let node = TestNode::new();
+        node.kernel
+            .register_namespace_definition(RegisterNamespaceDefinitionCommand::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+                NamespaceDefinition::try_new(
+                    "limit.ids",
+                    "Limit IDs",
+                    [Grain::Release],
+                    ".+",
+                    "identity",
+                    NamespaceLicencePosture::IdentifiersOnly,
+                )
+                .expect("namespace definition"),
+            ))
+            .expect("register namespace");
+        let record_id = node
+            .kernel
+            .create_record(CreateRecordCommand::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+                Grain::Release,
+            ))
+            .expect("create record")
+            .record_id();
+        for index in 0..MAX_IDENTITY_CLAIMS {
+            node.kernel
+                .attach_identifier(AttachIdentifierCommand::new(
+                    RequestCorrelationId::new_v7(),
+                    node.access,
+                    record_id,
+                    ExternalIdentifierClaim::try_new(
+                        "limit.ids",
+                        Grain::Release,
+                        format!("id-{index}"),
+                    )
+                    .expect("identifier"),
+                ))
+                .expect("attach identifier");
+        }
+
+        let impact = node
+            .kernel
+            .authorize_and_preview_anime_grouping_policy_change(
+                PreviewAnimeGroupingPolicyChangeQuery::try_new(
+                    RequestCorrelationId::new_v7(),
+                    node.access,
+                    AnimeGroupingPolicyScope::Profile,
+                    AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::GroupByTvWork),
+                    None,
+                    fasti_application::IdentityImpactPageLimit::try_new(1).expect("page limit"),
+                )
+                .expect("preview query"),
+            )
+            .expect("preview at identifier limit");
+        assert_eq!(impact.total_records(), 1);
     }
 }
