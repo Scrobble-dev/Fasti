@@ -903,6 +903,10 @@ mod tests {
                 CapabilityKey::GetNuvioCollections,
                 CapabilityKey::ReplaceNuvioCollections,
                 CapabilityKey::ClearNuvioCollections,
+                CapabilityKey::ResolveIdentityRoute,
+                CapabilityKey::ReadAnimeGroupingPolicy,
+                CapabilityKey::PreviewAnimeGroupingPolicyChange,
+                CapabilityKey::ApplyAnimeGroupingPolicyChange,
             ]
         );
 
