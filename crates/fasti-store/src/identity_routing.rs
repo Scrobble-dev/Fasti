@@ -24,7 +24,7 @@ use fasti_domain::{
 };
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 
 const MAX_IDENTITY_ASSERTIONS_PER_RECORD: i64 = 256;
@@ -86,11 +86,30 @@ struct StoredAssertionRow {
     created_at: String,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct PolicyState {
     preference: AnimeGroupingPreference,
     source: AnimeGroupingPolicySource,
     revision: u64,
+}
+
+struct StoredPolicyReceipt {
+    profile_id: String,
+    actor_client_id: String,
+    scope_kind: String,
+    scope_client_id: Option<String>,
+    operation_id: String,
+    change_kind: String,
+    requested_preference: Option<String>,
+    rollback_operation_id: Option<String>,
+    previous_preference: String,
+    previous_source: String,
+    result_preference: String,
+    result_source: String,
+    result_revision: i64,
+    affected_records: i64,
+    unresolved_routes: i64,
+    possible_season_regroupings: i64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -682,6 +701,398 @@ pub(crate) fn validate_workspace_identity_routing_state(
             capability,
             correlation_id,
         )?;
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_workspace_anime_grouping_policy_receipts(
+    connection: &Connection,
+    workspace_id: WorkspaceId,
+    correlation_id: RequestCorrelationId,
+) -> ApplicationResult<()> {
+    let capability = CapabilityKey::RestoreWorkspace;
+    let total_records = parse_u64(
+        map_sql(
+            connection.query_row(
+                "SELECT COUNT(*) FROM records WHERE workspace_id = ?1",
+                [workspace_id.to_string()],
+                |row| row.get(0),
+            ),
+            capability,
+            correlation_id,
+        )?,
+        capability,
+        correlation_id,
+    )?;
+    let mut statement = map_sql(
+        connection.prepare(
+            r#"
+            SELECT profile_id, actor_client_id, scope_kind, scope_client_id,
+                   operation_id, change_kind,
+                   requested_preference, rollback_operation_id,
+                   previous_preference, previous_source, result_preference,
+                   result_source, result_revision, affected_records,
+                   unresolved_routes, possible_season_regroupings
+            FROM anime_grouping_policy_receipts
+            WHERE workspace_id = ?1
+            ORDER BY CASE scope_kind WHEN 'profile' THEN 0 ELSE 1 END,
+                     profile_id, scope_client_id, result_revision, operation_id
+            "#,
+        ),
+        capability,
+        correlation_id,
+    )?;
+    let rows = map_sql(
+        statement.query_map([workspace_id.to_string()], |row| {
+            Ok(StoredPolicyReceipt {
+                profile_id: row.get(0)?,
+                actor_client_id: row.get(1)?,
+                scope_kind: row.get(2)?,
+                scope_client_id: row.get(3)?,
+                operation_id: row.get(4)?,
+                change_kind: row.get(5)?,
+                requested_preference: row.get(6)?,
+                rollback_operation_id: row.get(7)?,
+                previous_preference: row.get(8)?,
+                previous_source: row.get(9)?,
+                result_preference: row.get(10)?,
+                result_source: row.get(11)?,
+                result_revision: row.get(12)?,
+                affected_records: row.get(13)?,
+                unresolved_routes: row.get(14)?,
+                possible_season_regroupings: row.get(15)?,
+            })
+        }),
+        capability,
+        correlation_id,
+    )?;
+    let receipts = rows
+        .map(|row| map_sql(row, capability, correlation_id))
+        .collect::<ApplicationResult<Vec<_>>>()?;
+    drop(statement);
+    let mut receipt_counts = HashMap::<String, u64>::new();
+    let mut inherited_client_revisions = HashMap::<String, HashSet<u64>>::new();
+    for receipt in &receipts {
+        let count = receipt_counts
+            .entry(receipt.profile_id.clone())
+            .or_default();
+        *count = count
+            .checked_add(1)
+            .ok_or_else(|| integrity(capability, correlation_id))?;
+        if receipt.scope_kind == "client" && receipt.result_source == "profile_default" {
+            inherited_client_revisions
+                .entry(receipt.profile_id.clone())
+                .or_default()
+                .insert(parse_u64(
+                    receipt.result_revision,
+                    capability,
+                    correlation_id,
+                )?);
+        }
+    }
+
+    let default_state = PolicyState {
+        preference: AnimeGroupingPreference::Automatic,
+        source: AnimeGroupingPolicySource::ProfileDefault,
+        revision: 0,
+    };
+    let mut profiles = HashMap::<ProfileId, PolicyState>::new();
+    let mut clients = HashMap::<(ProfileId, ClientId), PolicyState>::new();
+    let mut rollback_states = HashMap::<
+        (ProfileId, Option<ClientId>, OperationId),
+        (AnimeGroupingPreference, AnimeGroupingPolicySource),
+    >::new();
+    let mut profile_history = HashMap::<ProfileId, Vec<PolicyState>>::new();
+
+    for receipt in receipts {
+        let profile_id = ProfileId::from_str(&receipt.profile_id)
+            .map_err(|_| integrity(capability, correlation_id))?;
+        let actor_client_id = ClientId::from_str(&receipt.actor_client_id)
+            .map_err(|_| integrity(capability, correlation_id))?;
+        let operation_id = OperationId::from_str(&receipt.operation_id)
+            .map_err(|_| integrity(capability, correlation_id))?;
+        let scope_client_id = receipt
+            .scope_client_id
+            .as_deref()
+            .map(ClientId::from_str)
+            .transpose()
+            .map_err(|_| integrity(capability, correlation_id))?;
+        let scope = match (receipt.scope_kind.as_str(), scope_client_id) {
+            ("profile", None) => AnimeGroupingPolicyScope::Profile,
+            ("client", Some(client_id)) if client_id == actor_client_id => {
+                AnimeGroupingPolicyScope::Client(client_id)
+            }
+            _ => return Err(integrity(capability, correlation_id)),
+        };
+        let profile_state = *profiles.get(&profile_id).unwrap_or(&default_state);
+        let history = profile_history
+            .entry(profile_id)
+            .or_insert_with(|| vec![default_state]);
+        let client_state = scope
+            .client_id()
+            .and_then(|client_id| clients.get(&(profile_id, client_id)).copied());
+        let prior_state = match scope {
+            AnimeGroupingPolicyScope::Profile => Some(profile_state),
+            AnimeGroupingPolicyScope::Client(_) => client_state,
+        };
+        let previous_preference = preference(&receipt.previous_preference)
+            .ok_or_else(|| integrity(capability, correlation_id))?;
+        let previous_source = policy_source(&receipt.previous_source)
+            .ok_or_else(|| integrity(capability, correlation_id))?;
+        let previous_is_valid = match (scope, prior_state) {
+            (AnimeGroupingPolicyScope::Profile, Some(previous)) => {
+                previous.preference == previous_preference && previous.source == previous_source
+            }
+            (AnimeGroupingPolicyScope::Client(_), None)
+            | (
+                AnimeGroupingPolicyScope::Client(_),
+                Some(PolicyState {
+                    source: AnimeGroupingPolicySource::ProfileDefault,
+                    ..
+                }),
+            ) => {
+                previous_source == AnimeGroupingPolicySource::ProfileDefault
+                    && history
+                        .iter()
+                        .any(|state| state.preference == previous_preference)
+            }
+            (AnimeGroupingPolicyScope::Client(_), Some(previous)) => {
+                previous.preference == previous_preference && previous.source == previous_source
+            }
+            _ => false,
+        };
+        if !previous_is_valid {
+            return Err(integrity(capability, correlation_id));
+        }
+
+        let change = match (
+            receipt.change_kind.as_str(),
+            receipt.requested_preference.as_deref(),
+            receipt.rollback_operation_id.as_deref(),
+        ) {
+            ("set", Some(value), None) => AnimeGroupingPolicyChange::Set(
+                preference(value).ok_or_else(|| integrity(capability, correlation_id))?,
+            ),
+            ("inherit_profile", None, None)
+                if matches!(scope, AnimeGroupingPolicyScope::Client(_)) =>
+            {
+                AnimeGroupingPolicyChange::InheritProfile
+            }
+            ("rollback", None, Some(value)) => AnimeGroupingPolicyChange::Rollback {
+                applied_operation_id: OperationId::from_str(value)
+                    .map_err(|_| integrity(capability, correlation_id))?,
+            },
+            _ => return Err(integrity(capability, correlation_id)),
+        };
+        let result_preference = preference(&receipt.result_preference)
+            .ok_or_else(|| integrity(capability, correlation_id))?;
+        let result_source = policy_source(&receipt.result_source)
+            .ok_or_else(|| integrity(capability, correlation_id))?;
+        let expected_result = match change {
+            AnimeGroupingPolicyChange::Set(value) => Some((
+                value,
+                match scope {
+                    AnimeGroupingPolicyScope::Profile => AnimeGroupingPolicySource::ProfileDefault,
+                    AnimeGroupingPolicyScope::Client(_) => {
+                        AnimeGroupingPolicySource::ClientOverride
+                    }
+                },
+            )),
+            AnimeGroupingPolicyChange::InheritProfile
+                if result_source == AnimeGroupingPolicySource::ProfileDefault
+                    && history
+                        .iter()
+                        .any(|state| state.preference == result_preference) =>
+            {
+                match prior_state {
+                    Some(previous)
+                        if previous.source == AnimeGroupingPolicySource::ProfileDefault
+                            && previous.preference != result_preference =>
+                    {
+                        None
+                    }
+                    _ => Some((result_preference, result_source)),
+                }
+            }
+            AnimeGroupingPolicyChange::Rollback {
+                applied_operation_id,
+            } => rollback_states
+                .get(&(profile_id, scope.client_id(), applied_operation_id))
+                .copied(),
+            AnimeGroupingPolicyChange::InheritProfile => None,
+        };
+        let result_revision = parse_u64(receipt.result_revision, capability, correlation_id)?;
+        let predecessor_revision = result_revision.checked_sub(1);
+        let exact_profile_predecessor = predecessor_revision.is_some_and(|predecessor| {
+            history.iter().any(|state| {
+                state.preference == previous_preference && state.revision == predecessor
+            })
+        });
+        let revision_is_valid = match (scope, prior_state) {
+            (AnimeGroupingPolicyScope::Profile, Some(previous)) => predecessor_revision
+                .is_some_and(|predecessor| {
+                    predecessor == previous.revision
+                        || (predecessor > previous.revision
+                            && inherited_client_revisions
+                                .get(&receipt.profile_id)
+                                .is_some_and(|revisions| revisions.contains(&predecessor)))
+                }),
+            (AnimeGroupingPolicyScope::Client(_), None) => exact_profile_predecessor,
+            (AnimeGroupingPolicyScope::Client(_), Some(previous))
+                if previous.source == AnimeGroupingPolicySource::ClientOverride =>
+            {
+                previous
+                    .revision
+                    .checked_add(1)
+                    .is_some_and(|next| result_revision == next)
+            }
+            (AnimeGroupingPolicyScope::Client(_), Some(previous)) => predecessor_revision
+                .is_some_and(|predecessor| {
+                    predecessor >= previous.revision
+                        && if predecessor == previous.revision {
+                            history.iter().any(|state| {
+                                state.preference == previous_preference
+                                    && state.revision <= predecessor
+                            })
+                        } else {
+                            exact_profile_predecessor
+                        }
+                }),
+            _ => false,
+        };
+        if result_revision
+            > receipt_counts
+                .get(&receipt.profile_id)
+                .copied()
+                .unwrap_or_default()
+            || !revision_is_valid
+            || expected_result != Some((result_preference, result_source))
+        {
+            return Err(integrity(capability, correlation_id));
+        }
+        let affected_records = parse_u64(receipt.affected_records, capability, correlation_id)?;
+        let unresolved_routes = parse_u64(receipt.unresolved_routes, capability, correlation_id)?;
+        let possible_season_regroupings = parse_u64(
+            receipt.possible_season_regroupings,
+            capability,
+            correlation_id,
+        )?;
+        if affected_records > total_records
+            || unresolved_routes > total_records
+            || possible_season_regroupings > affected_records
+        {
+            return Err(integrity(capability, correlation_id));
+        }
+
+        rollback_states.insert(
+            (profile_id, scope.client_id(), operation_id),
+            (previous_preference, previous_source),
+        );
+        let result = PolicyState {
+            preference: result_preference,
+            source: result_source,
+            revision: result_revision,
+        };
+        match scope {
+            AnimeGroupingPolicyScope::Profile => {
+                profiles.insert(profile_id, result);
+                history.push(result);
+            }
+            AnimeGroupingPolicyScope::Client(client_id) => {
+                clients.insert((profile_id, client_id), result);
+            }
+        }
+    }
+
+    let mut stored_profiles = HashMap::new();
+    let mut statement = map_sql(
+        connection.prepare(
+            "SELECT profile_id, preference, revision FROM profile_anime_grouping_policies WHERE workspace_id = ?1",
+        ),
+        capability,
+        correlation_id,
+    )?;
+    let rows = map_sql(
+        statement.query_map([workspace_id.to_string()], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        }),
+        capability,
+        correlation_id,
+    )?;
+    for row in rows {
+        let (profile_id, value, revision) = map_sql(row, capability, correlation_id)?;
+        stored_profiles.insert(
+            ProfileId::from_str(&profile_id).map_err(|_| integrity(capability, correlation_id))?,
+            PolicyState {
+                preference: preference(&value)
+                    .ok_or_else(|| integrity(capability, correlation_id))?,
+                source: AnimeGroupingPolicySource::ProfileDefault,
+                revision: parse_u64(revision, capability, correlation_id)?,
+            },
+        );
+    }
+    drop(statement);
+    if stored_profiles != profiles {
+        return Err(integrity(capability, correlation_id));
+    }
+
+    let mut stored_clients = HashMap::new();
+    let mut statement = map_sql(
+        connection.prepare(
+            "SELECT profile_id, client_id, preference, revision FROM client_anime_grouping_policies WHERE workspace_id = ?1",
+        ),
+        capability,
+        correlation_id,
+    )?;
+    let rows = map_sql(
+        statement.query_map([workspace_id.to_string()], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, i64>(3)?,
+            ))
+        }),
+        capability,
+        correlation_id,
+    )?;
+    for row in rows {
+        let (profile_id, client_id, value, revision) = map_sql(row, capability, correlation_id)?;
+        let profile_id =
+            ProfileId::from_str(&profile_id).map_err(|_| integrity(capability, correlation_id))?;
+        let client_id =
+            ClientId::from_str(&client_id).map_err(|_| integrity(capability, correlation_id))?;
+        let profile = *profiles.get(&profile_id).unwrap_or(&default_state);
+        let state = match value {
+            Some(value) => PolicyState {
+                preference: preference(&value)
+                    .ok_or_else(|| integrity(capability, correlation_id))?,
+                source: AnimeGroupingPolicySource::ClientOverride,
+                revision: parse_u64(revision, capability, correlation_id)?,
+            },
+            None => PolicyState {
+                preference: profile.preference,
+                source: AnimeGroupingPolicySource::ProfileDefault,
+                revision: parse_u64(revision, capability, correlation_id)?,
+            },
+        };
+        stored_clients.insert((profile_id, client_id), state);
+    }
+    drop(statement);
+    for ((profile_id, _), state) in &mut clients {
+        if state.source == AnimeGroupingPolicySource::ProfileDefault {
+            state.preference = profiles
+                .get(profile_id)
+                .unwrap_or(&default_state)
+                .preference;
+        }
+    }
+    if stored_clients != clients {
+        return Err(integrity(capability, correlation_id));
     }
     Ok(())
 }
@@ -1373,8 +1784,33 @@ impl IdentityRoutingPort for SqliteKernel {
             capability,
             correlation_id,
         )?;
+        let inherited_client_revision = match command.scope() {
+            AnimeGroupingPolicyScope::Profile => parse_u64(
+                map_sql(
+                    transaction.query_row(
+                        r#"
+                        SELECT COALESCE(MAX(revision), 0)
+                        FROM client_anime_grouping_policies
+                        WHERE workspace_id = ?1 AND profile_id = ?2
+                          AND preference IS NULL
+                        "#,
+                        params![
+                            authorized.workspace_id().to_string(),
+                            authorized.profile_id().to_string()
+                        ],
+                        |row| row.get(0),
+                    ),
+                    capability,
+                    correlation_id,
+                )?,
+                capability,
+                correlation_id,
+            )?,
+            AnimeGroupingPolicyScope::Client(_) => 0,
+        };
         let next_revision = current
             .revision
+            .max(inherited_client_revision)
             .checked_add(1)
             .filter(|revision| *revision <= 9_007_199_254_740_991)
             .ok_or_else(|| Box::new(FastiProblem::capacity_exceeded(capability, correlation_id)))?;
@@ -1538,10 +1974,10 @@ mod tests {
     use super::*;
     use crate::test_support::TestNode;
     use fasti_application::{
-        AttachIdentifierCommand, CreateRecordCommand, IdentityPort,
-        RegisterNamespaceDefinitionCommand, ScopeKey,
+        AcceptObservationCommand, AttachIdentifierCommand, CreateRecordCommand, IdentityPort,
+        ListRecordsQuery, ObservationAcceptancePort, RegisterNamespaceDefinitionCommand, ScopeKey,
     };
-    use fasti_domain::{NamespaceDefinition, NamespaceLicencePosture};
+    use fasti_domain::{ClaimedTrust, NamespaceDefinition, NamespaceLicencePosture, ObservedAt};
 
     fn digest(byte: u8) -> Sha256Digest {
         Sha256Digest::parse(format!("sha256:{}", format!("{byte:02x}").repeat(32))).expect("digest")
@@ -1599,6 +2035,33 @@ mod tests {
     fn route_resolution_and_policy_change_are_durable_and_idempotent() {
         let node = TestNode::new();
         let record_id = create_anime_record(&node);
+        let mal_claim = ExternalIdentifierClaim::try_new("mal.anime", Grain::Release, "49894")
+            .expect("MAL identifier");
+        node.kernel
+            .authorize_and_accept(
+                AcceptObservationCommand::new(
+                    RequestCorrelationId::new_v7(),
+                    node.access,
+                    OperationId::new_v7(),
+                    None,
+                    ObservedAt::parse("2026-08-29T10:30:00Z", ClaimedTrust::DeviceObserved)
+                        .expect("observed_at"),
+                    node.upload(b"anime grouping policy Chronicle invariant"),
+                )
+                .with_identity_clues(vec![mal_claim], Some(Grain::Release)),
+            )
+            .expect("accept observation resolving to the anime record");
+        let records_before = node
+            .kernel
+            .list_records(ListRecordsQuery::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+            ))
+            .expect("list records before policy change")
+            .into_records();
+        assert_eq!(records_before.len(), 1);
+        assert_eq!(records_before[0].record_id(), record_id);
+        assert!(records_before[0].latest_activity().is_some());
         let route = node
             .kernel
             .authorize_and_resolve_identity(ResolveIdentityRouteQuery::new(
@@ -1660,6 +2123,15 @@ mod tests {
                 .expect("replay policy"),
             applied
         );
+        let records_after = node
+            .kernel
+            .list_records(ListRecordsQuery::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+            ))
+            .expect("list records after policy change")
+            .into_records();
+        assert_eq!(records_after, records_before);
 
         let conflict = ApplyAnimeGroupingPolicyChangeCommand::try_new(
             RequestCorrelationId::new_v7(),
@@ -1725,6 +2197,56 @@ mod tests {
         assert_eq!(
             inherited.policy().preference(),
             AnimeGroupingPreference::Automatic
+        );
+
+        node.kernel
+            .authorize_and_apply_anime_grouping_policy_change(
+                ApplyAnimeGroupingPolicyChangeCommand::try_new(
+                    RequestCorrelationId::new_v7(),
+                    node.access,
+                    AnimeGroupingPolicyScope::Profile,
+                    OperationId::new_v7(),
+                    digest(5),
+                    0,
+                    AnimeGroupingPolicyChange::Set(
+                        AnimeGroupingPreference::KeepMalReleasesSeparate,
+                    ),
+                )
+                .expect("profile change"),
+            )
+            .expect("change inherited profile policy");
+        let stale = ApplyAnimeGroupingPolicyChangeCommand::try_new(
+            RequestCorrelationId::new_v7(),
+            node.access,
+            scope,
+            OperationId::new_v7(),
+            digest(6),
+            inherited.policy().revision(),
+            AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::GroupByTvWork),
+        )
+        .expect("stale inherited command");
+        assert_eq!(
+            node.kernel
+                .authorize_and_apply_anime_grouping_policy_change(stale)
+                .expect_err("profile change invalidates inherited client revision")
+                .code(),
+            ProblemCode::IdempotencyConflict
+        );
+        let refreshed = node
+            .kernel
+            .authorize_and_read_anime_grouping_policy(ReadAnimeGroupingPolicyQuery::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+                scope,
+            ))
+            .expect("read inherited client after profile change");
+        assert_eq!(
+            refreshed.policy().revision(),
+            inherited.policy().revision() + 1
+        );
+        assert_eq!(
+            refreshed.policy().preference(),
+            AnimeGroupingPreference::KeepMalReleasesSeparate
         );
     }
 
