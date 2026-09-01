@@ -1655,33 +1655,31 @@ fn load_replay_receipt(
         connection
             .query_row(
                 r#"
-                SELECT profile_id, scope_kind, scope_client_id, semantic_digest,
+                SELECT actor_client_id, profile_id, scope_kind, scope_client_id,
+                       semantic_digest,
                        previous_preference, previous_source,
                        result_preference, result_source, result_revision,
                        affected_records, unresolved_routes,
                        possible_season_regroupings
                 FROM anime_grouping_policy_receipts
-                WHERE workspace_id = ?1 AND actor_client_id = ?2 AND operation_id = ?3
+                WHERE workspace_id = ?1 AND operation_id = ?2
                 "#,
-                params![
-                    workspace_id.to_string(),
-                    actor_client_id.to_string(),
-                    command.operation_id().to_string()
-                ],
+                params![workspace_id.to_string(), command.operation_id().to_string()],
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
-                        row.get::<_, Option<String>>(2)?,
-                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
                         row.get::<_, String>(4)?,
                         row.get::<_, String>(5)?,
                         row.get::<_, String>(6)?,
                         row.get::<_, String>(7)?,
-                        row.get::<_, i64>(8)?,
+                        row.get::<_, String>(8)?,
                         row.get::<_, i64>(9)?,
                         row.get::<_, i64>(10)?,
                         row.get::<_, i64>(11)?,
+                        row.get::<_, i64>(12)?,
                     ))
                 },
             )
@@ -1693,26 +1691,27 @@ fn load_replay_receipt(
         return Ok(None);
     };
     let (scope_kind, scope_client_id) = receipt_scope(command.scope());
-    if row.0 != profile_id.to_string()
-        || row.1 != scope_kind
-        || row.2 != scope_client_id
-        || row.3 != command.semantic_digest().as_str()
+    if row.0 != actor_client_id.to_string()
+        || row.1 != profile_id.to_string()
+        || row.2 != scope_kind
+        || row.3 != scope_client_id
+        || row.4 != command.semantic_digest().as_str()
     {
         return Err(idempotency_conflict(capability, correlation_id));
     }
     Ok(Some(ReceiptState {
-        previous_preference: preference(&row.4)
+        previous_preference: preference(&row.5)
             .ok_or_else(|| integrity(capability, correlation_id))?,
-        previous_source: policy_source(&row.5)
+        previous_source: policy_source(&row.6)
             .ok_or_else(|| integrity(capability, correlation_id))?,
-        result_preference: preference(&row.6)
+        result_preference: preference(&row.7)
             .ok_or_else(|| integrity(capability, correlation_id))?,
-        result_source: policy_source(&row.7)
+        result_source: policy_source(&row.8)
             .ok_or_else(|| integrity(capability, correlation_id))?,
-        result_revision: parse_u64(row.8, capability, correlation_id)?,
-        affected_records: parse_u64(row.9, capability, correlation_id)?,
-        unresolved_routes: parse_u64(row.10, capability, correlation_id)?,
-        possible_season_regroupings: parse_u64(row.11, capability, correlation_id)?,
+        result_revision: parse_u64(row.9, capability, correlation_id)?,
+        affected_records: parse_u64(row.10, capability, correlation_id)?,
+        unresolved_routes: parse_u64(row.11, capability, correlation_id)?,
+        possible_season_regroupings: parse_u64(row.12, capability, correlation_id)?,
     }))
 }
 
@@ -2157,10 +2156,14 @@ mod tests {
     use super::*;
     use crate::test_support::TestNode;
     use fasti_application::{
-        AcceptObservationCommand, AttachIdentifierCommand, CreateRecordCommand, IdentityPort,
-        ListRecordsQuery, ObservationAcceptancePort, RegisterNamespaceDefinitionCommand, ScopeKey,
+        AcceptObservationCommand, AttachIdentifierCommand, ClientCredentialAdministrationPort,
+        CreateRecordCommand, CreateScopedClientCredentialCommand, IdentityPort, ListRecordsQuery,
+        ObservationAcceptancePort, RegisterNamespaceDefinitionCommand, RequestAccessContext,
+        ScopeKey,
     };
-    use fasti_domain::{ClaimedTrust, NamespaceDefinition, NamespaceLicencePosture, ObservedAt};
+    use fasti_domain::{
+        ClaimedTrust, NamespaceDefinition, NamespaceLicencePosture, ObservedAt, ProfileGrantId,
+    };
 
     fn digest(byte: u8) -> Sha256Digest {
         Sha256Digest::parse(format!("sha256:{}", format!("{byte:02x}").repeat(32))).expect("digest")
@@ -2382,7 +2385,7 @@ mod tests {
             node.access,
             AnimeGroupingPolicyScope::Client(node.access.client_id()),
             operation_id,
-            semantic_digest,
+            semantic_digest.clone(),
             0,
             AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::KeepMalReleasesSeparate),
         )
@@ -2391,6 +2394,55 @@ mod tests {
             node.kernel
                 .authorize_and_apply_anime_grouping_policy_change(cross_scope)
                 .expect_err("receipt cannot cross scopes")
+                .code(),
+            ProblemCode::IdempotencyConflict
+        );
+
+        let issued = node
+            .kernel
+            .create_scoped_client_credential(CreateScopedClientCredentialCommand::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+                vec![ScopeKey::ProfileStateRead, ScopeKey::ProfileStateWrite],
+            ))
+            .expect("issue second client");
+        let other_grant_id = {
+            let connection = node.kernel.inner.connection.lock().expect("connection");
+            let value: String = connection
+                .query_row(
+                    "SELECT grant_id FROM profile_grants WHERE workspace_id = ?1 AND profile_id = ?2 AND client_id = ?3",
+                    params![
+                        node.access.workspace_id().to_string(),
+                        node.access.profile_id().to_string(),
+                        issued.client_id().to_string()
+                    ],
+                    |row| row.get(0),
+                )
+                .expect("second client grant");
+            ProfileGrantId::from_str(&value).expect("profile grant id")
+        };
+        let other_client = RequestAccessContext::new(
+            node.access.workspace_id(),
+            node.access.profile_id(),
+            issued.client_id(),
+            issued.credential_id(),
+            other_grant_id,
+            1,
+        );
+        let cross_client = ApplyAnimeGroupingPolicyChangeCommand::try_new(
+            RequestCorrelationId::new_v7(),
+            other_client,
+            AnimeGroupingPolicyScope::Profile,
+            operation_id,
+            semantic_digest,
+            1,
+            AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::KeepMalReleasesSeparate),
+        )
+        .expect("cross-client replay");
+        assert_eq!(
+            node.kernel
+                .authorize_and_apply_anime_grouping_policy_change(cross_client)
+                .expect_err("receipt cannot cross clients")
                 .code(),
             ProblemCode::IdempotencyConflict
         );
@@ -2715,7 +2767,7 @@ mod tests {
     }
 
     #[test]
-    fn lifecycle_batch_loader_rejects_its_truncation_sentinel() {
+    fn preview_rejects_single_record_with_too_many_lifecycle_events() {
         let node = TestNode::new();
         let record_id = create_anime_record(&node);
         let assertion_id = IdentityAssertionId::new_v7();
@@ -2754,29 +2806,203 @@ mod tests {
                 ],
             )
             .expect("identity assertion");
-        connection
-            .execute(
-                "INSERT INTO identity_assertion_lifecycle_events(workspace_id, assertion_id, sequence, previous_status, status, reviewer_client_id, occurred_at, evidence_digest) VALUES (?1, ?2, 1, 'candidate', 'accepted', ?3, ?4, NULL)",
-                params![
-                    node.access.workspace_id().to_string(),
-                    assertion_id.to_string(),
-                    node.access.client_id().to_string(),
-                    "2026-08-31T12:00:01.000000Z",
-                ],
-            )
-            .expect("identity lifecycle event");
+        let transition_digest = digest(99).to_string();
+        for sequence in 1..=MAX_IDENTITY_LIFECYCLE_EVENTS_PER_ASSERTION + 1 {
+            let (previous, status) = if sequence == 1 {
+                ("candidate", "accepted")
+            } else if sequence % 2 == 0 {
+                ("accepted", "disputed")
+            } else {
+                ("disputed", "accepted")
+            };
+            connection
+                .execute(
+                    "INSERT INTO identity_assertion_lifecycle_events(workspace_id, assertion_id, sequence, previous_status, status, reviewer_client_id, occurred_at, evidence_digest) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    params![
+                        node.access.workspace_id().to_string(),
+                        assertion_id.to_string(),
+                        sequence,
+                        previous,
+                        status,
+                        node.access.client_id().to_string(),
+                        format!(
+                            "2026-08-31T12:{:02}:{:02}.000000Z",
+                            sequence / 60,
+                            sequence % 60
+                        ),
+                        (status == "disputed").then_some(transition_digest.as_str()),
+                    ],
+                )
+                .expect("identity lifecycle event");
+        }
 
-        let problem = load_lifecycle_events_for_record_batch(
+        let problem = load_preview_route_evidence(
             &connection,
             node.access.workspace_id(),
-            record_id,
-            record_id,
-            0,
+            &[record_id],
             CapabilityKey::PreviewAnimeGroupingPolicyChange,
             RequestCorrelationId::new_v7(),
         )
-        .expect_err("sentinel row must fail closed");
+        .expect_err("over-limit record must fail closed");
         assert_eq!(problem.code(), ProblemCode::CapacityExceeded);
+    }
+
+    #[test]
+    fn preview_splits_dense_valid_lifecycle_batches_without_losing_records() {
+        const ASSERTIONS_PER_RECORD: usize = 131;
+        const EVENTS_PER_ASSERTION: i64 = 63;
+        assert!(
+            2 * ASSERTIONS_PER_RECORD as i64 * EVENTS_PER_ASSERTION
+                > MAX_IDENTITY_LIFECYCLE_EVENTS_PER_PREVIEW_BATCH
+        );
+
+        let node = TestNode::new();
+        let first_record_id = create_anime_record(&node);
+        let second_record_id = node
+            .kernel
+            .create_record(CreateRecordCommand::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+                Grain::Release,
+            ))
+            .expect("create second record")
+            .record_id();
+        node.kernel
+            .attach_identifier(AttachIdentifierCommand::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+                second_record_id,
+                ExternalIdentifierClaim::try_new("mal.anime", Grain::Release, "51009")
+                    .expect("second MAL identifier"),
+            ))
+            .expect("attach second MAL identifier");
+
+        let mut record_ids = [first_record_id, second_record_id];
+        record_ids.sort_by_key(|record_id| record_id.to_string());
+        let transition_digest = digest(99).to_string();
+        let mut connection = node.kernel.inner.connection.lock().expect("connection");
+        let source_identifier_ids = record_ids.map(|record_id| {
+            connection
+                .query_row(
+                    "SELECT external_identifier_id FROM external_identifiers WHERE workspace_id = ?1 AND record_id = ?2 AND namespace = 'mal.anime'",
+                    params![
+                        node.access.workspace_id().to_string(),
+                        record_id.to_string()
+                    ],
+                    |row| row.get::<_, String>(0),
+                )
+                .expect("source identifier")
+        });
+        let transaction = connection.transaction().expect("transaction");
+        {
+            let mut insert_assertion = transaction
+                .prepare(
+                    r#"
+                    INSERT INTO identity_assertions(
+                        assertion_id, workspace_id, record_id,
+                        source_external_identifier_id, target_namespace, target_grain,
+                        target_value, relation, coverage_json, episode_links_json,
+                        evidence_class, evidence_json, id_source, source_version,
+                        authority, reasoning, initial_status, created_at
+                    ) VALUES (
+                        ?1, ?2, ?3, ?4, 'imdb.title', 'release', ?5, 'exact',
+                        '[]', '[]', 'verified',
+                        '[{"method":"human_verified","observed_source":"test","derivation_root":null,"reviewer":"test-reviewer","observed_at":"2026-08-30","evidence_id":null}]',
+                        'dense-test-fixture', NULL, NULL, NULL, 'candidate',
+                        '2026-08-31T12:00:00.000000Z'
+                    )
+                    "#,
+                )
+                .expect("prepare assertion insert");
+            let mut insert_event = transaction
+                .prepare(
+                    r#"
+                    INSERT INTO identity_assertion_lifecycle_events(
+                        workspace_id, assertion_id, sequence, previous_status, status,
+                        reviewer_client_id, occurred_at, evidence_digest
+                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                    "#,
+                )
+                .expect("prepare lifecycle insert");
+            for (record_index, record_id) in record_ids.iter().enumerate() {
+                for assertion_index in 0..ASSERTIONS_PER_RECORD {
+                    let assertion_id = IdentityAssertionId::new_v7();
+                    insert_assertion
+                        .execute(params![
+                            assertion_id.to_string(),
+                            node.access.workspace_id().to_string(),
+                            record_id.to_string(),
+                            source_identifier_ids[record_index],
+                            format!("tt-dense-{record_index}-{assertion_index}")
+                        ])
+                        .expect("insert dense assertion");
+                    for sequence in 1..=EVENTS_PER_ASSERTION {
+                        let (previous, status) = if sequence == 1 {
+                            ("candidate", "accepted")
+                        } else if sequence % 2 == 0 {
+                            ("accepted", "disputed")
+                        } else {
+                            ("disputed", "accepted")
+                        };
+                        insert_event
+                            .execute(params![
+                                node.access.workspace_id().to_string(),
+                                assertion_id.to_string(),
+                                sequence,
+                                previous,
+                                status,
+                                node.access.client_id().to_string(),
+                                format!(
+                                    "2026-08-31T12:{:02}:{:02}.000000Z",
+                                    sequence / 60,
+                                    sequence % 60
+                                ),
+                                (status == "disputed").then_some(transition_digest.as_str())
+                            ])
+                            .expect("insert dense lifecycle event");
+                    }
+                }
+            }
+        }
+        transaction
+            .commit()
+            .expect("commit dense lifecycle fixture");
+
+        let evidence = load_preview_route_evidence(
+            &connection,
+            node.access.workspace_id(),
+            &record_ids,
+            CapabilityKey::PreviewAnimeGroupingPolicyChange,
+            RequestCorrelationId::new_v7(),
+        )
+        .expect("load split dense evidence");
+        assert!(record_ids.iter().all(|record_id| {
+            evidence
+                .get(record_id)
+                .is_some_and(|routes| routes.len() > ASSERTIONS_PER_RECORD)
+        }));
+        drop(connection);
+
+        let impact = node
+            .kernel
+            .authorize_and_preview_anime_grouping_policy_change(
+                PreviewAnimeGroupingPolicyChangeQuery::try_new(
+                    RequestCorrelationId::new_v7(),
+                    node.access,
+                    AnimeGroupingPolicyScope::Profile,
+                    AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::GroupByTvWork),
+                    None,
+                    fasti_application::IdentityImpactPageLimit::try_new(2).expect("page limit"),
+                )
+                .expect("preview query"),
+            )
+            .expect("preview dense records");
+        assert_eq!(impact.total_records(), 2);
+        assert_eq!(impact.records().len(), 2);
+        assert!(record_ids.iter().all(|record_id| impact
+            .records()
+            .iter()
+            .any(|row| row.record_id() == *record_id)));
     }
 
     #[test]
