@@ -326,22 +326,74 @@ fn authorize_policy_scope(
     Ok(())
 }
 
-fn load_lifecycle_events(
-    connection: &Connection,
-    workspace_id: WorkspaceId,
+#[allow(clippy::too_many_arguments)]
+fn materialize_lifecycle_event(
     assertion_id: IdentityAssertionId,
+    sequence: i64,
+    previous: String,
+    status: String,
+    reviewer: String,
+    occurred_at: String,
+    evidence_digest: Option<String>,
     capability: CapabilityKey,
     correlation_id: RequestCorrelationId,
-) -> ApplicationResult<Vec<IdentityAssertionLifecycleEvent>> {
+) -> ApplicationResult<IdentityAssertionLifecycleEvent> {
+    IdentityAssertionLifecycleEvent::try_new(
+        assertion_id,
+        u32::try_from(sequence).map_err(|_| integrity(capability, correlation_id))?,
+        assertion_status(&previous).ok_or_else(|| integrity(capability, correlation_id))?,
+        assertion_status(&status).ok_or_else(|| integrity(capability, correlation_id))?,
+        ClientId::from_str(&reviewer).map_err(|_| integrity(capability, correlation_id))?,
+        ReceivedAt::from_application_clock(parse_timestamp(
+            &occurred_at,
+            capability,
+            correlation_id,
+        )?),
+        evidence_digest
+            .map(Sha256Digest::parse)
+            .transpose()
+            .map_err(|_| integrity(capability, correlation_id))?,
+    )
+    .map_err(|_| integrity(capability, correlation_id))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn load_lifecycle_events_for_record_batch(
+    connection: &Connection,
+    workspace_id: WorkspaceId,
+    first_record_id: RecordId,
+    last_record_id: RecordId,
+    record_count: usize,
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+) -> ApplicationResult<HashMap<IdentityAssertionId, Vec<IdentityAssertionLifecycleEvent>>> {
+    let row_limit = record_count
+        .checked_mul(MAX_IDENTITY_ASSERTIONS_PER_RECORD as usize + 1)
+        .and_then(|count| {
+            count.checked_mul(MAX_IDENTITY_LIFECYCLE_EVENTS_PER_ASSERTION as usize + 1)
+        })
+        .and_then(|count| count.checked_add(1))
+        .and_then(|count| i64::try_from(count).ok())
+        .unwrap_or(i64::MAX);
     let mut statement = map_sql(
         connection.prepare(
             r#"
-            SELECT sequence, previous_status, status, reviewer_client_id,
-                   occurred_at, evidence_digest
-            FROM identity_assertion_lifecycle_events
-            WHERE workspace_id = ?1 AND assertion_id = ?2
-            ORDER BY sequence
-            LIMIT ?3
+            SELECT event.assertion_id, event.sequence, event.previous_status,
+                   event.status, event.reviewer_client_id, event.occurred_at,
+                   event.evidence_digest
+            FROM identity_assertion_lifecycle_events event
+            JOIN identity_assertions assertion
+              ON assertion.workspace_id = event.workspace_id
+             AND assertion.assertion_id = event.assertion_id
+            JOIN records record
+              ON record.workspace_id = assertion.workspace_id
+             AND record.record_id = assertion.record_id
+             AND record.status = 'active'
+            WHERE event.workspace_id = ?1
+              AND assertion.record_id >= ?2
+              AND assertion.record_id <= ?3
+            ORDER BY event.assertion_id, event.sequence
+            LIMIT ?4
             "#,
         ),
         capability,
@@ -351,52 +403,49 @@ fn load_lifecycle_events(
         statement.query_map(
             params![
                 workspace_id.to_string(),
-                assertion_id.to_string(),
-                MAX_IDENTITY_LIFECYCLE_EVENTS_PER_ASSERTION + 1
+                first_record_id.to_string(),
+                last_record_id.to_string(),
+                row_limit
             ],
             |row| {
                 Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
                     row.get::<_, String>(2)?,
                     row.get::<_, String>(3)?,
                     row.get::<_, String>(4)?,
-                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, Option<String>>(6)?,
                 ))
             },
         ),
         capability,
         correlation_id,
     )?;
-    let mut events = Vec::new();
+    let mut events = HashMap::<IdentityAssertionId, Vec<IdentityAssertionLifecycleEvent>>::new();
     for row in rows {
-        let (sequence, previous, status, reviewer, occurred_at, evidence_digest) =
+        let (assertion_id, sequence, previous, status, reviewer, occurred_at, evidence_digest) =
             map_sql(row, capability, correlation_id)?;
-        events.push(
-            IdentityAssertionLifecycleEvent::try_new(
-                assertion_id,
-                u32::try_from(sequence).map_err(|_| integrity(capability, correlation_id))?,
-                assertion_status(&previous).ok_or_else(|| integrity(capability, correlation_id))?,
-                assertion_status(&status).ok_or_else(|| integrity(capability, correlation_id))?,
-                ClientId::from_str(&reviewer).map_err(|_| integrity(capability, correlation_id))?,
-                ReceivedAt::from_application_clock(parse_timestamp(
-                    &occurred_at,
-                    capability,
-                    correlation_id,
-                )?),
-                evidence_digest
-                    .map(Sha256Digest::parse)
-                    .transpose()
-                    .map_err(|_| integrity(capability, correlation_id))?,
-            )
-            .map_err(|_| integrity(capability, correlation_id))?,
-        );
-    }
-    if events.len() > MAX_IDENTITY_LIFECYCLE_EVENTS_PER_ASSERTION as usize {
-        return Err(Box::new(FastiProblem::capacity_exceeded(
+        let assertion_id = IdentityAssertionId::from_str(&assertion_id)
+            .map_err(|_| integrity(capability, correlation_id))?;
+        let lifecycle = events.entry(assertion_id).or_default();
+        lifecycle.push(materialize_lifecycle_event(
+            assertion_id,
+            sequence,
+            previous,
+            status,
+            reviewer,
+            occurred_at,
+            evidence_digest,
             capability,
             correlation_id,
-        )));
+        )?);
+        if lifecycle.len() > MAX_IDENTITY_LIFECYCLE_EVENTS_PER_ASSERTION as usize {
+            return Err(Box::new(FastiProblem::capacity_exceeded(
+                capability,
+                correlation_id,
+            )));
+        }
     }
     Ok(events)
 }
@@ -555,6 +604,15 @@ fn load_route_evidence(
             correlation_id,
         )));
     }
+    let mut lifecycle_events = load_lifecycle_events_for_record_batch(
+        connection,
+        workspace_id,
+        record_id,
+        record_id,
+        1,
+        capability,
+        correlation_id,
+    )?;
 
     let mut assertions = map_sql(
         connection.prepare(
@@ -631,13 +689,9 @@ fn load_route_evidence(
             capability,
             correlation_id,
         )?;
-        let lifecycle = load_lifecycle_events(
-            connection,
-            workspace_id,
-            assertion.assertion_id(),
-            capability,
-            correlation_id,
-        )?;
+        let lifecycle = lifecycle_events
+            .remove(&assertion.assertion_id())
+            .unwrap_or_default();
         assertion
             .effective_status(&lifecycle)
             .map_err(|_| integrity(capability, correlation_id))?;
@@ -863,6 +917,15 @@ fn load_preview_route_evidence(
         }
     }
     drop(identifiers);
+    let mut lifecycle_events = load_lifecycle_events_for_record_batch(
+        connection,
+        workspace_id,
+        *first,
+        *last,
+        record_ids.len(),
+        capability,
+        correlation_id,
+    )?;
 
     let mut assertions = map_sql(
         connection.prepare(
@@ -951,13 +1014,9 @@ fn load_preview_route_evidence(
         }
         let assertion =
             materialize_assertion(row, workspace_id, record_id, capability, correlation_id)?;
-        let lifecycle = load_lifecycle_events(
-            connection,
-            workspace_id,
-            assertion.assertion_id(),
-            capability,
-            correlation_id,
-        )?;
+        let lifecycle = lifecycle_events
+            .remove(&assertion.assertion_id())
+            .unwrap_or_default();
         assertion
             .effective_status(&lifecycle)
             .map_err(|_| integrity(capability, correlation_id))?;
