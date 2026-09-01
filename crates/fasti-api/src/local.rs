@@ -444,12 +444,15 @@ pub(crate) fn router(
         crate::profile_state::router().layer(DefaultBodyLimit::max(MAX_RECORDS_JSON_BODY_BYTES));
     let nuvio_collections = crate::nuvio_collections::router()
         .layer(DefaultBodyLimit::max(MAX_NUVIO_COLLECTIONS_JSON_BODY_BYTES));
+    let identity_routing =
+        crate::identity_routing::router().layer(DefaultBodyLimit::max(MAX_RECORDS_JSON_BODY_BYTES));
 
     let routes = Router::new()
         .merge(observation)
         .merge(records)
         .merge(profile_state)
-        .merge(nuvio_collections);
+        .merge(nuvio_collections)
+        .merge(identity_routing);
     if include_bootstrap {
         bootstrap.merge(routes).with_state(state)
     } else {

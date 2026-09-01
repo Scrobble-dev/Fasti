@@ -11,6 +11,7 @@ pub enum CapabilityBody {
     C1,
     M1,
     M2,
+    M3,
 }
 
 impl CapabilityBody {
@@ -23,6 +24,7 @@ impl CapabilityBody {
             Self::C1 => "C1",
             Self::M1 => "M1",
             Self::M2 => "M2",
+            Self::M3 => "M3",
         }
     }
 }
@@ -1016,6 +1018,101 @@ define_capabilities!(
         ],
         []
     ),
+    (
+        ResolveIdentityRoute,
+        M3,
+        M3,
+        Finalized,
+        Implemented,
+        ScopedOrBrowserSession,
+        [IdentityRead],
+        [
+            AuthenticationFailed,
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
+            CapabilityUnavailable,
+            CapacityExceeded,
+            Forbidden,
+            IntegrityFailed,
+            RecordNotFound,
+            SessionPolicyChanged,
+            StorageUnavailable,
+            ValidationFailed
+        ],
+        []
+    ),
+    (
+        ReadAnimeGroupingPolicy,
+        M3,
+        M3,
+        Finalized,
+        Implemented,
+        ScopedOrBrowserSession,
+        [ProfileStateRead],
+        [
+            AuthenticationFailed,
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
+            CapabilityUnavailable,
+            Forbidden,
+            IntegrityFailed,
+            SessionPolicyChanged,
+            StorageUnavailable,
+            ValidationFailed
+        ],
+        []
+    ),
+    (
+        PreviewAnimeGroupingPolicyChange,
+        M3,
+        M3,
+        Finalized,
+        Implemented,
+        ScopedOrBrowserSession,
+        [ProfileStateRead],
+        [
+            AuthenticationFailed,
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
+            CapabilityUnavailable,
+            CapacityExceeded,
+            Forbidden,
+            IntegrityFailed,
+            MalformedJson,
+            PayloadTooLarge,
+            SessionPolicyChanged,
+            StorageUnavailable,
+            UnsupportedMediaType,
+            ValidationFailed
+        ],
+        []
+    ),
+    (
+        ApplyAnimeGroupingPolicyChange,
+        M3,
+        M3,
+        Finalized,
+        Implemented,
+        ScopedOrBrowserSession,
+        [ProfileStateWrite],
+        [
+            AuthenticationFailed,
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
+            CapabilityUnavailable,
+            CapacityExceeded,
+            Forbidden,
+            IdempotencyConflict,
+            IntegrityFailed,
+            MalformedJson,
+            PayloadTooLarge,
+            SessionPolicyChanged,
+            StorageUnavailable,
+            UnsupportedMediaType,
+            ValidationFailed
+        ],
+        []
+    ),
 );
 
 #[cfg(test)]
@@ -1162,6 +1259,30 @@ mod tests {
     }
 
     #[test]
+    fn m3_identity_routing_keeps_reads_and_policy_writes_separate() {
+        for (capability, scope) in [
+            (CapabilityKey::ResolveIdentityRoute, ScopeKey::IdentityRead),
+            (
+                CapabilityKey::ReadAnimeGroupingPolicy,
+                ScopeKey::ProfileStateRead,
+            ),
+            (
+                CapabilityKey::PreviewAnimeGroupingPolicyChange,
+                ScopeKey::ProfileStateRead,
+            ),
+            (
+                CapabilityKey::ApplyAnimeGroupingPolicyChange,
+                ScopeKey::ProfileStateWrite,
+            ),
+        ] {
+            assert_eq!(capability.contract_body(), CapabilityBody::M3);
+            assert_eq!(capability.runtime_body(), CapabilityBody::M3);
+            assert_eq!(capability.required_scopes(), &[scope]);
+            assert!(capability.is_production_executable());
+        }
+    }
+
+    #[test]
     fn staged_runtime_failures_are_checked_but_not_published() {
         let discovery = CapabilityKey::DiscoverCapabilities.allowed_problem_codes();
         assert!(discovery.contains(&ProblemCode::AuthenticationFailed));
@@ -1248,7 +1369,7 @@ mod tests {
     }
 
     #[test]
-    fn browser_application_access_is_limited_to_the_frozen_ten_capabilities() {
+    fn browser_application_access_is_limited_to_explicit_hybrid_capabilities() {
         let hybrid: Vec<_> = CapabilityKey::ALL
             .iter()
             .copied()
@@ -1269,6 +1390,10 @@ mod tests {
                 CapabilityKey::ClearNuvioCollections,
                 CapabilityKey::ListTrackingDispositions,
                 CapabilityKey::SetTrackingDisposition,
+                CapabilityKey::ResolveIdentityRoute,
+                CapabilityKey::ReadAnimeGroupingPolicy,
+                CapabilityKey::PreviewAnimeGroupingPolicyChange,
+                CapabilityKey::ApplyAnimeGroupingPolicyChange,
             ]
         );
         assert!(hybrid

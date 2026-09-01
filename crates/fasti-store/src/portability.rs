@@ -1724,6 +1724,59 @@ const EXPORT_SECTIONS: &[ExportSection] = &[
         count_sql: "SELECT COUNT(*) FROM metadata_refresh_receipts WHERE workspace_id = ?1",
         cursor_columns: &[CursorColumn::Text(2), CursorColumn::Text(3)],
     },
+    ExportSection {
+        entity: WorkspaceExportEntity::IdentityAssertions,
+        sql: "SELECT assertion_id, workspace_id, record_id, source_external_identifier_id, \
+                     target_namespace, target_grain, target_value, relation, coverage_json, \
+                     episode_links_json, evidence_class, evidence_json, id_source, source_version, \
+                     authority, reasoning, initial_status, created_at \
+              FROM identity_assertions \
+              WHERE workspace_id = ?1 AND assertion_id > ?2 \
+              ORDER BY assertion_id LIMIT ?3",
+        count_sql: "SELECT COUNT(*) FROM identity_assertions WHERE workspace_id = ?1",
+        cursor_columns: &[CursorColumn::Text(0)],
+    },
+    ExportSection {
+        entity: WorkspaceExportEntity::IdentityAssertionLifecycleEvents,
+        sql: "SELECT workspace_id, assertion_id, sequence, previous_status, status, \
+                     reviewer_client_id, occurred_at, evidence_digest \
+              FROM identity_assertion_lifecycle_events \
+              WHERE workspace_id = ?1 AND (assertion_id, sequence) > (?2, ?3) \
+              ORDER BY assertion_id, sequence LIMIT ?4",
+        count_sql: "SELECT COUNT(*) FROM identity_assertion_lifecycle_events WHERE workspace_id = ?1",
+        cursor_columns: &[CursorColumn::Text(1), CursorColumn::NonNegativeInteger(2)],
+    },
+    ExportSection {
+        entity: WorkspaceExportEntity::ProfileAnimeGroupingPolicies,
+        sql: "SELECT workspace_id, profile_id, preference, revision, updated_at \
+              FROM profile_anime_grouping_policies \
+              WHERE workspace_id = ?1 AND profile_id > ?2 \
+              ORDER BY profile_id LIMIT ?3",
+        count_sql: "SELECT COUNT(*) FROM profile_anime_grouping_policies WHERE workspace_id = ?1",
+        cursor_columns: &[CursorColumn::Text(1)],
+    },
+    ExportSection {
+        entity: WorkspaceExportEntity::ClientAnimeGroupingPolicies,
+        sql: "SELECT workspace_id, profile_id, client_id, preference, revision, updated_at \
+              FROM client_anime_grouping_policies \
+              WHERE workspace_id = ?1 AND (profile_id, client_id) > (?2, ?3) \
+              ORDER BY profile_id, client_id LIMIT ?4",
+        count_sql: "SELECT COUNT(*) FROM client_anime_grouping_policies WHERE workspace_id = ?1",
+        cursor_columns: &[CursorColumn::Text(1), CursorColumn::Text(2)],
+    },
+    ExportSection {
+        entity: WorkspaceExportEntity::AnimeGroupingPolicyReceipts,
+        sql: "SELECT workspace_id, profile_id, actor_client_id, scope_kind, scope_client_id, \
+                     operation_id, semantic_digest, change_kind, requested_preference, \
+                     rollback_operation_id, previous_preference, previous_source, \
+                     result_preference, result_source, result_revision, affected_records, \
+                     unresolved_routes, possible_season_regroupings, created_at \
+              FROM anime_grouping_policy_receipts \
+              WHERE workspace_id = ?1 AND (actor_client_id, operation_id) > (?2, ?3) \
+              ORDER BY actor_client_id, operation_id LIMIT ?4",
+        count_sql: "SELECT COUNT(*) FROM anime_grouping_policy_receipts WHERE workspace_id = ?1",
+        cursor_columns: &[CursorColumn::Text(2), CursorColumn::Text(5)],
+    },
 ];
 
 /// The migration version and a digest of the actual SQLite schema in a frozen

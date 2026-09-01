@@ -4,18 +4,21 @@
 //! claims to this port. The provider coordinate remains evidence attached to a
 //! Fasti Record; it never becomes the Record identity.
 
-use crate::ProviderCapabilityState;
 use crate::{ApplicationResult, RequestAccessContext};
+use crate::{ProviderCapabilityState, ProviderId};
 use fasti_domain::{
-    EnrichmentPolicy, ExternalIdentifierClaim, ExternalIdentifierError, FieldClaim,
-    FieldClaimStatus, FieldKey, Grain, MetadataAttribution, MetadataCacheEntry,
-    MetadataCacheReadState, MetadataFieldGroup, MetadataLocale, MetadataProjection,
-    MetadataProjectionPolicy, MetadataProviderId, MetadataRegion, NamespaceDefinition,
-    NamespaceDefinitionError, NamespaceLicencePosture, ProfileId, RatingClaim, RecordId,
-    RequestCorrelationId, MAX_EXTERNAL_IDENTIFIER_BYTES, ORIGINAL_TITLE_FIELD_KEY,
-    OVERVIEW_FIELD_KEY, POSTER_FIELD_KEY, RELEASE_YEAR_FIELD_KEY, TITLE_FIELD_KEY,
+    AnimeGroupingPreference, EnrichmentPolicy, ExternalIdentifierClaim, ExternalIdentifierError,
+    FieldClaim, FieldClaimStatus, FieldKey, Grain, IdentityAssertion,
+    IdentityAssertionEvidenceClass, IdentityAssertionId, IdentityAssertionLifecycleEvent,
+    IdentityAssertionRelation, IdentityRouteEvidenceKind, IdentityRouteKind, MetadataAttribution,
+    MetadataCacheEntry, MetadataCacheReadState, MetadataFieldGroup, MetadataLocale,
+    MetadataProjection, MetadataProjectionPolicy, MetadataProviderId, MetadataRegion,
+    NamespaceDefinition, NamespaceDefinitionError, NamespaceLicencePosture, ProfileId, RatingClaim,
+    RecordId, RequestCorrelationId, ResolutionIntent, MAX_EXTERNAL_IDENTIFIER_BYTES,
+    ORIGINAL_TITLE_FIELD_KEY, OVERVIEW_FIELD_KEY, POSTER_FIELD_KEY, RELEASE_YEAR_FIELD_KEY,
+    TITLE_FIELD_KEY,
 };
-use std::{future::Future, pin::Pin};
+use std::{collections::HashMap, future::Future, pin::Pin};
 
 pub const MAX_PROVIDER_METADATA_FIELDS: usize = 16;
 pub const GOOGLE_BOOKS_PROVIDER_ID: &str = "google-books";
@@ -145,6 +148,698 @@ pub fn provider_identity_mapping_for_grain(
         .iter()
         .copied()
         .find(|mapping| mapping.provider == provider && mapping.grain == grain)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PurposeIdentityRoute {
+    identifier: ExternalIdentifierClaim,
+    kind: IdentityRouteKind,
+    accepted_assertions: Vec<AcceptedIdentityRouteAssertion>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AcceptedIdentityRouteAssertion {
+    assertion_id: IdentityAssertionId,
+    record_id: RecordId,
+    source_grain: Grain,
+    relation: IdentityAssertionRelation,
+}
+
+impl AcceptedIdentityRouteAssertion {
+    pub const fn assertion_id(self) -> IdentityAssertionId {
+        self.assertion_id
+    }
+
+    pub const fn record_id(self) -> RecordId {
+        self.record_id
+    }
+
+    pub const fn source_grain(self) -> Grain {
+        self.source_grain
+    }
+
+    pub const fn relation(self) -> IdentityAssertionRelation {
+        self.relation
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IdentityRouteEvidence {
+    identifier: ExternalIdentifierClaim,
+    kind: IdentityRouteEvidenceKind,
+    accepted_assertion: Option<AcceptedIdentityRouteAssertion>,
+}
+
+impl IdentityRouteEvidence {
+    pub const fn direct(identifier: ExternalIdentifierClaim) -> Self {
+        Self {
+            identifier,
+            kind: IdentityRouteEvidenceKind::Direct,
+            accepted_assertion: None,
+        }
+    }
+
+    /// Build routable evidence only from a complete, validated lifecycle chain.
+    pub fn accepted_crosswalk(
+        assertion: &IdentityAssertion,
+        lifecycle_events: &[IdentityAssertionLifecycleEvent],
+    ) -> Option<Self> {
+        if matches!(
+            assertion.evidence_class(),
+            IdentityAssertionEvidenceClass::Asserted
+                | IdentityAssertionEvidenceClass::Candidate
+                | IdentityAssertionEvidenceClass::Disputed
+        ) {
+            return None;
+        }
+        assertion
+            .effective_status(lifecycle_events)
+            .ok()?
+            .can_route()
+            .then(|| Self {
+                identifier: assertion.target().clone(),
+                kind: IdentityRouteEvidenceKind::AcceptedCrosswalk,
+                accepted_assertion: Some(AcceptedIdentityRouteAssertion {
+                    assertion_id: assertion.assertion_id(),
+                    record_id: assertion.record_id(),
+                    source_grain: assertion.source().grain(),
+                    relation: assertion.relation(),
+                }),
+            })
+    }
+
+    pub const fn identifier(&self) -> &ExternalIdentifierClaim {
+        &self.identifier
+    }
+
+    pub const fn kind(&self) -> IdentityRouteEvidenceKind {
+        self.kind
+    }
+
+    pub const fn accepted_assertion(&self) -> Option<AcceptedIdentityRouteAssertion> {
+        self.accepted_assertion
+    }
+}
+
+impl PurposeIdentityRoute {
+    pub const fn identifier(&self) -> &ExternalIdentifierClaim {
+        &self.identifier
+    }
+
+    pub const fn kind(&self) -> IdentityRouteKind {
+        self.kind
+    }
+
+    pub fn accepted_assertions(&self) -> &[AcceptedIdentityRouteAssertion] {
+        &self.accepted_assertions
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PurposeIdentityRouteStatus {
+    Selected,
+    Missing,
+    Ambiguous,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PurposeIdentityRoutePlan {
+    record_id: RecordId,
+    intent: ResolutionIntent,
+    target_provider: ProviderId,
+    status: PurposeIdentityRouteStatus,
+    known_identifiers: Vec<ExternalIdentifierClaim>,
+    candidate_routes: Vec<PurposeIdentityRoute>,
+    selected_route: Option<PurposeIdentityRoute>,
+}
+
+impl PurposeIdentityRoutePlan {
+    pub const fn record_id(&self) -> RecordId {
+        self.record_id
+    }
+
+    pub const fn intent(&self) -> ResolutionIntent {
+        self.intent
+    }
+
+    pub const fn target_provider(&self) -> &ProviderId {
+        &self.target_provider
+    }
+
+    pub const fn status(&self) -> PurposeIdentityRouteStatus {
+        self.status
+    }
+
+    pub fn known_identifiers(&self) -> &[ExternalIdentifierClaim] {
+        &self.known_identifiers
+    }
+
+    pub fn candidate_routes(&self) -> &[PurposeIdentityRoute] {
+        &self.candidate_routes
+    }
+
+    pub const fn selected_route(&self) -> Option<&PurposeIdentityRoute> {
+        self.selected_route.as_ref()
+    }
+
+    pub fn nuvio_content_id(&self) -> Option<String> {
+        if self.intent != ResolutionIntent::NuvioExport {
+            return None;
+        }
+        let identifier = self.selected_route()?.identifier();
+        let prefix = match identifier.namespace() {
+            "imdb.title" => return Some(identifier.value().to_owned()),
+            "tmdb.movie" | "tmdb.tv" => "tmdb",
+            "tvdb.movie" | "tvdb.series" => "tvdb",
+            "mal.anime" => "mal",
+            "anidb.anime" => "anidb",
+            "anilist.anime" => "anilist",
+            "kitsu.anime" => "kitsu",
+            "simkl.anime" => "simkl",
+            _ => return None,
+        };
+        Some(format!("{prefix}:{}", identifier.value()))
+    }
+}
+
+fn nuvio_standard_route_priority(namespace: &str, grain: Grain) -> Option<u8> {
+    match (namespace, grain) {
+        ("imdb.title", Grain::Film | Grain::Series | Grain::Release) => Some(0),
+        ("tmdb.movie", Grain::Film) | ("tmdb.tv", Grain::Series) => Some(1),
+        ("tvdb.movie", Grain::Film) | ("tvdb.series", Grain::Series) => Some(2),
+        ("mal.anime", Grain::Release) => Some(3),
+        ("anidb.anime", Grain::Release) => Some(4),
+        ("anilist.anime", Grain::Release) => Some(5),
+        ("kitsu.anime", Grain::Release) => Some(6),
+        ("simkl.anime", Grain::Release) => Some(7),
+        _ => None,
+    }
+}
+
+fn identity_route_value_is_valid(identifier: &ExternalIdentifierClaim) -> bool {
+    let value = identifier.value();
+    let positive_decimal = || {
+        let mut bytes = value.bytes();
+        bytes.next().is_some_and(|byte| matches!(byte, b'1'..=b'9'))
+            && bytes.all(|byte| byte.is_ascii_digit())
+    };
+    match identifier.namespace() {
+        "imdb.title" => value.strip_prefix("tt").is_some_and(|digits| {
+            !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())
+        }),
+        "wikidata" => value.strip_prefix('Q').is_some_and(|digits| {
+            let mut bytes = digits.bytes();
+            bytes.next().is_some_and(|byte| matches!(byte, b'1'..=b'9'))
+                && bytes.all(|byte| byte.is_ascii_digit())
+        }),
+        "tmdb.movie" | "tmdb.tv" | "tvdb.movie" | "tvdb.series" | "mal.anime" | "anidb.anime"
+        | "anilist.anime" | "kitsu.anime" | "simkl.anime" => positive_decimal(),
+        "googlebooks.volume" => ProviderIdentifierValueKind::AsciiToken.accepts(value),
+        _ => true,
+    }
+}
+
+fn route_priority(
+    intent: ResolutionIntent,
+    target_provider: &str,
+    anime_preference: AnimeGroupingPreference,
+    evidence: &IdentityRouteEvidence,
+) -> Option<(u8, IdentityRouteKind)> {
+    let identifier = evidence.identifier();
+    if !identity_route_value_is_valid(identifier) {
+        return None;
+    }
+    let namespace = identifier.namespace();
+    let grain = identifier.grain();
+    if evidence.kind() == IdentityRouteEvidenceKind::AcceptedCrosswalk {
+        let assertion = evidence.accepted_assertion()?;
+        let exact = assertion.relation() == IdentityAssertionRelation::Exact;
+        let safe_tv_work_subset = assertion.relation() == IdentityAssertionRelation::SubsetOf
+            && assertion.source_grain() == Grain::Release
+            && groups_by_tv_work(anime_preference)
+            && matches!(
+                (namespace, grain),
+                ("imdb.title" | "tmdb.movie" | "tvdb.movie", Grain::Film)
+                    | ("imdb.title" | "tmdb.tv" | "tvdb.series", Grain::Series)
+            );
+        if !(exact || intent == ResolutionIntent::NuvioExport && safe_tv_work_subset) {
+            return None;
+        }
+    }
+    match (intent, target_provider, namespace, grain, evidence.kind()) {
+        (
+            ResolutionIntent::MetadataLookup
+            | ResolutionIntent::MetadataEnrichment
+            | ResolutionIntent::DisplayProjection,
+            "tmdb",
+            "tmdb.movie",
+            Grain::Film,
+            IdentityRouteEvidenceKind::Direct,
+        )
+        | (
+            ResolutionIntent::MetadataLookup
+            | ResolutionIntent::MetadataEnrichment
+            | ResolutionIntent::DisplayProjection,
+            "tmdb",
+            "tmdb.tv",
+            Grain::Series,
+            IdentityRouteEvidenceKind::Direct,
+        ) => Some((0, IdentityRouteKind::ProviderNative)),
+        (
+            ResolutionIntent::MetadataLookup
+            | ResolutionIntent::MetadataEnrichment
+            | ResolutionIntent::DisplayProjection,
+            "tmdb",
+            "imdb.title",
+            Grain::Film | Grain::Series | Grain::Release,
+            IdentityRouteEvidenceKind::Direct,
+        ) => Some((1, IdentityRouteKind::VerifiedAlias)),
+        (
+            ResolutionIntent::MetadataLookup
+            | ResolutionIntent::MetadataEnrichment
+            | ResolutionIntent::DisplayProjection,
+            "tmdb",
+            "tvdb.series",
+            Grain::Series | Grain::Release,
+            IdentityRouteEvidenceKind::Direct,
+        )
+        | (
+            ResolutionIntent::MetadataLookup
+            | ResolutionIntent::MetadataEnrichment
+            | ResolutionIntent::DisplayProjection,
+            "tmdb",
+            "wikidata",
+            Grain::Film | Grain::Series | Grain::Release,
+            IdentityRouteEvidenceKind::Direct,
+        ) => Some((2, IdentityRouteKind::VerifiedAlias)),
+        (
+            ResolutionIntent::MetadataLookup
+            | ResolutionIntent::MetadataEnrichment
+            | ResolutionIntent::DisplayProjection,
+            "tmdb",
+            "tmdb.movie",
+            Grain::Film,
+            IdentityRouteEvidenceKind::AcceptedCrosswalk,
+        )
+        | (
+            ResolutionIntent::MetadataLookup
+            | ResolutionIntent::MetadataEnrichment
+            | ResolutionIntent::DisplayProjection,
+            "tmdb",
+            "tmdb.tv",
+            Grain::Series,
+            IdentityRouteEvidenceKind::AcceptedCrosswalk,
+        ) => Some((3, IdentityRouteKind::AcceptedCrosswalk)),
+        (
+            ResolutionIntent::MetadataLookup
+            | ResolutionIntent::MetadataEnrichment
+            | ResolutionIntent::DisplayProjection,
+            "tmdb",
+            "imdb.title",
+            Grain::Film | Grain::Series | Grain::Release,
+            IdentityRouteEvidenceKind::AcceptedCrosswalk,
+        ) => Some((4, IdentityRouteKind::AcceptedCrosswalk)),
+        (
+            ResolutionIntent::MetadataLookup
+            | ResolutionIntent::MetadataEnrichment
+            | ResolutionIntent::DisplayProjection,
+            "tmdb",
+            "tvdb.series",
+            Grain::Series | Grain::Release,
+            IdentityRouteEvidenceKind::AcceptedCrosswalk,
+        )
+        | (
+            ResolutionIntent::MetadataLookup
+            | ResolutionIntent::MetadataEnrichment
+            | ResolutionIntent::DisplayProjection,
+            "tmdb",
+            "wikidata",
+            Grain::Film | Grain::Series | Grain::Release,
+            IdentityRouteEvidenceKind::AcceptedCrosswalk,
+        ) => Some((5, IdentityRouteKind::AcceptedCrosswalk)),
+        (
+            ResolutionIntent::MetadataLookup
+            | ResolutionIntent::MetadataEnrichment
+            | ResolutionIntent::DisplayProjection,
+            "google-books",
+            "googlebooks.volume",
+            Grain::Edition,
+            IdentityRouteEvidenceKind::Direct,
+        )
+        | (
+            ResolutionIntent::TrackerRead | ResolutionIntent::TrackerWrite,
+            "mal",
+            "mal.anime",
+            Grain::Release,
+            IdentityRouteEvidenceKind::Direct,
+        )
+        | (
+            ResolutionIntent::TrackerRead | ResolutionIntent::TrackerWrite,
+            "kitsu",
+            "kitsu.anime",
+            Grain::Release,
+            IdentityRouteEvidenceKind::Direct,
+        ) => Some((0, IdentityRouteKind::ProviderNative)),
+        (
+            ResolutionIntent::NuvioExport,
+            "nuvio",
+            _,
+            _,
+            evidence_kind @ (IdentityRouteEvidenceKind::Direct
+            | IdentityRouteEvidenceKind::AcceptedCrosswalk),
+        ) => {
+            let release = |expected| namespace == expected && grain == Grain::Release;
+            let priority = match anime_preference {
+                AnimeGroupingPreference::GroupByTvWork | AnimeGroupingPreference::Automatic => {
+                    nuvio_standard_route_priority(namespace, grain)?
+                }
+                AnimeGroupingPreference::KeepMalReleasesSeparate => {
+                    if release("mal.anime") {
+                        0
+                    } else if release("kitsu.anime") {
+                        1
+                    } else if release("anidb.anime") {
+                        2
+                    } else {
+                        nuvio_standard_route_priority(namespace, grain)? + 3
+                    }
+                }
+                AnimeGroupingPreference::KeepKitsuReleasesSeparate => {
+                    if release("kitsu.anime") {
+                        0
+                    } else if release("mal.anime") {
+                        1
+                    } else if release("anidb.anime") {
+                        2
+                    } else {
+                        nuvio_standard_route_priority(namespace, grain)? + 3
+                    }
+                }
+            };
+            let (evidence_priority, route_kind) = match evidence_kind {
+                IdentityRouteEvidenceKind::Direct => (0, IdentityRouteKind::VerifiedAlias),
+                IdentityRouteEvidenceKind::AcceptedCrosswalk => {
+                    (1, IdentityRouteKind::AcceptedCrosswalk)
+                }
+            };
+            Some((priority * 2 + evidence_priority, route_kind))
+        }
+        _ => None,
+    }
+}
+
+/// Plan one provider route without changing a Record or Chronicle history.
+///
+/// Unsupported identifiers remain visible in `known_identifiers`. Multiple
+/// identifiers at the best accepted priority fail closed as ambiguous.
+pub fn plan_purpose_identity_route(
+    record_id: RecordId,
+    intent: ResolutionIntent,
+    target_provider: ProviderId,
+    anime_preference: AnimeGroupingPreference,
+    identifiers: &[ExternalIdentifierClaim],
+) -> PurposeIdentityRoutePlan {
+    let evidence = identifiers
+        .iter()
+        .cloned()
+        .map(IdentityRouteEvidence::direct)
+        .collect::<Vec<_>>();
+    plan_purpose_identity_route_with_evidence(
+        record_id,
+        intent,
+        target_provider,
+        anime_preference,
+        &evidence,
+    )
+}
+
+pub fn plan_purpose_identity_route_with_evidence(
+    record_id: RecordId,
+    intent: ResolutionIntent,
+    target_provider: ProviderId,
+    anime_preference: AnimeGroupingPreference,
+    evidence: &[IdentityRouteEvidence],
+) -> PurposeIdentityRoutePlan {
+    let evidence = evidence
+        .iter()
+        .filter(|item| {
+            item.accepted_assertion()
+                .is_none_or(|assertion| assertion.record_id() == record_id)
+        })
+        .collect::<Vec<_>>();
+    let mut known_identifiers = evidence
+        .iter()
+        .map(|item| item.identifier().clone())
+        .collect::<Vec<_>>();
+    known_identifiers.sort_by(|left, right| {
+        (left.namespace(), left.grain(), left.value()).cmp(&(
+            right.namespace(),
+            right.grain(),
+            right.value(),
+        ))
+    });
+    known_identifiers.dedup();
+
+    let mut candidates = evidence
+        .iter()
+        .filter_map(|evidence| {
+            route_priority(intent, target_provider.as_str(), anime_preference, evidence).map(
+                |(priority, kind)| {
+                    (
+                        priority,
+                        PurposeIdentityRoute {
+                            identifier: evidence.identifier().clone(),
+                            kind,
+                            accepted_assertions: evidence
+                                .accepted_assertion()
+                                .into_iter()
+                                .collect(),
+                        },
+                    )
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    let kind_order = |kind| match kind {
+        IdentityRouteKind::ProviderNative => 0,
+        IdentityRouteKind::VerifiedAlias => 1,
+        IdentityRouteKind::AcceptedCrosswalk => 2,
+    };
+    candidates.sort_by(|(left_priority, left), (right_priority, right)| {
+        (
+            left_priority,
+            left.identifier.namespace(),
+            left.identifier.grain(),
+            left.identifier.value(),
+            kind_order(left.kind),
+        )
+            .cmp(&(
+                right_priority,
+                right.identifier.namespace(),
+                right.identifier.grain(),
+                right.identifier.value(),
+                kind_order(right.kind),
+            ))
+    });
+    let mut merged_candidates: Vec<(u8, PurposeIdentityRoute)> =
+        Vec::with_capacity(candidates.len());
+    for (priority, mut route) in candidates {
+        let same_coordinate =
+            merged_candidates
+                .last()
+                .is_some_and(|(previous_priority, previous)| {
+                    *previous_priority == priority
+                        && previous.identifier == route.identifier
+                        && previous.kind == route.kind
+                });
+        if same_coordinate {
+            let (_, previous) = merged_candidates
+                .last_mut()
+                .expect("same coordinate requires a previous candidate");
+            previous
+                .accepted_assertions
+                .append(&mut route.accepted_assertions);
+            previous
+                .accepted_assertions
+                .sort_by_key(|assertion| assertion.assertion_id().uuid());
+            previous.accepted_assertions.dedup();
+        } else {
+            merged_candidates.push((priority, route));
+        }
+    }
+    let mut supporting_assertions =
+        HashMap::<ExternalIdentifierClaim, Vec<AcceptedIdentityRouteAssertion>>::new();
+    for (_, route) in &merged_candidates {
+        supporting_assertions
+            .entry(route.identifier.clone())
+            .or_default()
+            .extend_from_slice(&route.accepted_assertions);
+    }
+    for (_, route) in &mut merged_candidates {
+        if route.kind == IdentityRouteKind::AcceptedCrosswalk {
+            continue;
+        }
+        if let Some(assertions) = supporting_assertions.get(&route.identifier) {
+            route.accepted_assertions.extend_from_slice(assertions);
+        }
+        route
+            .accepted_assertions
+            .sort_by_key(|assertion| assertion.assertion_id().uuid());
+        route.accepted_assertions.dedup();
+    }
+    let candidates = merged_candidates;
+
+    let best_priority = candidates.first().map(|(priority, _)| *priority);
+    let best = candidates
+        .iter()
+        .filter(|(priority, _)| Some(*priority) == best_priority)
+        .map(|(_, route)| route)
+        .collect::<Vec<_>>();
+    let (status, selected_route) = match best.as_slice() {
+        [] => (PurposeIdentityRouteStatus::Missing, None),
+        [selected] => (
+            PurposeIdentityRouteStatus::Selected,
+            Some((*selected).clone()),
+        ),
+        _ => (PurposeIdentityRouteStatus::Ambiguous, None),
+    };
+
+    PurposeIdentityRoutePlan {
+        record_id,
+        intent,
+        target_provider,
+        status,
+        known_identifiers,
+        candidate_routes: candidates.into_iter().map(|(_, route)| route).collect(),
+        selected_route,
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnimeGroupingRecordPreview {
+    record_id: RecordId,
+    previous_preference: AnimeGroupingPreference,
+    proposed_preference: AnimeGroupingPreference,
+    previous_status: PurposeIdentityRouteStatus,
+    proposed_status: PurposeIdentityRouteStatus,
+    previous_route: Option<PurposeIdentityRoute>,
+    proposed_route: Option<PurposeIdentityRoute>,
+    route_changed: bool,
+    possible_season_regrouping: bool,
+}
+
+impl AnimeGroupingRecordPreview {
+    pub const fn record_id(&self) -> RecordId {
+        self.record_id
+    }
+
+    pub const fn previous_preference(&self) -> AnimeGroupingPreference {
+        self.previous_preference
+    }
+
+    pub const fn proposed_preference(&self) -> AnimeGroupingPreference {
+        self.proposed_preference
+    }
+
+    pub const fn previous_status(&self) -> PurposeIdentityRouteStatus {
+        self.previous_status
+    }
+
+    pub const fn proposed_status(&self) -> PurposeIdentityRouteStatus {
+        self.proposed_status
+    }
+
+    pub const fn previous_route(&self) -> Option<&PurposeIdentityRoute> {
+        self.previous_route.as_ref()
+    }
+
+    pub const fn proposed_route(&self) -> Option<&PurposeIdentityRoute> {
+        self.proposed_route.as_ref()
+    }
+
+    pub const fn route_changed(&self) -> bool {
+        self.route_changed
+    }
+
+    pub const fn unresolved(&self) -> bool {
+        !matches!(self.proposed_status, PurposeIdentityRouteStatus::Selected)
+    }
+
+    pub const fn possible_season_regrouping(&self) -> bool {
+        self.possible_season_regrouping
+    }
+}
+
+const fn groups_by_tv_work(preference: AnimeGroupingPreference) -> bool {
+    matches!(
+        preference,
+        AnimeGroupingPreference::GroupByTvWork | AnimeGroupingPreference::Automatic
+    )
+}
+
+/// Compare one Record's outward Nuvio route without mutating identity or history.
+pub fn preview_anime_grouping_change_for_record(
+    record_id: RecordId,
+    previous_preference: AnimeGroupingPreference,
+    proposed_preference: AnimeGroupingPreference,
+    identifiers: &[ExternalIdentifierClaim],
+) -> AnimeGroupingRecordPreview {
+    let evidence = identifiers
+        .iter()
+        .cloned()
+        .map(IdentityRouteEvidence::direct)
+        .collect::<Vec<_>>();
+    preview_anime_grouping_change_for_record_with_evidence(
+        record_id,
+        previous_preference,
+        proposed_preference,
+        &evidence,
+    )
+}
+
+pub fn preview_anime_grouping_change_for_record_with_evidence(
+    record_id: RecordId,
+    previous_preference: AnimeGroupingPreference,
+    proposed_preference: AnimeGroupingPreference,
+    evidence: &[IdentityRouteEvidence],
+) -> AnimeGroupingRecordPreview {
+    let nuvio = ProviderId::try_new("nuvio").expect("the fixed Nuvio provider ID is valid");
+    let previous = plan_purpose_identity_route_with_evidence(
+        record_id,
+        ResolutionIntent::NuvioExport,
+        nuvio.clone(),
+        previous_preference,
+        evidence,
+    );
+    let proposed = plan_purpose_identity_route_with_evidence(
+        record_id,
+        ResolutionIntent::NuvioExport,
+        nuvio,
+        proposed_preference,
+        evidence,
+    );
+    let route_changed =
+        previous.status != proposed.status || previous.selected_route != proposed.selected_route;
+    let can_regroup_seasons = |route: Option<&PurposeIdentityRoute>| {
+        route.is_some_and(|route| {
+            matches!(route.identifier().grain(), Grain::Series | Grain::Release)
+        })
+    };
+    let possible_season_regrouping = route_changed
+        && (can_regroup_seasons(previous.selected_route())
+            || can_regroup_seasons(proposed.selected_route()));
+
+    AnimeGroupingRecordPreview {
+        record_id,
+        previous_preference,
+        proposed_preference,
+        previous_status: previous.status,
+        proposed_status: proposed.status,
+        previous_route: previous.selected_route,
+        proposed_route: proposed.selected_route,
+        route_changed,
+        possible_season_regrouping,
+    }
 }
 
 pub fn metadata_field_group(field_key: &FieldKey) -> Option<MetadataFieldGroup> {
@@ -1150,7 +1845,13 @@ pub trait MetadataProjectionPort: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fasti_domain::{ClientId, CredentialId, ProfileGrantId, ProfileId, WorkspaceId};
+    use chrono::{NaiveDate, TimeZone, Utc};
+    use fasti_domain::{
+        ClientId, CredentialId, ExternalIdentifierId, IdentityAssertionEvidence,
+        IdentityAssertionEvidenceClass, IdentityAssertionStatus, IdentityCoverageMode,
+        IdentityCoverageSegment, IdentityEvidenceMethod, IdentityNumberingSpace, IdentityOrdering,
+        ProfileGrantId, ProfileId, ReceivedAt, WorkspaceId,
+    };
 
     fn access() -> RequestAccessContext {
         RequestAccessContext::new(
@@ -1223,6 +1924,1154 @@ mod tests {
             .expect("Google Books mapping")
             .identifier("bad/value")
             .is_err());
+    }
+
+    fn identity_claim(namespace: &str, value: &str) -> ExternalIdentifierClaim {
+        ExternalIdentifierClaim::try_new(namespace, Grain::Release, value)
+            .expect("identity fixture")
+    }
+
+    fn identity_claim_at(namespace: &str, grain: Grain, value: &str) -> ExternalIdentifierClaim {
+        ExternalIdentifierClaim::try_new(namespace, grain, value).expect("identity fixture")
+    }
+
+    fn crosswalk_assertion_fixture(
+        record_id: RecordId,
+        source_grain: Grain,
+        target: ExternalIdentifierClaim,
+        relation: IdentityAssertionRelation,
+        initial_status: IdentityAssertionStatus,
+        evidence_class: IdentityAssertionEvidenceClass,
+        evidence_method: IdentityEvidenceMethod,
+    ) -> IdentityAssertion {
+        let assertion_id = IdentityAssertionId::new_v7();
+        let coverage = matches!(
+            relation,
+            IdentityAssertionRelation::SubsetOf
+                | IdentityAssertionRelation::SupersetOf
+                | IdentityAssertionRelation::Overlaps
+        )
+        .then(|| {
+            IdentityCoverageSegment::try_new(
+                IdentityCoverageMode::Flat,
+                None,
+                IdentityNumberingSpace::Regular,
+                IdentityOrdering::Provider,
+                1,
+                1,
+                0,
+                Some("*".to_owned()),
+            )
+            .expect("coverage fixture")
+        })
+        .into_iter()
+        .collect();
+        let source = fasti_domain::ExternalIdentifier::new(
+            ExternalIdentifierId::new_v7(),
+            WorkspaceId::new_v7(),
+            record_id,
+            identity_claim_at("source.fixture", source_grain, "source"),
+        );
+        IdentityAssertion::try_new(
+            assertion_id,
+            &source,
+            target,
+            relation,
+            coverage,
+            Vec::new(),
+            evidence_class,
+            vec![IdentityAssertionEvidence::try_new(
+                evidence_method,
+                "pinned fixture source",
+                Some("fixture-root".to_owned()),
+                (evidence_method == IdentityEvidenceMethod::HumanVerified)
+                    .then(|| "fixture-reviewer".to_owned()),
+                NaiveDate::from_ymd_opt(2026, 8, 30).expect("date fixture"),
+                None,
+            )
+            .expect("evidence fixture")],
+            "test-fixture",
+            Some("fixture-v1".to_owned()),
+            None,
+            (relation == IdentityAssertionRelation::NotSameAs)
+                .then(|| "These coordinates identify different releases.".to_owned()),
+            initial_status,
+            ReceivedAt::from_application_clock(
+                Utc.timestamp_opt(1_800_000_000, 0)
+                    .single()
+                    .expect("time fixture"),
+            ),
+        )
+        .expect("identity assertion fixture")
+    }
+
+    fn accepted_crosswalk_fixture(
+        record_id: RecordId,
+        target: ExternalIdentifierClaim,
+        relation: IdentityAssertionRelation,
+    ) -> (IdentityRouteEvidence, IdentityAssertionId) {
+        let assertion = crosswalk_assertion_fixture(
+            record_id,
+            Grain::Release,
+            target,
+            relation,
+            IdentityAssertionStatus::Accepted,
+            IdentityAssertionEvidenceClass::Verified,
+            IdentityEvidenceMethod::HumanVerified,
+        );
+        let assertion_id = assertion.assertion_id();
+        (
+            IdentityRouteEvidence::accepted_crosswalk(&assertion, &[])
+                .expect("accepted crosswalk fixture"),
+            assertion_id,
+        )
+    }
+
+    #[test]
+    fn accepted_crosswalk_requires_a_validated_effective_lifecycle() {
+        let assertion = crosswalk_assertion_fixture(
+            RecordId::new_v7(),
+            Grain::Release,
+            identity_claim("mal.anime", "49894"),
+            IdentityAssertionRelation::Exact,
+            IdentityAssertionStatus::Candidate,
+            IdentityAssertionEvidenceClass::Verified,
+            IdentityEvidenceMethod::HumanVerified,
+        );
+        let accepted = IdentityAssertionLifecycleEvent::try_new(
+            assertion.assertion_id(),
+            1,
+            IdentityAssertionStatus::Candidate,
+            IdentityAssertionStatus::Accepted,
+            ClientId::new_v7(),
+            ReceivedAt::from_application_clock(
+                Utc.timestamp_opt(1_800_000_001, 0)
+                    .single()
+                    .expect("acceptance time"),
+            ),
+            None,
+        )
+        .expect("accepted lifecycle event");
+        assert!(IdentityRouteEvidence::accepted_crosswalk(
+            &assertion,
+            std::slice::from_ref(&accepted)
+        )
+        .is_some());
+
+        for status in [
+            IdentityAssertionStatus::Disputed,
+            IdentityAssertionStatus::Rejected,
+        ] {
+            let event = IdentityAssertionLifecycleEvent::try_new(
+                assertion.assertion_id(),
+                1,
+                IdentityAssertionStatus::Candidate,
+                status,
+                ClientId::new_v7(),
+                ReceivedAt::from_application_clock(
+                    Utc.timestamp_opt(1_800_000_001, 0)
+                        .single()
+                        .expect("negative lifecycle time"),
+                ),
+                Some(fasti_domain::Sha256Digest::from_bytes(&[1; 32])),
+            )
+            .expect("negative lifecycle event");
+            assert!(IdentityRouteEvidence::accepted_crosswalk(&assertion, &[event]).is_none());
+        }
+
+        let revoked = IdentityAssertionLifecycleEvent::try_new(
+            assertion.assertion_id(),
+            2,
+            IdentityAssertionStatus::Accepted,
+            IdentityAssertionStatus::Revoked,
+            ClientId::new_v7(),
+            ReceivedAt::from_application_clock(
+                Utc.timestamp_opt(1_800_000_002, 0)
+                    .single()
+                    .expect("revocation time"),
+            ),
+            Some(fasti_domain::Sha256Digest::from_bytes(&[1; 32])),
+        )
+        .expect("revoked lifecycle event");
+        assert!(
+            IdentityRouteEvidence::accepted_crosswalk(&assertion, &[accepted, revoked]).is_none()
+        );
+
+        let skipped = IdentityAssertionLifecycleEvent::try_new(
+            assertion.assertion_id(),
+            2,
+            IdentityAssertionStatus::Candidate,
+            IdentityAssertionStatus::Accepted,
+            ClientId::new_v7(),
+            ReceivedAt::from_application_clock(
+                Utc.timestamp_opt(1_800_000_001, 0)
+                    .single()
+                    .expect("skipped time"),
+            ),
+            None,
+        )
+        .expect("individually valid skipped event");
+        assert!(IdentityRouteEvidence::accepted_crosswalk(&assertion, &[skipped]).is_none());
+
+        let inferred = crosswalk_assertion_fixture(
+            RecordId::new_v7(),
+            Grain::Release,
+            identity_claim("imdb.title", "tt28254942"),
+            IdentityAssertionRelation::Exact,
+            IdentityAssertionStatus::Candidate,
+            IdentityAssertionEvidenceClass::Inferred,
+            IdentityEvidenceMethod::HeuristicTitleMatch,
+        );
+        assert!(IdentityRouteEvidence::accepted_crosswalk(&inferred, &[]).is_none());
+        let reviewed = IdentityAssertionLifecycleEvent::try_new(
+            inferred.assertion_id(),
+            1,
+            IdentityAssertionStatus::Candidate,
+            IdentityAssertionStatus::Accepted,
+            ClientId::new_v7(),
+            ReceivedAt::from_application_clock(
+                Utc.timestamp_opt(1_800_000_001, 0)
+                    .single()
+                    .expect("acceptance time"),
+            ),
+            None,
+        )
+        .expect("explicit review event");
+        assert!(IdentityRouteEvidence::accepted_crosswalk(&inferred, &[reviewed]).is_some());
+    }
+
+    #[test]
+    fn candidate_and_disputed_evidence_never_become_routes() {
+        for (evidence_class, initial_status) in [
+            (
+                IdentityAssertionEvidenceClass::Candidate,
+                IdentityAssertionStatus::Candidate,
+            ),
+            (
+                IdentityAssertionEvidenceClass::Disputed,
+                IdentityAssertionStatus::Disputed,
+            ),
+        ] {
+            let record_id = RecordId::new_v7();
+            let source = fasti_domain::ExternalIdentifier::new(
+                ExternalIdentifierId::new_v7(),
+                WorkspaceId::new_v7(),
+                record_id,
+                identity_claim("mal.anime", "49894"),
+            );
+            let assertion = IdentityAssertion::try_new(
+                IdentityAssertionId::new_v7(),
+                &source,
+                identity_claim("imdb.title", "tt28254942"),
+                IdentityAssertionRelation::Exact,
+                Vec::new(),
+                Vec::new(),
+                evidence_class,
+                vec![IdentityAssertionEvidence::try_new(
+                    IdentityEvidenceMethod::HumanVerified,
+                    "reviewed candidate fixture",
+                    Some("candidate-fixture-root".to_owned()),
+                    Some("fixture-reviewer".to_owned()),
+                    NaiveDate::from_ymd_opt(2026, 8, 30).expect("date fixture"),
+                    None,
+                )
+                .expect("candidate evidence")],
+                "test-fixture",
+                Some("fixture-v1".to_owned()),
+                None,
+                None,
+                initial_status,
+                ReceivedAt::from_application_clock(
+                    Utc.timestamp_opt(1_800_000_000, 0)
+                        .single()
+                        .expect("assertion time"),
+                ),
+            )
+            .expect("non-routable assertion");
+            let accepted = IdentityAssertionLifecycleEvent::try_new(
+                assertion.assertion_id(),
+                1,
+                initial_status,
+                IdentityAssertionStatus::Accepted,
+                ClientId::new_v7(),
+                ReceivedAt::from_application_clock(
+                    Utc.timestamp_opt(1_800_000_001, 0)
+                        .single()
+                        .expect("acceptance time"),
+                ),
+                None,
+            )
+            .expect("accepted lifecycle event");
+
+            assert_eq!(
+                assertion.effective_status(std::slice::from_ref(&accepted)),
+                Err(fasti_domain::IdentityAssertionLifecycleError::InvalidTransition)
+            );
+            assert!(IdentityRouteEvidence::accepted_crosswalk(&assertion, &[accepted]).is_none());
+        }
+    }
+
+    #[test]
+    fn unverified_authority_assertions_never_become_routes() {
+        let source = fasti_domain::ExternalIdentifier::new(
+            ExternalIdentifierId::new_v7(),
+            WorkspaceId::new_v7(),
+            RecordId::new_v7(),
+            identity_claim("mal.anime", "49894"),
+        );
+        let assertion = IdentityAssertion::try_new(
+            IdentityAssertionId::new_v7(),
+            &source,
+            identity_claim("imdb.title", "tt28254942"),
+            IdentityAssertionRelation::Exact,
+            Vec::new(),
+            Vec::new(),
+            IdentityAssertionEvidenceClass::Asserted,
+            vec![IdentityAssertionEvidence::try_new(
+                IdentityEvidenceMethod::RightsholderAsserted,
+                "unverified authority fixture",
+                Some("authority-fixture-root".to_owned()),
+                None,
+                NaiveDate::from_ymd_opt(2026, 8, 30).expect("date fixture"),
+                None,
+            )
+            .expect("asserted evidence")],
+            "test-fixture",
+            Some("fixture-v1".to_owned()),
+            Some("unverified:rightsholder".to_owned()),
+            None,
+            IdentityAssertionStatus::Accepted,
+            ReceivedAt::from_application_clock(
+                Utc.timestamp_opt(1_800_000_000, 0)
+                    .single()
+                    .expect("assertion time"),
+            ),
+        )
+        .expect("syntactically valid authority assertion");
+
+        assert_eq!(
+            assertion.effective_status(&[]),
+            Ok(IdentityAssertionStatus::Accepted)
+        );
+        assert!(IdentityRouteEvidence::accepted_crosswalk(&assertion, &[]).is_none());
+    }
+
+    #[test]
+    fn metadata_search_fails_closed_until_explicitly_owned() {
+        let record_id = RecordId::new_v7();
+        let (crosswalk, _) = accepted_crosswalk_fixture(
+            record_id,
+            identity_claim_at("tmdb.tv", Grain::Series, "43"),
+            IdentityAssertionRelation::Exact,
+        );
+        let evidence = [
+            IdentityRouteEvidence::direct(identity_claim_at("tmdb.tv", Grain::Series, "42")),
+            IdentityRouteEvidence::direct(identity_claim_at(
+                "imdb.title",
+                Grain::Series,
+                "tt0944947",
+            )),
+            crosswalk,
+        ];
+        let plan = plan_purpose_identity_route_with_evidence(
+            record_id,
+            ResolutionIntent::MetadataSearch,
+            ProviderId::try_new("tmdb").expect("TMDB provider"),
+            AnimeGroupingPreference::Automatic,
+            &evidence,
+        );
+
+        assert_eq!(plan.status(), PurposeIdentityRouteStatus::Missing);
+        assert_eq!(plan.known_identifiers().len(), evidence.len());
+        assert!(plan.candidate_routes().is_empty());
+        assert!(plan.selected_route().is_none());
+    }
+
+    #[test]
+    fn tmdb_metadata_uses_the_pinned_nuvio_imdb_alias_without_rekeying() {
+        let identifiers = vec![
+            identity_claim("mal.anime", "49894"),
+            identity_claim("imdb.title", "tt28254942"),
+        ];
+        let plan = plan_purpose_identity_route(
+            RecordId::new_v7(),
+            ResolutionIntent::MetadataLookup,
+            ProviderId::try_new("tmdb").expect("TMDB provider"),
+            AnimeGroupingPreference::KeepMalReleasesSeparate,
+            &identifiers,
+        );
+
+        assert_eq!(plan.status(), PurposeIdentityRouteStatus::Selected);
+        assert_eq!(plan.known_identifiers().len(), identifiers.len());
+        assert!(identifiers
+            .iter()
+            .all(|identifier| plan.known_identifiers().contains(identifier)));
+        let route = plan.selected_route().expect("IMDb alias route");
+        assert_eq!(route.identifier().namespace(), "imdb.title");
+        assert_eq!(route.identifier().value(), "tt28254942");
+        assert_eq!(route.kind(), IdentityRouteKind::VerifiedAlias);
+    }
+
+    #[test]
+    fn tmdb_metadata_prefers_its_native_identifier_over_an_imdb_alias() {
+        let tmdb = ExternalIdentifierClaim::try_new("tmdb.tv", Grain::Series, "42")
+            .expect("TMDB identity fixture");
+        let plan = plan_purpose_identity_route(
+            RecordId::new_v7(),
+            ResolutionIntent::MetadataLookup,
+            ProviderId::try_new("tmdb").expect("TMDB provider"),
+            AnimeGroupingPreference::GroupByTvWork,
+            &[tmdb.clone(), identity_claim("imdb.title", "tt28254942")],
+        );
+
+        let route = plan.selected_route().expect("native TMDB route");
+        assert_eq!(route.identifier(), &tmdb);
+        assert_eq!(route.kind(), IdentityRouteKind::ProviderNative);
+    }
+
+    #[test]
+    fn tmdb_metadata_routes_aliases_before_an_accepted_crosswalk() {
+        let record_id = RecordId::new_v7();
+        let imdb = IdentityRouteEvidence::direct(identity_claim_at(
+            "imdb.title",
+            Grain::Series,
+            "tt0944947",
+        ));
+        let tvdb = IdentityRouteEvidence::direct(identity_claim_at(
+            "tvdb.series",
+            Grain::Series,
+            "121361",
+        ));
+        let wikidata =
+            IdentityRouteEvidence::direct(identity_claim_at("wikidata", Grain::Series, "Q23572"));
+        let (crosswalk, assertion_id) = accepted_crosswalk_fixture(
+            record_id,
+            identity_claim_at("tmdb.tv", Grain::Series, "1399"),
+            IdentityAssertionRelation::Exact,
+        );
+
+        for (evidence, namespace, kind) in [
+            (
+                vec![imdb.clone(), tvdb.clone(), crosswalk.clone()],
+                "imdb.title",
+                IdentityRouteKind::VerifiedAlias,
+            ),
+            (
+                vec![tvdb.clone(), crosswalk.clone()],
+                "tvdb.series",
+                IdentityRouteKind::VerifiedAlias,
+            ),
+            (
+                vec![wikidata.clone(), crosswalk.clone()],
+                "wikidata",
+                IdentityRouteKind::VerifiedAlias,
+            ),
+            (
+                vec![crosswalk.clone()],
+                "tmdb.tv",
+                IdentityRouteKind::AcceptedCrosswalk,
+            ),
+        ] {
+            let plan = plan_purpose_identity_route_with_evidence(
+                record_id,
+                ResolutionIntent::MetadataEnrichment,
+                ProviderId::try_new("tmdb").expect("TMDB provider"),
+                AnimeGroupingPreference::Automatic,
+                &evidence,
+            );
+            let route = plan.selected_route().expect("selected TMDB route");
+            assert_eq!(route.identifier().namespace(), namespace);
+            assert_eq!(route.kind(), kind);
+            let expected_assertions =
+                (kind == IdentityRouteKind::AcceptedCrosswalk).then_some(assertion_id);
+            assert_eq!(
+                route
+                    .accepted_assertions()
+                    .iter()
+                    .map(|assertion| assertion.assertion_id())
+                    .collect::<Vec<_>>(),
+                expected_assertions.into_iter().collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[test]
+    fn tmdb_find_routes_only_tvdb_series_grains() {
+        for identifier in [
+            identity_claim_at("tvdb.movie", Grain::Film, "123"),
+            identity_claim_at("tvdb.series", Grain::Film, "123"),
+        ] {
+            let plan = plan_purpose_identity_route(
+                RecordId::new_v7(),
+                ResolutionIntent::MetadataLookup,
+                ProviderId::try_new("tmdb").expect("TMDB provider"),
+                AnimeGroupingPreference::Automatic,
+                &[identifier],
+            );
+
+            assert_eq!(plan.status(), PurposeIdentityRouteStatus::Missing);
+            assert!(plan.selected_route().is_none());
+        }
+    }
+
+    #[test]
+    fn tmdb_metadata_accepts_reviewed_exact_alias_crosswalks() {
+        for identifier in [
+            identity_claim_at("imdb.title", Grain::Series, "tt0944947"),
+            identity_claim_at("tvdb.series", Grain::Series, "121361"),
+            identity_claim_at("wikidata", Grain::Series, "Q23572"),
+        ] {
+            let record_id = RecordId::new_v7();
+            let (crosswalk, assertion_id) = accepted_crosswalk_fixture(
+                record_id,
+                identifier.clone(),
+                IdentityAssertionRelation::Exact,
+            );
+            let plan = plan_purpose_identity_route_with_evidence(
+                record_id,
+                ResolutionIntent::MetadataEnrichment,
+                ProviderId::try_new("tmdb").expect("TMDB provider"),
+                AnimeGroupingPreference::Automatic,
+                &[crosswalk],
+            );
+
+            let route = plan.selected_route().expect("reviewed TMDB alias");
+            assert_eq!(route.identifier(), &identifier);
+            assert_eq!(route.kind(), IdentityRouteKind::AcceptedCrosswalk);
+            assert_eq!(route.accepted_assertions()[0].assertion_id(), assertion_id);
+        }
+
+        let record_id = RecordId::new_v7();
+        let evidence = [
+            identity_claim_at("tmdb.tv", Grain::Series, "1399"),
+            identity_claim_at("imdb.title", Grain::Series, "tt0944947"),
+            identity_claim_at("tvdb.series", Grain::Series, "121361"),
+            identity_claim_at("wikidata", Grain::Series, "Q23572"),
+        ]
+        .map(|identifier| {
+            accepted_crosswalk_fixture(record_id, identifier, IdentityAssertionRelation::Exact).0
+        });
+        let plan = plan_purpose_identity_route_with_evidence(
+            record_id,
+            ResolutionIntent::MetadataEnrichment,
+            ProviderId::try_new("tmdb").expect("TMDB provider"),
+            AnimeGroupingPreference::Automatic,
+            &evidence,
+        );
+        assert_eq!(
+            plan.selected_route()
+                .expect("highest-priority reviewed coordinate")
+                .identifier()
+                .namespace(),
+            "tmdb.tv"
+        );
+        assert_eq!(
+            plan.candidate_routes()
+                .iter()
+                .map(|route| route.identifier().namespace())
+                .collect::<Vec<_>>(),
+            ["tmdb.tv", "imdb.title", "tvdb.series", "wikidata"]
+        );
+    }
+
+    #[test]
+    fn tmdb_crosswalk_routes_require_compatible_grains() {
+        for identifier in [
+            identity_claim_at("tmdb.movie", Grain::Series, "123"),
+            identity_claim_at("tmdb.tv", Grain::Film, "456"),
+            identity_claim_at("tvdb.movie", Grain::Film, "789"),
+            identity_claim_at("tvdb.series", Grain::Film, "789"),
+        ] {
+            let record_id = RecordId::new_v7();
+            let plan = plan_purpose_identity_route_with_evidence(
+                record_id,
+                ResolutionIntent::MetadataLookup,
+                ProviderId::try_new("tmdb").expect("TMDB provider"),
+                AnimeGroupingPreference::Automatic,
+                &[accepted_crosswalk_fixture(
+                    record_id,
+                    identifier,
+                    IdentityAssertionRelation::Exact,
+                )
+                .0],
+            );
+
+            assert_eq!(plan.status(), PurposeIdentityRouteStatus::Missing);
+            assert!(plan.selected_route().is_none());
+        }
+    }
+
+    #[test]
+    fn tracker_write_uses_only_the_target_provider_native_identifier() {
+        let plan = plan_purpose_identity_route(
+            RecordId::new_v7(),
+            ResolutionIntent::TrackerWrite,
+            ProviderId::try_new("kitsu").expect("Kitsu provider"),
+            AnimeGroupingPreference::GroupByTvWork,
+            &[
+                identity_claim("imdb.title", "tt28254942"),
+                identity_claim("mal.anime", "49894"),
+                identity_claim("kitsu.anime", "7442"),
+            ],
+        );
+
+        let route = plan.selected_route().expect("Kitsu write route");
+        assert_eq!(route.identifier().namespace(), "kitsu.anime");
+        assert_eq!(route.kind(), IdentityRouteKind::ProviderNative);
+        assert_eq!(plan.candidate_routes().len(), 1);
+    }
+
+    #[test]
+    fn tracker_write_fails_closed_without_the_target_provider_identifier() {
+        let plan = plan_purpose_identity_route(
+            RecordId::new_v7(),
+            ResolutionIntent::TrackerWrite,
+            ProviderId::try_new("kitsu").expect("Kitsu provider"),
+            AnimeGroupingPreference::GroupByTvWork,
+            &[
+                identity_claim("imdb.title", "tt28254942"),
+                identity_claim("mal.anime", "49894"),
+            ],
+        );
+
+        assert_eq!(plan.status(), PurposeIdentityRouteStatus::Missing);
+        assert!(plan.selected_route().is_none());
+        assert!(plan.candidate_routes().is_empty());
+    }
+
+    #[test]
+    fn equally_ranked_aliases_fail_closed_as_ambiguous() {
+        let plan = plan_purpose_identity_route(
+            RecordId::new_v7(),
+            ResolutionIntent::MetadataLookup,
+            ProviderId::try_new("tmdb").expect("TMDB provider"),
+            AnimeGroupingPreference::GroupByTvWork,
+            &[
+                identity_claim("imdb.title", "tt0000001"),
+                identity_claim("imdb.title", "tt0000002"),
+            ],
+        );
+
+        assert_eq!(plan.status(), PurposeIdentityRouteStatus::Ambiguous);
+        assert!(plan.selected_route().is_none());
+        assert_eq!(plan.candidate_routes().len(), 2);
+    }
+
+    #[test]
+    fn malformed_provider_values_remain_known_but_never_route() {
+        for identifier in [
+            identity_claim_at("imdb.title", Grain::Series, "tt12:34"),
+            identity_claim_at("tmdb.tv", Grain::Series, "-1"),
+            identity_claim_at("tvdb.series", Grain::Series, "0"),
+            identity_claim_at("wikidata", Grain::Series, "q23572"),
+            identity_claim("mal.anime", "1/2"),
+        ] {
+            let plan = plan_purpose_identity_route(
+                RecordId::new_v7(),
+                ResolutionIntent::NuvioExport,
+                ProviderId::try_new("nuvio").expect("Nuvio provider"),
+                AnimeGroupingPreference::Automatic,
+                std::slice::from_ref(&identifier),
+            );
+            assert_eq!(plan.status(), PurposeIdentityRouteStatus::Missing);
+            assert_eq!(plan.known_identifiers(), &[identifier]);
+            assert!(plan.candidate_routes().is_empty());
+        }
+    }
+
+    #[test]
+    fn anime_export_preference_changes_only_the_selected_projection() {
+        let identifiers = [
+            identity_claim("imdb.title", "tt28254942"),
+            identity_claim("mal.anime", "49894"),
+            identity_claim("kitsu.anime", "7442"),
+        ];
+        for (preference, namespace) in [
+            (AnimeGroupingPreference::GroupByTvWork, "imdb.title"),
+            (AnimeGroupingPreference::Automatic, "imdb.title"),
+            (
+                AnimeGroupingPreference::KeepMalReleasesSeparate,
+                "mal.anime",
+            ),
+            (
+                AnimeGroupingPreference::KeepKitsuReleasesSeparate,
+                "kitsu.anime",
+            ),
+        ] {
+            let plan = plan_purpose_identity_route(
+                RecordId::new_v7(),
+                ResolutionIntent::NuvioExport,
+                ProviderId::try_new("nuvio").expect("Nuvio provider"),
+                preference,
+                &identifiers,
+            );
+            assert_eq!(
+                plan.selected_route()
+                    .expect("selected anime export route")
+                    .identifier()
+                    .namespace(),
+                namespace
+            );
+            assert_eq!(plan.known_identifiers().len(), identifiers.len());
+            assert!(identifiers
+                .iter()
+                .all(|identifier| plan.known_identifiers().contains(identifier)));
+        }
+    }
+
+    #[test]
+    fn tv_work_grouping_accepts_a_series_grained_coordinate() {
+        let plan = plan_purpose_identity_route(
+            RecordId::new_v7(),
+            ResolutionIntent::NuvioExport,
+            ProviderId::try_new("nuvio").expect("Nuvio provider"),
+            AnimeGroupingPreference::GroupByTvWork,
+            &[
+                identity_claim("mal.anime", "49894"),
+                identity_claim_at("tmdb.tv", Grain::Series, "1399"),
+            ],
+        );
+
+        let route = plan.selected_route().expect("series grouping route");
+        assert_eq!(route.identifier().namespace(), "tmdb.tv");
+        assert_eq!(route.identifier().grain(), Grain::Series);
+    }
+
+    #[test]
+    fn nuvio_tv_work_grouping_uses_its_pinned_imdb_first_order() {
+        let plan = plan_purpose_identity_route(
+            RecordId::new_v7(),
+            ResolutionIntent::NuvioExport,
+            ProviderId::try_new("nuvio").expect("Nuvio provider"),
+            AnimeGroupingPreference::Automatic,
+            &[
+                identity_claim_at("tvdb.series", Grain::Series, "121361"),
+                identity_claim_at("tmdb.tv", Grain::Series, "1399"),
+                identity_claim("imdb.title", "tt0944947"),
+            ],
+        );
+
+        assert_eq!(plan.status(), PurposeIdentityRouteStatus::Selected);
+        assert_eq!(
+            plan.selected_route()
+                .expect("Nuvio-compatible TV work route")
+                .identifier()
+                .namespace(),
+            "imdb.title"
+        );
+    }
+
+    #[test]
+    fn nuvio_release_grouping_keeps_its_pinned_anime_fallback_order() {
+        let identifiers = [
+            identity_claim("imdb.title", "tt5311514"),
+            identity_claim("anidb.anime", "15159"),
+            identity_claim("anilist.anime", "32281"),
+            identity_claim("kitsu.anime", "12268"),
+            identity_claim("simkl.anime", "60001"),
+        ];
+        let nuvio = ProviderId::try_new("nuvio").expect("Nuvio provider");
+
+        let mal = plan_purpose_identity_route(
+            RecordId::new_v7(),
+            ResolutionIntent::NuvioExport,
+            nuvio.clone(),
+            AnimeGroupingPreference::KeepMalReleasesSeparate,
+            &identifiers,
+        );
+        assert_eq!(
+            mal.selected_route()
+                .expect("MAL-compatible fallback")
+                .identifier()
+                .namespace(),
+            "kitsu.anime"
+        );
+
+        let kitsu = plan_purpose_identity_route(
+            RecordId::new_v7(),
+            ResolutionIntent::NuvioExport,
+            nuvio,
+            AnimeGroupingPreference::KeepKitsuReleasesSeparate,
+            &identifiers[0..3],
+        );
+        assert_eq!(
+            kitsu
+                .selected_route()
+                .expect("Kitsu-compatible fallback")
+                .identifier()
+                .namespace(),
+            "anidb.anime"
+        );
+    }
+
+    #[test]
+    fn nuvio_content_ids_use_one_canonical_wire_encoder() {
+        for (namespace, grain, value, expected) in [
+            ("imdb.title", Grain::Series, "tt0944947", "tt0944947"),
+            ("tmdb.tv", Grain::Series, "1399", "tmdb:1399"),
+            ("tvdb.series", Grain::Series, "121361", "tvdb:121361"),
+            ("mal.anime", Grain::Release, "49894", "mal:49894"),
+            ("anidb.anime", Grain::Release, "15159", "anidb:15159"),
+            ("anilist.anime", Grain::Release, "32281", "anilist:32281"),
+            ("kitsu.anime", Grain::Release, "12268", "kitsu:12268"),
+            ("simkl.anime", Grain::Release, "60001", "simkl:60001"),
+        ] {
+            let plan = plan_purpose_identity_route(
+                RecordId::new_v7(),
+                ResolutionIntent::NuvioExport,
+                ProviderId::try_new("nuvio").expect("Nuvio provider"),
+                AnimeGroupingPreference::Automatic,
+                &[identity_claim_at(namespace, grain, value)],
+            );
+            assert_eq!(plan.nuvio_content_id().as_deref(), Some(expected));
+        }
+
+        let metadata_plan = plan_purpose_identity_route(
+            RecordId::new_v7(),
+            ResolutionIntent::MetadataLookup,
+            ProviderId::try_new("tmdb").expect("TMDB provider"),
+            AnimeGroupingPreference::Automatic,
+            &[identity_claim("imdb.title", "tt28254942")],
+        );
+        assert!(metadata_plan.nuvio_content_id().is_none());
+    }
+
+    #[test]
+    fn nuvio_grain_matrix_is_exact() {
+        for (namespace, grain, value, expected) in [
+            ("imdb.title", Grain::Release, "tt0944947", "tt0944947"),
+            ("tmdb.movie", Grain::Film, "550", "tmdb:550"),
+            ("tmdb.tv", Grain::Series, "1399", "tmdb:1399"),
+            ("tvdb.movie", Grain::Film, "123", "tvdb:123"),
+            ("tvdb.series", Grain::Series, "121361", "tvdb:121361"),
+            ("mal.anime", Grain::Release, "49894", "mal:49894"),
+            ("anidb.anime", Grain::Release, "15159", "anidb:15159"),
+            ("anilist.anime", Grain::Release, "32281", "anilist:32281"),
+            ("kitsu.anime", Grain::Release, "12268", "kitsu:12268"),
+            ("simkl.anime", Grain::Release, "60001", "simkl:60001"),
+        ] {
+            let plan = plan_purpose_identity_route(
+                RecordId::new_v7(),
+                ResolutionIntent::NuvioExport,
+                ProviderId::try_new("nuvio").expect("Nuvio provider"),
+                AnimeGroupingPreference::Automatic,
+                &[identity_claim_at(namespace, grain, value)],
+            );
+            assert_eq!(plan.nuvio_content_id().as_deref(), Some(expected));
+        }
+
+        for (namespace, grain) in [
+            ("tmdb.movie", Grain::Release),
+            ("tmdb.movie", Grain::Series),
+            ("tmdb.tv", Grain::Release),
+            ("tmdb.tv", Grain::Film),
+            ("tvdb.movie", Grain::Release),
+            ("tvdb.movie", Grain::Series),
+            ("tvdb.series", Grain::Release),
+            ("tvdb.series", Grain::Film),
+            ("mal.anime", Grain::Series),
+            ("kitsu.anime", Grain::Film),
+        ] {
+            let plan = plan_purpose_identity_route(
+                RecordId::new_v7(),
+                ResolutionIntent::NuvioExport,
+                ProviderId::try_new("nuvio").expect("Nuvio provider"),
+                AnimeGroupingPreference::Automatic,
+                &[identity_claim_at(namespace, grain, "123")],
+            );
+            assert_eq!(plan.status(), PurposeIdentityRouteStatus::Missing);
+            assert!(plan.selected_route().is_none());
+        }
+    }
+
+    #[test]
+    fn accepted_crosswalk_can_satisfy_a_nuvio_preference_without_hiding_direct_evidence() {
+        let record_id = RecordId::new_v7();
+        let (accepted_mal, assertion_id) = accepted_crosswalk_fixture(
+            record_id,
+            identity_claim("mal.anime", "49894"),
+            IdentityAssertionRelation::Exact,
+        );
+        let direct_kitsu = IdentityRouteEvidence::direct(identity_claim("kitsu.anime", "7442"));
+        let plan = plan_purpose_identity_route_with_evidence(
+            record_id,
+            ResolutionIntent::NuvioExport,
+            ProviderId::try_new("nuvio").expect("Nuvio provider"),
+            AnimeGroupingPreference::KeepMalReleasesSeparate,
+            &[direct_kitsu, accepted_mal.clone()],
+        );
+        let route = plan.selected_route().expect("accepted preferred route");
+        assert_eq!(route.identifier().namespace(), "mal.anime");
+        assert_eq!(route.kind(), IdentityRouteKind::AcceptedCrosswalk);
+        assert_eq!(route.accepted_assertions().len(), 1);
+        assert_eq!(route.accepted_assertions()[0].assertion_id(), assertion_id);
+        assert_eq!(
+            route.accepted_assertions()[0].relation(),
+            IdentityAssertionRelation::Exact
+        );
+
+        let direct_mal = IdentityRouteEvidence::direct(identity_claim("mal.anime", "49894"));
+        let direct_plan = plan_purpose_identity_route_with_evidence(
+            record_id,
+            ResolutionIntent::NuvioExport,
+            ProviderId::try_new("nuvio").expect("Nuvio provider"),
+            AnimeGroupingPreference::KeepMalReleasesSeparate,
+            &[accepted_mal, direct_mal],
+        );
+        let direct_route = direct_plan
+            .selected_route()
+            .expect("direct preferred route");
+        assert_eq!(direct_route.kind(), IdentityRouteKind::VerifiedAlias);
+        assert_eq!(direct_route.accepted_assertions().len(), 1);
+        assert_eq!(
+            direct_route.accepted_assertions()[0].assertion_id(),
+            assertion_id
+        );
+    }
+
+    #[test]
+    fn accepted_crosswalk_cannot_route_for_another_record() {
+        let assertion_record_id = RecordId::new_v7();
+        let requested_record_id = RecordId::new_v7();
+        let accepted = accepted_crosswalk_fixture(
+            assertion_record_id,
+            identity_claim("mal.anime", "49894"),
+            IdentityAssertionRelation::Exact,
+        )
+        .0;
+
+        let plan = plan_purpose_identity_route_with_evidence(
+            requested_record_id,
+            ResolutionIntent::NuvioExport,
+            ProviderId::try_new("nuvio").expect("Nuvio provider"),
+            AnimeGroupingPreference::KeepMalReleasesSeparate,
+            &[accepted],
+        );
+
+        assert_eq!(plan.record_id(), requested_record_id);
+        assert_eq!(plan.status(), PurposeIdentityRouteStatus::Missing);
+        assert!(plan.known_identifiers().is_empty());
+        assert!(plan.selected_route().is_none());
+        assert!(plan.candidate_routes().is_empty());
+    }
+
+    #[test]
+    fn accepted_crosswalk_relation_is_bound_to_the_resolution_intent() {
+        for relation in [
+            IdentityAssertionRelation::SupersetOf,
+            IdentityAssertionRelation::Overlaps,
+            IdentityAssertionRelation::AlternateCutOf,
+            IdentityAssertionRelation::Related,
+            IdentityAssertionRelation::NotSameAs,
+        ] {
+            let record_id = RecordId::new_v7();
+            let plan = plan_purpose_identity_route_with_evidence(
+                record_id,
+                ResolutionIntent::NuvioExport,
+                ProviderId::try_new("nuvio").expect("Nuvio provider"),
+                AnimeGroupingPreference::GroupByTvWork,
+                &[accepted_crosswalk_fixture(
+                    record_id,
+                    identity_claim_at("tmdb.tv", Grain::Series, "1399"),
+                    relation,
+                )
+                .0],
+            );
+            assert_eq!(plan.status(), PurposeIdentityRouteStatus::Missing);
+        }
+
+        let record_id = RecordId::new_v7();
+        let subset = accepted_crosswalk_fixture(
+            record_id,
+            identity_claim_at("tmdb.tv", Grain::Series, "1399"),
+            IdentityAssertionRelation::SubsetOf,
+        )
+        .0;
+        let grouped = plan_purpose_identity_route_with_evidence(
+            record_id,
+            ResolutionIntent::NuvioExport,
+            ProviderId::try_new("nuvio").expect("Nuvio provider"),
+            AnimeGroupingPreference::GroupByTvWork,
+            std::slice::from_ref(&subset),
+        );
+        assert_eq!(grouped.status(), PurposeIdentityRouteStatus::Selected);
+        assert_eq!(
+            grouped
+                .selected_route()
+                .expect("TV work subset")
+                .accepted_assertions()[0]
+                .relation(),
+            IdentityAssertionRelation::SubsetOf
+        );
+
+        let non_release_assertion = crosswalk_assertion_fixture(
+            record_id,
+            Grain::Film,
+            identity_claim_at("tmdb.tv", Grain::Series, "1399"),
+            IdentityAssertionRelation::SubsetOf,
+            IdentityAssertionStatus::Accepted,
+            IdentityAssertionEvidenceClass::Verified,
+            IdentityEvidenceMethod::HumanVerified,
+        );
+        let non_release = IdentityRouteEvidence::accepted_crosswalk(&non_release_assertion, &[])
+            .expect("accepted non-release evidence");
+        let non_release_plan = plan_purpose_identity_route_with_evidence(
+            record_id,
+            ResolutionIntent::NuvioExport,
+            ProviderId::try_new("nuvio").expect("Nuvio provider"),
+            AnimeGroupingPreference::GroupByTvWork,
+            &[non_release],
+        );
+        assert_eq!(
+            non_release_plan.status(),
+            PurposeIdentityRouteStatus::Missing
+        );
+
+        let release_preference = plan_purpose_identity_route_with_evidence(
+            record_id,
+            ResolutionIntent::NuvioExport,
+            ProviderId::try_new("nuvio").expect("Nuvio provider"),
+            AnimeGroupingPreference::KeepMalReleasesSeparate,
+            &[subset],
+        );
+        assert_eq!(
+            release_preference.status(),
+            PurposeIdentityRouteStatus::Missing
+        );
+    }
+
+    #[test]
+    fn anime_grouping_preview_retains_accepted_crosswalk_provenance() {
+        let record_id = RecordId::new_v7();
+        let (accepted_mal, assertion_id) = accepted_crosswalk_fixture(
+            record_id,
+            identity_claim("mal.anime", "49894"),
+            IdentityAssertionRelation::Exact,
+        );
+        let preview = preview_anime_grouping_change_for_record_with_evidence(
+            record_id,
+            AnimeGroupingPreference::GroupByTvWork,
+            AnimeGroupingPreference::KeepMalReleasesSeparate,
+            &[
+                IdentityRouteEvidence::direct(identity_claim("imdb.title", "tt28254942")),
+                accepted_mal,
+            ],
+        );
+
+        assert_eq!(
+            preview
+                .proposed_route()
+                .expect("accepted MAL projection")
+                .accepted_assertions()[0]
+                .assertion_id(),
+            assertion_id
+        );
+    }
+
+    #[test]
+    fn corroborating_assertions_for_one_coordinate_are_not_ambiguous() {
+        let record_id = RecordId::new_v7();
+        let identifier = identity_claim("mal.anime", "49894");
+        let (first_evidence, first) = accepted_crosswalk_fixture(
+            record_id,
+            identifier.clone(),
+            IdentityAssertionRelation::Exact,
+        );
+        let (second_evidence, second) =
+            accepted_crosswalk_fixture(record_id, identifier, IdentityAssertionRelation::Exact);
+        let plan = plan_purpose_identity_route_with_evidence(
+            record_id,
+            ResolutionIntent::NuvioExport,
+            ProviderId::try_new("nuvio").expect("Nuvio provider"),
+            AnimeGroupingPreference::KeepMalReleasesSeparate,
+            &[second_evidence, first_evidence],
+        );
+
+        assert_eq!(plan.status(), PurposeIdentityRouteStatus::Selected);
+        let mut expected = vec![first, second];
+        expected.sort_by_key(|id| id.uuid());
+        assert_eq!(
+            plan.selected_route()
+                .expect("one corroborated coordinate")
+                .accepted_assertions()
+                .iter()
+                .map(|assertion| assertion.assertion_id())
+                .collect::<Vec<_>>(),
+            expected
+        );
+    }
+
+    #[test]
+    fn anime_grouping_preview_reports_change_and_possible_regrouping() {
+        let record_id = RecordId::new_v7();
+        let preview = preview_anime_grouping_change_for_record(
+            record_id,
+            AnimeGroupingPreference::GroupByTvWork,
+            AnimeGroupingPreference::KeepMalReleasesSeparate,
+            &[
+                identity_claim("imdb.title", "tt28254942"),
+                identity_claim("mal.anime", "49894"),
+            ],
+        );
+
+        assert!(preview.route_changed());
+        assert_eq!(preview.record_id(), record_id);
+        assert!(!preview.unresolved());
+        assert!(preview.possible_season_regrouping());
+        assert_eq!(
+            preview
+                .previous_route()
+                .expect("previous route")
+                .identifier()
+                .namespace(),
+            "imdb.title"
+        );
+        assert_eq!(
+            preview
+                .proposed_route()
+                .expect("proposed route")
+                .identifier()
+                .namespace(),
+            "mal.anime"
+        );
+
+        let release_change = preview_anime_grouping_change_for_record(
+            record_id,
+            AnimeGroupingPreference::KeepMalReleasesSeparate,
+            AnimeGroupingPreference::KeepKitsuReleasesSeparate,
+            &[
+                identity_claim("mal.anime", "49894"),
+                identity_claim("kitsu.anime", "7442"),
+            ],
+        );
+        assert!(release_change.route_changed());
+        assert!(release_change.possible_season_regrouping());
+    }
+
+    #[test]
+    fn anime_grouping_preview_preserves_safe_missing_state() {
+        let record_id = RecordId::new_v7();
+        let preview = preview_anime_grouping_change_for_record(
+            record_id,
+            AnimeGroupingPreference::GroupByTvWork,
+            AnimeGroupingPreference::KeepKitsuReleasesSeparate,
+            &[identity_claim("local.unmapped", "17723")],
+        );
+
+        assert_eq!(preview.record_id(), record_id);
+        assert!(!preview.route_changed());
+        assert!(preview.unresolved());
+        assert!(!preview.possible_season_regrouping());
+        assert_eq!(
+            preview.previous_status(),
+            PurposeIdentityRouteStatus::Missing
+        );
+        assert_eq!(
+            preview.proposed_status(),
+            PurposeIdentityRouteStatus::Missing
+        );
+        assert!(preview.previous_route().is_none());
+        assert!(preview.proposed_route().is_none());
     }
 
     #[test]

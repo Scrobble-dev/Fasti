@@ -77,6 +77,11 @@ pub enum WorkspaceExportEntityDto {
     MetadataOverrideMigrationReceipts,
     MetadataAttributions,
     MetadataRefreshReceipts,
+    IdentityAssertions,
+    IdentityAssertionLifecycleEvents,
+    ProfileAnimeGroupingPolicies,
+    ClientAnimeGroupingPolicies,
+    AnimeGroupingPolicyReceipts,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -106,7 +111,7 @@ pub struct WorkspaceBlobDescriptorDto {
 #[serde(deny_unknown_fields)]
 pub struct WorkspaceManifestDto {
     pub format: WorkspaceManifestFormatDto,
-    #[schemars(range(min = 1, max = 4))]
+    #[schemars(range(min = 1, max = 5))]
     pub format_version: u32,
     #[schemars(length(equal = 36), regex(pattern = r"^wsp_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"), extend("format" = "fasti-workspace-id"))]
     pub workspace_id: String,
@@ -122,7 +127,7 @@ pub struct WorkspaceManifestDto {
     pub migration_version: u32,
     #[schemars(length(equal = 71), regex(pattern = r"^sha256:[0-9a-f]{64}$"), extend("format" = "sha256"))]
     pub migration_digest: String,
-    #[schemars(length(min = 16, max = 29))]
+    #[schemars(length(min = 16, max = 34))]
     pub streams: Vec<WorkspaceStreamDescriptorDto>,
     pub blobs: Vec<WorkspaceBlobDescriptorDto>,
 }
@@ -256,6 +261,19 @@ impl From<WorkspaceExportEntityDto> for WorkspaceExportEntity {
             }
             WorkspaceExportEntityDto::MetadataAttributions => Self::MetadataAttributions,
             WorkspaceExportEntityDto::MetadataRefreshReceipts => Self::MetadataRefreshReceipts,
+            WorkspaceExportEntityDto::IdentityAssertions => Self::IdentityAssertions,
+            WorkspaceExportEntityDto::IdentityAssertionLifecycleEvents => {
+                Self::IdentityAssertionLifecycleEvents
+            }
+            WorkspaceExportEntityDto::ProfileAnimeGroupingPolicies => {
+                Self::ProfileAnimeGroupingPolicies
+            }
+            WorkspaceExportEntityDto::ClientAnimeGroupingPolicies => {
+                Self::ClientAnimeGroupingPolicies
+            }
+            WorkspaceExportEntityDto::AnimeGroupingPolicyReceipts => {
+                Self::AnimeGroupingPolicyReceipts
+            }
         }
     }
 }
@@ -302,6 +320,15 @@ impl From<WorkspaceExportEntity> for WorkspaceExportEntityDto {
             }
             WorkspaceExportEntity::MetadataAttributions => Self::MetadataAttributions,
             WorkspaceExportEntity::MetadataRefreshReceipts => Self::MetadataRefreshReceipts,
+            WorkspaceExportEntity::IdentityAssertions => Self::IdentityAssertions,
+            WorkspaceExportEntity::IdentityAssertionLifecycleEvents => {
+                Self::IdentityAssertionLifecycleEvents
+            }
+            WorkspaceExportEntity::ProfileAnimeGroupingPolicies => {
+                Self::ProfileAnimeGroupingPolicies
+            }
+            WorkspaceExportEntity::ClientAnimeGroupingPolicies => Self::ClientAnimeGroupingPolicies,
+            WorkspaceExportEntity::AnimeGroupingPolicyReceipts => Self::AnimeGroupingPolicyReceipts,
         }
     }
 }
@@ -536,6 +563,7 @@ mod tests {
     use fasti_application::{
         WORKSPACE_ARCHIVE_FORMAT_VERSION, WORKSPACE_ARCHIVE_V1_FORMAT_VERSION,
         WORKSPACE_ARCHIVE_V2_FORMAT_VERSION, WORKSPACE_ARCHIVE_V3_FORMAT_VERSION,
+        WORKSPACE_ARCHIVE_V4_FORMAT_VERSION,
     };
     use schemars::generate::SchemaSettings;
     use std::num::NonZeroU64;
@@ -730,7 +758,11 @@ mod tests {
         let expected = checked_v4_example();
         assert_eq!(
             expected.manifest.format_version,
-            WORKSPACE_ARCHIVE_FORMAT_VERSION
+            WORKSPACE_ARCHIVE_V4_FORMAT_VERSION
+        );
+        assert_eq!(
+            expected.manifest.streams.len(),
+            WorkspaceExportEntity::V4.len()
         );
         assert_eq!(
             expected.manifest.streams[..WorkspaceExportEntity::V3.len()],
@@ -750,6 +782,61 @@ mod tests {
         )
         .expect("archive-v4 application manifest projects");
         assert_eq!(projected.dto(), &expected);
+    }
+
+    #[test]
+    fn archive_v5_appends_identity_routing_streams_and_round_trips() {
+        let v4 = checked_v4_example()
+            .try_into_application(limits())
+            .expect("strict archive-v4 hostile-boundary conversion");
+        let mut streams = v4.manifest().streams().to_vec();
+        let empty_digest = Sha256Digest::from_bytes(&Sha256::digest([]).into());
+        streams.extend(
+            WorkspaceExportEntity::ALL[WorkspaceExportEntity::V4.len()..]
+                .iter()
+                .copied()
+                .map(|entity| WorkspaceStreamDescriptor::new(entity, 0, 0, empty_digest.clone())),
+        );
+        let manifest = WorkspaceManifest::try_new(
+            v4.manifest().workspace_id(),
+            v4.manifest().workspace_revision(),
+            v4.manifest().contract_version().to_owned(),
+            15,
+            v4.manifest().migration_digest().clone(),
+            streams,
+            v4.manifest().blobs().to_vec(),
+        )
+        .expect("archive-v5 application manifest");
+        let projected = CanonicalWorkspaceManifestProjection::try_from_application(manifest)
+            .expect("archive-v5 application manifest projects");
+
+        assert_eq!(
+            projected.dto().manifest.format_version,
+            WORKSPACE_ARCHIVE_FORMAT_VERSION
+        );
+        assert_eq!(
+            projected.dto().manifest.streams[..WorkspaceExportEntity::V4.len()],
+            checked_v4_example().manifest.streams
+        );
+        assert_eq!(
+            projected.dto().manifest.streams[WorkspaceExportEntity::V4.len()..]
+                .iter()
+                .map(|stream| stream.entity)
+                .collect::<Vec<_>>(),
+            vec![
+                WorkspaceExportEntityDto::IdentityAssertions,
+                WorkspaceExportEntityDto::IdentityAssertionLifecycleEvents,
+                WorkspaceExportEntityDto::ProfileAnimeGroupingPolicies,
+                WorkspaceExportEntityDto::ClientAnimeGroupingPolicies,
+                WorkspaceExportEntityDto::AnimeGroupingPolicyReceipts,
+            ]
+        );
+        let inbound = projected
+            .dto()
+            .clone()
+            .try_into_application(limits())
+            .expect("strict archive-v5 hostile-boundary conversion");
+        assert_eq!(inbound.manifest(), projected.application_manifest());
     }
 
     #[test]

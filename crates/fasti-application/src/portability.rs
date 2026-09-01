@@ -32,12 +32,15 @@ pub const WORKSPACE_ARCHIVE_V2_FORMAT_VERSION: u32 = 2;
 /// Frozen third archive format retained for restore compatibility.
 pub const WORKSPACE_ARCHIVE_V3_FORMAT_VERSION: u32 = 3;
 
+/// Frozen fourth archive format retained for restore compatibility.
+pub const WORKSPACE_ARCHIVE_V4_FORMAT_VERSION: u32 = 4;
+
 /// Internal staged archive format version written by the export adapter.
 ///
 /// A restore implementation must reject any version it does not understand
 /// rather than guessing at the framing. The archive-v1 stream inventory is
 /// frozen, but this does not activate a public format, capability, or route.
-pub const WORKSPACE_ARCHIVE_FORMAT_VERSION: u32 = 4;
+pub const WORKSPACE_ARCHIVE_FORMAT_VERSION: u32 = 5;
 
 /// The sole archive-v1 contract version understood by this executable.
 ///
@@ -193,6 +196,11 @@ pub enum WorkspaceExportEntity {
     MetadataOverrideMigrationReceipts,
     MetadataAttributions,
     MetadataRefreshReceipts,
+    IdentityAssertions,
+    IdentityAssertionLifecycleEvents,
+    ProfileAnimeGroupingPolicies,
+    ClientAnimeGroupingPolicies,
+    AnimeGroupingPolicyReceipts,
 }
 
 impl WorkspaceExportEntity {
@@ -280,7 +288,7 @@ impl WorkspaceExportEntity {
     ];
 
     /// Every archive-v4 entity. The frozen v3 order is an exact prefix.
-    pub const ALL: [Self; 29] = [
+    pub const V4: [Self; 29] = [
         Self::Workspaces,
         Self::Profiles,
         Self::Clients,
@@ -312,11 +320,50 @@ impl WorkspaceExportEntity {
         Self::MetadataRefreshReceipts,
     ];
 
+    /// Every archive-v5 entity. The frozen v4 order is an exact prefix.
+    pub const ALL: [Self; 34] = [
+        Self::Workspaces,
+        Self::Profiles,
+        Self::Clients,
+        Self::Records,
+        Self::NamespaceDefinitions,
+        Self::ExternalIdentifiers,
+        Self::Evidence,
+        Self::Observations,
+        Self::ObservationClues,
+        Self::Occurrences,
+        Self::Interpretations,
+        Self::ReviewItems,
+        Self::ReviewCandidates,
+        Self::Corrections,
+        Self::Receipts,
+        Self::Operations,
+        Self::MetadataFieldClaims,
+        Self::MetadataFieldOverrides,
+        Self::ProfileRecordTrackingDispositions,
+        Self::MetadataClaims,
+        Self::MetadataClaimProvenance,
+        Self::MetadataRatingClaims,
+        Self::MetadataClaimLifecycleEvents,
+        Self::MetadataProjectionPolicies,
+        Self::MetadataProfileFieldOverrides,
+        Self::MetadataLegacyOverrideOwnership,
+        Self::MetadataOverrideMigrationReceipts,
+        Self::MetadataAttributions,
+        Self::MetadataRefreshReceipts,
+        Self::IdentityAssertions,
+        Self::IdentityAssertionLifecycleEvents,
+        Self::ProfileAnimeGroupingPolicies,
+        Self::ClientAnimeGroupingPolicies,
+        Self::AnimeGroupingPolicyReceipts,
+    ];
+
     pub const fn for_format(format_version: u32) -> Option<&'static [Self]> {
         match format_version {
             WORKSPACE_ARCHIVE_V1_FORMAT_VERSION => Some(&Self::V1),
             WORKSPACE_ARCHIVE_V2_FORMAT_VERSION => Some(&Self::V2),
             WORKSPACE_ARCHIVE_V3_FORMAT_VERSION => Some(&Self::V3),
+            WORKSPACE_ARCHIVE_V4_FORMAT_VERSION => Some(&Self::V4),
             WORKSPACE_ARCHIVE_FORMAT_VERSION => Some(&Self::ALL),
             _ => None,
         }
@@ -354,6 +401,11 @@ impl WorkspaceExportEntity {
             Self::MetadataOverrideMigrationReceipts => "metadata_override_migration_receipts",
             Self::MetadataAttributions => "metadata_attributions",
             Self::MetadataRefreshReceipts => "metadata_refresh_receipts",
+            Self::IdentityAssertions => "identity_assertions",
+            Self::IdentityAssertionLifecycleEvents => "identity_assertion_lifecycle_events",
+            Self::ProfileAnimeGroupingPolicies => "profile_anime_grouping_policies",
+            Self::ClientAnimeGroupingPolicies => "client_anime_grouping_policies",
+            Self::AnimeGroupingPolicyReceipts => "anime_grouping_policy_receipts",
         }
     }
 

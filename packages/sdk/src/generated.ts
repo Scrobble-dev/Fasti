@@ -67,6 +67,30 @@ export const LOCAL_BOOTSTRAP_OPERATIONS = {
 
 // prettier-ignore
 const PRODUCTION_SCHEMAS = {
+  "AcceptedIdentityRouteAssertionDto": {
+    "additionalProperties": false,
+    "properties": {
+      "assertion_id": {
+        "type": "string"
+      },
+      "record_id": {
+        "type": "string"
+      },
+      "relation": {
+        "$ref": "#/components/schemas/IdentityAssertionRelationDto"
+      },
+      "source_grain": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "assertion_id",
+      "record_id",
+      "source_grain",
+      "relation"
+    ],
+    "type": "object"
+  },
   "AccessAuthenticationMethodDto": {
     "enum": [
       "trail_base_password",
@@ -448,6 +472,325 @@ const PRODUCTION_SCHEMAS = {
       "administrator"
     ],
     "type": "string"
+  },
+  "AnimeGroupingPolicyChangeDto": {
+    "oneOf": [
+      {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "set"
+            ],
+            "type": "string"
+          },
+          "preference": {
+            "$ref": "#/components/schemas/AnimeGroupingPreferenceDto"
+          }
+        },
+        "required": [
+          "preference",
+          "kind"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "inherit_profile"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "applied_operation_id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "rollback"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "applied_operation_id",
+          "kind"
+        ],
+        "type": "object"
+      }
+    ]
+  },
+  "AnimeGroupingPolicyDto": {
+    "additionalProperties": false,
+    "properties": {
+      "preference": {
+        "$ref": "#/components/schemas/AnimeGroupingPreferenceDto"
+      },
+      "profile_id": {
+        "type": "string"
+      },
+      "revision": {
+        "format": "int64",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "scope": {
+        "$ref": "#/components/schemas/AnimeGroupingPolicyScopeDto"
+      },
+      "source": {
+        "$ref": "#/components/schemas/AnimeGroupingPolicySourceDto"
+      }
+    },
+    "required": [
+      "profile_id",
+      "scope",
+      "source",
+      "preference",
+      "revision"
+    ],
+    "type": "object"
+  },
+  "AnimeGroupingPolicyImpactResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "affected_records": {
+        "format": "int64",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "next_after_record_id": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "policy": {
+        "$ref": "#/components/schemas/AnimeGroupingPolicyDto"
+      },
+      "possible_season_regroupings": {
+        "format": "int64",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "proposed_preference": {
+        "$ref": "#/components/schemas/AnimeGroupingPreferenceDto"
+      },
+      "proposed_source": {
+        "$ref": "#/components/schemas/AnimeGroupingPolicySourceDto"
+      },
+      "records": {
+        "items": {
+          "$ref": "#/components/schemas/AnimeGroupingRecordPreviewDto"
+        },
+        "type": "array"
+      },
+      "total_records": {
+        "format": "int64",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "unresolved_routes": {
+        "format": "int64",
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "policy",
+      "proposed_preference",
+      "proposed_source",
+      "total_records",
+      "affected_records",
+      "unresolved_routes",
+      "possible_season_regroupings",
+      "records"
+    ],
+    "type": "object"
+  },
+  "AnimeGroupingPolicyScopeDto": {
+    "additionalProperties": false,
+    "properties": {
+      "client_id": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "kind": {
+        "$ref": "#/components/schemas/AnimeGroupingPolicyScopeKindDto"
+      }
+    },
+    "required": [
+      "kind"
+    ],
+    "type": "object"
+  },
+  "AnimeGroupingPolicyScopeKindDto": {
+    "enum": [
+      "profile",
+      "client"
+    ],
+    "type": "string"
+  },
+  "AnimeGroupingPolicySourceDto": {
+    "enum": [
+      "profile_default",
+      "client_override"
+    ],
+    "type": "string"
+  },
+  "AnimeGroupingPreferenceDto": {
+    "enum": [
+      "automatic",
+      "group_by_tv_work",
+      "keep_mal_releases_separate",
+      "keep_kitsu_releases_separate"
+    ],
+    "type": "string"
+  },
+  "AnimeGroupingRecordPreviewDto": {
+    "additionalProperties": false,
+    "properties": {
+      "possible_season_regrouping": {
+        "type": "boolean"
+      },
+      "previous_preference": {
+        "$ref": "#/components/schemas/AnimeGroupingPreferenceDto"
+      },
+      "previous_route": {
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "$ref": "#/components/schemas/IdentityRouteDto"
+          }
+        ]
+      },
+      "previous_status": {
+        "$ref": "#/components/schemas/IdentityRouteStatusDto"
+      },
+      "proposed_preference": {
+        "$ref": "#/components/schemas/AnimeGroupingPreferenceDto"
+      },
+      "proposed_route": {
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "$ref": "#/components/schemas/IdentityRouteDto"
+          }
+        ]
+      },
+      "proposed_status": {
+        "$ref": "#/components/schemas/IdentityRouteStatusDto"
+      },
+      "record_id": {
+        "type": "string"
+      },
+      "route_changed": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "record_id",
+      "previous_preference",
+      "proposed_preference",
+      "previous_status",
+      "proposed_status",
+      "route_changed",
+      "possible_season_regrouping"
+    ],
+    "type": "object"
+  },
+  "ApplyAnimeGroupingPolicyChangeRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "change": {
+        "$ref": "#/components/schemas/AnimeGroupingPolicyChangeDto"
+      },
+      "expected_revision": {
+        "format": "int64",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "operation_id": {
+        "type": "string"
+      },
+      "scope": {
+        "$ref": "#/components/schemas/AnimeGroupingPolicyScopeDto"
+      }
+    },
+    "required": [
+      "operation_id",
+      "scope",
+      "expected_revision",
+      "change"
+    ],
+    "type": "object"
+  },
+  "ApplyAnimeGroupingPolicyChangeResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "affected_records": {
+        "format": "int64",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "change": {
+        "$ref": "#/components/schemas/AnimeGroupingPolicyChangeDto"
+      },
+      "operation_id": {
+        "type": "string"
+      },
+      "policy": {
+        "$ref": "#/components/schemas/AnimeGroupingPolicyDto"
+      },
+      "possible_season_regroupings": {
+        "format": "int64",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "previous_preference": {
+        "$ref": "#/components/schemas/AnimeGroupingPreferenceDto"
+      },
+      "previous_source": {
+        "$ref": "#/components/schemas/AnimeGroupingPolicySourceDto"
+      },
+      "rolled_back_operation_id": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "unresolved_routes": {
+        "format": "int64",
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "operation_id",
+      "change",
+      "previous_preference",
+      "previous_source",
+      "policy",
+      "affected_records",
+      "unresolved_routes",
+      "possible_season_regroupings"
+    ],
+    "type": "object"
   },
   "AttachIdentifierRequest": {
     "additionalProperties": false,
@@ -869,6 +1212,77 @@ const PRODUCTION_SCHEMAS = {
       "version"
     ],
     "type": "object"
+  },
+  "IdentityAssertionRelationDto": {
+    "enum": [
+      "exact",
+      "subset_of",
+      "superset_of",
+      "overlaps",
+      "alternate_cut_of",
+      "related",
+      "not_same_as"
+    ],
+    "type": "string"
+  },
+  "IdentityIdentifierDto": {
+    "additionalProperties": false,
+    "properties": {
+      "grain": {
+        "type": "string"
+      },
+      "namespace": {
+        "type": "string"
+      },
+      "value": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "namespace",
+      "grain",
+      "value"
+    ],
+    "type": "object"
+  },
+  "IdentityRouteDto": {
+    "additionalProperties": false,
+    "properties": {
+      "accepted_assertions": {
+        "items": {
+          "$ref": "#/components/schemas/AcceptedIdentityRouteAssertionDto"
+        },
+        "type": "array"
+      },
+      "identifier": {
+        "$ref": "#/components/schemas/IdentityIdentifierDto"
+      },
+      "kind": {
+        "$ref": "#/components/schemas/IdentityRouteKindDto"
+      }
+    },
+    "required": [
+      "identifier",
+      "kind",
+      "accepted_assertions"
+    ],
+    "type": "object"
+  },
+  "IdentityRouteKindDto": {
+    "enum": [
+      "provider_native",
+      "verified_alias",
+      "accepted_crosswalk"
+    ],
+    "type": "string"
+  },
+  "IdentityRouteStatusDto": {
+    "enum": [
+      "selected",
+      "missing",
+      "ambiguous"
+    ],
+    "type": "string"
   },
   "InitializeNodeRequest": {
     "additionalProperties": false,
@@ -1978,6 +2392,35 @@ const PRODUCTION_SCHEMAS = {
     ],
     "type": "object"
   },
+  "PreviewAnimeGroupingPolicyChangeRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "after_record_id": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "change": {
+        "$ref": "#/components/schemas/AnimeGroupingPolicyChangeDto"
+      },
+      "limit": {
+        "format": "int32",
+        "maximum": 100,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "scope": {
+        "$ref": "#/components/schemas/AnimeGroupingPolicyScopeDto"
+      }
+    },
+    "required": [
+      "scope",
+      "change",
+      "limit"
+    ],
+    "type": "object"
+  },
   "ProblemActionDto": {
     "additionalProperties": false,
     "properties": {
@@ -2354,6 +2797,18 @@ const PRODUCTION_SCHEMAS = {
     ],
     "type": "object"
   },
+  "ReadAnimeGroupingPolicyResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "policy": {
+        "$ref": "#/components/schemas/AnimeGroupingPolicyDto"
+      }
+    },
+    "required": [
+      "policy"
+    ],
+    "type": "object"
+  },
   "ReadBrowserSessionResponse": {
     "additionalProperties": false,
     "properties": {
@@ -2706,6 +3161,77 @@ const PRODUCTION_SCHEMAS = {
     "required": [
       "namespace",
       "created"
+    ],
+    "type": "object"
+  },
+  "ResolutionIntentDto": {
+    "enum": [
+      "metadata_search",
+      "metadata_lookup",
+      "metadata_enrichment",
+      "rating_lookup",
+      "catalog_lookup",
+      "display_projection",
+      "nuvio_export",
+      "nuvio_import_attachment",
+      "tracker_read",
+      "tracker_write",
+      "segment_translation",
+      "deduplication_review"
+    ],
+    "type": "string"
+  },
+  "ResolveIdentityRouteResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "candidate_routes": {
+        "items": {
+          "$ref": "#/components/schemas/IdentityRouteDto"
+        },
+        "type": "array"
+      },
+      "intent": {
+        "$ref": "#/components/schemas/ResolutionIntentDto"
+      },
+      "known_identifiers": {
+        "items": {
+          "$ref": "#/components/schemas/IdentityIdentifierDto"
+        },
+        "type": "array"
+      },
+      "nuvio_content_id": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "record_id": {
+        "type": "string"
+      },
+      "selected_route": {
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "$ref": "#/components/schemas/IdentityRouteDto"
+          }
+        ]
+      },
+      "status": {
+        "$ref": "#/components/schemas/IdentityRouteStatusDto"
+      },
+      "target_provider": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "record_id",
+      "intent",
+      "target_provider",
+      "status",
+      "known_identifiers",
+      "candidate_routes"
     ],
     "type": "object"
   },
@@ -3293,6 +3819,30 @@ export type AccessCeremonyFailureDto = "exchange_failed" | "exchange_outcome_unc
 // prettier-ignore
 export type AccessFirstRunStepKeyDto = "account_confirmed" | "devices_and_clients" | "external_identity" | "recovery" | "strong_sign_in";
 
+// prettier-ignore
+export type ResolutionIntentDto = "catalog_lookup" | "deduplication_review" | "display_projection" | "metadata_enrichment" | "metadata_lookup" | "metadata_search" | "nuvio_export" | "nuvio_import_attachment" | "rating_lookup" | "segment_translation" | "tracker_read" | "tracker_write";
+
+// prettier-ignore
+export type IdentityRouteStatusDto = "ambiguous" | "missing" | "selected";
+
+// prettier-ignore
+export type IdentityRouteKindDto = "accepted_crosswalk" | "provider_native" | "verified_alias";
+
+// prettier-ignore
+export type IdentityAssertionRelationDto = "alternate_cut_of" | "exact" | "not_same_as" | "overlaps" | "related" | "subset_of" | "superset_of";
+
+// prettier-ignore
+export type AnimeGroupingPreferenceDto = "automatic" | "group_by_tv_work" | "keep_kitsu_releases_separate" | "keep_mal_releases_separate";
+
+// prettier-ignore
+export type AnimeGroupingPolicyScopeKindDto = "client" | "profile";
+
+// prettier-ignore
+export type AnimeGroupingPolicySourceDto = "client_override" | "profile_default";
+
+// prettier-ignore
+export type AnimeGroupingPolicyChangeDto = { readonly applied_operation_id: string; readonly kind: "rollback" } | { readonly kind: "inherit_profile" } | { readonly kind: "set"; readonly preference: AnimeGroupingPreferenceDto };
+
 // The Nuvio wire document intentionally preserves extension fields.
 export type NuvioCollectionsDocumentDto = ReadonlyArray<Record<string, unknown>>;
 
@@ -3631,6 +4181,103 @@ export interface MetadataProjectionConfigurationResponse {
   readonly policy: EnrichmentPolicyDto;
 }
 
+export interface IdentityIdentifierDto {
+  readonly grain: string;
+  readonly namespace: string;
+  readonly value: string;
+}
+
+export interface AcceptedIdentityRouteAssertionDto {
+  readonly assertion_id: string;
+  readonly record_id: string;
+  readonly relation: IdentityAssertionRelationDto;
+  readonly source_grain: string;
+}
+
+export interface IdentityRouteDto {
+  readonly accepted_assertions: ReadonlyArray<AcceptedIdentityRouteAssertionDto>;
+  readonly identifier: IdentityIdentifierDto;
+  readonly kind: IdentityRouteKindDto;
+}
+
+export interface ResolveIdentityRouteResponse {
+  readonly candidate_routes: ReadonlyArray<IdentityRouteDto>;
+  readonly intent: ResolutionIntentDto;
+  readonly known_identifiers: ReadonlyArray<IdentityIdentifierDto>;
+  readonly nuvio_content_id?: null | string;
+  readonly record_id: string;
+  readonly selected_route?: IdentityRouteDto | null;
+  readonly status: IdentityRouteStatusDto;
+  readonly target_provider: string;
+}
+
+export interface AnimeGroupingPolicyScopeDto {
+  readonly client_id?: null | string;
+  readonly kind: AnimeGroupingPolicyScopeKindDto;
+}
+
+export interface AnimeGroupingPolicyDto {
+  readonly preference: AnimeGroupingPreferenceDto;
+  readonly profile_id: string;
+  readonly revision: number;
+  readonly scope: AnimeGroupingPolicyScopeDto;
+  readonly source: AnimeGroupingPolicySourceDto;
+}
+
+export interface ReadAnimeGroupingPolicyResponse {
+  readonly policy: AnimeGroupingPolicyDto;
+}
+
+export interface PreviewAnimeGroupingPolicyChangeRequest {
+  readonly after_record_id?: null | string;
+  readonly change: AnimeGroupingPolicyChangeDto;
+  readonly limit: number;
+  readonly scope: AnimeGroupingPolicyScopeDto;
+}
+
+export interface AnimeGroupingRecordPreviewDto {
+  readonly possible_season_regrouping: boolean;
+  readonly previous_preference: AnimeGroupingPreferenceDto;
+  readonly previous_route?: IdentityRouteDto | null;
+  readonly previous_status: IdentityRouteStatusDto;
+  readonly proposed_preference: AnimeGroupingPreferenceDto;
+  readonly proposed_route?: IdentityRouteDto | null;
+  readonly proposed_status: IdentityRouteStatusDto;
+  readonly record_id: string;
+  readonly route_changed: boolean;
+}
+
+export interface AnimeGroupingPolicyImpactResponse {
+  readonly affected_records: number;
+  readonly next_after_record_id?: null | string;
+  readonly policy: AnimeGroupingPolicyDto;
+  readonly possible_season_regroupings: number;
+  readonly proposed_preference: AnimeGroupingPreferenceDto;
+  readonly proposed_source: AnimeGroupingPolicySourceDto;
+  readonly records: ReadonlyArray<AnimeGroupingRecordPreviewDto>;
+  readonly total_records: number;
+  readonly unresolved_routes: number;
+}
+
+export interface ApplyAnimeGroupingPolicyChangeRequest {
+  readonly change: AnimeGroupingPolicyChangeDto;
+  readonly expected_revision: number;
+  readonly operation_id: string;
+  readonly scope: AnimeGroupingPolicyScopeDto;
+}
+
+export interface ApplyAnimeGroupingPolicyChangeResponse {
+  readonly affected_records: number;
+  readonly change: AnimeGroupingPolicyChangeDto;
+  readonly operation_id: string;
+  readonly policy: AnimeGroupingPolicyDto;
+  readonly possible_season_regroupings: number;
+  readonly previous_preference: AnimeGroupingPreferenceDto;
+  readonly previous_source: AnimeGroupingPolicySourceDto;
+  readonly rolled_back_operation_id?: null | string;
+  readonly unresolved_routes: number;
+}
+
 export interface StartTrailBaseSignInRequest {
   readonly remembered: boolean;
 }
@@ -3807,6 +4454,10 @@ export const LOCAL_RUNTIME_OPERATIONS = {
   refreshMetadataClaims: { operationId: "refresh_metadata_claims", method: "POST", path: "/api/v1/metadata/claims/refresh", capabilityId: "metadata.claim.refresh", authorization: "scoped", requiredScopes: ["metadata_claim_refresh"], problemCodes: ["authentication_failed","forbidden","idempotency_conflict","integrity_failed","malformed_json","metadata_claim_stale","payload_too_large","provider_credential_expired","provider_credential_invalid","provider_credential_missing","provider_rate_limited","provider_response_invalid","provider_route_unavailable","provider_unavailable","record_not_found","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["metadata.claim.refresh.metadata_claim_stale"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: "RefreshMetadataClaimsRequest", responseSchema: "RefreshMetadataClaimsResponse" },
   readMetadataProjection: { operationId: "read_metadata_projection", method: "GET", path: "/api/v1/records/{record_id}/metadata-projection", capabilityId: "metadata.projection.read", authorization: "scoped", requiredScopes: ["metadata_projection_read"], problemCodes: ["authentication_failed","forbidden","integrity_failed","record_not_found","storage_unavailable","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "MetadataProjectionResponse" },
   configureMetadataProjection: { operationId: "configure_metadata_projection", method: "PUT", path: "/api/v1/profile/metadata-projection", capabilityId: "metadata.projection.configure", authorization: "scoped", requiredScopes: ["metadata_projection_configure"], problemCodes: ["authentication_failed","forbidden","integrity_failed","malformed_json","payload_too_large","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["metadata.projection.configure.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "ConfigureMetadataProjectionRequest", responseSchema: "MetadataProjectionConfigurationResponse" },
+  resolveIdentityRoute: { operationId: "resolve_identity_route", method: "GET", path: "/api/v1/records/{record_id}/identity-route", capabilityId: "identity.route.resolve", authorization: "scoped_or_browser_session", requiredScopes: ["identity_read"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","capacity_exceeded","forbidden","integrity_failed","record_not_found","session_policy_changed","storage_unavailable","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ResolveIdentityRouteResponse" },
+  readAnimeGroupingPolicy: { operationId: "read_anime_grouping_policy", method: "GET", path: "/api/v1/profile/anime-grouping-policy", capabilityId: "profile.anime_grouping_policy.read", authorization: "scoped_or_browser_session", requiredScopes: ["profile_state_read"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","integrity_failed","session_policy_changed","storage_unavailable","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ReadAnimeGroupingPolicyResponse" },
+  previewAnimeGroupingPolicyChange: { operationId: "preview_anime_grouping_policy_change", method: "POST", path: "/api/v1/profile/anime-grouping-policy/preview", capabilityId: "profile.anime_grouping_policy.preview", authorization: "scoped_or_browser_session", requiredScopes: ["profile_state_read"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","capacity_exceeded","forbidden","integrity_failed","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: "PreviewAnimeGroupingPolicyChangeRequest", responseSchema: "AnimeGroupingPolicyImpactResponse" },
+  applyAnimeGroupingPolicyChange: { operationId: "apply_anime_grouping_policy_change", method: "PUT", path: "/api/v1/profile/anime-grouping-policy", capabilityId: "profile.anime_grouping_policy.apply", authorization: "scoped_or_browser_session", requiredScopes: ["profile_state_write"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: "ApplyAnimeGroupingPolicyChangeRequest", responseSchema: "ApplyAnimeGroupingPolicyChangeResponse" },
   startTrailBaseSignIn: { operationId: "start_trailbase_sign_in", method: "POST", path: "/api/access/v1/trailbase/sign-in", capabilityId: "browser.session.create", authorization: "unauthenticated", requiredScopes: [], problemCodes: ["capacity_exceeded","forbidden","integrity_failed","malformed_json","payload_too_large","storage_unavailable","trailbase_trust_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: false, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "StartTrailBaseSignInRequest", responseSchema: "StartTrailBaseSignInResponse" },
   readTrailBaseContinuation: { operationId: "read_trailbase_continuation", method: "GET", path: "/api/access/v1/trailbase/continuation", capabilityId: "browser.session.create", authorization: "unauthenticated", requiredScopes: [], problemCodes: ["auth_browser_binding_invalid","auth_continuation_persistence_failed","auth_subject_unaffiliated","capacity_exceeded","forbidden","identity_service_unavailable","integrity_failed","storage_unavailable","trailbase_proof_invalid","trailbase_session_cleanup_failed","trailbase_trust_unavailable","validation_failed"], exampleIds: [], authenticated: false, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ReadTrailBaseContinuationResponse" },
   completeTrailBaseContinuation: { operationId: "complete_trailbase_continuation", method: "POST", path: "/api/access/v1/trailbase/continuation", capabilityId: "browser.session.create", authorization: "unauthenticated", requiredScopes: [], problemCodes: ["auth_browser_binding_invalid","auth_continuation_persistence_failed","auth_selection_changed","auth_subject_unaffiliated","capacity_exceeded","forbidden","identity_service_unavailable","integrity_failed","malformed_json","payload_too_large","storage_unavailable","trailbase_proof_invalid","trailbase_session_cleanup_failed","trailbase_trust_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: false, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "CompleteTrailBaseContinuationRequest", responseSchema: null },
@@ -3938,6 +4589,36 @@ export function parseMetadataProjectionConfigurationResponse(value: unknown): Me
 }
 
 // prettier-ignore
+export function parseResolveIdentityRouteResponse(value: unknown): ResolveIdentityRouteResponse {
+  return parseProductionDto("ResolveIdentityRouteResponse", value);
+}
+
+// prettier-ignore
+export function parseReadAnimeGroupingPolicyResponse(value: unknown): ReadAnimeGroupingPolicyResponse {
+  return parseProductionDto("ReadAnimeGroupingPolicyResponse", value);
+}
+
+// prettier-ignore
+export function parsePreviewAnimeGroupingPolicyChangeRequest(value: unknown): PreviewAnimeGroupingPolicyChangeRequest {
+  return parseProductionDto("PreviewAnimeGroupingPolicyChangeRequest", value);
+}
+
+// prettier-ignore
+export function parseAnimeGroupingPolicyImpactResponse(value: unknown): AnimeGroupingPolicyImpactResponse {
+  return parseProductionDto("AnimeGroupingPolicyImpactResponse", value);
+}
+
+// prettier-ignore
+export function parseApplyAnimeGroupingPolicyChangeRequest(value: unknown): ApplyAnimeGroupingPolicyChangeRequest {
+  return parseProductionDto("ApplyAnimeGroupingPolicyChangeRequest", value);
+}
+
+// prettier-ignore
+export function parseApplyAnimeGroupingPolicyChangeResponse(value: unknown): ApplyAnimeGroupingPolicyChangeResponse {
+  return parseProductionDto("ApplyAnimeGroupingPolicyChangeResponse", value);
+}
+
+// prettier-ignore
 export function parseStartTrailBaseSignInRequest(value: unknown): StartTrailBaseSignInRequest {
   return parseProductionDto("StartTrailBaseSignInRequest", value);
 }
@@ -4008,14 +4689,14 @@ export interface AcceptObservationResponse {
 export interface CapabilityDescriptorDto {
   readonly authorization: "bootstrap_only" | "browser_session" | "local_operator" | "scoped" | "scoped_or_browser_session" | "unauthenticated";
   readonly bounded_context: string;
-  readonly contract_body: "b1" | "b2" | "b3" | "c1" | "m1" | "m2";
+  readonly contract_body: "b1" | "b2" | "b3" | "c1" | "m1" | "m2" | "m3";
   readonly examples: ReadonlyArray<"client.enroll.forbidden" | "credential.revoke.capability_unavailable" | "credential.rotate.capability_unavailable" | "identity.identifier.attach.validation_failed" | "identity.namespace.register.validation_failed" | "identity.record.create.validation_failed" | "identity.record.list.forbidden" | "integration.status.success" | "listener.configure.capability_unavailable" | "metadata.claim.refresh.metadata_claim_stale" | "metadata.projection.configure.validation_failed" | "node.initialize.validation_failed" | "observation.accept.capacity_exceeded" | "observation.accept.receipt" | "observation.accept.validation_failed" | "profile.record.tracking_disposition.list.forbidden" | "profile.record.tracking_disposition.set.validation_failed" | "profile.select.capability_unavailable" | "provider.credential.configure.validation_failed" | "provider.credential.test.provider_credential_missing" | "provider.health.read.provider_unavailable" | "provider.list.forbidden" | "receipt.replay.receipt_not_found" | "receipt.stream.event" | "receipt.stream.receipt_not_found" | "system.capabilities.forbidden" | "system.capabilities.success" | "system.health.success">;
-  readonly id: "access.identity.bootstrap" | "access.projection.read" | "browser.session.create" | "browser.session.end" | "browser.session.profile.select" | "browser.session.read" | "browser.session.revoke" | "browser.session.rotate" | "browser.sessions.list" | "browser.sessions.revoke_all" | "browser.sessions.revoke_others" | "client.enroll" | "correction.chain.append" | "correction.chain.inspect" | "credential.revoke" | "credential.rotate" | "identity.identifier.attach" | "identity.namespace.register" | "identity.record.create" | "identity.record.list" | "identity.review.defer" | "identity.review.inspect" | "identity.review.resolve" | "identity.review.resume" | "integration.status" | "listener.configure" | "metadata.claim.refresh" | "metadata.projection.configure" | "metadata.projection.read" | "node.initialize" | "observation.accept" | "portability.workspace.export" | "portability.workspace.restore" | "portability.workspace.verify" | "profile.nuvio_collections.clear" | "profile.nuvio_collections.get" | "profile.nuvio_collections.replace" | "profile.record.tracking_disposition.list" | "profile.record.tracking_disposition.set" | "profile.select" | "provider.credential.configure" | "provider.credential.test" | "provider.health.read" | "provider.list" | "receipt.replay" | "receipt.stream" | "system.capabilities.discover" | "system.health";
+  readonly id: "access.identity.bootstrap" | "access.projection.read" | "browser.session.create" | "browser.session.end" | "browser.session.profile.select" | "browser.session.read" | "browser.session.revoke" | "browser.session.rotate" | "browser.sessions.list" | "browser.sessions.revoke_all" | "browser.sessions.revoke_others" | "client.enroll" | "correction.chain.append" | "correction.chain.inspect" | "credential.revoke" | "credential.rotate" | "identity.identifier.attach" | "identity.namespace.register" | "identity.record.create" | "identity.record.list" | "identity.review.defer" | "identity.review.inspect" | "identity.review.resolve" | "identity.review.resume" | "identity.route.resolve" | "integration.status" | "listener.configure" | "metadata.claim.refresh" | "metadata.projection.configure" | "metadata.projection.read" | "node.initialize" | "observation.accept" | "portability.workspace.export" | "portability.workspace.restore" | "portability.workspace.verify" | "profile.anime_grouping_policy.apply" | "profile.anime_grouping_policy.preview" | "profile.anime_grouping_policy.read" | "profile.nuvio_collections.clear" | "profile.nuvio_collections.get" | "profile.nuvio_collections.replace" | "profile.record.tracking_disposition.list" | "profile.record.tracking_disposition.set" | "profile.select" | "provider.credential.configure" | "provider.credential.test" | "provider.health.read" | "provider.list" | "receipt.replay" | "receipt.stream" | "system.capabilities.discover" | "system.health";
   readonly lifecycle: CapabilityLifecycleDto;
   readonly problems: ReadonlyArray<"already_initialized" | "auth_browser_binding_invalid" | "auth_continuation_persistence_failed" | "auth_identity_conflict" | "auth_selection_changed" | "auth_subject_unaffiliated" | "authentication_failed" | "bootstrap_closed" | "browser_session_expired" | "browser_session_revoked" | "capability_unavailable" | "capacity_exceeded" | "forbidden" | "idempotency_conflict" | "identity_conflict" | "identity_service_unavailable" | "integrity_failed" | "invalid_identifier" | "invalid_observation" | "malformed_json" | "metadata_claim_stale" | "payload_too_large" | "provider_credential_expired" | "provider_credential_invalid" | "provider_credential_missing" | "provider_rate_limited" | "provider_response_invalid" | "provider_route_unavailable" | "provider_unavailable" | "receipt_not_found" | "record_not_found" | "session_policy_changed" | "storage_unavailable" | "trailbase_proof_invalid" | "trailbase_session_cleanup_failed" | "trailbase_trust_unavailable" | "trailbase_version_unsupported" | "unsupported_media_type" | "validation_failed">;
-  readonly runtime_body: "b0" | "b1" | "b2" | "b3" | "c1" | "m1" | "m2";
+  readonly runtime_body: "b0" | "b1" | "b2" | "b3" | "c1" | "m1" | "m2" | "m3";
   readonly scopes: ReadonlyArray<"capability_read" | "client_enroll" | "correction_read" | "correction_write" | "credential_manage" | "identity_read" | "identity_write" | "listener_configure" | "metadata_claim_refresh" | "metadata_projection_configure" | "metadata_projection_read" | "observation_accept" | "profile_select" | "profile_state_read" | "profile_state_write" | "provider_credential_manage" | "provider_read" | "receipt_read" | "review_read" | "review_write" | "workspace_export" | "workspace_verify">;
-  readonly surface_profile: "b1_durable_bootstrap" | "b1_http_fixture" | "b1_integration_status" | "b1_observation_accept" | "b1_receipt_replay" | "b1_receipt_stream" | "b1_records" | "b2_profile_state" | "c1_access_projection" | "c1_browser_session_foundation" | "c1_identity_bootstrap" | "health" | "later_b2" | "later_b3" | "m1_providers" | "m2_metadata";
+  readonly surface_profile: "b1_durable_bootstrap" | "b1_http_fixture" | "b1_integration_status" | "b1_observation_accept" | "b1_receipt_replay" | "b1_receipt_stream" | "b1_records" | "b2_profile_state" | "c1_access_projection" | "c1_browser_session_foundation" | "c1_identity_bootstrap" | "health" | "later_b2" | "later_b3" | "m1_providers" | "m2_metadata" | "m3_identity_routing";
   readonly uat: ReadonlyArray<CapabilityUatDto>;
 }
 
@@ -4029,21 +4710,21 @@ export interface CapabilityDiscoveryResponse {
 
 export interface CapabilityLifecycleDto {
   readonly contract_state: "finalized" | "reserved";
-  readonly introduced_in: "b0" | "b1" | "b2" | "c1" | "m1" | "m2";
+  readonly introduced_in: "b0" | "b1" | "b2" | "c1" | "m1" | "m2" | "m3";
   readonly runtime_availability: "fixture_only" | "guarded" | "implemented" | "later_body";
 }
 
 export interface CapabilitySurfaceDispositionDto {
   readonly binding?: null | string;
   readonly binding_visibility?: "internal" | "public";
-  readonly body?: "b0" | "b1" | "b2" | "b3" | "c1" | "m1" | "m2";
+  readonly body?: "b0" | "b1" | "b2" | "b3" | "c1" | "m1" | "m2" | "m3";
   readonly reason?: null | string;
   readonly state: "later_body" | "not_applicable" | "required";
 }
 
 export interface CapabilityUatDto {
   readonly id: string;
-  readonly owner_body: "b1" | "b2" | "b3" | "c1" | "m1" | "m2";
+  readonly owner_body: "b1" | "b2" | "b3" | "c1" | "m1" | "m2" | "m3";
   readonly reason: string;
   readonly relationship: "deferred" | "direct" | "split";
 }
@@ -4224,7 +4905,8 @@ const B1_CONFORMANCE_SCHEMAS = {
           "b3",
           "c1",
           "m1",
-          "m2"
+          "m2",
+          "m3"
         ],
         "type": "string"
       },
@@ -4291,6 +4973,7 @@ const B1_CONFORMANCE_SCHEMAS = {
           "identity.review.inspect",
           "identity.review.resolve",
           "identity.review.resume",
+          "identity.route.resolve",
           "integration.status",
           "listener.configure",
           "metadata.claim.refresh",
@@ -4301,6 +4984,9 @@ const B1_CONFORMANCE_SCHEMAS = {
           "portability.workspace.export",
           "portability.workspace.restore",
           "portability.workspace.verify",
+          "profile.anime_grouping_policy.apply",
+          "profile.anime_grouping_policy.preview",
+          "profile.anime_grouping_policy.read",
           "profile.nuvio_collections.clear",
           "profile.nuvio_collections.get",
           "profile.nuvio_collections.replace",
@@ -4378,7 +5064,8 @@ const B1_CONFORMANCE_SCHEMAS = {
           "b3",
           "c1",
           "m1",
-          "m2"
+          "m2",
+          "m3"
         ],
         "type": "string"
       },
@@ -4430,7 +5117,8 @@ const B1_CONFORMANCE_SCHEMAS = {
           "later_b2",
           "later_b3",
           "m1_providers",
-          "m2_metadata"
+          "m2_metadata",
+          "m3_identity_routing"
         ],
         "type": "string"
       },
@@ -4463,8 +5151,8 @@ const B1_CONFORMANCE_SCHEMAS = {
         "items": {
           "$ref": "#/components/schemas/CapabilityDescriptorDto"
         },
-        "maxItems": 48,
-        "minItems": 48,
+        "maxItems": 52,
+        "minItems": 52,
         "type": "array",
         "uniqueItems": true
       },
@@ -4502,8 +5190,8 @@ const B1_CONFORMANCE_SCHEMAS = {
           },
           "type": "object"
         },
-        "maxProperties": 16,
-        "minProperties": 16,
+        "maxProperties": 17,
+        "minProperties": 17,
         "propertyNames": {
           "enum": [
             "b1_durable_bootstrap",
@@ -4521,7 +5209,8 @@ const B1_CONFORMANCE_SCHEMAS = {
             "later_b2",
             "later_b3",
             "m1_providers",
-            "m2_metadata"
+            "m2_metadata",
+            "m3_identity_routing"
           ],
           "type": "string"
         },
@@ -4554,7 +5243,8 @@ const B1_CONFORMANCE_SCHEMAS = {
           "b2",
           "c1",
           "m1",
-          "m2"
+          "m2",
+          "m3"
         ],
         "type": "string"
       },
@@ -4602,7 +5292,8 @@ const B1_CONFORMANCE_SCHEMAS = {
           "b3",
           "c1",
           "m1",
-          "m2"
+          "m2",
+          "m3"
         ],
         "type": [
           "string",
@@ -4633,7 +5324,7 @@ const B1_CONFORMANCE_SCHEMAS = {
     "additionalProperties": false,
     "properties": {
       "id": {
-        "pattern": "^ID-[0-9]{3}$",
+        "pattern": "^(?:ID|MDN)-[0-9]{3}$",
         "type": "string"
       },
       "owner_body": {
@@ -4643,7 +5334,8 @@ const B1_CONFORMANCE_SCHEMAS = {
           "b3",
           "c1",
           "m1",
-          "m2"
+          "m2",
+          "m3"
         ],
         "type": "string"
       },
@@ -5390,6 +6082,7 @@ export type CapabilityId =
   | "identity.review.inspect"
   | "identity.review.resolve"
   | "identity.review.resume"
+  | "identity.route.resolve"
   | "integration.status"
   | "listener.configure"
   | "metadata.claim.refresh"
@@ -5400,6 +6093,9 @@ export type CapabilityId =
   | "portability.workspace.export"
   | "portability.workspace.restore"
   | "portability.workspace.verify"
+  | "profile.anime_grouping_policy.apply"
+  | "profile.anime_grouping_policy.preview"
+  | "profile.anime_grouping_policy.read"
   | "profile.nuvio_collections.clear"
   | "profile.nuvio_collections.get"
   | "profile.nuvio_collections.replace"
@@ -5423,7 +6119,8 @@ export type CapabilityBody =
   | "b3"
   | "c1"
   | "m1"
-  | "m2";
+  | "m2"
+  | "m3";
 
 // prettier-ignore
 export type ContractState =
@@ -6127,6 +6824,50 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       "uat": []
     },
     {
+      "authorization": "scoped_or_browser_session",
+      "bounded_context": "identity.routing",
+      "contract_body": "m3",
+      "examples": [],
+      "id": "identity.route.resolve",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "m3",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "browser_session_expired",
+        "browser_session_revoked",
+        "capability_unavailable",
+        "capacity_exceeded",
+        "forbidden",
+        "integrity_failed",
+        "record_not_found",
+        "session_policy_changed",
+        "storage_unavailable",
+        "validation_failed"
+      ],
+      "runtime_body": "m3",
+      "scopes": [
+        "identity_read"
+      ],
+      "surface_profile": "m3_identity_routing",
+      "uat": [
+        {
+          "id": "MDN-001",
+          "owner_body": "m3",
+          "reason": "M3 proves the verified IMDb alias route while M8 owns live TMDB enrichment.",
+          "relationship": "split"
+        },
+        {
+          "id": "MDN-002",
+          "owner_body": "m3",
+          "reason": "M3 proves the verified IMDb alias route while M8 owns live TMDB enrichment.",
+          "relationship": "split"
+        }
+      ]
+    },
+    {
       "authorization": "unauthenticated",
       "bounded_context": "observation.ingress",
       "contract_body": "b1",
@@ -6427,6 +7168,123 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       ],
       "surface_profile": "later_b3",
       "uat": []
+    },
+    {
+      "authorization": "scoped_or_browser_session",
+      "bounded_context": "profile.projection_policy",
+      "contract_body": "m3",
+      "examples": [],
+      "id": "profile.anime_grouping_policy.apply",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "m3",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "browser_session_expired",
+        "browser_session_revoked",
+        "capability_unavailable",
+        "capacity_exceeded",
+        "forbidden",
+        "idempotency_conflict",
+        "integrity_failed",
+        "malformed_json",
+        "payload_too_large",
+        "session_policy_changed",
+        "storage_unavailable",
+        "unsupported_media_type",
+        "validation_failed"
+      ],
+      "runtime_body": "m3",
+      "scopes": [
+        "profile_state_write"
+      ],
+      "surface_profile": "m3_identity_routing",
+      "uat": [
+        {
+          "id": "MDN-018",
+          "owner_body": "m3",
+          "reason": "M3 durably changes projection policy without re-keying Records or Chronicle state.",
+          "relationship": "direct"
+        }
+      ]
+    },
+    {
+      "authorization": "scoped_or_browser_session",
+      "bounded_context": "profile.projection_policy",
+      "contract_body": "m3",
+      "examples": [],
+      "id": "profile.anime_grouping_policy.preview",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "m3",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "browser_session_expired",
+        "browser_session_revoked",
+        "capability_unavailable",
+        "capacity_exceeded",
+        "forbidden",
+        "integrity_failed",
+        "malformed_json",
+        "payload_too_large",
+        "session_policy_changed",
+        "storage_unavailable",
+        "unsupported_media_type",
+        "validation_failed"
+      ],
+      "runtime_body": "m3",
+      "scopes": [
+        "profile_state_read"
+      ],
+      "surface_profile": "m3_identity_routing",
+      "uat": [
+        {
+          "id": "MDN-018",
+          "owner_body": "m3",
+          "reason": "M3 previews the bounded projection impact before any governed policy change.",
+          "relationship": "split"
+        }
+      ]
+    },
+    {
+      "authorization": "scoped_or_browser_session",
+      "bounded_context": "profile.projection_policy",
+      "contract_body": "m3",
+      "examples": [],
+      "id": "profile.anime_grouping_policy.read",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "m3",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "browser_session_expired",
+        "browser_session_revoked",
+        "capability_unavailable",
+        "forbidden",
+        "integrity_failed",
+        "session_policy_changed",
+        "storage_unavailable",
+        "validation_failed"
+      ],
+      "runtime_body": "m3",
+      "scopes": [
+        "profile_state_read"
+      ],
+      "surface_profile": "m3_identity_routing",
+      "uat": [
+        {
+          "id": "MDN-018",
+          "owner_body": "m3",
+          "reason": "M3 exposes the durable profile policy read used by the governed change flow.",
+          "relationship": "split"
+        }
+      ]
     },
     {
       "authorization": "scoped_or_browser_session",
@@ -7696,6 +8554,60 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       },
       "ui": {
         "binding": "ui:metadata-provenance",
+        "binding_visibility": "public",
+        "state": "required"
+      }
+    },
+    "m3_identity_routing": {
+      "cli": {
+        "binding": "cli:capability-discovery",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "domain_application": {
+        "binding_visibility": "internal",
+        "state": "required"
+      },
+      "http_openapi": {
+        "binding": "openapi:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "json_ld": {
+        "reason": "Private identity evidence and profile projection policy are not public linked data.",
+        "state": "not_applicable"
+      },
+      "json_schema": {
+        "binding": "schema:production-openapi-operation:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "knowledge": {
+        "binding": "knowledge:problem-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "okf": {
+        "binding": "okf:capability-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "package_smoke": {
+        "binding": "package-smoke:production-identity-routing",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "sdk": {
+        "binding": "sdk:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "sse_asyncapi": {
+        "reason": "Identity routing and anime policy operations are finite requests with no event channel.",
+        "state": "not_applicable"
+      },
+      "ui": {
+        "binding": "ui:anime-grouping-policy",
         "binding_visibility": "public",
         "state": "required"
       }
@@ -10805,6 +11717,204 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
     },
     {
+      "capability_id": "identity.route.resolve",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "identity.route.resolve",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "identity.route.resolve",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
+    },
+    {
+      "capability_id": "identity.route.resolve",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by m3",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "identity.route.resolve",
+      "code": "capacity_exceeded",
+      "detail": "bounded application capacity has been reached",
+      "next_actions": [
+        {
+          "id": "release_capacity",
+          "label": "Release retained capacity before retrying"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 507,
+      "title": "Capacity exceeded",
+      "type": "https://fasti.scrobble.dev/v1/problems/capacity-exceeded"
+    },
+    {
+      "capability_id": "identity.route.resolve",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "identity.route.resolve",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "identity.route.resolve",
+      "code": "record_not_found",
+      "detail": "no active Record is available for the requested identifier",
+      "next_actions": [
+        {
+          "id": "verify_record_id",
+          "label": "Verify the Record ID or create a new Record"
+        }
+      ],
+      "param": "/record_id",
+      "param_policy": "fixed",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 404,
+      "title": "Record not found",
+      "type": "https://fasti.scrobble.dev/v1/problems/record-not-found"
+    },
+    {
+      "capability_id": "identity.route.resolve",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
+    },
+    {
+      "capability_id": "identity.route.resolve",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "identity.route.resolve",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
       "capability_id": "listener.configure",
       "code": "capability_unavailable",
       "detail": "requested capability is not available in this body; it is owned by b2",
@@ -11940,6 +13050,654 @@ export const PUBLIC_PROBLEM_CATALOG = {
     },
     {
       "capability_id": "portability.workspace.verify",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.apply",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.apply",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.apply",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.apply",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by m3",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.apply",
+      "code": "capacity_exceeded",
+      "detail": "bounded application capacity has been reached",
+      "next_actions": [
+        {
+          "id": "release_capacity",
+          "label": "Release retained capacity before retrying"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 507,
+      "title": "Capacity exceeded",
+      "type": "https://fasti.scrobble.dev/v1/problems/capacity-exceeded"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.apply",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.apply",
+      "code": "idempotency_conflict",
+      "detail": "operation ID was already used with different request semantics",
+      "next_actions": [
+        {
+          "id": "use_new_operation_id",
+          "label": "Use a new operation ID for a distinct observation"
+        }
+      ],
+      "param": "/operation_id",
+      "param_policy": "fixed",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 409,
+      "title": "Idempotency conflict",
+      "type": "https://fasti.scrobble.dev/v1/problems/idempotency-conflict"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.apply",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.apply",
+      "code": "malformed_json",
+      "detail": "request JSON is malformed",
+      "next_actions": [
+        {
+          "id": "correct_json",
+          "label": "Correct the JSON syntax and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 400,
+      "title": "Malformed JSON",
+      "type": "https://fasti.scrobble.dev/v1/problems/malformed-json"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.apply",
+      "code": "payload_too_large",
+      "detail": "request body exceeds the bounded transport limit",
+      "next_actions": [
+        {
+          "id": "reduce_request_body",
+          "label": "Reduce the request body and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 413,
+      "title": "Payload too large",
+      "type": "https://fasti.scrobble.dev/v1/problems/payload-too-large"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.apply",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.apply",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.apply",
+      "code": "unsupported_media_type",
+      "detail": "request media type is unsupported",
+      "next_actions": [
+        {
+          "id": "use_supported_media_type",
+          "label": "Use the documented media type and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 415,
+      "title": "Unsupported media type",
+      "type": "https://fasti.scrobble.dev/v1/problems/unsupported-media-type"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.apply",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.preview",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.preview",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.preview",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.preview",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by m3",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.preview",
+      "code": "capacity_exceeded",
+      "detail": "bounded application capacity has been reached",
+      "next_actions": [
+        {
+          "id": "release_capacity",
+          "label": "Release retained capacity before retrying"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 507,
+      "title": "Capacity exceeded",
+      "type": "https://fasti.scrobble.dev/v1/problems/capacity-exceeded"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.preview",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.preview",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.preview",
+      "code": "malformed_json",
+      "detail": "request JSON is malformed",
+      "next_actions": [
+        {
+          "id": "correct_json",
+          "label": "Correct the JSON syntax and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 400,
+      "title": "Malformed JSON",
+      "type": "https://fasti.scrobble.dev/v1/problems/malformed-json"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.preview",
+      "code": "payload_too_large",
+      "detail": "request body exceeds the bounded transport limit",
+      "next_actions": [
+        {
+          "id": "reduce_request_body",
+          "label": "Reduce the request body and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 413,
+      "title": "Payload too large",
+      "type": "https://fasti.scrobble.dev/v1/problems/payload-too-large"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.preview",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.preview",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.preview",
+      "code": "unsupported_media_type",
+      "detail": "request media type is unsupported",
+      "next_actions": [
+        {
+          "id": "use_supported_media_type",
+          "label": "Use the documented media type and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 415,
+      "title": "Unsupported media type",
+      "type": "https://fasti.scrobble.dev/v1/problems/unsupported-media-type"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.preview",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.read",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.read",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.read",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.read",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by m3",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.read",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.read",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.read",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.read",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.read",
       "code": "validation_failed",
       "detail": "request representation does not satisfy the governed contract",
       "next_actions": [
@@ -13593,7 +15351,7 @@ type JsonObject = Record<string, unknown>;
 const HEALTH_ALLOWED = ["status", "version"] as const;
 const HEALTH_REQUIRED = ["status", "version"] as const;
 // prettier-ignore
-const CAPABILITY_IDS = ["access.identity.bootstrap", "access.projection.read", "browser.session.create", "browser.session.end", "browser.session.profile.select", "browser.session.read", "browser.session.revoke", "browser.session.rotate", "browser.sessions.list", "browser.sessions.revoke_all", "browser.sessions.revoke_others", "client.enroll", "correction.chain.append", "correction.chain.inspect", "credential.revoke", "credential.rotate", "identity.identifier.attach", "identity.namespace.register", "identity.record.create", "identity.record.list", "identity.review.defer", "identity.review.inspect", "identity.review.resolve", "identity.review.resume", "integration.status", "listener.configure", "metadata.claim.refresh", "metadata.projection.configure", "metadata.projection.read", "node.initialize", "observation.accept", "portability.workspace.export", "portability.workspace.restore", "portability.workspace.verify", "profile.nuvio_collections.clear", "profile.nuvio_collections.get", "profile.nuvio_collections.replace", "profile.record.tracking_disposition.list", "profile.record.tracking_disposition.set", "profile.select", "provider.credential.configure", "provider.credential.test", "provider.health.read", "provider.list", "receipt.replay", "receipt.stream", "system.capabilities.discover", "system.health"] as const;
+const CAPABILITY_IDS = ["access.identity.bootstrap", "access.projection.read", "browser.session.create", "browser.session.end", "browser.session.profile.select", "browser.session.read", "browser.session.revoke", "browser.session.rotate", "browser.sessions.list", "browser.sessions.revoke_all", "browser.sessions.revoke_others", "client.enroll", "correction.chain.append", "correction.chain.inspect", "credential.revoke", "credential.rotate", "identity.identifier.attach", "identity.namespace.register", "identity.record.create", "identity.record.list", "identity.review.defer", "identity.review.inspect", "identity.review.resolve", "identity.review.resume", "identity.route.resolve", "integration.status", "listener.configure", "metadata.claim.refresh", "metadata.projection.configure", "metadata.projection.read", "node.initialize", "observation.accept", "portability.workspace.export", "portability.workspace.restore", "portability.workspace.verify", "profile.anime_grouping_policy.apply", "profile.anime_grouping_policy.preview", "profile.anime_grouping_policy.read", "profile.nuvio_collections.clear", "profile.nuvio_collections.get", "profile.nuvio_collections.replace", "profile.record.tracking_disposition.list", "profile.record.tracking_disposition.set", "profile.select", "provider.credential.configure", "provider.credential.test", "provider.health.read", "provider.list", "receipt.replay", "receipt.stream", "system.capabilities.discover", "system.health"] as const;
 // prettier-ignore
 const PROBLEM_CODES = ["already_initialized", "auth_browser_binding_invalid", "auth_continuation_persistence_failed", "auth_identity_conflict", "auth_selection_changed", "auth_subject_unaffiliated", "authentication_failed", "bootstrap_closed", "browser_session_expired", "browser_session_revoked", "capability_unavailable", "capacity_exceeded", "forbidden", "idempotency_conflict", "identity_conflict", "identity_service_unavailable", "integrity_failed", "invalid_identifier", "invalid_observation", "malformed_json", "metadata_claim_stale", "payload_too_large", "provider_credential_expired", "provider_credential_invalid", "provider_credential_missing", "provider_rate_limited", "provider_response_invalid", "provider_route_unavailable", "provider_unavailable", "receipt_not_found", "record_not_found", "session_policy_changed", "storage_unavailable", "trailbase_proof_invalid", "trailbase_session_cleanup_failed", "trailbase_trust_unavailable", "trailbase_version_unsupported", "unsupported_media_type", "validation_failed"] as const;
 // prettier-ignore

@@ -374,6 +374,113 @@ pub enum IdentityResolution {
     Conflicted(Vec<RecordId>),
 }
 
+/// The operation for which an external identifier may be used.
+///
+/// Route permission is purpose-specific: an alias accepted for a metadata
+/// read is not automatically safe for a tracker write.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResolutionIntent {
+    MetadataSearch,
+    MetadataLookup,
+    MetadataEnrichment,
+    RatingLookup,
+    CatalogLookup,
+    DisplayProjection,
+    NuvioExport,
+    NuvioImportAttachment,
+    TrackerRead,
+    TrackerWrite,
+    SegmentTranslation,
+    DeduplicationReview,
+}
+
+impl ResolutionIntent {
+    pub const ALL: &'static [Self] = &[
+        Self::MetadataSearch,
+        Self::MetadataLookup,
+        Self::MetadataEnrichment,
+        Self::RatingLookup,
+        Self::CatalogLookup,
+        Self::DisplayProjection,
+        Self::NuvioExport,
+        Self::NuvioImportAttachment,
+        Self::TrackerRead,
+        Self::TrackerWrite,
+        Self::SegmentTranslation,
+        Self::DeduplicationReview,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::MetadataSearch => "metadata_search",
+            Self::MetadataLookup => "metadata_lookup",
+            Self::MetadataEnrichment => "metadata_enrichment",
+            Self::RatingLookup => "rating_lookup",
+            Self::CatalogLookup => "catalog_lookup",
+            Self::DisplayProjection => "display_projection",
+            Self::NuvioExport => "nuvio_export",
+            Self::NuvioImportAttachment => "nuvio_import_attachment",
+            Self::TrackerRead => "tracker_read",
+            Self::TrackerWrite => "tracker_write",
+            Self::SegmentTranslation => "segment_translation",
+            Self::DeduplicationReview => "deduplication_review",
+        }
+    }
+
+    pub const fn requires_provider_native_route(self) -> bool {
+        matches!(self, Self::TrackerWrite)
+    }
+}
+
+/// How an operation reached the selected provider coordinate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IdentityRouteKind {
+    ProviderNative,
+    VerifiedAlias,
+    AcceptedCrosswalk,
+}
+
+/// Why a coordinate is eligible for route planning.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IdentityRouteEvidenceKind {
+    Direct,
+    AcceptedCrosswalk,
+}
+
+/// A profile or application client's anime grouping and export preference.
+///
+/// This value selects an outward projection only. It never identifies or
+/// re-keys a Fasti Record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnimeGroupingPreference {
+    GroupByTvWork,
+    KeepMalReleasesSeparate,
+    KeepKitsuReleasesSeparate,
+    Automatic,
+}
+
+impl AnimeGroupingPreference {
+    pub const ALL: &'static [Self] = &[
+        Self::GroupByTvWork,
+        Self::KeepMalReleasesSeparate,
+        Self::KeepKitsuReleasesSeparate,
+        Self::Automatic,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::GroupByTvWork => "group_by_tv_work",
+            Self::KeepMalReleasesSeparate => "keep_mal_releases_separate",
+            Self::KeepKitsuReleasesSeparate => "keep_kitsu_releases_separate",
+            Self::Automatic => "automatic",
+        }
+    }
+}
+
 impl IdentityResolution {
     pub fn conflicted(candidates: impl IntoIterator<Item = RecordId>) -> Self {
         let mut values = candidates.into_iter().collect::<Vec<_>>();
@@ -476,5 +583,31 @@ mod tests {
             identifier.record_id().to_string(),
             identifier.claim().value()
         );
+    }
+
+    #[test]
+    fn resolution_intents_keep_read_aliases_out_of_tracker_writes() {
+        assert_eq!(ResolutionIntent::ALL.len(), 12);
+        assert!(ResolutionIntent::TrackerWrite.requires_provider_native_route());
+        assert!(!ResolutionIntent::MetadataLookup.requires_provider_native_route());
+        assert_eq!(ResolutionIntent::NuvioExport.as_str(), "nuvio_export");
+    }
+
+    #[test]
+    fn anime_grouping_preferences_use_the_approved_public_vocabulary() {
+        assert_eq!(AnimeGroupingPreference::ALL.len(), 4);
+        assert_eq!(
+            AnimeGroupingPreference::GroupByTvWork.as_str(),
+            "group_by_tv_work"
+        );
+        assert_eq!(
+            AnimeGroupingPreference::KeepMalReleasesSeparate.as_str(),
+            "keep_mal_releases_separate"
+        );
+        assert_eq!(
+            AnimeGroupingPreference::KeepKitsuReleasesSeparate.as_str(),
+            "keep_kitsu_releases_separate"
+        );
+        assert_eq!(AnimeGroupingPreference::Automatic.as_str(), "automatic");
     }
 }

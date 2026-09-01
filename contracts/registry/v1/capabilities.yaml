@@ -334,6 +334,33 @@ surface_profiles:
       { state: required, binding: "package-smoke:production-metadata" }
     ui: { state: required, binding: "ui:metadata-provenance" }
 
+  m3_identity_routing:
+    domain_application:
+      { state: required, binding: "application:{application_key}" }
+    http_openapi: { state: required, binding: "openapi:{capability_id}" }
+    sse_asyncapi:
+      {
+        state: not_applicable,
+        reason: Identity routing and anime policy operations are finite requests with no event channel.,
+      }
+    cli: { state: required, binding: "cli:capability-discovery" }
+    json_schema:
+      {
+        state: required,
+        binding: "schema:production-openapi-operation:{capability_id}",
+      }
+    json_ld:
+      {
+        state: not_applicable,
+        reason: Private identity evidence and profile projection policy are not public linked data.,
+      }
+    okf: { state: required, binding: "okf:capability-catalog" }
+    sdk: { state: required, binding: "sdk:{capability_id}" }
+    knowledge: { state: required, binding: "knowledge:problem-catalog" }
+    package_smoke:
+      { state: required, binding: "package-smoke:production-identity-routing" }
+    ui: { state: required, binding: "ui:anime-grouping-policy" }
+
   c1_browser_session_foundation:
     domain_application:
       { state: required, binding: "application:{application_key}" }
@@ -1804,3 +1831,160 @@ capabilities:
       ]
     examples: [metadata.projection.configure.validation_failed]
     uat: []
+
+  - application_key: resolve_identity_route
+    id: identity.route.resolve
+    bounded_context: identity.routing
+    contract_body: m3
+    runtime_body: m3
+    authorization: scoped_or_browser_session
+    lifecycle:
+      {
+        introduced_in: m3,
+        contract_state: finalized,
+        runtime_availability: implemented,
+      }
+    surface_profile: m3_identity_routing
+    scopes: [identity_read]
+    problems:
+      [
+        authentication_failed,
+        browser_session_expired,
+        browser_session_revoked,
+        capability_unavailable,
+        capacity_exceeded,
+        forbidden,
+        integrity_failed,
+        record_not_found,
+        session_policy_changed,
+        storage_unavailable,
+        validation_failed,
+      ]
+    examples: []
+    uat:
+      - {
+          id: MDN-001,
+          relationship: split,
+          owner_body: m3,
+          reason: M3 proves the verified IMDb alias route while M8 owns live TMDB enrichment.,
+        }
+      - {
+          id: MDN-002,
+          relationship: split,
+          owner_body: m3,
+          reason: M3 proves the verified IMDb alias route while M8 owns live TMDB enrichment.,
+        }
+
+  - application_key: read_anime_grouping_policy
+    id: profile.anime_grouping_policy.read
+    bounded_context: profile.projection_policy
+    contract_body: m3
+    runtime_body: m3
+    authorization: scoped_or_browser_session
+    lifecycle:
+      {
+        introduced_in: m3,
+        contract_state: finalized,
+        runtime_availability: implemented,
+      }
+    surface_profile: m3_identity_routing
+    scopes: [profile_state_read]
+    problems:
+      [
+        authentication_failed,
+        browser_session_expired,
+        browser_session_revoked,
+        capability_unavailable,
+        forbidden,
+        integrity_failed,
+        session_policy_changed,
+        storage_unavailable,
+        validation_failed,
+      ]
+    examples: []
+    uat:
+      - {
+          id: MDN-018,
+          relationship: split,
+          owner_body: m3,
+          reason: M3 exposes the durable profile policy read used by the governed change flow.,
+        }
+
+  - application_key: preview_anime_grouping_policy_change
+    id: profile.anime_grouping_policy.preview
+    bounded_context: profile.projection_policy
+    contract_body: m3
+    runtime_body: m3
+    authorization: scoped_or_browser_session
+    lifecycle:
+      {
+        introduced_in: m3,
+        contract_state: finalized,
+        runtime_availability: implemented,
+      }
+    surface_profile: m3_identity_routing
+    scopes: [profile_state_read]
+    problems:
+      [
+        authentication_failed,
+        browser_session_expired,
+        browser_session_revoked,
+        capability_unavailable,
+        capacity_exceeded,
+        forbidden,
+        integrity_failed,
+        malformed_json,
+        payload_too_large,
+        session_policy_changed,
+        storage_unavailable,
+        unsupported_media_type,
+        validation_failed,
+      ]
+    examples: []
+    uat:
+      - {
+          id: MDN-018,
+          relationship: split,
+          owner_body: m3,
+          reason: M3 previews the bounded projection impact before any governed policy change.,
+        }
+
+  - application_key: apply_anime_grouping_policy_change
+    id: profile.anime_grouping_policy.apply
+    bounded_context: profile.projection_policy
+    contract_body: m3
+    runtime_body: m3
+    authorization: scoped_or_browser_session
+    lifecycle:
+      {
+        introduced_in: m3,
+        contract_state: finalized,
+        runtime_availability: implemented,
+      }
+    surface_profile: m3_identity_routing
+    scopes: [profile_state_write]
+    problems:
+      [
+        authentication_failed,
+        browser_session_expired,
+        browser_session_revoked,
+        capability_unavailable,
+        capacity_exceeded,
+        forbidden,
+        idempotency_conflict,
+        integrity_failed,
+        malformed_json,
+        payload_too_large,
+        session_policy_changed,
+        storage_unavailable,
+        unsupported_media_type,
+        validation_failed,
+      ]
+    examples: []
+    uat:
+      - {
+          id: MDN-018,
+          relationship: direct,
+          owner_body: m3,
+          reason: M3 durably changes projection policy without re-keying Records or Chronicle state.,
+        }

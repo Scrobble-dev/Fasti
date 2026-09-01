@@ -53,6 +53,136 @@ try {
     }
     await page.getByRole("heading", { name: "Account and security" }).waitFor();
 
+    const m3AnimeGroupingPolicy = await page.evaluate(async () => {
+      const csrf = document.cookie
+        .split("; ")
+        .find((pair) => pair.startsWith("__Host-fasti_csrf="))
+        ?.split("=", 2)[1];
+      if (!csrf) throw new Error("browser CSRF cookie is unavailable");
+
+      function requestOptions(method, body) {
+        const headers = {};
+        if (body !== undefined) headers["content-type"] = "application/json";
+        if (method !== "GET") headers["X-CSRF-Token"] = csrf;
+        return {
+          method,
+          headers,
+          body: body === undefined ? undefined : JSON.stringify(body),
+          credentials: "same-origin",
+        };
+      }
+
+      async function parseResponse(response, method, path) {
+        const payload = await response.json();
+        if (!response.ok) {
+          throw new Error(
+            `${method} ${path} failed with ${response.status} ${payload.code ?? "unknown"}`,
+          );
+        }
+        return payload;
+      }
+
+      async function readPolicy() {
+        return parseResponse(
+          await fetch(
+            "/api/v1/profile/anime-grouping-policy?scope=profile",
+            requestOptions("GET"),
+          ),
+          "GET",
+          "/api/v1/profile/anime-grouping-policy?scope=profile",
+        );
+      }
+
+      async function mutatePolicy(body) {
+        return parseResponse(
+          await fetch(
+            "/api/v1/profile/anime-grouping-policy",
+            requestOptions("PUT", body),
+          ),
+          "PUT",
+          "/api/v1/profile/anime-grouping-policy",
+        );
+      }
+
+      const created = await parseResponse(
+        await fetch(
+          "/api/v1/records",
+          requestOptions("POST", { grain: "release" }),
+        ),
+        "POST",
+        "/api/v1/records",
+      );
+      const initial = await readPolicy();
+      if (initial.policy.revision !== 0) {
+        throw new Error("anime grouping policy did not start at revision zero");
+      }
+      const preview = await parseResponse(
+        await fetch(
+          "/api/v1/profile/anime-grouping-policy/preview",
+          requestOptions("POST", {
+            scope: { kind: "profile", client_id: null },
+            change: { kind: "set", preference: "group_by_tv_work" },
+            after_record_id: null,
+            limit: 10,
+          }),
+        ),
+        "POST",
+        "/api/v1/profile/anime-grouping-policy/preview",
+      );
+      if (preview.total_records !== 1) {
+        throw new Error(
+          "anime grouping preview did not include the durable record",
+        );
+      }
+
+      const applyBody = {
+        operation_id: "op_01998c1a4e2b70008000000000000001",
+        scope: { kind: "profile", client_id: null },
+        expected_revision: 0,
+        change: { kind: "set", preference: "group_by_tv_work" },
+      };
+      const applied = await mutatePolicy(applyBody);
+      const appliedReplay = await mutatePolicy(applyBody);
+      if (
+        applied.policy.revision !== 1 ||
+        applied.policy.preference !== "group_by_tv_work" ||
+        JSON.stringify(appliedReplay) !== JSON.stringify(applied)
+      ) {
+        throw new Error("anime grouping apply or replay differs");
+      }
+
+      const rollbackBody = {
+        operation_id: "op_01998c1a4e2b70008000000000000002",
+        scope: { kind: "profile", client_id: null },
+        expected_revision: 1,
+        change: {
+          kind: "rollback",
+          applied_operation_id: applyBody.operation_id,
+        },
+      };
+      const rolledBack = await mutatePolicy(rollbackBody);
+      const rollbackReplay = await mutatePolicy(rollbackBody);
+      if (
+        rolledBack.policy.revision !== 2 ||
+        rolledBack.policy.preference !== "automatic" ||
+        JSON.stringify(rollbackReplay) !== JSON.stringify(rolledBack)
+      ) {
+        throw new Error("anime grouping rollback or replay differs");
+      }
+      return {
+        realFastid: true,
+        realSqlite: true,
+        browserSession: true,
+        csrfMutationBoundary: true,
+        durableRecordId: created.record_id,
+        previewRecords: preview.total_records,
+        finalRevision: rolledBack.policy.revision,
+        finalPreference: rolledBack.policy.preference,
+        applyReplayExact: true,
+        rollbackReplayExact: true,
+      };
+    });
+
     const cookies = await context.cookies();
     const sessionMatches = cookies.filter(
       (cookie) => cookie.name === "__Host-fasti_session",
@@ -136,6 +266,7 @@ try {
           },
           distinct: true,
         },
+        m3AnimeGroupingPolicy,
         fastiOriginVendorCredentialStorageAbsent: true,
       }),
     );

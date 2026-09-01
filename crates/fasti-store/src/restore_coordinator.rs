@@ -108,6 +108,13 @@ fn import_problem(
         | RestoreImportError::BlobDescriptor { .. }
         | RestoreImportError::RowInvariant { .. }
         | RestoreImportError::DomainInvariant
+        | RestoreImportError::IdentityRoutingInvariant
+        | RestoreImportError::PolicyReceiptInvariant
+        | RestoreImportError::SqliteIntegrity
+        | RestoreImportError::RelationInvariant
+        | RestoreImportError::AggregateInvariant
+        | RestoreImportError::InterpretationChainInvariant
+        | RestoreImportError::MetadataLifecycleInvariant
         | RestoreImportError::SchemaMismatch
         | RestoreImportError::RevisionMismatch
         | RestoreImportError::CountMismatch

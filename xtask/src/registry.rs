@@ -9,7 +9,7 @@ use std::fs;
 use std::path::Path;
 
 const REGISTRY_PATH: &str = "contracts/registry/v1/capabilities.yaml";
-const EXPECTED_PROFILES: [&str; 16] = [
+const EXPECTED_PROFILES: [&str; 17] = [
     "b1_durable_bootstrap",
     "b1_http_fixture",
     "b1_integration_status",
@@ -26,6 +26,7 @@ const EXPECTED_PROFILES: [&str; 16] = [
     "later_b3",
     "m1_providers",
     "m2_metadata",
+    "m3_identity_routing",
 ];
 
 #[derive(Debug)]
@@ -216,7 +217,11 @@ pub(crate) fn finalized_required_bindings(
     for capability in registry.capabilities {
         if !matches!(
             capability.contract_body,
-            CapabilityBody::B1 | CapabilityBody::C1 | CapabilityBody::M1 | CapabilityBody::M2
+            CapabilityBody::B1
+                | CapabilityBody::C1
+                | CapabilityBody::M1
+                | CapabilityBody::M2
+                | CapabilityBody::M3
         ) || capability.lifecycle.contract_state != ContractState::Finalized
         {
             continue;
@@ -564,7 +569,7 @@ fn validate_uat(label: &str, entries: &[UatOwnership]) -> anyhow::Result<()> {
     for entry in entries {
         ensure!(
             uat_id_is_well_formed(&entry.id),
-            "{label}: UAT ID must use ID-NNN: {}",
+            "{label}: UAT ID must use ID-NNN or MDN-NNN: {}",
             entry.id
         );
         ensure!(
@@ -611,9 +616,9 @@ fn segment_is_well_formed(segment: &str) -> bool {
 }
 
 fn uat_id_is_well_formed(value: &str) -> bool {
-    value.len() == 6
-        && value.starts_with("ID-")
-        && value[3..]
+    ((value.len() == 6 && value.starts_with("ID-"))
+        || (value.len() == 7 && value.starts_with("MDN-")))
+        && value[value.len() - 3..]
             .chars()
             .all(|character| character.is_ascii_digit())
 }
@@ -657,6 +662,10 @@ const fn expected_surface_profile(key: CapabilityKey) -> &'static str {
         CapabilityKey::RefreshMetadataClaims
         | CapabilityKey::ReadMetadataProjection
         | CapabilityKey::ConfigureMetadataProjection => "m2_metadata",
+        CapabilityKey::ResolveIdentityRoute
+        | CapabilityKey::ReadAnimeGroupingPolicy
+        | CapabilityKey::PreviewAnimeGroupingPolicyChange
+        | CapabilityKey::ApplyAnimeGroupingPolicyChange => "m3_identity_routing",
         _ => match key.contract_body() {
             CapabilityBody::B1 => "b1_http_fixture",
             CapabilityBody::B2 => "later_b2",
@@ -665,6 +674,7 @@ const fn expected_surface_profile(key: CapabilityKey) -> &'static str {
             CapabilityBody::C1 => "c1_browser_session_foundation",
             CapabilityBody::M1 => "m1_providers",
             CapabilityBody::M2 => "m2_metadata",
+            CapabilityBody::M3 => "m3_identity_routing",
         },
     }
 }
@@ -678,6 +688,7 @@ const fn body_rank(body: CapabilityBody) -> u8 {
         CapabilityBody::C1 => 4,
         CapabilityBody::M1 => 5,
         CapabilityBody::M2 => 6,
+        CapabilityBody::M3 => 7,
     }
 }
 
@@ -696,7 +707,9 @@ mod tests {
     #[test]
     fn uat_ids_are_fixed_width() {
         assert!(uat_id_is_well_formed("ID-065"));
+        assert!(uat_id_is_well_formed("MDN-018"));
         assert!(!uat_id_is_well_formed("ID-65"));
+        assert!(!uat_id_is_well_formed("MDN-18"));
     }
 
     #[test]
@@ -892,6 +905,10 @@ mod tests {
                 CapabilityKey::GetNuvioCollections,
                 CapabilityKey::ReplaceNuvioCollections,
                 CapabilityKey::ClearNuvioCollections,
+                CapabilityKey::ResolveIdentityRoute,
+                CapabilityKey::ReadAnimeGroupingPolicy,
+                CapabilityKey::PreviewAnimeGroupingPolicyChange,
+                CapabilityKey::ApplyAnimeGroupingPolicyChange,
             ]
         );
 

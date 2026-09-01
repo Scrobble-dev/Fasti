@@ -307,6 +307,52 @@ status, refresh = post(
 if status != 409 or refresh.get("code") != "metadata_claim_stale":
     raise SystemExit("Offline provider refresh did not retain the governed last-known-good state")
 
+status, route = get(
+    f"/api/v1/records/{record_id}/identity-route?intent=metadata_lookup&target_provider=tmdb",
+    enrolled["credential"],
+)
+if (
+    status != 200
+    or route.get("status") != "selected"
+    or route.get("selected_route", {}).get("identifier", {}).get("value") != "550"
+):
+    raise SystemExit("Packaged identity routing did not select the local provider identifier")
+
+status, policy = get(
+    "/api/v1/profile/anime-grouping-policy?scope=profile",
+    enrolled["credential"],
+)
+if status != 200 or policy.get("policy", {}).get("preference") != "automatic":
+    raise SystemExit("Packaged anime policy did not expose its durable profile default")
+
+policy_change = {
+    "scope": {"kind": "profile", "client_id": None},
+    "change": {"kind": "set", "preference": "group_by_tv_work"},
+}
+status, preview = post(
+    "/api/v1/profile/anime-grouping-policy/preview",
+    {**policy_change, "after_record_id": None, "limit": 100},
+    bearer=enrolled["credential"],
+)
+if status != 200 or preview.get("proposed_preference") != "group_by_tv_work":
+    raise SystemExit("Packaged anime policy preview did not evaluate the requested change")
+
+status, applied = put(
+    "/api/v1/profile/anime-grouping-policy",
+    {
+        **policy_change,
+        "operation_id": "op_018f0e0e7f7b70008000000000000006",
+        "expected_revision": 0,
+    },
+    enrolled["credential"],
+)
+if (
+    status != 200
+    or applied.get("policy", {}).get("preference") != "group_by_tv_work"
+    or applied.get("policy", {}).get("revision") != 1
+):
+    raise SystemExit("Packaged anime policy change did not commit an immutable receipt")
+
 status, problem = post("/api/v1/node/initialization", {}, bearer=bootstrap_secret)
 if status != 409 or problem.get("code") != "already_initialized":
     raise SystemExit("One-time node initialization did not close after enrollment")
@@ -331,5 +377,5 @@ if (( rss_kib > idle_limit_mib * 1024 )); then
   exit 1
 fi
 
-echo "native offline smoke: CLI guard, durable bootstrap, provider registry, metadata safe states, daemon health, and ${rss_mib} MiB idle memory all pass with no network"
+echo "native offline smoke: CLI guard, durable bootstrap, provider registry, metadata and identity safe states, daemon health, and ${rss_mib} MiB idle memory all pass with no network"
 ' _ "$work_dir" "$(realpath "$daemon")" "$(realpath "$cli")" "$idle_limit_mib"

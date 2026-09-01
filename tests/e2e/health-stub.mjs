@@ -95,15 +95,17 @@ const server = createServer((request, response) => {
     payload = { status: "healthy", version: "0.1.0-test" };
   } else if (url.pathname === "/api/access/v1/projection") {
     payload = accessProjection;
+  } else if (url.pathname === "/api/v1/providers") {
+    payload = { providers: [] };
   } else if (url.pathname === "/api/v1/profile/nuvio-collections") {
-    payload = [];
+    payload = { document: null };
   } else if (url.pathname === "/api/v1/profile/record-tracking-dispositions") {
-    payload = [];
+    payload = { states: [], truncated: false };
   } else if (
     url.pathname === "/api/v1/records" ||
     url.pathname.startsWith("/api/v1/records/")
   ) {
-    payload = [];
+    payload = { records: [], truncated: false };
   } else if (
     url.pathname === "/api/v1/reviews" ||
     url.pathname.startsWith("/api/v1/reviews/")

@@ -481,6 +481,31 @@
       "status": "deferred",
       "owner_body": "b5",
       "reason": "Predictable provider switching and rollback require B5 enrichment integrated with the reviewed B4 interface."
+    },
+    {
+      "id": "MDN-001",
+      "status": "contract-m3",
+      "owner_body": "m3",
+      "reason": "M3 proves the verified IMDb alias route; M8 still owns live TMDB enrichment evidence."
+    },
+    {
+      "id": "MDN-002",
+      "status": "contract-m3",
+      "owner_body": "m3",
+      "reason": "M3 proves the verified IMDb alias route; M8 still owns live TMDB enrichment evidence."
+    },
+    {
+      "id": "MDN-018",
+      "status": "executable-m3",
+      "owner_body": "m3",
+      "reason": "M3 proves durable policy change, bounded preview, rollback, and unchanged Record and Chronicle state.",
+      "evidence": [
+        "cargo test -p fasti-api identity_routing_http_routes_authorize_preview_apply_and_replay (Linux production router and SQLite)",
+        "python3 -B scripts/smoke-access-browser.py --root .dev-trailbase (real Chromium, TrailBase, fastid, SQLite, browser session, and CSRF)",
+        "cargo test -p fasti-store route_resolution_and_policy_change_are_durable_and_idempotent (Linux SQLite Record and Chronicle invariant)",
+        "cargo test -p fasti-store archive_v5_round_trips_identity_routing_and_policy_receipts (Linux archive v5 restore)",
+        "pnpm exec playwright test tests/e2e/anime-grouping-policy.spec.ts (Chromium 320/768/1440 light and dark)"
+      ]
     }
   ]
 }

@@ -7,7 +7,7 @@ use fasti_domain::{Grain, MetadataClaimId, MAX_EXTERNAL_IDENTIFIER_BYTES};
 use rusqlite::{Connection, Result, Transaction, TransactionBehavior};
 use std::fmt::Write as _;
 
-pub(crate) const SCHEMA_VERSION: i64 = 14;
+pub(crate) const SCHEMA_VERSION: i64 = 15;
 
 pub(crate) fn migrate(connection: &Connection) -> Result<()> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -78,6 +78,11 @@ pub(crate) fn migrate(connection: &Connection) -> Result<()> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if version == 13 {
         migrate_v14(connection)?;
+    }
+
+    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version == 14 {
+        migrate_v15(connection)?;
     }
 
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -2376,6 +2381,368 @@ fn migrate_v14(connection: &Connection) -> Result<()> {
     transaction.commit()
 }
 
+fn migrate_v15(connection: &Connection) -> Result<()> {
+    let transaction = Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+    transaction.execute_batch(
+        r#"
+        CREATE INDEX records_workspace_record_idx
+            ON records(workspace_id, record_id);
+
+        CREATE TABLE identity_assertions (
+            assertion_id TEXT PRIMARY KEY CHECK (
+                length(assertion_id) = 36
+                AND substr(assertion_id, 1, 4) = 'asr_'
+                AND substr(assertion_id, 5) NOT GLOB '*[^0-9a-f]*'
+                AND substr(assertion_id, 17, 1) = '7'
+                AND substr(assertion_id, 21, 1) GLOB '[89ab]'
+            ),
+            workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id),
+            record_id TEXT NOT NULL REFERENCES records(record_id),
+            source_external_identifier_id TEXT NOT NULL
+                REFERENCES external_identifiers(external_identifier_id),
+            target_namespace TEXT NOT NULL CHECK (
+                length(target_namespace) BETWEEN 2 AND 64
+                AND target_namespace = lower(target_namespace)
+                AND substr(target_namespace, 1, 1) GLOB '[a-z]'
+                AND target_namespace NOT GLOB '*[^a-z0-9._-]*'
+            ),
+            target_grain TEXT NOT NULL CHECK (length(target_grain) BETWEEN 1 AND 32),
+            target_value TEXT NOT NULL CHECK (length(target_value) BETWEEN 1 AND 256),
+            relation TEXT NOT NULL CHECK (relation IN (
+                'exact', 'subset_of', 'superset_of', 'overlaps',
+                'alternate_cut_of', 'related', 'not_same_as'
+            )),
+            coverage_json TEXT NOT NULL CHECK (
+                length(coverage_json) BETWEEN 2 AND 262144
+                AND json_valid(coverage_json)
+                AND json_type(coverage_json) = 'array'
+                AND json_array_length(coverage_json) <= 64
+            ),
+            episode_links_json TEXT NOT NULL CHECK (
+                length(episode_links_json) BETWEEN 2 AND 262144
+                AND json_valid(episode_links_json)
+                AND json_type(episode_links_json) = 'array'
+                AND json_array_length(episode_links_json) <= 64
+            ),
+            evidence_class TEXT NOT NULL CHECK (evidence_class IN (
+                'asserted', 'verified', 'corroborated', 'inferred',
+                'candidate', 'disputed'
+            )),
+            evidence_json TEXT NOT NULL CHECK (
+                length(evidence_json) BETWEEN 2 AND 131072
+                AND json_valid(evidence_json)
+                AND json_type(evidence_json) = 'array'
+                AND json_array_length(evidence_json) BETWEEN 1 AND 16
+            ),
+            id_source TEXT NOT NULL CHECK (length(id_source) BETWEEN 3 AND 256),
+            source_version TEXT CHECK (
+                source_version IS NULL OR length(source_version) BETWEEN 1 AND 256
+            ),
+            authority TEXT CHECK (
+                authority IS NULL OR length(authority) BETWEEN 1 AND 256
+            ),
+            reasoning TEXT CHECK (
+                reasoning IS NULL OR length(reasoning) BETWEEN 1 AND 4096
+            ),
+            initial_status TEXT NOT NULL CHECK (initial_status IN (
+                'candidate', 'accepted', 'disputed', 'rejected', 'revoked'
+            )),
+            created_at TEXT NOT NULL,
+            UNIQUE (
+                workspace_id, record_id, source_external_identifier_id,
+                target_namespace, target_grain, target_value, relation
+            )
+        ) STRICT;
+        CREATE INDEX identity_assertions_record_idx
+            ON identity_assertions(workspace_id, record_id, assertion_id);
+
+        CREATE TRIGGER identity_assertions_scope_insert
+        BEFORE INSERT ON identity_assertions
+        WHEN NOT EXISTS (
+            SELECT 1 FROM external_identifiers identifier
+            WHERE identifier.external_identifier_id = NEW.source_external_identifier_id
+              AND identifier.workspace_id = NEW.workspace_id
+              AND identifier.record_id = NEW.record_id
+        ) OR NOT EXISTS (
+            SELECT 1 FROM namespace_definitions definition
+            WHERE definition.workspace_id = NEW.workspace_id
+              AND definition.namespace = NEW.target_namespace
+              AND instr(
+                    ',' || definition.supported_grains || ',',
+                    ',' || NEW.target_grain || ','
+                  ) > 0
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'identity assertion crosses its Record or namespace boundary');
+        END;
+
+        CREATE TRIGGER identity_assertions_immutable_update
+        BEFORE UPDATE ON identity_assertions
+        BEGIN
+            SELECT RAISE(ABORT, 'identity assertions are immutable');
+        END;
+
+        CREATE TRIGGER identity_assertions_immutable_delete
+        BEFORE DELETE ON identity_assertions
+        BEGIN
+            SELECT RAISE(ABORT, 'identity assertions are immutable');
+        END;
+
+        CREATE TRIGGER identity_assertion_namespace_delete_guard
+        BEFORE DELETE ON namespace_definitions
+        WHEN EXISTS (
+            SELECT 1 FROM identity_assertions assertion
+            WHERE assertion.workspace_id = OLD.workspace_id
+              AND assertion.target_namespace = OLD.namespace
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'namespace is referenced by an identity assertion');
+        END;
+
+        CREATE TABLE identity_assertion_lifecycle_events (
+            workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id),
+            assertion_id TEXT NOT NULL REFERENCES identity_assertions(assertion_id),
+            sequence INTEGER NOT NULL CHECK (sequence BETWEEN 1 AND 4294967295),
+            previous_status TEXT NOT NULL CHECK (previous_status IN (
+                'candidate', 'accepted', 'disputed', 'rejected', 'revoked'
+            )),
+            status TEXT NOT NULL CHECK (status IN (
+                'candidate', 'accepted', 'disputed', 'rejected', 'revoked'
+            )),
+            reviewer_client_id TEXT NOT NULL REFERENCES clients(client_id),
+            occurred_at TEXT NOT NULL,
+            evidence_digest TEXT CHECK (
+                evidence_digest IS NULL OR (
+                    length(evidence_digest) = 71
+                    AND substr(evidence_digest, 1, 7) = 'sha256:'
+                    AND substr(evidence_digest, 8) NOT GLOB '*[^0-9a-f]*'
+                )
+            ),
+            PRIMARY KEY (assertion_id, sequence)
+        ) STRICT, WITHOUT ROWID;
+
+        CREATE TRIGGER identity_assertion_lifecycle_scope_insert
+        BEFORE INSERT ON identity_assertion_lifecycle_events
+        WHEN NOT EXISTS (
+            SELECT 1 FROM identity_assertions assertion
+            WHERE assertion.assertion_id = NEW.assertion_id
+              AND assertion.workspace_id = NEW.workspace_id
+        ) OR NOT EXISTS (
+            SELECT 1 FROM clients client
+            WHERE client.client_id = NEW.reviewer_client_id
+              AND client.workspace_id = NEW.workspace_id
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'identity assertion lifecycle crosses a workspace boundary');
+        END;
+
+        CREATE TRIGGER identity_assertion_lifecycle_immutable_update
+        BEFORE UPDATE ON identity_assertion_lifecycle_events
+        BEGIN
+            SELECT RAISE(ABORT, 'identity assertion lifecycle events are immutable');
+        END;
+
+        CREATE TRIGGER identity_assertion_lifecycle_immutable_delete
+        BEFORE DELETE ON identity_assertion_lifecycle_events
+        BEGIN
+            SELECT RAISE(ABORT, 'identity assertion lifecycle events are immutable');
+        END;
+
+        CREATE TABLE profile_anime_grouping_policies (
+            workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id),
+            profile_id TEXT NOT NULL REFERENCES profiles(profile_id),
+            preference TEXT NOT NULL CHECK (preference IN (
+                'group_by_tv_work', 'keep_mal_releases_separate',
+                'keep_kitsu_releases_separate', 'automatic'
+            )),
+            revision INTEGER NOT NULL CHECK (revision BETWEEN 1 AND 9007199254740991),
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (workspace_id, profile_id)
+        ) STRICT, WITHOUT ROWID;
+
+        CREATE TRIGGER profile_anime_grouping_policy_scope_insert
+        BEFORE INSERT ON profile_anime_grouping_policies
+        WHEN NOT EXISTS (
+            SELECT 1 FROM profiles profile
+            WHERE profile.profile_id = NEW.profile_id
+              AND profile.workspace_id = NEW.workspace_id
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'anime grouping profile policy crosses a workspace boundary');
+        END;
+
+        CREATE TRIGGER profile_anime_grouping_policy_scope_update
+        BEFORE UPDATE ON profile_anime_grouping_policies
+        WHEN NEW.workspace_id <> OLD.workspace_id OR NEW.profile_id <> OLD.profile_id
+        BEGIN
+            SELECT RAISE(ABORT, 'anime grouping profile policy ownership is immutable');
+        END;
+
+        CREATE TABLE client_anime_grouping_policies (
+            workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id),
+            profile_id TEXT NOT NULL REFERENCES profiles(profile_id),
+            client_id TEXT NOT NULL REFERENCES clients(client_id),
+            preference TEXT CHECK (preference IS NULL OR preference IN (
+                'group_by_tv_work', 'keep_mal_releases_separate',
+                'keep_kitsu_releases_separate', 'automatic'
+            )),
+            revision INTEGER NOT NULL CHECK (revision BETWEEN 1 AND 9007199254740991),
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (workspace_id, profile_id, client_id)
+        ) STRICT, WITHOUT ROWID;
+
+        CREATE TRIGGER client_anime_grouping_policy_scope_insert
+        BEFORE INSERT ON client_anime_grouping_policies
+        WHEN NOT EXISTS (
+            SELECT 1 FROM profiles profile
+            WHERE profile.profile_id = NEW.profile_id
+              AND profile.workspace_id = NEW.workspace_id
+        ) OR NOT EXISTS (
+            SELECT 1 FROM clients client
+            WHERE client.client_id = NEW.client_id
+              AND client.workspace_id = NEW.workspace_id
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'anime grouping client policy crosses a workspace boundary');
+        END;
+
+        CREATE TRIGGER client_anime_grouping_policy_scope_update
+        BEFORE UPDATE ON client_anime_grouping_policies
+        WHEN NEW.workspace_id <> OLD.workspace_id
+          OR NEW.profile_id <> OLD.profile_id
+          OR NEW.client_id <> OLD.client_id
+        BEGIN
+            SELECT RAISE(ABORT, 'anime grouping client policy ownership is immutable');
+        END;
+
+        CREATE TABLE anime_grouping_policy_receipts (
+            workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id),
+            profile_id TEXT NOT NULL REFERENCES profiles(profile_id),
+            actor_client_id TEXT NOT NULL REFERENCES clients(client_id),
+            scope_kind TEXT NOT NULL CHECK (scope_kind IN ('profile', 'client')),
+            scope_client_id TEXT REFERENCES clients(client_id),
+            operation_id TEXT NOT NULL CHECK (
+                length(operation_id) = 35
+                AND substr(operation_id, 1, 3) = 'op_'
+                AND substr(operation_id, 4) NOT GLOB '*[^0-9a-f]*'
+                AND substr(operation_id, 16, 1) = '7'
+                AND substr(operation_id, 20, 1) GLOB '[89ab]'
+            ),
+            semantic_digest TEXT NOT NULL CHECK (
+                length(semantic_digest) = 71
+                AND substr(semantic_digest, 1, 7) = 'sha256:'
+                AND substr(semantic_digest, 8) NOT GLOB '*[^0-9a-f]*'
+            ),
+            change_kind TEXT NOT NULL CHECK (
+                change_kind IN ('set', 'inherit_profile', 'rollback')
+            ),
+            requested_preference TEXT CHECK (
+                requested_preference IS NULL OR requested_preference IN (
+                    'group_by_tv_work', 'keep_mal_releases_separate',
+                    'keep_kitsu_releases_separate', 'automatic'
+                )
+            ),
+            rollback_operation_id TEXT,
+            previous_preference TEXT NOT NULL CHECK (previous_preference IN (
+                'group_by_tv_work', 'keep_mal_releases_separate',
+                'keep_kitsu_releases_separate', 'automatic'
+            )),
+            previous_source TEXT NOT NULL CHECK (
+                previous_source IN ('profile_default', 'client_override')
+            ),
+            result_preference TEXT NOT NULL CHECK (result_preference IN (
+                'group_by_tv_work', 'keep_mal_releases_separate',
+                'keep_kitsu_releases_separate', 'automatic'
+            )),
+            result_source TEXT NOT NULL CHECK (
+                result_source IN ('profile_default', 'client_override')
+            ),
+            result_revision INTEGER NOT NULL CHECK (
+                result_revision BETWEEN 1 AND 9007199254740991
+            ),
+            affected_records INTEGER NOT NULL CHECK (affected_records >= 0),
+            unresolved_routes INTEGER NOT NULL CHECK (unresolved_routes >= 0),
+            possible_season_regroupings INTEGER NOT NULL CHECK (
+                possible_season_regroupings BETWEEN 0 AND affected_records
+            ),
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (workspace_id, actor_client_id, operation_id),
+            UNIQUE (workspace_id, operation_id),
+            CHECK (
+                (scope_kind = 'profile' AND scope_client_id IS NULL)
+                OR (scope_kind = 'client' AND scope_client_id IS NOT NULL)
+            ),
+            CHECK (
+                (change_kind = 'set'
+                    AND requested_preference IS NOT NULL
+                    AND rollback_operation_id IS NULL)
+                OR (change_kind = 'inherit_profile'
+                    AND requested_preference IS NULL
+                    AND rollback_operation_id IS NULL
+                    AND scope_kind = 'client')
+                OR (change_kind = 'rollback'
+                    AND requested_preference IS NULL
+                    AND rollback_operation_id IS NOT NULL
+                    AND rollback_operation_id <> operation_id)
+            )
+        ) STRICT, WITHOUT ROWID;
+
+        CREATE TRIGGER anime_grouping_policy_receipt_scope_insert
+        BEFORE INSERT ON anime_grouping_policy_receipts
+        WHEN NOT EXISTS (
+            SELECT 1 FROM profiles profile
+            WHERE profile.profile_id = NEW.profile_id
+              AND profile.workspace_id = NEW.workspace_id
+        ) OR NOT EXISTS (
+            SELECT 1 FROM clients client
+            WHERE client.client_id = NEW.actor_client_id
+              AND client.workspace_id = NEW.workspace_id
+        ) OR (
+            NEW.scope_client_id IS NOT NULL AND NOT EXISTS (
+                SELECT 1 FROM clients client
+                WHERE client.client_id = NEW.scope_client_id
+                  AND client.workspace_id = NEW.workspace_id
+            )
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'anime grouping policy receipt crosses a workspace boundary');
+        END;
+
+        CREATE TRIGGER anime_grouping_policy_receipts_immutable_update
+        BEFORE UPDATE ON anime_grouping_policy_receipts
+        BEGIN
+            SELECT RAISE(ABORT, 'anime grouping policy receipts are immutable');
+        END;
+
+        CREATE TRIGGER anime_grouping_policy_receipts_immutable_delete
+        BEFORE DELETE ON anime_grouping_policy_receipts
+        BEGIN
+            SELECT RAISE(ABORT, 'anime grouping policy receipts are immutable');
+        END;
+        "#,
+    )?;
+    let mut revision_sql = String::new();
+    for table in [
+        "identity_assertions",
+        "identity_assertion_lifecycle_events",
+        "profile_anime_grouping_policies",
+        "client_anime_grouping_policies",
+        "anime_grouping_policy_receipts",
+    ] {
+        append_revision_triggers(
+            &mut revision_sql,
+            &RevisionSource {
+                table,
+                new_workspace: "NEW.workspace_id",
+                old_workspace: "OLD.workspace_id",
+            },
+        );
+    }
+    transaction.execute_batch(&revision_sql)?;
+    transaction.pragma_update(None, "user_version", 15)?;
+    transaction.commit()
+}
+
 /// Materialize v12 companions for rows restored from archive-v2 after the
 /// archive's frozen legacy tables have been imported and coordinate-repaired.
 /// Every insert is retry-safe and the archive-owned rows remain untouched.
@@ -3053,6 +3420,11 @@ mod tests {
         migrate_v13(connection).expect("version thirteen");
     }
 
+    fn migrate_to_version_fourteen(connection: &Connection) {
+        migrate_to_version_thirteen(connection);
+        migrate_v14(connection).expect("version fourteen");
+    }
+
     fn seed_legacy_override_root(connection: &Connection, profile_count: usize) {
         connection
             .execute_batch(
@@ -3289,13 +3661,14 @@ mod tests {
         // (migrate_v7), +3 for profile Nuvio Collections (migrate_v9), and
         // +3 for provider capability state (migrate_v11), +27 for the nine
         // authoritative metadata tables (migrate_v12), and +3 for immutable
-        // metadata refresh receipts (migrate_v13). Disposable
+        // metadata refresh receipts (migrate_v13), plus +15 for the five M3
+        // identity and anime-policy tables (migrate_v15). Disposable
         // projection and cache tables do not advance the workspace revision,
         // none of which are in the
         // original REVISION_SOURCES list built for the v3 schema snapshot.
         assert_eq!(
             trigger_count,
-            (REVISION_SOURCES.len() * 3 + 3 + 6 + 3 + 3 + 3 + 27 + 3) as i64
+            (REVISION_SOURCES.len() * 3 + 3 + 6 + 3 + 3 + 3 + 27 + 3 + 15) as i64
         );
     }
 
@@ -3386,7 +3759,7 @@ mod tests {
             assert_eq!(count, 0, "{table} must not exist in published v13");
         }
 
-        migrate(&connection).expect("upgrade v13 to v14");
+        migrate_v14(&connection).expect("upgrade v13 to v14");
 
         let after: i64 = connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))
@@ -3425,6 +3798,91 @@ mod tests {
             )
             .expect("count active bootstrap index");
         assert_eq!(active_bootstrap_index, 1);
+    }
+
+    #[test]
+    fn version_fourteen_upgrades_to_append_only_identity_and_anime_policy_state() {
+        let connection = Connection::open_in_memory().expect("in-memory SQLite");
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .expect("enable foreign keys");
+        migrate_to_version_fourteen(&connection);
+
+        let before: i64 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .expect("read v14");
+        assert_eq!(before, 14);
+        for table in [
+            "identity_assertions",
+            "identity_assertion_lifecycle_events",
+            "profile_anime_grouping_policies",
+            "client_anime_grouping_policies",
+            "anime_grouping_policy_receipts",
+        ] {
+            let count: i64 = connection
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_schema WHERE type = 'table' AND name = ?1",
+                    [table],
+                    |row| row.get(0),
+                )
+                .expect("inspect v14 tables");
+            assert_eq!(count, 0, "{table} must not exist in published v14");
+        }
+
+        migrate(&connection).expect("upgrade v14 to v15");
+
+        let after: i64 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .expect("read v15");
+        assert_eq!(after, 15);
+        for table in [
+            "identity_assertions",
+            "identity_assertion_lifecycle_events",
+            "profile_anime_grouping_policies",
+            "client_anime_grouping_policies",
+            "anime_grouping_policy_receipts",
+        ] {
+            let count: i64 = connection
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_schema WHERE type = 'table' AND name = ?1",
+                    [table],
+                    |row| row.get(0),
+                )
+                .expect("inspect v15 tables");
+            assert_eq!(count, 1, "{table}");
+        }
+        let revision_triggers: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_schema WHERE type = 'trigger' AND name LIKE 'workspace_revision_%' AND tbl_name IN ('identity_assertions', 'identity_assertion_lifecycle_events', 'profile_anime_grouping_policies', 'client_anime_grouping_policies', 'anime_grouping_policy_receipts')",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count M3 revision triggers");
+        assert_eq!(revision_triggers, 15);
+        let records_index: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_schema WHERE type = 'index' AND name = 'records_workspace_record_idx'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count Record keyset index");
+        assert_eq!(records_index, 1);
+        let operation_uniqueness: i64 = connection
+            .query_row(
+                r#"
+                SELECT COUNT(*)
+                FROM pragma_index_list('anime_grouping_policy_receipts') AS index_list
+                WHERE index_list."unique" = 1
+                  AND (
+                    SELECT group_concat(index_info.name, ',')
+                    FROM pragma_index_info(index_list.name) AS index_info
+                  ) = 'workspace_id,operation_id'
+                "#,
+                [],
+                |row| row.get(0),
+            )
+            .expect("inspect operation uniqueness");
+        assert_eq!(operation_uniqueness, 1);
     }
 
     #[test]
@@ -3682,7 +4140,7 @@ mod tests {
         connection
             .execute_batch("DROP TABLE trailbase_installation;")
             .expect("remove test collision");
-        migrate(&connection).expect("retry v14 migration");
+        migrate_v14(&connection).expect("retry v14 migration");
         assert_eq!(
             connection
                 .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
@@ -4736,6 +5194,11 @@ mod tests {
                 "auth_ceremonies".to_owned(),
                 "fasti_browser_session_authentication".to_owned(),
                 "access_audit_events".to_owned(),
+                "identity_assertions".to_owned(),
+                "identity_assertion_lifecycle_events".to_owned(),
+                "profile_anime_grouping_policies".to_owned(),
+                "client_anime_grouping_policies".to_owned(),
+                "anime_grouping_policy_receipts".to_owned(),
             ])
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()
