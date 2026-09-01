@@ -1842,6 +1842,30 @@ impl IdentityRoutingPort for SqliteKernel {
         if current.revision != command.expected_revision() {
             return Err(idempotency_conflict(capability, correlation_id));
         }
+        let stored_client_revision = match command.scope() {
+            AnimeGroupingPolicyScope::Profile => None,
+            AnimeGroupingPolicyScope::Client(client_id) => map_sql(
+                transaction
+                    .query_row(
+                        r#"
+                        SELECT revision
+                        FROM client_anime_grouping_policies
+                        WHERE workspace_id = ?1 AND profile_id = ?2 AND client_id = ?3
+                        "#,
+                        params![
+                            authorized.workspace_id().to_string(),
+                            authorized.profile_id().to_string(),
+                            client_id.to_string()
+                        ],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .optional(),
+                capability,
+                correlation_id,
+            )?
+            .map(|revision| parse_u64(revision, capability, correlation_id))
+            .transpose()?,
+        };
         let (result_preference, result_source) = proposed_state(
             &transaction,
             authorized.workspace_id(),
@@ -1958,7 +1982,8 @@ impl IdentityRoutingPort for SqliteKernel {
                             stored_preference,
                             i64::try_from(next_revision).unwrap_or(i64::MAX),
                             timestamp(now()),
-                            i64::try_from(current.revision).unwrap_or(i64::MAX)
+                            i64::try_from(stored_client_revision.unwrap_or(current.revision))
+                                .unwrap_or(i64::MAX)
                         ],
                     ),
                     capability,
@@ -2322,6 +2347,29 @@ mod tests {
         assert_eq!(
             refreshed.policy().preference(),
             AnimeGroupingPreference::KeepMalReleasesSeparate
+        );
+        let refreshed_override = node
+            .kernel
+            .authorize_and_apply_anime_grouping_policy_change(
+                ApplyAnimeGroupingPolicyChangeCommand::try_new(
+                    RequestCorrelationId::new_v7(),
+                    node.access,
+                    scope,
+                    OperationId::new_v7(),
+                    digest(7),
+                    refreshed.policy().revision(),
+                    AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::GroupByTvWork),
+                )
+                .expect("refreshed override command"),
+            )
+            .expect("replace inherited state after profile advance");
+        assert_eq!(
+            refreshed_override.policy().source(),
+            AnimeGroupingPolicySource::ClientOverride
+        );
+        assert_eq!(
+            refreshed_override.policy().revision(),
+            refreshed.policy().revision() + 1
         );
     }
 
