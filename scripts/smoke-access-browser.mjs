@@ -60,16 +60,19 @@ try {
         ?.split("=", 2)[1];
       if (!csrf) throw new Error("browser CSRF cookie is unavailable");
 
-      async function request(path, method = "GET", body) {
+      function requestOptions(method, body) {
         const headers = {};
         if (body !== undefined) headers["content-type"] = "application/json";
         if (method !== "GET") headers["X-CSRF-Token"] = csrf;
-        const response = await fetch(path, {
+        return {
           method,
           headers,
           body: body === undefined ? undefined : JSON.stringify(body),
           credentials: "same-origin",
-        });
+        };
+      }
+
+      async function parseResponse(response, method, path) {
         const payload = await response.json();
         if (!response.ok) {
           throw new Error(
@@ -79,24 +82,52 @@ try {
         return payload;
       }
 
-      const created = await request("/api/v1/records", "POST", {
-        grain: "release",
-      });
-      const initial = await request(
-        "/api/v1/profile/anime-grouping-policy?scope=profile",
+      async function readPolicy() {
+        return parseResponse(
+          await fetch(
+            "/api/v1/profile/anime-grouping-policy?scope=profile",
+            requestOptions("GET"),
+          ),
+          "GET",
+          "/api/v1/profile/anime-grouping-policy?scope=profile",
+        );
+      }
+
+      async function mutatePolicy(body) {
+        return parseResponse(
+          await fetch(
+            "/api/v1/profile/anime-grouping-policy",
+            requestOptions("PUT", body),
+          ),
+          "PUT",
+          "/api/v1/profile/anime-grouping-policy",
+        );
+      }
+
+      const created = await parseResponse(
+        await fetch(
+          "/api/v1/records",
+          requestOptions("POST", { grain: "release" }),
+        ),
+        "POST",
+        "/api/v1/records",
       );
+      const initial = await readPolicy();
       if (initial.policy.revision !== 0) {
         throw new Error("anime grouping policy did not start at revision zero");
       }
-      const preview = await request(
-        "/api/v1/profile/anime-grouping-policy/preview",
+      const preview = await parseResponse(
+        await fetch(
+          "/api/v1/profile/anime-grouping-policy/preview",
+          requestOptions("POST", {
+            scope: { kind: "profile", client_id: null },
+            change: { kind: "set", preference: "group_by_tv_work" },
+            after_record_id: null,
+            limit: 10,
+          }),
+        ),
         "POST",
-        {
-          scope: { kind: "profile", client_id: null },
-          change: { kind: "set", preference: "group_by_tv_work" },
-          after_record_id: null,
-          limit: 10,
-        },
+        "/api/v1/profile/anime-grouping-policy/preview",
       );
       if (preview.total_records !== 1) {
         throw new Error(
@@ -110,16 +141,8 @@ try {
         expected_revision: 0,
         change: { kind: "set", preference: "group_by_tv_work" },
       };
-      const applied = await request(
-        "/api/v1/profile/anime-grouping-policy",
-        "PUT",
-        applyBody,
-      );
-      const appliedReplay = await request(
-        "/api/v1/profile/anime-grouping-policy",
-        "PUT",
-        applyBody,
-      );
+      const applied = await mutatePolicy(applyBody);
+      const appliedReplay = await mutatePolicy(applyBody);
       if (
         applied.policy.revision !== 1 ||
         applied.policy.preference !== "group_by_tv_work" ||
@@ -137,16 +160,8 @@ try {
           applied_operation_id: applyBody.operation_id,
         },
       };
-      const rolledBack = await request(
-        "/api/v1/profile/anime-grouping-policy",
-        "PUT",
-        rollbackBody,
-      );
-      const rollbackReplay = await request(
-        "/api/v1/profile/anime-grouping-policy",
-        "PUT",
-        rollbackBody,
-      );
+      const rolledBack = await mutatePolicy(rollbackBody);
+      const rollbackReplay = await mutatePolicy(rollbackBody);
       if (
         rolledBack.policy.revision !== 2 ||
         rolledBack.policy.preference !== "automatic" ||
