@@ -6,7 +6,7 @@
 //! ever supplied (history, never overwritten in place) and the single
 //! current override per field, then read them back for resolution.
 
-use crate::identity::{attach_identifier_tx, insert_record, matching_record_ids};
+use crate::identity::{attach_identifier_tx, insert_record, matching_record_ids, MAX_RECORDS_PAGE};
 use crate::kernel::{
     authorize_transaction, map_sql, now, parse_timestamp, timestamp, SqliteKernel,
 };
@@ -2117,15 +2117,25 @@ impl RecordListMetadata {
     }
 }
 
-pub(crate) fn load_record_list_metadata(
+/// Resolve only the bounded set of Records selected by the caller's query.
+/// Record-list and Search pages share the same profile metadata policy.
+pub(crate) fn load_record_metadata_batch(
     connection: &Connection,
     workspace_id: WorkspaceId,
     profile_id: ProfileId,
-    page_limit: i64,
+    record_ids: &[RecordId],
     field_keys: &[FieldKey; 5],
     capability: CapabilityKey,
     correlation_id: RequestCorrelationId,
 ) -> ApplicationResult<RecordListMetadata> {
+    if record_ids.len() > MAX_RECORDS_PAGE as usize {
+        return Err(Box::new(FastiProblem::integrity_failed(
+            capability,
+            correlation_id,
+        )));
+    }
+    let record_ids_json = serde_json::to_string(record_ids)
+        .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
     let policy = load_projection_policy(
         connection,
         workspace_id,
@@ -2139,8 +2149,7 @@ pub(crate) fn load_record_list_metadata(
             WITH page_records AS (
                 SELECT record_id FROM records
                 WHERE workspace_id = ?1 AND status = 'active'
-                ORDER BY record_id
-                LIMIT ?2
+                  AND record_id IN (SELECT value FROM json_each(?2))
             ), ranked_claims AS (
                 SELECT claim.record_id, claim.field_key,
                        provenance.claim_id, claim.source, claim.value, claim.locale,
@@ -2185,7 +2194,7 @@ pub(crate) fn load_record_list_metadata(
         statement.query_map(
             params![
                 workspace_id.to_string(),
-                page_limit,
+                record_ids_json,
                 field_keys[0].as_str(),
                 field_keys[1].as_str(),
                 field_keys[2].as_str(),
@@ -2212,8 +2221,7 @@ pub(crate) fn load_record_list_metadata(
             WITH page_records AS (
                 SELECT record_id FROM records
                 WHERE workspace_id = ?1 AND status = 'active'
-                ORDER BY record_id
-                LIMIT ?2
+                  AND record_id IN (SELECT value FROM json_each(?2))
             )
             SELECT override.record_id, override.field_key,
                    override.value, override.created_at
@@ -2232,7 +2240,7 @@ pub(crate) fn load_record_list_metadata(
         statement.query_map(
             params![
                 workspace_id.to_string(),
-                page_limit,
+                record_ids_json,
                 profile_id.to_string(),
                 field_keys[0].as_str(),
                 field_keys[1].as_str(),
@@ -4280,6 +4288,7 @@ mod tests {
     use fasti_domain::{
         Grain, LastKnownGoodPolicy, MetadataCacheReadState, MetadataLocale,
         MetadataProjectionPolicy, MetadataProviderId, ProfileFieldOverride, ProfileId, ReceivedAt,
+        ORIGINAL_TITLE_FIELD_KEY, OVERVIEW_FIELD_KEY, POSTER_FIELD_KEY, RELEASE_YEAR_FIELD_KEY,
         TITLE_FIELD_KEY,
     };
 
@@ -4497,6 +4506,170 @@ mod tests {
             ProviderCheckMetadata::never_run(),
         )
         .expect("provider state")
+    }
+
+    #[test]
+    fn selected_record_metadata_is_not_limited_to_the_first_record_page() {
+        let node = TestNode::new();
+        let other_profile = node.add_profile_with_scopes(&[]).profile_id();
+        let capability = CapabilityKey::ListRecords;
+        let correlation_id = RequestCorrelationId::new_v7();
+        let mut connection = node.kernel.inner.connection.lock().expect("connection");
+        let transaction = connection.transaction().expect("fixture transaction");
+        let records: Vec<_> = (0..=MAX_RECORDS_PAGE)
+            .map(|_| {
+                insert_record(
+                    &transaction,
+                    node.access.workspace_id(),
+                    Grain::Film,
+                    capability,
+                    correlation_id,
+                )
+                .expect("record")
+            })
+            .collect();
+        let first = records[0];
+        let selected = records[MAX_RECORDS_PAGE as usize];
+        let other_workspace = WorkspaceId::new_v7();
+        transaction
+            .execute(
+                "INSERT INTO workspaces(workspace_id, created_at) VALUES (?1, ?2)",
+                params![other_workspace.to_string(), timestamp(now())],
+            )
+            .expect("other workspace");
+        let foreign = insert_record(
+            &transaction,
+            other_workspace,
+            Grain::Film,
+            capability,
+            correlation_id,
+        )
+        .expect("foreign record");
+        let keys = [
+            TITLE_FIELD_KEY,
+            POSTER_FIELD_KEY,
+            ORIGINAL_TITLE_FIELD_KEY,
+            OVERVIEW_FIELD_KEY,
+            RELEASE_YEAR_FIELD_KEY,
+        ]
+        .map(field_key);
+        for (record, title) in [(first, "Unselected title"), (selected, "Selected title")] {
+            let claim =
+                FieldClaim::try_new(ns("tmdb"), title, None, received(100), None).expect("claim");
+            write_field_claim(
+                &transaction,
+                node.access.workspace_id(),
+                record,
+                &keys[0],
+                &claim,
+                capability,
+                correlation_id,
+            )
+            .expect("claim persisted");
+        }
+        let override_ = ProfileFieldOverride::try_new(
+            node.access.profile_id(),
+            selected,
+            keys[0].clone(),
+            "My selected title",
+            received(200),
+        )
+        .expect("override");
+        write_profile_field_override(
+            &transaction,
+            node.access.workspace_id(),
+            &override_,
+            capability,
+            correlation_id,
+        )
+        .expect("override persisted");
+        write_field_claim(
+            &transaction,
+            other_workspace,
+            foreign,
+            &keys[0],
+            &FieldClaim::try_new(
+                ns("tmdb"),
+                "Private foreign title",
+                None,
+                received(100),
+                None,
+            )
+            .expect("foreign claim"),
+            capability,
+            correlation_id,
+        )
+        .expect("foreign claim persisted");
+
+        let metadata = load_record_metadata_batch(
+            &transaction,
+            node.access.workspace_id(),
+            node.access.profile_id(),
+            &[selected, selected, foreign],
+            &keys,
+            capability,
+            correlation_id,
+        )
+        .expect("selected metadata");
+        assert_eq!(metadata.claims.len(), 1);
+        assert_eq!(metadata.overrides.len(), 1);
+        assert_eq!(metadata.claims[&(selected, keys[0].clone())].len(), 1);
+        assert_eq!(
+            metadata
+                .resolve(selected, &keys[0], capability, correlation_id)
+                .expect("resolved selected title")
+                .value(),
+            Some("My selected title")
+        );
+        assert!(metadata
+            .resolve(first, &keys[0], capability, correlation_id)
+            .expect("unselected title absent")
+            .value()
+            .is_none());
+        assert!(metadata
+            .resolve(foreign, &keys[0], capability, correlation_id)
+            .expect("foreign title absent")
+            .value()
+            .is_none());
+        let other = load_record_metadata_batch(
+            &transaction,
+            node.access.workspace_id(),
+            other_profile,
+            &[selected],
+            &keys,
+            capability,
+            correlation_id,
+        )
+        .expect("other profile metadata");
+        assert!(other.overrides.is_empty());
+        assert_eq!(
+            other
+                .resolve(selected, &keys[0], capability, correlation_id)
+                .expect("other profile title")
+                .value(),
+            Some("Selected title")
+        );
+        let empty = load_record_metadata_batch(
+            &transaction,
+            node.access.workspace_id(),
+            node.access.profile_id(),
+            &[],
+            &keys,
+            capability,
+            correlation_id,
+        )
+        .expect("empty page");
+        assert!(empty.claims.is_empty() && empty.overrides.is_empty());
+        assert!(load_record_metadata_batch(
+            &transaction,
+            node.access.workspace_id(),
+            node.access.profile_id(),
+            &vec![selected; MAX_RECORDS_PAGE as usize + 1],
+            &keys,
+            capability,
+            correlation_id
+        )
+        .is_err());
     }
 
     #[test]
