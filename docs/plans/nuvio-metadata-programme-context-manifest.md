@@ -353,3 +353,50 @@ details documents language and append_to_response, not region; current code's
 region query parameter does not prove region-specific claims. Resolve this using
 documented release-date/watch-provider response semantics. No M8 production file
 ownership is allocated by this checkpoint. Codex Security remains skipped.
+
+### M4 candidate-details persistence checkpoint — 2026-09-05
+
+The candidate owner now persists canonical provider/page/locale/region/grain
+coordinates and the original query digest in a bounded 2 KiB context. The
+authorization partition binds that complete context digest. It stores no raw
+query text and requires no browser-supplied metadata to reopen a candidate.
+The context changes remain inside the unfrozen M4 v16; published v1–v15 are
+unchanged, and no migration or shared-file release has occurred.
+
+The new store read authorizes first, binds workspace/profile/client/subject/grant
+in the receipt lookup, reconstructs current provider/grant/policy/terms authority,
+and checks the exact route source and grain. Details remain readable after the
+Search cache window until their exclusive 24-hour deadline. Clock rollback,
+unknown IDs, changed context or authority, and cross-actor access cannot return
+the receipt. The shared bounded snapshot validator also catches missing siblings.
+Wrong-grain candidates are rejected before snapshot admission.
+
+Regression evidence covers restart without query text, canonical context bounds,
+unknown and corrupt receipts, atomic filter rejection, independent expiry,
+real session-owner rotation/profile-return/revocation, expired sessions, and a
+different authorized subject sharing the same client/profile/grant. Successful
+misses retain throttled browser activity. The 15-second session fixture respects
+the existing 10-second write interval; no production authentication rule changed.
+Independent read-only reviews found no P0/P1/P2 issue in this persistence slice.
+Actual browser rendering and live provider re-fetch are not claimed by these tests.
+
+Next active M4 integration remains governed provider fan-out/re-fetch, atomic
+Record Create/Attach with minimal portable replay evidence, local indexing,
+stable pagination, and API/SDK/host/Workbench plus browser/performance gates.
+Reuse `insert_record`, `attach_identifier_tx`, exact identifier matching and the
+existing metadata claim writer in one transaction; do not compose separately
+committing public Record methods. Search permission alone cannot write Records.
+Keep one Create/Attach replay family and distinguish its workspace-scoped
+operation uniqueness from the older observation-specific operation table.
+Freeze durable action evidence before deciding archive disposition.
+
+C2 checked the proposed disjoint store allocation and found no honest existing-
+schema implementation: required tables and capability/port contracts are not yet
+allocated. Shared ownership remains with M4; C2 continues approved independent
+work without speculative SQL. Read-only M5 preparation is Library, not Discover
+(M6). Neither is promoted before its canonical dependencies are satisfied.
+M5 preparation also identified that identifier/activity batch loaders still
+reselect the first 500 Records, unlike the corrected selected-ID metadata loader;
+all three must follow the actual keyset page. The UI's inferred saved/watching
+defaults are not independent Library state and must not become Search side effects.
+Native Collection membership is still a predecessor, not the Nuvio catalog document.

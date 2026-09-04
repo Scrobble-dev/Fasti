@@ -4,11 +4,12 @@ use crate::kernel::{authorize_application_transaction, map_sql, now, parse_times
 use crate::{providers, SqliteKernel};
 use chrono::Duration;
 use fasti_application::{
-    ApplicationAccessContext, ApplicationResult, AuthorizedActor, CapabilityKey, FastiProblem,
-    PreparedSearchPage, ProblemCode, SearchCandidate, SearchCandidateReceipt, SearchPageRequest,
-    SearchPersistencePort, SearchReceiptLifetime, SearchReceiptPartition, StoredSearchPage,
-    MAX_SEARCH_PAGE_CANDIDATES, SEARCH_FRESH_SECONDS, SEARCH_RECEIPT_SECONDS,
-    SEARCH_STALE_ON_ERROR_SECONDS,
+    ApplicationAccessContext, ApplicationResult, AuthorizedActor, AuthorizedApplicationAccess,
+    CapabilityKey, FastiProblem, OutboundAccessPolicy, PreparedSearchPage, ProblemCode,
+    ReadSearchCandidateRequest, SearchCandidate, SearchCandidateReceipt, SearchPageContext,
+    SearchPageRequest, SearchPersistencePort, SearchReceiptLifetime, SearchReceiptPartition,
+    StoredSearchCandidate, StoredSearchPage, MAX_SEARCH_PAGE_CANDIDATES, SEARCH_FRESH_SECONDS,
+    SEARCH_RECEIPT_SECONDS, SEARCH_STALE_ON_ERROR_SECONDS,
 };
 use fasti_domain::{RequestCorrelationId, SearchCandidateReceiptId, Sha256Digest};
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
@@ -41,9 +42,27 @@ fn prepare(
 ) -> ApplicationResult<PreparedSearchPage> {
     let id = request.correlation_id;
     let access = authorize_application_transaction(transaction, CAPABILITY, &request.access, id)?;
+    prepare_partition(
+        transaction,
+        access,
+        &request.query.receipt_context(),
+        &request.outbound_policy,
+        &request.terms_revision,
+        id,
+    )
+}
+
+fn prepare_partition(
+    transaction: &Transaction<'_>,
+    access: AuthorizedApplicationAccess,
+    context: &SearchPageContext,
+    outbound_policy: &OutboundAccessPolicy,
+    terms_revision: &str,
+    id: RequestCorrelationId,
+) -> ApplicationResult<PreparedSearchPage> {
     let state = map_sql(transaction.query_row(
         &providers::state_select("WHERE workspace_id = ?1 AND provider_id = ?2 AND capability_id = 'metadata.search'"),
-        params![access.workspace_id().to_string(), request.query.provider().as_str()], providers::read_state,
+        params![access.workspace_id().to_string(), context.provider()], providers::read_state,
     ).optional(), CAPABILITY, id)?.ok_or_else(|| failure(ProblemCode::CapabilityUnavailable, id))?;
     if !matches!(
         state.capability_status(),
@@ -52,13 +71,12 @@ fn prepare(
     ) {
         return Err(failure(ProblemCode::CapabilityUnavailable, id));
     }
-    request
-        .outbound_policy
+    outbound_policy
         .validate_identifiers()
         .map_err(|_| failure(ProblemCode::Forbidden, id))?;
     let authority_version: i64 = map_sql(transaction.query_row(
         "SELECT authority_version FROM provider_capability_states WHERE workspace_id = ?1 AND provider_id = ?2 AND capability_id = 'metadata.search'",
-        params![access.workspace_id().to_string(), request.query.provider().as_str()], |r| r.get(0)
+        params![access.workspace_id().to_string(), context.provider()], |r| r.get(0)
     ), CAPABILITY, id)?;
     let configuration = digest(
         &(
@@ -72,7 +90,7 @@ fn prepare(
             state
                 .credential_reference()
                 .map(|reference| reference.as_str()),
-            &request.outbound_policy,
+            outbound_policy,
         ),
         id,
     )?;
@@ -128,10 +146,10 @@ fn prepare(
     )?;
     let partition = SearchReceiptPartition::try_new(
         access,
-        request.query.digest(),
+        context.digest(),
         grant,
         configuration,
-        request.terms_revision.clone(),
+        terms_revision.to_owned(),
     )
     .map_err(|_| failure(ProblemCode::ValidationFailed, id))?;
     Ok(PreparedSearchPage {
@@ -170,11 +188,12 @@ impl SearchPersistencePort for SqliteKernel {
                 return Err(failure(ProblemCode::Forbidden, id));
             }
         }
+        let context = request.query.receipt_context();
         if candidates.len() > MAX_SEARCH_PAGE_CANDIDATES
             || next_page.is_some_and(|page| page <= request.query.page())
             || candidates
                 .iter()
-                .any(|candidate| candidate.data().provider != request.query.provider().as_str())
+                .any(|candidate| !context.accepts(candidate))
         {
             return Err(failure(ProblemCode::ValidationFailed, id));
         }
@@ -237,13 +256,14 @@ impl SearchPersistencePort for SqliteKernel {
         map_sql(transaction.execute(
             "INSERT INTO search_pages(partition_json, partition_digest, workspace_id, profile_id,
                 actor_client_id, actor_subject_id, grant_id, provider_id, upstream_page, next_page,
-                candidate_count, response_digest, created_at, fresh_until, stale_until, expires_at, candidate_bytes)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
+                candidate_count, response_digest, created_at, fresh_until, stale_until, expires_at, candidate_bytes, context_json)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)",
             params![json(partition, id)?, digest(partition, id)?.as_str(), partition.workspace_id().to_string(),
                 partition.profile_id().to_string(), partition.actor_client_id().to_string(),
                 partition.actor_subject_id().map(|value| value.to_string()), partition.grant_id().to_string(),
                 request.query.provider().as_str(), request.query.page(), next_page, candidates.len() as i64,
-                response_digest.as_str(), timestamp(created), timestamp(life.fresh_until()), timestamp(life.stale_until()), timestamp(life.expires_at()), candidate_bytes]
+                response_digest.as_str(), timestamp(created), timestamp(life.fresh_until()), timestamp(life.stale_until()), timestamp(life.expires_at()), candidate_bytes,
+                context.to_json().map_err(|_| failure(ProblemCode::ValidationFailed, id))?]
         ), CAPABILITY, id)?;
         let sequence = transaction.last_insert_rowid();
         let mut receipts = Vec::with_capacity(candidates.len());
@@ -283,10 +303,12 @@ impl SearchPersistencePort for SqliteKernel {
             .map_err(|_| failure(ProblemCode::StorageUnavailable, id))?;
         let transaction = map_sql(connection.transaction(), CAPABILITY, id)?;
         let current = prepare(&transaction, request)?;
+        let context = request.query.receipt_context();
         let row = map_sql(transaction.query_row(
             "SELECT sequence, next_page, candidate_count, response_digest, created_at, fresh_until, stale_until, expires_at
-             FROM search_pages WHERE partition_digest = ?1 AND partition_json = ?2 ORDER BY sequence DESC LIMIT 1",
-            params![digest(&current.partition, id)?.as_str(), json(&current.partition, id)?],
+             FROM search_pages WHERE partition_digest = ?1 AND partition_json = ?2 AND context_json = ?3 ORDER BY sequence DESC LIMIT 1",
+            params![digest(&current.partition, id)?.as_str(), json(&current.partition, id)?,
+                context.to_json().map_err(|_| failure(ProblemCode::ValidationFailed, id))?],
             |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Option<u32>>(1)?, r.get::<_, u32>(2)?, r.get::<_, String>(3)?,
                 r.get::<_, String>(4)?, r.get::<_, String>(5)?, r.get::<_, String>(6)?, r.get::<_, String>(7)?))
         ).optional(), CAPABILITY, id)?;
@@ -318,6 +340,12 @@ impl SearchPersistencePort for SqliteKernel {
             &life,
             id,
         )?;
+        if candidates
+            .iter()
+            .any(|receipt| !context.accepts(receipt.candidate()))
+        {
+            return Err(failure(ProblemCode::IntegrityFailed, id));
+        }
         map_sql(transaction.commit(), CAPABILITY, id)?;
         Ok(Some(StoredSearchPage {
             sequence: sequence as u64,
@@ -325,6 +353,152 @@ impl SearchPersistencePort for SqliteKernel {
             next_page,
         }))
     }
+
+    fn read_search_candidate(
+        &self,
+        request: &ReadSearchCandidateRequest,
+    ) -> ApplicationResult<Option<StoredSearchCandidate>> {
+        let id = request.correlation_id;
+        let mut connection = self
+            .inner
+            .connection
+            .lock()
+            .map_err(|_| failure(ProblemCode::StorageUnavailable, id))?;
+        let transaction = map_sql(connection.transaction(), CAPABILITY, id)?;
+        let access =
+            authorize_application_transaction(&transaction, CAPABILITY, &request.access, id)?;
+        let result = read_search_candidate(&transaction, request, access)?;
+        map_sql(transaction.commit(), CAPABILITY, id)?;
+        Ok(result)
+    }
+}
+
+fn read_search_candidate(
+    transaction: &Transaction<'_>,
+    request: &ReadSearchCandidateRequest,
+    access: AuthorizedApplicationAccess,
+) -> ApplicationResult<Option<StoredSearchCandidate>> {
+    let id = request.correlation_id;
+    let subject = match access.actor() {
+        AuthorizedActor::BrowserSession {
+            auth_subject_id, ..
+        } => Some(auth_subject_id.to_string()),
+        AuthorizedActor::Credential { .. } => None,
+    };
+    let row = map_sql(
+        transaction
+            .query_row(
+                "SELECT p.sequence, p.context_json, p.partition_json, p.partition_digest,
+            p.provider_id, p.upstream_page, p.candidate_count, p.response_digest,
+            p.created_at, p.fresh_until, p.stale_until, p.expires_at
+         FROM search_candidate_receipts c JOIN search_pages p ON p.sequence = c.page_sequence
+         WHERE c.candidate_receipt_id = ?1 AND p.workspace_id = ?2 AND p.profile_id = ?3
+            AND p.actor_client_id = ?4 AND p.actor_subject_id IS ?5 AND p.grant_id = ?6",
+                params![
+                    request.candidate_receipt_id.to_string(),
+                    access.workspace_id().to_string(),
+                    access.profile_id().to_string(),
+                    access.attribution_client_id().to_string(),
+                    subject,
+                    access.grant_id().to_string()
+                ],
+                |r| {
+                    Ok((
+                        r.get::<_, i64>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                        r.get::<_, String>(3)?,
+                        r.get::<_, String>(4)?,
+                        r.get::<_, u32>(5)?,
+                        r.get::<_, u32>(6)?,
+                        r.get::<_, String>(7)?,
+                        r.get::<_, String>(8)?,
+                        r.get::<_, String>(9)?,
+                        r.get::<_, String>(10)?,
+                        r.get::<_, String>(11)?,
+                    ))
+                },
+            )
+            .optional(),
+        CAPABILITY,
+        id,
+    )?;
+    let Some((
+        sequence,
+        context_json,
+        partition_json,
+        partition_digest,
+        provider,
+        page,
+        count,
+        response,
+        created,
+        fresh,
+        stale,
+        expires,
+    )) = row
+    else {
+        return Ok(None);
+    };
+    let context = SearchPageContext::from_json(&context_json)
+        .map_err(|_| failure(ProblemCode::IntegrityFailed, id))?;
+    if context.provider() != provider || context.page() != page {
+        return Err(failure(ProblemCode::IntegrityFailed, id));
+    }
+    if context.provider() != request.provider.as_str() {
+        return Ok(None);
+    }
+    let life = SearchReceiptLifetime::try_new(
+        parse_timestamp(&created, CAPABILITY, id)?,
+        parse_timestamp(&fresh, CAPABILITY, id)?,
+        parse_timestamp(&stale, CAPABILITY, id)?,
+        parse_timestamp(&expires, CAPABILITY, id)?,
+    )
+    .map_err(|_| failure(ProblemCode::IntegrityFailed, id))?;
+    if !life.receipt_is_current(now()) {
+        return Ok(None);
+    }
+    let current = prepare_partition(
+        transaction,
+        access,
+        &context,
+        &request.outbound_policy,
+        &request.terms_revision,
+        id,
+    )?;
+    if json(&current.partition, id)? != partition_json
+        || digest(&current.partition, id)?.as_str() != partition_digest
+    {
+        return Ok(None);
+    }
+    let response = response
+        .parse()
+        .map_err(|_| failure(ProblemCode::IntegrityFailed, id))?;
+    // ponytail: validate the same bounded snapshot (at most 100 candidates) as
+    // page reads; use a single-receipt projection only if profiling requires it.
+    let candidates = read_candidates(
+        transaction,
+        sequence,
+        count as usize,
+        &current.partition,
+        &response,
+        &life,
+        id,
+    )?;
+    if candidates
+        .iter()
+        .any(|receipt| !context.accepts(receipt.candidate()))
+    {
+        return Err(failure(ProblemCode::IntegrityFailed, id));
+    }
+    let receipt = candidates
+        .into_iter()
+        .find(|candidate| candidate.id() == request.candidate_receipt_id)
+        .ok_or_else(|| failure(ProblemCode::IntegrityFailed, id))?;
+    if receipt.candidate().identifier().grain() != request.grain {
+        return Ok(None);
+    }
+    Ok(Some(StoredSearchCandidate { receipt, context }))
 }
 
 fn read_candidates(
@@ -437,7 +611,7 @@ pub(crate) mod tests {
         (node, request)
     }
 
-    fn candidate(value: &str) -> SearchCandidate {
+    pub(crate) fn candidate(value: &str) -> SearchCandidate {
         SearchCandidate::try_new(SearchCandidateData {
             provider: "tmdb".into(),
             provider_id: value.into(),
@@ -467,6 +641,240 @@ pub(crate) mod tests {
                 Some(2),
             )
             .unwrap()
+    }
+
+    fn details(
+        request: &SearchPageRequest,
+        receipt: SearchCandidateReceiptId,
+    ) -> ReadSearchCandidateRequest {
+        ReadSearchCandidateRequest {
+            correlation_id: request.correlation_id,
+            access: request.access.clone(),
+            candidate_receipt_id: receipt,
+            provider: request.query.provider().clone(),
+            grain: fasti_domain::Grain::Film,
+            outbound_policy: request.outbound_policy.clone(),
+            terms_revision: request.terms_revision.clone(),
+        }
+    }
+
+    #[test]
+    fn candidate_receipt_reload_uses_persisted_coordinates_without_the_search_query() {
+        let (node, mut request) = setup();
+        request.query = SearchProviderQuery::try_new(
+            SearchQuery::try_new("Private title query").unwrap(),
+            ProviderId::try_new("tmdb").unwrap(),
+            1,
+            Some(fasti_domain::MetadataLocale::try_new("fr-FR").unwrap()),
+            Some(fasti_domain::MetadataRegion::try_new("FR").unwrap()),
+            vec![fasti_domain::Grain::Film],
+        )
+        .unwrap();
+        let saved = commit(&node, &request, &[candidate("42")]);
+        let read = details(&request, saved.candidates[0].id());
+        let context = request.query.receipt_context();
+        let stored_json: String = node
+            .kernel
+            .inner
+            .connection
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT context_json FROM search_pages WHERE sequence = ?1",
+                [i64::try_from(saved.sequence).unwrap()],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(!stored_json.contains("Private title query"));
+        drop(request);
+        let (root, _) = node.into_stopped();
+        let reopened = SqliteKernel::open(root.path()).unwrap();
+        let value = reopened.read_search_candidate(&read).unwrap().unwrap();
+        assert_eq!(value.receipt, saved.candidates[0]);
+        assert_eq!(value.context, context);
+        assert_eq!(value.context.locale().unwrap().as_str(), "fr-fr");
+        assert_eq!(value.context.region().unwrap().as_str(), "FR");
+        assert_eq!(
+            reopened
+                .inner
+                .connection
+                .lock()
+                .unwrap()
+                .query_row("SELECT COUNT(*) FROM records", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn candidate_receipt_routes_profiles_grants_policy_and_configuration_are_rechecked() {
+        let (node, request) = setup();
+        let saved = commit(&node, &request, &[candidate("42")]);
+        let read = details(&request, saved.candidates[0].id());
+        for change in 0..5 {
+            let mut changed = read.clone();
+            match change {
+                0 => changed.provider = ProviderId::try_new("google-books").unwrap(),
+                1 => changed.grain = fasti_domain::Grain::Series,
+                2 => {
+                    changed.access = node
+                        .add_profile_with_scopes(&[fasti_application::ScopeKey::MetadataSearch])
+                        .into()
+                }
+                3 => changed.terms_revision = "tmdb-v2".into(),
+                _ => changed.outbound_policy.deny_providers.push("tmdb".into()),
+            }
+            assert!(node
+                .kernel
+                .read_search_candidate(&changed)
+                .unwrap()
+                .is_none());
+        }
+        node.kernel
+            .put_provider_capability_state(node.access.workspace_id(), state(2))
+            .unwrap();
+        assert!(node.kernel.read_search_candidate(&read).unwrap().is_none());
+        node.kernel
+            .inner
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "DELETE FROM grant_scopes WHERE grant_id = ?1 AND scope_key = 'metadata_search'",
+                [node.access.grant_id().to_string()],
+            )
+            .unwrap();
+        assert_eq!(
+            node.kernel.read_search_candidate(&read).unwrap_err().code(),
+            ProblemCode::Forbidden
+        );
+    }
+
+    #[test]
+    fn candidate_receipt_lifetime_is_independent_of_the_search_cache_window() {
+        let (node, request) = setup();
+        let saved = commit(&node, &request, &[candidate("42")]);
+        let read = details(&request, saved.candidates[0].id());
+        for (age, readable) in [(1800, true), (86400, false), (-60, false)] {
+            {
+                let connection = node.kernel.inner.connection.lock().unwrap();
+                let guard: String = connection.query_row(
+                    "SELECT sql FROM sqlite_schema WHERE name = 'search_pages_immutable_update'", [], |r| r.get(0),
+                ).unwrap();
+                // Explicit clock fixture; restore the production guard before reading.
+                connection
+                    .execute_batch("DROP TRIGGER search_pages_immutable_update")
+                    .unwrap();
+                let created = now() - Duration::seconds(age);
+                connection.execute(
+                    "UPDATE search_pages SET created_at = ?1, fresh_until = ?2, stale_until = ?3, expires_at = ?4 WHERE sequence = ?5",
+                    params![timestamp(created), timestamp(created + Duration::seconds(120)),
+                        timestamp(created + Duration::seconds(600)), timestamp(created + Duration::seconds(86400)), i64::try_from(saved.sequence).unwrap()],
+                ).unwrap();
+                connection.execute_batch(&guard).unwrap();
+            }
+            assert!(node
+                .kernel
+                .read_cached_search_page(&request, true)
+                .unwrap()
+                .is_none());
+            assert_eq!(
+                node.kernel.read_search_candidate(&read).unwrap().is_some(),
+                readable
+            );
+        }
+    }
+
+    #[test]
+    fn candidate_receipt_route_context_tampering_cannot_change_the_refetch_coordinate() {
+        let (node, request) = setup();
+        let saved = commit(&node, &request, &[candidate("42")]);
+        let read = details(&request, saved.candidates[0].id());
+        let altered = SearchProviderQuery::try_new(
+            request.query.query().clone(),
+            request.query.provider().clone(),
+            request.query.page(),
+            Some(fasti_domain::MetadataLocale::try_new("fr-FR").unwrap()),
+            None,
+            vec![],
+        )
+        .unwrap()
+        .receipt_context()
+        .to_json()
+        .unwrap();
+        {
+            let connection = node.kernel.inner.connection.lock().unwrap();
+            connection
+                .execute_batch("DROP TRIGGER search_pages_immutable_update")
+                .unwrap();
+            connection
+                .execute(
+                    "UPDATE search_pages SET context_json = ?1 WHERE sequence = ?2",
+                    params![altered, i64::try_from(saved.sequence).unwrap()],
+                )
+                .unwrap();
+        }
+        assert!(node.kernel.read_search_candidate(&read).unwrap().is_none());
+        assert!(node
+            .kernel
+            .read_cached_search_page(&request, true)
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn candidate_receipt_missing_corrupt_and_wrong_grain_paths_fail_without_partial_writes() {
+        let (node, request) = setup();
+        let mut series = request.clone();
+        series.query = SearchProviderQuery::try_new(
+            request.query.query().clone(),
+            request.query.provider().clone(),
+            1,
+            None,
+            None,
+            vec![fasti_domain::Grain::Series],
+        )
+        .unwrap();
+        let prepared = node.kernel.prepare_search_page(&series).unwrap();
+        assert_eq!(
+            node.kernel
+                .commit_search_page(
+                    &series,
+                    &prepared,
+                    &[candidate("42")],
+                    &Sha256Digest::from_bytes(&[7; 32]),
+                    None
+                )
+                .unwrap_err()
+                .code(),
+            ProblemCode::ValidationFailed
+        );
+        assert_eq!(node.kernel.inner.connection.lock().unwrap().query_row(
+            "SELECT (SELECT COUNT(*) FROM search_pages) + (SELECT COUNT(*) FROM search_candidate_receipts)",
+            [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+        let saved = commit(&node, &request, &[candidate("42"), candidate("43")]);
+        assert!(node
+            .kernel
+            .read_search_candidate(&details(&request, SearchCandidateReceiptId::new_v7()))
+            .unwrap()
+            .is_none());
+        node.kernel
+            .inner
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "DELETE FROM search_candidate_receipts WHERE candidate_receipt_id = ?1",
+                [saved.candidates[1].id().to_string()],
+            )
+            .unwrap();
+        assert_eq!(
+            node.kernel
+                .read_search_candidate(&details(&request, saved.candidates[0].id()))
+                .unwrap_err()
+                .code(),
+            ProblemCode::IntegrityFailed
+        );
     }
 
     #[test]
@@ -711,8 +1119,8 @@ pub(crate) mod tests {
         {
             let connection = node.kernel.inner.connection.lock().unwrap();
             for _ in 0..10 {
-                connection.execute("INSERT INTO search_pages(partition_json, partition_digest, workspace_id, profile_id, actor_client_id, actor_subject_id, grant_id, provider_id, upstream_page, next_page, candidate_count, candidate_bytes, response_digest, created_at, fresh_until, stale_until, expires_at)
-                    SELECT partition_json, partition_digest, workspace_id, profile_id, actor_client_id, actor_subject_id, grant_id, provider_id, upstream_page, next_page, candidate_count, candidate_bytes, response_digest, created_at, fresh_until, stale_until, expires_at FROM search_pages", []).unwrap();
+                connection.execute("INSERT INTO search_pages(partition_json, partition_digest, workspace_id, profile_id, actor_client_id, actor_subject_id, grant_id, provider_id, upstream_page, next_page, candidate_count, candidate_bytes, response_digest, created_at, fresh_until, stale_until, expires_at, context_json)
+                    SELECT partition_json, partition_digest, workspace_id, profile_id, actor_client_id, actor_subject_id, grant_id, provider_id, upstream_page, next_page, candidate_count, candidate_bytes, response_digest, created_at, fresh_until, stale_until, expires_at, context_json FROM search_pages", []).unwrap();
             }
         }
         let before = node
@@ -751,8 +1159,8 @@ pub(crate) mod tests {
             // Explicit over-quota recovery fixture. Production admission does
             // not create this many pages, but recovery must remain bounded.
             for _ in 0..11 {
-                connection.execute("INSERT INTO search_pages(partition_json, partition_digest, workspace_id, profile_id, actor_client_id, actor_subject_id, grant_id, provider_id, upstream_page, next_page, candidate_count, candidate_bytes, response_digest, created_at, fresh_until, stale_until, expires_at)
-                    SELECT partition_json, partition_digest, workspace_id, profile_id, actor_client_id, actor_subject_id, grant_id, provider_id, upstream_page, next_page, candidate_count, candidate_bytes, response_digest, ?1, ?2, ?3, ?4 FROM search_pages",
+                connection.execute("INSERT INTO search_pages(partition_json, partition_digest, workspace_id, profile_id, actor_client_id, actor_subject_id, grant_id, provider_id, upstream_page, next_page, candidate_count, candidate_bytes, response_digest, created_at, fresh_until, stale_until, expires_at, context_json)
+                    SELECT partition_json, partition_digest, workspace_id, profile_id, actor_client_id, actor_subject_id, grant_id, provider_id, upstream_page, next_page, candidate_count, candidate_bytes, response_digest, ?1, ?2, ?3, ?4, context_json FROM search_pages",
                     params![timestamp(created), timestamp(created + Duration::seconds(120)), timestamp(created + Duration::seconds(600)), timestamp(created + Duration::days(1))]).unwrap();
             }
         }

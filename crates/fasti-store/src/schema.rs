@@ -126,6 +126,10 @@ fn migrate_v16(connection: &Connection) -> Result<()> {
         END;
         CREATE TABLE search_pages (
             sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+            context_json TEXT NOT NULL CHECK (
+                length(CAST(context_json AS BLOB)) <= 2048
+                AND json_valid(context_json) AND json_type(context_json) = 'object'
+            ),
             partition_json TEXT NOT NULL CHECK (
                 length(CAST(partition_json AS BLOB)) <= 4096
                 AND json_valid(partition_json) AND json_type(partition_json) = 'object'
@@ -186,6 +190,8 @@ fn migrate_v16(connection: &Connection) -> Result<()> {
           OR json_extract(NEW.partition_json, '$.actor_client_id') IS NOT NEW.actor_client_id
           OR json_extract(NEW.partition_json, '$.actor_subject_id') IS NOT NEW.actor_subject_id
           OR json_extract(NEW.partition_json, '$.grant_id') IS NOT NEW.grant_id
+          OR json_extract(NEW.context_json, '$.provider') IS NOT NEW.provider_id
+          OR json_extract(NEW.context_json, '$.page') IS NOT NEW.upstream_page
         BEGIN SELECT RAISE(ABORT, 'invalid search page scope'); END;
         CREATE TRIGGER search_candidates_parent_insert BEFORE INSERT ON search_candidate_receipts
         WHEN NOT EXISTS (

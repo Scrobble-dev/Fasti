@@ -1515,6 +1515,253 @@ mod tests {
         }
     }
 
+    fn candidate_receipt_fixture() -> (
+        Fixture,
+        CreatedBrowserSession,
+        fasti_application::StoredSearchPage,
+    ) {
+        use fasti_application::{
+            BrowserSessionAccessContext, ProviderStatePort, SearchPersistencePort,
+        };
+        let mut fixture = fixture();
+        // Older than the 10-second write interval, still inside idle expiry.
+        fixture.created_at = crate::kernel::now() - ChronoDuration::seconds(15);
+        for grant in &fixture.grants[..2] {
+            fixture
+                .kernel
+                .inner
+                .connection
+                .lock()
+                .unwrap()
+                .execute(
+                    "INSERT INTO grant_scopes(grant_id, scope_key) VALUES (?1, 'metadata_search')",
+                    [grant.to_string()],
+                )
+                .unwrap();
+        }
+        fixture
+            .kernel
+            .put_provider_capability_state(fixture.workspace_id, crate::search::tests::state(1))
+            .unwrap();
+        let session = create_session(&fixture, &fixture.grants[..2], fixture.grants[0], 0);
+        let id = fasti_domain::RequestCorrelationId::new_v7();
+        let request = fasti_application::SearchPageRequest {
+            correlation_id: id,
+            access: BrowserSessionAccessContext::mutation(mutation_command(
+                id,
+                secret_copy(session.session_secret()),
+                secret_copy(session.csrf_secret()),
+                crate::kernel::now(),
+            ))
+            .into(),
+            query: fasti_application::SearchProviderQuery::try_new(
+                fasti_domain::SearchQuery::try_new("Film").unwrap(),
+                fasti_application::ProviderId::try_new("tmdb").unwrap(),
+                1,
+                None,
+                None,
+                vec![],
+            )
+            .unwrap(),
+            outbound_policy: fasti_application::OutboundAccessPolicy::default(),
+            terms_revision: "tmdb-v1".into(),
+        };
+        let prepared = fixture.kernel.prepare_search_page(&request).unwrap();
+        let saved = fixture
+            .kernel
+            .commit_search_page(
+                &request,
+                &prepared,
+                &[crate::search::tests::candidate("42")],
+                &fasti_domain::Sha256Digest::from_bytes(&[7; 32]),
+                None,
+            )
+            .unwrap();
+        (fixture, session, saved)
+    }
+
+    fn candidate_receipt_read(
+        session: &CreatedBrowserSession,
+        receipt: fasti_domain::SearchCandidateReceiptId,
+    ) -> fasti_application::ReadSearchCandidateRequest {
+        use fasti_application::{BrowserRequestBoundaryPolicy, BrowserSessionAccessContext};
+        let id = fasti_domain::RequestCorrelationId::new_v7();
+        fasti_application::ReadSearchCandidateRequest {
+            correlation_id: id,
+            access: BrowserSessionAccessContext::read(
+                BrowserSessionQuery::new(
+                    id,
+                    secret_copy(session.session_secret()),
+                    crate::kernel::now(),
+                ),
+                BrowserRequestBoundaryPolicy::try_new("https://fasti.example", "fasti.example")
+                    .unwrap()
+                    .validate_read(Some("fasti.example"))
+                    .unwrap(),
+            )
+            .into(),
+            candidate_receipt_id: receipt,
+            provider: fasti_application::ProviderId::try_new("tmdb").unwrap(),
+            grain: fasti_domain::Grain::Film,
+            outbound_policy: fasti_application::OutboundAccessPolicy::default(),
+            terms_revision: "tmdb-v1".into(),
+        }
+    }
+
+    #[test]
+    fn candidate_receipt_survives_real_browser_rotation_and_profile_return_but_not_revocation() {
+        use fasti_application::SearchPersistencePort;
+        let (fixture, created, saved) = candidate_receipt_fixture();
+        let id = saved.candidates[0].id();
+        let original = fixture
+            .kernel
+            .read_search_candidate(&candidate_receipt_read(&created, id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(original.receipt, saved.candidates[0]);
+        let rotated = fixture
+            .kernel
+            .rotate_browser_session(mutation_command(
+                fasti_domain::RequestCorrelationId::new_v7(),
+                secret_copy(created.session_secret()),
+                secret_copy(created.csrf_secret()),
+                crate::kernel::now(),
+            ))
+            .unwrap();
+        assert_problem(
+            fixture
+                .kernel
+                .read_search_candidate(&candidate_receipt_read(&created, id)),
+            ProblemCode::BrowserSessionRevoked,
+        );
+        assert_eq!(
+            fixture
+                .kernel
+                .read_search_candidate(&candidate_receipt_read(&rotated, id))
+                .unwrap(),
+            Some(original.clone())
+        );
+        let selected = fixture
+            .kernel
+            .select_browser_session_profile(SelectBrowserSessionProfileCommand::new(
+                mutation_command(
+                    fasti_domain::RequestCorrelationId::new_v7(),
+                    secret_copy(rotated.session_secret()),
+                    secret_copy(rotated.csrf_secret()),
+                    crate::kernel::now(),
+                ),
+                fixture.grants[1],
+            ))
+            .unwrap();
+        assert!(fixture
+            .kernel
+            .read_search_candidate(&candidate_receipt_read(&selected, id))
+            .unwrap()
+            .is_none());
+        let returned = fixture
+            .kernel
+            .select_browser_session_profile(SelectBrowserSessionProfileCommand::new(
+                mutation_command(
+                    fasti_domain::RequestCorrelationId::new_v7(),
+                    secret_copy(selected.session_secret()),
+                    secret_copy(selected.csrf_secret()),
+                    crate::kernel::now(),
+                ),
+                fixture.grants[0],
+            ))
+            .unwrap();
+        assert_eq!(
+            fixture
+                .kernel
+                .read_search_candidate(&candidate_receipt_read(&returned, id))
+                .unwrap(),
+            Some(original)
+        );
+        fixture
+            .kernel
+            .revoke_current_browser_session(mutation_command(
+                fasti_domain::RequestCorrelationId::new_v7(),
+                secret_copy(returned.session_secret()),
+                secret_copy(returned.csrf_secret()),
+                crate::kernel::now(),
+            ))
+            .unwrap();
+        assert_problem(
+            fixture
+                .kernel
+                .read_search_candidate(&candidate_receipt_read(&returned, id)),
+            ProblemCode::BrowserSessionRevoked,
+        );
+    }
+
+    #[test]
+    fn candidate_receipt_denies_an_expired_browser_session_and_a_different_authorized_subject() {
+        use fasti_application::SearchPersistencePort;
+        let (mut fixture, _, saved) = candidate_receipt_fixture();
+        let id = saved.candidates[0].id();
+        let expired = create_session(&fixture, &fixture.grants[..1], fixture.grants[0], -60);
+        assert_problem(
+            fixture
+                .kernel
+                .read_search_candidate(&candidate_receipt_read(&expired, id)),
+            ProblemCode::BrowserSessionExpired,
+        );
+        let other_subject = AuthSubjectId::new_v7();
+        fixture
+            .kernel
+            .create_auth_subject(CreateAuthSubjectCommand::new(
+                fasti_domain::RequestCorrelationId::new_v7(),
+                AuthSubject::try_new(
+                    other_subject,
+                    AuthSubjectLifecycle::Active,
+                    1,
+                    1,
+                    fixture.created_at,
+                    fixture.created_at,
+                )
+                .unwrap(),
+            ))
+            .unwrap();
+        {
+            let connection = fixture.kernel.inner.connection.lock().unwrap();
+            connection.execute("INSERT INTO auth_subject_profile_grants(auth_subject_id, profile_grant_id) VALUES (?1, ?2)",
+                params![other_subject.to_string(), fixture.grants[0].to_string()]).unwrap();
+            connection.execute("INSERT INTO workspace_memberships(membership_id, auth_subject_id, workspace_id, lifecycle, role, created_at, updated_at) VALUES (?1, ?2, ?3, 'active', 'member', ?4, ?4)",
+                params![fasti_domain::MembershipId::new_v7().to_string(), other_subject.to_string(),
+                    fixture.workspace_id.to_string(), timestamp(fixture.created_at)]).unwrap();
+        }
+        fixture.subject_id = other_subject;
+        let other = create_session(&fixture, &fixture.grants[..1], fixture.grants[0], 0);
+        // This actor really authenticates to the same client/profile/grant;
+        // only the stable subject differs. A successful miss must retain activity.
+        assert!(fixture
+            .kernel
+            .read_search_candidate(&candidate_receipt_read(&other, id))
+            .unwrap()
+            .is_none());
+        let last_seen: String = fixture
+            .kernel
+            .inner
+            .connection
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT last_seen_at FROM fasti_browser_sessions WHERE browser_session_id = ?1",
+                [other.session().id().to_string()],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            parse_timestamp(
+                &last_seen,
+                CapabilityKey::SearchMetadata,
+                fasti_domain::RequestCorrelationId::new_v7()
+            )
+            .unwrap()
+                > fixture.created_at
+        );
+    }
+
     #[test]
     fn rotation_revokes_the_old_secret_without_extending_absolute_expiry() {
         let fixture = fixture();
