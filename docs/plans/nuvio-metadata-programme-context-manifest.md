@@ -196,3 +196,32 @@ authentication boundary. SQLite already compiles FTS5; no dependency is needed.
 C2 owns its isolated Access credential modules and additive Access exports in
 domain/application lib.rs. M4 owns Search exports and all previously allocated
 shared surfaces. Codex Security remains disabled.
+
+### M4 query and selected metadata checkpoint — 2026-09-04
+
+Provider paging is committed at `81b7cbea`; shared domain query admission is
+committed at `b8249540`. `SearchQuery` owns the 256-byte UTF-8 bound, whitespace
+and control-character checks, and redacted debug representation. Provider URL
+construction consumes the validated value. No query rewrite discards upstream
+search syntax.
+
+Record metadata loading now accepts the caller's bounded, typed Record IDs,
+instead of selecting the workspace's first 500 Records again. The current
+Record-list caller uses this shared loader. It retains the M2 projection and
+lifecycle resolver. The regression selects Record 501, tests duplicate input
+IDs, excludes a populated foreign-workspace Record, preserves profile override
+isolation, and checks empty and oversized batches. This prepares local Search
+to resolve its actual matches without a second metadata implementation.
+
+Verification: domain 88 tests pass; provider runtime 27 tests pass; store 292
+tests pass with three subprocess-worker tests ignored by design. Strict clippy
+passes for all targets in these three crates. Store snapshot tests require
+`TMPDIR=/mnt/secondary-ssd/cache/home/tmp` on this host: the default temporary
+path traverses a symlink and correctly fails SQLite's no-follow check. The
+physical-path rerun passes without changing protection or test assertions.
+Independent review of the selected-ID loader found no actionable issue.
+
+No M4 runtime Search endpoint, durable candidate cache, action receipt, local
+index, migration, archive format, or browser flow is activated by these commits.
+Those implementation and verification requirements remain in the active M4
+workfront above. The full programme goal remains active.

@@ -1,5 +1,5 @@
 use crate::kernel::{authorize_application_transaction, map_sql, now, timestamp, SqliteKernel};
-use crate::metadata::load_record_list_metadata;
+use crate::metadata::load_record_metadata_batch;
 use fasti_application::{
     ApplicationResult, AttachIdentifierCommand, AttachIdentifierOutcome, CapabilityKey,
     CreateRecordCommand, CreateRecordOutcome, FastiProblem, IdentityPort, ListRecordsQuery,
@@ -19,7 +19,7 @@ use std::collections::{BTreeSet, HashMap};
 /// library realistically needs before real pagination earns its keep.
 ///
 /// ponytail: no cursor pagination. Add one if a real library exceeds this.
-const MAX_RECORDS_PAGE: i64 = 500;
+pub(crate) const MAX_RECORDS_PAGE: i64 = 500;
 
 impl IdentityPort for SqliteKernel {
     fn register_namespace_definition(
@@ -256,11 +256,12 @@ impl IdentityPort for SqliteKernel {
             FieldKey::try_new(OVERVIEW_FIELD_KEY).expect("canonical record summary field key"),
             FieldKey::try_new(RELEASE_YEAR_FIELD_KEY).expect("canonical record summary field key"),
         ];
-        let metadata = load_record_list_metadata(
+        let record_ids: Vec<_> = records.iter().map(|(id, _)| *id).collect();
+        let metadata = load_record_metadata_batch(
             &transaction,
             workspace_id,
             profile_id,
-            MAX_RECORDS_PAGE,
+            &record_ids,
             &field_keys,
             capability,
             correlation_id,
