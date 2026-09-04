@@ -57,6 +57,7 @@ pub(crate) async fn refresh(
     policy: fasti_application::OutboundAccessPolicy,
     access: RequestAccessContext,
     request: RefreshMetadataClaimsRequest,
+    lease: fasti_application::ProviderOperationLease,
 ) -> Result<RefreshMetadataClaimsResponse, DesktopProblem> {
     let correlation_id = RequestCorrelationId::new_v7();
     let operation_id = request
@@ -98,7 +99,7 @@ pub(crate) async fn refresh(
             locale,
             region,
             metadata_refresh_mode(request.mode),
-        ))
+        ), lease)
         .await
         .map_err(|problem| DesktopProblem::application(&problem))?;
     Ok(refresh_metadata_claims_response(

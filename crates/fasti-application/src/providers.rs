@@ -17,6 +17,22 @@ pub const MAX_CREDENTIAL_REFERENCE_BYTES: usize = 253;
 pub const MAX_CREDENTIAL_SECRET_BYTES: usize = 64 * 1024;
 /// Public provider-credential request limit shared by every adapter.
 pub const MAX_PROVIDER_CREDENTIAL_BYTES: usize = 4096;
+
+/// Keeps an already-acquired host provider guard alive during blocking work.
+/// This has no acquisition or authorization behavior. Hosts must supply their
+/// existing provider gate's guard, and workers retain a clone until they finish.
+#[derive(Clone)]
+pub struct ProviderOperationLease {
+    _guard: std::sync::Arc<dyn Send + Sync>,
+}
+
+impl ProviderOperationLease {
+    pub fn new(guard: impl Send + Sync + 'static) -> Self {
+        Self {
+            _guard: std::sync::Arc::new(guard),
+        }
+    }
+}
 const CONFIGURATION_DIGEST_BYTES: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

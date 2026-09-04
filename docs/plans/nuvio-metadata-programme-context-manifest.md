@@ -457,3 +457,50 @@ foreign workspace rejection and the unchanged bound. Native read-only review fou
 no P0/P1/P2 issue. This is not evidence of a local text index, public pagination,
 10,000-Record latency, or bounded history scanning; those remain active M4 gates.
 No schema, archive, registry or external contract changed in this prerequisite.
+
+### M4 governed Search service checkpoint — 2026-09-05
+
+Selected-Record head `094e2d9995f687597c2c4f08a5495d8cb112ef05`, tree
+`9ef3c220f8d4adee79aa2c52f43361e04710ce86`, passed all 27 native contract gates
+with a clean exact-head receipt. That receipt precedes this service slice.
+
+The provider runtime now composes the existing Search persistence port and
+governed provider fetch. Fresh cache hits, including empty pages, perform no
+upstream work. Offline and transient outage paths consult only the authorized
+stale-on-error window. Stored pages retain their evaluated freshness, lifetime
+and response digest. Candidate receipt retention remains a separate 24-hour
+details window; it does not extend Search page freshness. Network work is
+directly awaited and is not detached on cancellation. Post-fetch authorization
+precedes disclosure of both failures and results; final persistence rechecks
+authority atomically. No Record or Library action is implied by Search.
+
+Native review found a real transport classification bug: policy/address denials
+were flattened into network errors, making them eligible for stale fallback.
+The existing runtime error type now preserves configuration denials through
+credential authorization. Real transport-denial regressions prove no stale read
+or commit. The focused rereview reports no remaining P0/P1/P2 finding.
+Codex Security remains skipped as directed; no external AI key is used.
+
+The same review traced M2 blocking persistence after caller cancellation. A
+lifetime-only lease now carries the existing host provider guard through every
+blocking metadata/Search operation. It introduces no lock map or authorization
+owner. API and Desktop supply their existing guards. A paused blocking-worker
+regression proves cancellation retains the gate until persistence finishes;
+Search sequencing fixtures also prove network cancellation releases it. Those
+fixtures are not live HTTP or browser QA evidence.
+
+Focused gates pass: 36 provider runtime tests, 14 real-store Search tests,
+4 metadata API tests, all 45 Desktop tests, and strict all-target Clippy for
+provider runtime, store, API and Desktop. Empty-page clock fixtures verify
+fresh, stale-on-error, expired and future-dated behavior with the production
+immutable trigger restored before reads. The filtered-page fixture uses the
+same query context as its prepared partition.
+
+Shared ownership remains M4-only. Read-only agents prepare exact host integration
+and effective locale/region handling while the commander verifies this slice.
+Actual Search coordinates still need normalization before host activation:
+TMDB Search sends language but not region; Google Books sends neither. Public
+fanout/API/SDK/Workbench, details refetch, atomic Record actions and action
+receipts, local text index/keyset/10,000-Record evidence, browser QA and exact
+merged-head delivery remain active M4 gates. Schema v16 remains unfrozen;
+archive v5 is unchanged. No v17 allocation or shared-file release has occurred.

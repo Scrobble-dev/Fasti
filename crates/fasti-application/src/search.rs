@@ -217,6 +217,9 @@ pub struct StoredSearchPage {
     pub sequence: u64,
     pub candidates: Vec<SearchCandidateReceipt>,
     pub next_page: Option<u32>,
+    pub cache_state: SearchCacheState,
+    pub lifetime: SearchReceiptLifetime,
+    pub response_digest: Sha256Digest,
 }
 
 /// Server-side read context for the canonical candidate route. Source and grain
@@ -238,7 +241,7 @@ pub struct StoredSearchCandidate {
     pub context: SearchPageContext,
 }
 
-pub trait SearchPersistencePort {
+pub trait SearchPersistencePort: Send + Sync {
     fn prepare_search_page(
         &self,
         request: &SearchPageRequest,
