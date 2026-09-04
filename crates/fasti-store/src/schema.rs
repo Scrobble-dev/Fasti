@@ -3425,6 +3425,26 @@ mod tests {
         migrate_v14(connection).expect("version fourteen");
     }
 
+    #[test]
+    fn published_v15_schema_fingerprint_is_stable() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .unwrap();
+        migrate_to_version_fourteen(&connection);
+        migrate_v15(&connection).unwrap();
+        let fingerprint = crate::portability::schema_fingerprint(
+            &connection,
+            fasti_domain::RequestCorrelationId::new_v7(),
+        )
+        .unwrap();
+        assert_eq!(fingerprint.migration_version(), 15);
+        assert_eq!(
+            fingerprint.digest().as_str(),
+            "sha256:36720ca62ef606e52f960e71cb40452323269f14e4a4af984e2fe875279a155e"
+        );
+    }
+
     fn seed_legacy_override_root(connection: &Connection, profile_count: usize) {
         connection
             .execute_batch(
