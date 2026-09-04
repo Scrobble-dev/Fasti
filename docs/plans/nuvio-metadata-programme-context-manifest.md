@@ -438,3 +438,22 @@ scope. Fix this before reuse. Existing SQLite/keyset/metadata owners remain the
 path to local Search; no external index service is allocated. Provider page
 results must retain page-level freshness, including empty pages. M4 v16 remains
 unfrozen, archive v5 unchanged, and all shared surfaces remain M4-owned.
+
+### M4 selected-Record enrichment checkpoint — 2026-09-05
+
+Provider cancellation hardening is committed at
+`342b1313b7a049a443aa64fd3bba14e0dc235daf`, tree
+`2535640b93e30c176303544df913947454491ba0`. The subsequent local-Search prerequisite
+keeps all three existing enrichment owners on the actual selected Record IDs.
+Identifier/activity loaders no longer reconstruct an unrelated first-500 page.
+The activity loader now filters the authorized profile before ranking occurrences;
+workspace-shared identity does not expose another profile's consumption activity.
+The metadata loader reuses the same existing 500-input serialization boundary.
+
+Ten focused identity tests and strict all-target store Clippy pass. New tests use
+real grants, evidence uploads and accepted observations to prove profile isolation,
+then prove sparse selection beyond Record 500, duplicate/missing IDs, empty input,
+foreign workspace rejection and the unchanged bound. Native read-only review found
+no P0/P1/P2 issue. This is not evidence of a local text index, public pagination,
+10,000-Record latency, or bounded history scanning; those remain active M4 gates.
+No schema, archive, registry or external contract changed in this prerequisite.

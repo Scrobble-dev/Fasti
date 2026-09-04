@@ -6,7 +6,11 @@
 //! ever supplied (history, never overwritten in place) and the single
 //! current override per field, then read them back for resolution.
 
-use crate::identity::{attach_identifier_tx, insert_record, matching_record_ids, MAX_RECORDS_PAGE};
+#[cfg(test)]
+use crate::identity::MAX_RECORDS_PAGE;
+use crate::identity::{
+    attach_identifier_tx, insert_record, matching_record_ids, selected_record_ids_json,
+};
 use crate::kernel::{
     authorize_transaction, map_sql, now, parse_timestamp, timestamp, SqliteKernel,
 };
@@ -2128,14 +2132,7 @@ pub(crate) fn load_record_metadata_batch(
     capability: CapabilityKey,
     correlation_id: RequestCorrelationId,
 ) -> ApplicationResult<RecordListMetadata> {
-    if record_ids.len() > MAX_RECORDS_PAGE as usize {
-        return Err(Box::new(FastiProblem::integrity_failed(
-            capability,
-            correlation_id,
-        )));
-    }
-    let record_ids_json = serde_json::to_string(record_ids)
-        .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
+    let record_ids_json = selected_record_ids_json(record_ids, capability, correlation_id)?;
     let policy = load_projection_policy(
         connection,
         workspace_id,
