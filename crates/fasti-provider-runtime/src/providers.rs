@@ -11,8 +11,9 @@ use fasti_application::{
 use fasti_domain::{
     ExternalIdentifierClaim, FieldClaim, FieldClaimProvenance, FieldClaimStatus, FieldKey, Grain,
     MetadataClaimId, MetadataLocale, MetadataProviderId, NamespaceDefinition, NamespaceKey,
-    ReceivedAt, Sha256Digest, METADATA_FRESH_SECONDS, ORIGINAL_TITLE_FIELD_KEY, OVERVIEW_FIELD_KEY,
-    POSTER_FIELD_KEY, RELEASE_YEAR_FIELD_KEY, TITLE_FIELD_KEY,
+    ReceivedAt, SearchQuery, Sha256Digest, MAX_SEARCH_QUERY_BYTES, METADATA_FRESH_SECONDS,
+    ORIGINAL_TITLE_FIELD_KEY, OVERVIEW_FIELD_KEY, POSTER_FIELD_KEY, RELEASE_YEAR_FIELD_KEY,
+    TITLE_FIELD_KEY,
 };
 use reqwest::header::{HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
@@ -38,7 +39,6 @@ const TMDB_ACCOUNT: &str = "provider/tmdb/read-access-token";
 const TMDB_DOCS: &str = "https://developer.themoviedb.org/docs/authentication-application";
 const SEARCH_CAPABILITY: &str = "metadata.search";
 const READ_CAPABILITY: &str = "metadata.read";
-const QUERY_LIMIT: usize = 256;
 const RESPONSE_LIMIT: usize = 2_000_000;
 const RESULT_LIMIT: usize = 10;
 const TMDB_PAGE_SIZE: usize = 20;
@@ -104,7 +104,7 @@ pub struct ProviderSpec {
 }
 
 const REQUEST_LIMITS: ProviderRequestLimits = ProviderRequestLimits {
-    query_bytes: QUERY_LIMIT,
+    query_bytes: MAX_SEARCH_QUERY_BYTES,
     response_bytes: RESPONSE_LIMIT,
     result_count: RESULT_LIMIT,
     timeout_seconds: 15,
@@ -705,8 +705,9 @@ impl ProviderRuntime {
         policy: &OutboundAccessPolicy,
         state: &ProviderCapabilityState,
     ) -> Result<ProviderSearchPage, ProviderRuntimeError> {
-        validate_query(&input.query)?;
-        let url = search_url(&input, page, locale)?;
+        let query = SearchQuery::try_new(input.query)
+            .map_err(|error| ProviderRuntimeError::configuration(error.to_string()))?;
+        let url = search_url(&input.provider, &query, page, locale)?;
         let spec = self.active_spec(&input.provider)?;
         let (access, endpoint) = endpoint(&input.provider, SEARCH_CAPABILITY)?;
         let client = self
@@ -1162,35 +1163,23 @@ fn vault_error(error: CredentialVaultError) -> ProviderRuntimeError {
     }
 }
 
-fn validate_query(query: &str) -> Result<(), ProviderRuntimeError> {
-    if query.is_empty()
-        || query.trim() != query
-        || query.len() > QUERY_LIMIT
-        || query.chars().any(char::is_control)
-    {
-        return Err(ProviderRuntimeError::configuration(
-            "The provider query must contain 1 to 256 bytes without leading, trailing, or control characters.",
-        ));
-    }
-    Ok(())
-}
-
 fn search_url(
-    input: &ProviderSearchInput,
+    provider: &str,
+    query: &SearchQuery,
     page: u32,
     locale: Option<&MetadataLocale>,
 ) -> Result<reqwest::Url, ProviderRuntimeError> {
     let invalid_page =
         || ProviderRuntimeError::configuration("The provider search page is invalid.");
     let offset = page.checked_sub(1).ok_or_else(invalid_page)?;
-    let (_, mut url) = endpoint(&input.provider, SEARCH_CAPABILITY)?;
-    match input.provider.as_str() {
+    let (_, mut url) = endpoint(provider, SEARCH_CAPABILITY)?;
+    match provider {
         GOOGLE_BOOKS_PROVIDER => {
             let start = offset
                 .checked_mul(RESULT_LIMIT as u32)
                 .ok_or_else(invalid_page)?;
             url.query_pairs_mut()
-                .append_pair("q", &input.query)
+                .append_pair("q", query.as_str())
                 .append_pair("startIndex", &start.to_string())
                 .append_pair("maxResults", &RESULT_LIMIT.to_string())
                 .append_pair("projection", "lite");
@@ -1201,7 +1190,7 @@ fn search_url(
                 return Err(invalid_page());
             }
             url.query_pairs_mut()
-                .append_pair("query", &input.query)
+                .append_pair("query", query.as_str())
                 .append_pair("include_adult", "false")
                 .append_pair("language", locale.map_or("en-US", MetadataLocale::as_str))
                 .append_pair("page", &page.to_string());
@@ -1496,9 +1485,9 @@ mod tests {
 
     #[test]
     fn credentials_and_queries_are_strictly_bounded() {
-        assert!(validate_query("isbn:9780140328721").is_ok());
-        assert!(validate_query(" leading").is_err());
-        assert!(validate_query(&"x".repeat(QUERY_LIMIT + 1)).is_err());
+        assert!(SearchQuery::try_new("isbn:9780140328721").is_ok());
+        assert!(SearchQuery::try_new(" leading").is_err());
+        assert!(SearchQuery::try_new("x".repeat(MAX_SEARCH_QUERY_BYTES + 1)).is_err());
         let client = crate::transport::test_authorized_client(
             GOOGLE_BOOKS_PROVIDER,
             SEARCH_CAPABILITY,
@@ -1527,7 +1516,8 @@ mod tests {
             provider: GOOGLE_BOOKS_PROVIDER.to_owned(),
             query: "海 &page=99#title".to_owned(),
         };
-        let books = search_url(&input, 3, None).expect("book page");
+        let query = SearchQuery::try_new(input.query.clone()).expect("query");
+        let books = search_url(&input.provider, &query, 3, None).expect("book page");
         assert_eq!(books.host_str(), Some(GOOGLE_BOOKS_HOST));
         assert_eq!(books.fragment(), None);
         let pairs: std::collections::BTreeMap<_, _> = books.query_pairs().collect();
@@ -1537,13 +1527,13 @@ mod tests {
         );
         assert_eq!(pairs.get("startIndex").map(|v| v.as_ref()), Some("20"));
         assert!(!pairs.contains_key("page"));
-        assert!(search_url(&input, 0, None).is_err());
-        assert!(search_url(&input, u32::MAX, None).is_err());
+        assert!(search_url(&input.provider, &query, 0, None).is_err());
+        assert!(search_url(&input.provider, &query, u32::MAX, None).is_err());
         assert!(!format!("{input:?}").contains(&input.query));
 
         input.provider = TMDB_PROVIDER.to_owned();
         let locale = MetadataLocale::try_new("fr-FR").expect("locale");
-        let tmdb = search_url(&input, 2, Some(&locale)).expect("TMDB page");
+        let tmdb = search_url(&input.provider, &query, 2, Some(&locale)).expect("TMDB page");
         let pairs: std::collections::BTreeMap<_, _> = tmdb.query_pairs().collect();
         assert_eq!(
             pairs.get("query").map(|v| v.as_ref()),
@@ -1555,7 +1545,7 @@ mod tests {
             pairs.get("include_adult").map(|v| v.as_ref()),
             Some("false")
         );
-        assert!(search_url(&input, 501, None).is_err());
+        assert!(search_url(&input.provider, &query, 501, None).is_err());
     }
 
     #[test]
