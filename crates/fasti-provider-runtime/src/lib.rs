@@ -3,12 +3,14 @@
 mod metadata;
 mod platform_vault;
 mod providers;
+mod search;
 mod transport;
 
 use fasti_application::ProblemCode;
 pub use metadata::*;
 pub use platform_vault::*;
 pub use providers::*;
+pub use search::*;
 pub use transport::{
     bounded_body, configuration_digest, pinned_client, pinned_client_with_timeouts, resolve_once,
     AuthorizedClient, GovernedTransport,

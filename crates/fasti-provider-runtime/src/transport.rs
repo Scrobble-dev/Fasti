@@ -1,3 +1,4 @@
+use crate::ProviderRuntimeError;
 use fasti_application::{authorize_outbound, OutboundAccessDeclaration, OutboundAccessPolicy};
 use reqwest::{Client, Response};
 use sha2::{Digest, Sha256};
@@ -149,15 +150,17 @@ impl GovernedTransport {
         policy: &OutboundAccessPolicy,
         capability: &'static str,
         endpoint: &reqwest::Url,
-    ) -> Result<AuthorizedClient, String> {
-        let origin = Origin::try_from(endpoint)?;
+    ) -> Result<AuthorizedClient, ProviderRuntimeError> {
+        let origin = Origin::try_from(endpoint).map_err(ProviderRuntimeError::configuration)?;
         let permit = tokio::time::timeout(self.timeout, Arc::clone(&self.requests).acquire_owned())
             .await
-            .map_err(|_| "The provider request queue timed out.".to_owned())?
-            .map_err(|_| "The provider request queue is unavailable.".to_owned())?;
+            .map_err(|_| ProviderRuntimeError::network("The provider request queue timed out."))?
+            .map_err(|_| {
+                ProviderRuntimeError::network("The provider request queue is unavailable.")
+            })?;
         let addresses = resolve_once(&origin.host, origin.port)
             .await
-            .map_err(str::to_owned)?;
+            .map_err(ProviderRuntimeError::network)?;
         let address_values = addresses.iter().map(|value| value.ip()).collect::<Vec<_>>();
         authorize_outbound(
             declaration,
@@ -167,18 +170,19 @@ impl GovernedTransport {
             &address_values,
         )
         .map_err(|denial| {
-            format!(
+            ProviderRuntimeError::configuration(format!(
                 "The outbound policy denied the {} {}.",
                 declaration.provider,
                 denial.dimension()
-            )
+            ))
         })?;
-        let client =
-            pinned_client(&origin.host, &addresses, self.timeout).map_err(str::to_owned)?;
+        let client = pinned_client(&origin.host, &addresses, self.timeout)
+            .map_err(ProviderRuntimeError::configuration)?;
         Ok(AuthorizedClient {
             client,
             origin,
-            configuration_digest: configuration_digest(declaration.provider, capability, endpoint)?,
+            configuration_digest: configuration_digest(declaration.provider, capability, endpoint)
+                .map_err(ProviderRuntimeError::configuration)?,
             _permit: permit,
         })
     }

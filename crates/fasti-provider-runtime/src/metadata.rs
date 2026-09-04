@@ -5,8 +5,8 @@ use fasti_application::{
     MetadataClaimRefreshService, MetadataRefreshFuture, MetadataRefreshMode,
     MetadataRefreshPersistencePort, OutboundAccessPolicy, PrepareMetadataRefreshCommand,
     ProblemCode, ProviderCapabilityId, ProviderCapabilityState, ProviderCapabilityStatus,
-    ProviderId, ProviderMetadataField, ProviderStatePort, ProviderStatePortError,
-    ReadCachedMetadataRefreshCommand, ReadMetadataRefreshReceiptCommand,
+    ProviderId, ProviderMetadataField, ProviderOperationLease, ProviderStatePort,
+    ProviderStatePortError, ReadCachedMetadataRefreshCommand, ReadMetadataRefreshReceiptCommand,
     RefreshMetadataClaimsCommand,
 };
 use fasti_domain::{
@@ -49,6 +49,7 @@ impl ProviderMetadataRefreshService {
     async fn refresh(
         &self,
         command: RefreshMetadataClaimsCommand,
+        lease: ProviderOperationLease,
     ) -> fasti_application::ApplicationResult<fasti_application::RefreshMetadataClaimsOutcome> {
         let capability = CapabilityKey::RefreshMetadataClaims;
         let correlation_id = command.correlation_id();
@@ -64,7 +65,7 @@ impl ProviderMetadataRefreshService {
             command.record_id(),
             provider_id.clone(),
         );
-        if let Some(outcome) = run_blocking(capability, correlation_id, move || {
+        if let Some(outcome) = run_blocking(&lease, capability, correlation_id, move || {
             persistence.authorize_and_read_refresh_receipt(receipt)
         })
         .await?
@@ -79,7 +80,7 @@ impl ProviderMetadataRefreshService {
             provider_id.clone(),
             command.field_groups().to_vec(),
         );
-        let prepared = run_blocking(capability, correlation_id, move || {
+        let prepared = run_blocking(&lease, capability, correlation_id, move || {
             persistence.authorize_and_prepare_refresh(prepare)
         })
         .await?;
@@ -90,7 +91,7 @@ impl ProviderMetadataRefreshService {
             .map_err(|_| problem(ProblemCode::IntegrityFailed, capability, correlation_id))?;
         let provider_state = Arc::clone(&self.provider_state);
         let workspace_id = command.access().workspace_id();
-        let state = run_blocking(capability, correlation_id, move || {
+        let state = run_blocking(&lease, capability, correlation_id, move || {
             provider_state
                 .get_provider_capability_state(workspace_id, &provider, &read_capability)
                 .map_err(|error| state_problem(error, capability, correlation_id))?
@@ -142,7 +143,7 @@ impl ProviderMetadataRefreshService {
                 prepared.clone(),
                 enrichment_keys.clone(),
             );
-            if let Some(outcome) = run_blocking(capability, correlation_id, move || {
+            if let Some(outcome) = run_blocking(&lease, capability, correlation_id, move || {
                 persistence.authorize_and_read_cached_refresh(cached)
             })
             .await?
@@ -157,7 +158,7 @@ impl ProviderMetadataRefreshService {
                     provider_id.clone(),
                     outcome,
                 );
-                return run_blocking(capability, correlation_id, move || {
+                return run_blocking(&lease, capability, correlation_id, move || {
                     persistence.authorize_and_commit_refresh_receipt(receipt)
                 })
                 .await;
@@ -188,7 +189,7 @@ impl ProviderMetadataRefreshService {
                     prepared,
                     provider_id,
                 );
-                run_blocking(capability, correlation_id, move || {
+                run_blocking(&lease, capability, correlation_id, move || {
                     persistence.authorize_and_mark_refresh_unavailable(unavailable)
                 })
                 .await?;
@@ -256,7 +257,7 @@ impl ProviderMetadataRefreshService {
             cache_entries,
             attribution,
         );
-        run_blocking(capability, correlation_id, move || {
+        run_blocking(&lease, capability, correlation_id, move || {
             persistence.authorize_and_commit_refresh(commit)
         })
         .await
@@ -284,7 +285,8 @@ fn refresh_semantic_digest(
     Ok(Sha256Digest::from_bytes(&Sha256::digest(encoded).into()))
 }
 
-async fn run_blocking<T, F>(
+pub(crate) async fn run_blocking<T, F>(
+    lease: &ProviderOperationLease,
     capability: CapabilityKey,
     correlation_id: fasti_domain::RequestCorrelationId,
     operation: F,
@@ -293,17 +295,22 @@ where
     T: Send + 'static,
     F: FnOnce() -> fasti_application::ApplicationResult<T> + Send + 'static,
 {
-    tokio::task::spawn_blocking(operation)
-        .await
-        .map_err(|_| problem(ProblemCode::StorageUnavailable, capability, correlation_id))?
+    let lease = lease.clone();
+    tokio::task::spawn_blocking(move || {
+        let _lease = lease;
+        operation()
+    })
+    .await
+    .map_err(|_| problem(ProblemCode::StorageUnavailable, capability, correlation_id))?
 }
 
 impl MetadataClaimRefreshService for ProviderMetadataRefreshService {
     fn authorize_and_refresh(
         &self,
         command: RefreshMetadataClaimsCommand,
+        lease: ProviderOperationLease,
     ) -> MetadataRefreshFuture<'_> {
-        Box::pin(self.refresh(command))
+        Box::pin(self.refresh(command, lease))
     }
 }
 
@@ -503,6 +510,39 @@ mod tests {
         FieldClaimStatus, FieldKey, Grain, MetadataClaimId, MetadataLocale, MetadataProviderId,
         MetadataRegion, NamespaceKey, ProfileGrantId, ProfileId, RecordId, WorkspaceId,
     };
+
+    #[tokio::test]
+    async fn cancellation_retains_provider_lease_until_blocking_persistence_finishes() {
+        let gate = Arc::new(tokio::sync::Mutex::new(()));
+        let lease = ProviderOperationLease::new(Arc::clone(&gate).lock_owned().await);
+        let (started, entered) = tokio::sync::oneshot::channel();
+        let (finish, release) = std::sync::mpsc::channel();
+        let caller = tokio::spawn(async move {
+            run_blocking(
+                &lease,
+                CapabilityKey::RefreshMetadataClaims,
+                fasti_domain::RequestCorrelationId::new_v7(),
+                move || {
+                    let _ = started.send(());
+                    let _ = release.recv();
+                    Ok(())
+                },
+            )
+            .await
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(5), entered)
+            .await
+            .expect("bounded persistence start")
+            .expect("entered persistence");
+        caller.abort();
+        assert!(caller.await.expect_err("cancel caller").is_cancelled());
+        let held = gate.try_lock().is_err();
+        finish.send(()).expect("release persistence");
+        let _completed = tokio::time::timeout(std::time::Duration::from_secs(5), gate.lock())
+            .await
+            .expect("completed persistence releases gate");
+        assert!(held);
+    }
 
     fn test_field(at: chrono::DateTime<Utc>) -> ProviderMetadataField {
         let digest = Sha256Digest::parse(format!("sha256:{}", "a".repeat(64))).expect("digest");

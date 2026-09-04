@@ -287,6 +287,9 @@ impl SearchPersistencePort for SqliteKernel {
             sequence: sequence as u64,
             candidates: receipts,
             next_page,
+            cache_state: fasti_application::SearchCacheState::Fresh,
+            lifetime: life,
+            response_digest: response_digest.clone(),
         })
     }
 
@@ -324,10 +327,10 @@ impl SearchPersistencePort for SqliteKernel {
             parse_timestamp(&expires, CAPABILITY, id)?,
         )
         .map_err(|_| failure(ProblemCode::IntegrityFailed, id))?;
-        if life.cache_state(now(), upstream_unavailable).is_none() {
+        let Some(cache_state) = life.cache_state(now(), upstream_unavailable) else {
             map_sql(transaction.commit(), CAPABILITY, id)?;
             return Ok(None);
-        }
+        };
         let response = response
             .parse()
             .map_err(|_| failure(ProblemCode::IntegrityFailed, id))?;
@@ -351,6 +354,9 @@ impl SearchPersistencePort for SqliteKernel {
             sequence: sequence as u64,
             candidates,
             next_page,
+            cache_state,
+            lifetime: life,
+            response_digest: response,
         }))
     }
 
@@ -756,23 +762,7 @@ pub(crate) mod tests {
         let saved = commit(&node, &request, &[candidate("42")]);
         let read = details(&request, saved.candidates[0].id());
         for (age, readable) in [(1800, true), (86400, false), (-60, false)] {
-            {
-                let connection = node.kernel.inner.connection.lock().unwrap();
-                let guard: String = connection.query_row(
-                    "SELECT sql FROM sqlite_schema WHERE name = 'search_pages_immutable_update'", [], |r| r.get(0),
-                ).unwrap();
-                // Explicit clock fixture; restore the production guard before reading.
-                connection
-                    .execute_batch("DROP TRIGGER search_pages_immutable_update")
-                    .unwrap();
-                let created = now() - Duration::seconds(age);
-                connection.execute(
-                    "UPDATE search_pages SET created_at = ?1, fresh_until = ?2, stale_until = ?3, expires_at = ?4 WHERE sequence = ?5",
-                    params![timestamp(created), timestamp(created + Duration::seconds(120)),
-                        timestamp(created + Duration::seconds(600)), timestamp(created + Duration::seconds(86400)), i64::try_from(saved.sequence).unwrap()],
-                ).unwrap();
-                connection.execute_batch(&guard).unwrap();
-            }
+            age_page(&node, saved.sequence, age);
             assert!(node
                 .kernel
                 .read_cached_search_page(&request, true)
@@ -782,6 +772,58 @@ pub(crate) mod tests {
                 node.kernel.read_search_candidate(&read).unwrap().is_some(),
                 readable
             );
+        }
+    }
+
+    fn age_page(node: &TestNode, sequence: u64, age: i64) {
+        let connection = node.kernel.inner.connection.lock().unwrap();
+        let guard: String = connection
+            .query_row(
+                "SELECT sql FROM sqlite_schema WHERE name = 'search_pages_immutable_update'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        // Explicit clock fixture; restore the production guard before reading.
+        connection
+            .execute_batch("DROP TRIGGER search_pages_immutable_update")
+            .unwrap();
+        let created = now() - Duration::seconds(age);
+        connection.execute(
+            "UPDATE search_pages SET created_at = ?1, fresh_until = ?2, stale_until = ?3, expires_at = ?4 WHERE sequence = ?5",
+            params![timestamp(created), timestamp(created + Duration::seconds(120)),
+                timestamp(created + Duration::seconds(600)), timestamp(created + Duration::seconds(86400)), i64::try_from(sequence).unwrap()],
+        ).unwrap();
+        connection.execute_batch(&guard).unwrap();
+    }
+
+    #[test]
+    fn empty_search_pages_preserve_exact_freshness_and_expiry() {
+        let (node, request) = setup();
+        let saved = commit(&node, &request, &[]);
+        for (age, state) in [
+            (60, Some(fasti_application::SearchCacheState::Fresh)),
+            (180, Some(fasti_application::SearchCacheState::StaleOnError)),
+            (601, None),
+            (-60, None),
+        ] {
+            age_page(&node, saved.sequence, age);
+            for unavailable in [false, true] {
+                let expected = state.filter(|state| {
+                    unavailable || *state == fasti_application::SearchCacheState::Fresh
+                });
+                let cached = node
+                    .kernel
+                    .read_cached_search_page(&request, unavailable)
+                    .unwrap();
+                assert_eq!(cached.as_ref().map(|page| page.cache_state), expected);
+                if let Some(page) = cached {
+                    assert!(page.candidates.is_empty());
+                    assert_eq!(page.sequence, saved.sequence);
+                    assert_eq!(page.response_digest, saved.response_digest);
+                    assert_eq!(page.lifetime.cache_state(now(), unavailable), expected);
+                }
+            }
         }
     }
 

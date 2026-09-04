@@ -924,7 +924,6 @@ impl ProviderRuntime {
         self.transport
             .authorize(access, policy, capability, &endpoint)
             .await
-            .map_err(ProviderRuntimeError::network)
     }
 
     fn load_bound_credential(
@@ -1313,6 +1312,12 @@ fn parse_tmdb_candidates(
         next_page,
         evidence_digest,
     })
+}
+
+#[cfg(test)]
+pub(crate) fn search_page_fixture() -> ProviderSearchPage {
+    parse_tmdb_candidates(br#"{"page":1,"total_pages":2,"results":[{"id":42,"media_type":"movie","title":"Fixture film","adult":false}]}"#, 1)
+        .expect("valid parser fixture")
 }
 
 fn tmdb_candidate(

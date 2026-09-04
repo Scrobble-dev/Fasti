@@ -76,7 +76,7 @@ impl ArtworkCache {
         let client = transport
             .authorize(target.access, policy, ARTWORK_CAPABILITY, &target.url)
             .await
-            .map_err(DesktopProblem::provider)?;
+            .map_err(|error| DesktopProblem::provider(error.detail()))?;
         let response = client
             .get(target.url.clone())
             .map_err(DesktopProblem::provider)?

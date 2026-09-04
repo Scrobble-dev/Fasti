@@ -1215,6 +1215,7 @@ pub trait MetadataClaimRefreshService: Send + Sync {
     fn authorize_and_refresh(
         &self,
         command: RefreshMetadataClaimsCommand,
+        lease: crate::ProviderOperationLease,
     ) -> MetadataRefreshFuture<'_>;
 }
 

@@ -580,7 +580,9 @@ async fn refresh_metadata_claims(
     state: tauri::State<'_, DesktopState>,
     input: fasti_contracts::RefreshMetadataClaimsRequest,
 ) -> Result<fasti_contracts::RefreshMetadataClaimsResponse, DesktopProblem> {
-    let _provider_guard = state.provider_operation_gate.lock().await;
+    let lease = fasti_application::ProviderOperationLease::new(
+        Arc::clone(&state.provider_operation_gate).lock_owned().await,
+    );
     let kernel = state.kernel()?;
     let access = records::require_access(
         &kernel,
@@ -588,7 +590,7 @@ async fn refresh_metadata_claims(
     )?;
     let runtime = state.provider_runtime(&kernel)?;
     let policy = state.network.load()?.outbound_policy().clone();
-    metadata::refresh(kernel, runtime, policy, access, input).await
+    metadata::refresh(kernel, runtime, policy, access, input, lease).await
 }
 
 #[cfg(feature = "desktop-runtime")]
