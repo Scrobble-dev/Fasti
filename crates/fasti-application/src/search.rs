@@ -18,6 +18,14 @@ pub const SEARCH_FRESH_SECONDS: i64 = 120;
 pub const SEARCH_STALE_ON_ERROR_SECONDS: i64 = 600;
 pub const SEARCH_RECEIPT_SECONDS: i64 = 24 * 60 * 60;
 pub const MAX_SEARCH_PAGE_CANDIDATES: usize = 100;
+pub const MAX_SEARCH_CONTEXT_BYTES: usize = 2048;
+
+fn search_digest(value: &impl Serialize) -> Sha256Digest {
+    use sha2::{Digest, Sha256};
+    let bytes =
+        serde_json::to_vec(value).expect("Search context contains only serializable values");
+    Sha256Digest::from_bytes(&Sha256::digest(bytes).into())
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchProviderQuery {
@@ -71,8 +79,7 @@ impl SearchProviderQuery {
         &self.grains
     }
     pub fn digest(&self) -> Sha256Digest {
-        use sha2::{Digest, Sha256};
-        let bytes = serde_json::to_vec(&(
+        search_digest(&(
             "fasti.search.page.v1",
             self.query.as_str(),
             self.provider.as_str(),
@@ -81,8 +88,110 @@ impl SearchProviderQuery {
             &self.region,
             &self.grains,
         ))
-        .expect("fixed Search tuple contains only serializable values");
-        Sha256Digest::from_bytes(&Sha256::digest(bytes).into())
+    }
+
+    pub fn receipt_context(&self) -> SearchPageContext {
+        SearchPageContext {
+            query_digest: self.digest(),
+            provider: self.provider.as_str().to_owned(),
+            page: self.page,
+            locale: self.locale.clone(),
+            region: self.region.clone(),
+            grains: self.grains.clone(),
+        }
+    }
+}
+
+/// Stored route coordinates and query evidence, without the user's query text.
+/// Reopening a candidate must not depend on browser-supplied metadata or locale.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SearchPageContext {
+    query_digest: Sha256Digest,
+    provider: String,
+    page: u32,
+    locale: Option<MetadataLocale>,
+    region: Option<MetadataRegion>,
+    grains: Vec<Grain>,
+}
+
+impl SearchPageContext {
+    pub fn provider(&self) -> &str {
+        &self.provider
+    }
+    pub const fn page(&self) -> u32 {
+        self.page
+    }
+    pub fn locale(&self) -> Option<&MetadataLocale> {
+        self.locale.as_ref()
+    }
+    pub fn region(&self) -> Option<&MetadataRegion> {
+        self.region.as_ref()
+    }
+    pub fn grains(&self) -> &[Grain] {
+        &self.grains
+    }
+    pub fn digest(&self) -> Sha256Digest {
+        search_digest(&("fasti.search.context.v1", self))
+    }
+    pub fn accepts(&self, candidate: &SearchCandidate) -> bool {
+        candidate.data().provider == self.provider
+            && (self.grains.is_empty() || self.grains.contains(&candidate.identifier().grain()))
+    }
+    pub fn to_json(&self) -> Result<String, SearchEvidenceError> {
+        let value =
+            serde_json::to_string(self).map_err(|_| SearchEvidenceError::InvalidPartition)?;
+        if value.len() > MAX_SEARCH_CONTEXT_BYTES {
+            return Err(SearchEvidenceError::InvalidPartition);
+        }
+        Ok(value)
+    }
+    pub fn from_json(value: &str) -> Result<Self, SearchEvidenceError> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Stored {
+            query_digest: Sha256Digest,
+            provider: String,
+            page: u32,
+            locale: Option<String>,
+            region: Option<String>,
+            grains: Vec<Grain>,
+        }
+        if value.len() > MAX_SEARCH_CONTEXT_BYTES {
+            return Err(SearchEvidenceError::InvalidPartition);
+        }
+        let stored: Stored =
+            serde_json::from_str(value).map_err(|_| SearchEvidenceError::InvalidPartition)?;
+        ProviderId::try_new(&stored.provider).map_err(|_| SearchEvidenceError::InvalidPartition)?;
+        if stored.page == 0
+            || stored.grains.len() > Grain::ALL.len()
+            || stored
+                .grains
+                .windows(2)
+                .any(|pair| pair[0].as_str() >= pair[1].as_str())
+        {
+            return Err(SearchEvidenceError::InvalidPartition);
+        }
+        let context = Self {
+            query_digest: stored.query_digest,
+            provider: stored.provider,
+            page: stored.page,
+            locale: stored
+                .locale
+                .map(MetadataLocale::try_new)
+                .transpose()
+                .map_err(|_| SearchEvidenceError::InvalidPartition)?,
+            region: stored
+                .region
+                .map(MetadataRegion::try_new)
+                .transpose()
+                .map_err(|_| SearchEvidenceError::InvalidPartition)?,
+            grains: stored.grains,
+        };
+        // Only our exact normalized persisted representation is accepted.
+        if context.to_json()? != value {
+            return Err(SearchEvidenceError::InvalidPartition);
+        }
+        Ok(context)
     }
 }
 
@@ -110,6 +219,25 @@ pub struct StoredSearchPage {
     pub next_page: Option<u32>,
 }
 
+/// Server-side read context for the canonical candidate route. Source and grain
+/// are checked against stored evidence; they never select an upstream URL.
+#[derive(Debug, Clone)]
+pub struct ReadSearchCandidateRequest {
+    pub correlation_id: RequestCorrelationId,
+    pub access: ApplicationAccessContext,
+    pub candidate_receipt_id: SearchCandidateReceiptId,
+    pub provider: ProviderId,
+    pub grain: Grain,
+    pub outbound_policy: OutboundAccessPolicy,
+    pub terms_revision: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredSearchCandidate {
+    pub receipt: SearchCandidateReceipt,
+    pub context: SearchPageContext,
+}
+
 pub trait SearchPersistencePort {
     fn prepare_search_page(
         &self,
@@ -128,6 +256,10 @@ pub trait SearchPersistencePort {
         request: &SearchPageRequest,
         upstream_unavailable: bool,
     ) -> ApplicationResult<Option<StoredSearchPage>>;
+    fn read_search_candidate(
+        &self,
+        request: &ReadSearchCandidateRequest,
+    ) -> ApplicationResult<Option<StoredSearchCandidate>>;
 }
 
 /// The allowlist persisted from provider search. No raw body or request headers.
@@ -272,7 +404,7 @@ pub struct SearchReceiptPartition {
     actor_client_id: ClientId,
     actor_subject_id: Option<AuthSubjectId>,
     grant_id: ProfileGrantId,
-    query_digest: Sha256Digest,
+    context_digest: Sha256Digest,
     grant_digest: Sha256Digest,
     configuration_digest: Sha256Digest,
     terms_revision: String,
@@ -281,7 +413,7 @@ pub struct SearchReceiptPartition {
 impl SearchReceiptPartition {
     pub fn try_new(
         access: AuthorizedApplicationAccess,
-        query_digest: Sha256Digest,
+        context_digest: Sha256Digest,
         grant_digest: Sha256Digest,
         configuration_digest: Sha256Digest,
         terms_revision: String,
@@ -305,7 +437,7 @@ impl SearchReceiptPartition {
                 } => Some(auth_subject_id),
                 AuthorizedActor::Credential { .. } => None,
             },
-            query_digest,
+            context_digest,
             grant_digest,
             configuration_digest,
             terms_revision,
@@ -511,6 +643,49 @@ mod tests {
         }
     }
 
+    #[test]
+    fn candidate_receipt_context_is_canonical_bounded_and_contains_no_query_text() {
+        let context = SearchProviderQuery::try_new(
+            SearchQuery::try_new("Private exact query").unwrap(),
+            ProviderId::try_new("tmdb").unwrap(),
+            2,
+            Some(MetadataLocale::try_new("fr-FR").unwrap()),
+            Some(MetadataRegion::try_new("fr").unwrap()),
+            vec![Grain::Series, Grain::Film, Grain::Film],
+        )
+        .unwrap()
+        .receipt_context();
+        let json = context.to_json().unwrap();
+        assert!(!json.contains("Private exact query"));
+        assert_eq!(SearchPageContext::from_json(&json).unwrap(), context);
+        assert!(context.accepts(&SearchCandidate::try_new(candidate_data()).unwrap()));
+        let mutations: [fn(&mut SearchPageContext); 6] = [
+            |c| c.query_digest = Sha256Digest::from_bytes(&[0; 32]),
+            |c| c.provider = "google-books".into(),
+            |c| c.page = 3,
+            |c| c.locale = None,
+            |c| c.region = None,
+            |c| c.grains = vec![Grain::Film],
+        ];
+        for mutate in mutations {
+            let mut changed = context.clone();
+            mutate(&mut changed);
+            assert_ne!(changed.digest(), context.digest());
+        }
+        for hostile in [
+            json.replace("fr-fr", "FR-fr"),
+            json.replace("\"FR\"", "\"fr\""),
+            json.replace("\"page\":2", "\"page\":0"),
+            json.replace("\"film\",\"series\"", "\"film\",\"film\""),
+            json.replace("\"film\",\"series\"", "\"series\",\"film\""),
+            json.replace("\"region\":\"FR\",", ""),
+            json.replace("\"query_digest\":", "\"extra\":true,\"query_digest\":"),
+            " ".repeat(MAX_SEARCH_CONTEXT_BYTES + 1),
+        ] {
+            assert!(SearchPageContext::from_json(&hostile).is_err(), "{hostile}");
+        }
+    }
+
     fn lifetime() -> SearchReceiptLifetime {
         let created = DateTime::from_timestamp(1_700_000_000, 0).unwrap();
         SearchReceiptLifetime::try_new(
@@ -664,7 +839,7 @@ mod tests {
             |p| p.actor_subject_id = Some(AuthSubjectId::new_v7()),
             |p| p.actor_subject_id = None,
             |p| p.grant_id = ProfileGrantId::new_v7(),
-            |p| p.query_digest = Sha256Digest::from_bytes(&[9; 32]),
+            |p| p.context_digest = Sha256Digest::from_bytes(&[9; 32]),
             |p| p.grant_digest = Sha256Digest::from_bytes(&[9; 32]),
             |p| p.configuration_digest = Sha256Digest::from_bytes(&[9; 32]),
             |p| p.terms_revision = "provider-v2".into(),
