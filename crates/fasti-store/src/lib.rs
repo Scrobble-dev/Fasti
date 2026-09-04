@@ -26,6 +26,7 @@ mod restore_coordinator;
 mod restore_import;
 mod review;
 mod schema;
+mod search;
 mod seed;
 mod snapshot;
 mod stopped_portability;

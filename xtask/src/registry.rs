@@ -9,7 +9,7 @@ use std::fs;
 use std::path::Path;
 
 const REGISTRY_PATH: &str = "contracts/registry/v1/capabilities.yaml";
-const EXPECTED_PROFILES: [&str; 17] = [
+const EXPECTED_PROFILES: [&str; 18] = [
     "b1_durable_bootstrap",
     "b1_http_fixture",
     "b1_integration_status",
@@ -27,6 +27,7 @@ const EXPECTED_PROFILES: [&str; 17] = [
     "m1_providers",
     "m2_metadata",
     "m3_identity_routing",
+    "m4_search",
 ];
 
 #[derive(Debug)]
@@ -222,6 +223,7 @@ pub(crate) fn finalized_required_bindings(
                 | CapabilityBody::M1
                 | CapabilityBody::M2
                 | CapabilityBody::M3
+                | CapabilityBody::M4
         ) || capability.lifecycle.contract_state != ContractState::Finalized
         {
             continue;
@@ -675,6 +677,7 @@ const fn expected_surface_profile(key: CapabilityKey) -> &'static str {
             CapabilityBody::M1 => "m1_providers",
             CapabilityBody::M2 => "m2_metadata",
             CapabilityBody::M3 => "m3_identity_routing",
+            CapabilityBody::M4 => "m4_search",
         },
     }
 }
@@ -689,6 +692,7 @@ const fn body_rank(body: CapabilityBody) -> u8 {
         CapabilityBody::M1 => 5,
         CapabilityBody::M2 => 6,
         CapabilityBody::M3 => 7,
+        CapabilityBody::M4 => 8,
     }
 }
 
@@ -895,6 +899,7 @@ mod tests {
         assert_eq!(
             hybrid,
             [
+                CapabilityKey::SearchMetadata,
                 CapabilityKey::AcceptObservation,
                 CapabilityKey::CreateRecord,
                 CapabilityKey::AttachIdentifier,

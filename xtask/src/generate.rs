@@ -1785,7 +1785,7 @@ fn enrich_discovery_collection_schema(
         ),
         (
             "/components/schemas/CapabilitySurfaceDispositionDto/properties/body",
-            vec!["b0", "b1", "b2", "b3", "c1", "m1", "m2", "m3"],
+            vec!["b0", "b1", "b2", "b3", "c1", "m1", "m2", "m3", "m4"],
         ),
         (
             "/components/schemas/CapabilityUatDto/properties/relationship",

@@ -859,6 +859,7 @@ pub(crate) fn scope_storage_key(scope: ScopeKey) -> &'static str {
         ScopeKey::MetadataClaimRefresh => "metadata_claim_refresh",
         ScopeKey::MetadataProjectionRead => "metadata_projection_read",
         ScopeKey::MetadataProjectionConfigure => "metadata_projection_configure",
+        ScopeKey::MetadataSearch => "metadata_search",
         ScopeKey::ReviewRead => "review_read",
         ScopeKey::ReviewWrite => "review_write",
         ScopeKey::CorrectionRead => "correction_read",

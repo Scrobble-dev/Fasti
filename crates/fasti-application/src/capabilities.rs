@@ -12,6 +12,7 @@ pub enum CapabilityBody {
     M1,
     M2,
     M3,
+    M4,
 }
 
 impl CapabilityBody {
@@ -25,6 +26,7 @@ impl CapabilityBody {
             Self::M1 => "M1",
             Self::M2 => "M2",
             Self::M3 => "M3",
+            Self::M4 => "M4",
         }
     }
 }
@@ -111,6 +113,29 @@ macro_rules! define_capabilities {
 }
 
 define_capabilities!(
+    (
+        SearchMetadata,
+        M4,
+        M4,
+        Reserved,
+        Guarded,
+        ScopedOrBrowserSession,
+        [MetadataSearch],
+        [
+            AuthenticationFailed,
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
+            CapabilityUnavailable,
+            CapacityExceeded,
+            Forbidden,
+            IdempotencyConflict,
+            IntegrityFailed,
+            SessionPolicyChanged,
+            StorageUnavailable,
+            ValidationFailed
+        ],
+        []
+    ),
     (
         SystemHealth,
         B1,
@@ -1380,6 +1405,7 @@ mod tests {
         assert_eq!(
             hybrid,
             [
+                CapabilityKey::SearchMetadata,
                 CapabilityKey::AcceptObservation,
                 CapabilityKey::CreateRecord,
                 CapabilityKey::AttachIdentifier,

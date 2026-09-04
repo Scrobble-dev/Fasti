@@ -50,6 +50,7 @@ pub const fn public_capability_id(key: CapabilityKey) -> &'static str {
         CapabilityKey::RevokeOtherBrowserSessions => "browser.sessions.revoke_others",
         CapabilityKey::RotateBrowserSession => "browser.session.rotate",
         CapabilityKey::RotateCredential => "credential.rotate",
+        CapabilityKey::SearchMetadata => "metadata.search",
         CapabilityKey::SelectBrowserSessionProfile => "browser.session.profile.select",
         CapabilityKey::SelectProfile => "profile.select",
         CapabilityKey::SetTrackingDisposition => "profile.record.tracking_disposition.set",

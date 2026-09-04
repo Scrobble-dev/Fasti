@@ -1,10 +1,14 @@
 //! Normalized Search evidence. Candidates remain separate from Fasti Records.
 
-use crate::{provider_identity_mapping, AuthorizedActor, AuthorizedApplicationAccess};
+use crate::{
+    provider_identity_mapping, ApplicationAccessContext, ApplicationResult, AuthorizedActor,
+    AuthorizedApplicationAccess, OutboundAccessPolicy, ProviderCapabilityState, ProviderId,
+};
 use chrono::{DateTime, Duration, Utc};
 use fasti_domain::{
-    AuthSubjectId, ClientId, ExternalIdentifierClaim, ProfileGrantId, ProfileId,
-    SearchCandidateReceiptId, Sha256Digest, WorkspaceId,
+    AuthSubjectId, ClientId, ExternalIdentifierClaim, Grain, MetadataLocale, MetadataRegion,
+    ProfileGrantId, ProfileId, RequestCorrelationId, SearchCandidateReceiptId, SearchQuery,
+    Sha256Digest, WorkspaceId,
 };
 use serde::{Deserialize, Serialize};
 use std::{error::Error, fmt};
@@ -13,6 +17,118 @@ pub const MAX_SEARCH_CANDIDATE_BYTES: usize = 64 * 1024;
 pub const SEARCH_FRESH_SECONDS: i64 = 120;
 pub const SEARCH_STALE_ON_ERROR_SECONDS: i64 = 600;
 pub const SEARCH_RECEIPT_SECONDS: i64 = 24 * 60 * 60;
+pub const MAX_SEARCH_PAGE_CANDIDATES: usize = 100;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchProviderQuery {
+    query: SearchQuery,
+    provider: ProviderId,
+    page: u32,
+    locale: Option<MetadataLocale>,
+    region: Option<MetadataRegion>,
+    grains: Vec<Grain>,
+}
+
+impl SearchProviderQuery {
+    pub fn try_new(
+        query: SearchQuery,
+        provider: ProviderId,
+        page: u32,
+        locale: Option<MetadataLocale>,
+        region: Option<MetadataRegion>,
+        mut grains: Vec<Grain>,
+    ) -> Result<Self, SearchEvidenceError> {
+        if page == 0 || grains.len() > 32 {
+            return Err(SearchEvidenceError::InvalidPartition);
+        }
+        grains.sort_by_key(|grain| grain.as_str());
+        grains.dedup();
+        Ok(Self {
+            query,
+            provider,
+            page,
+            locale,
+            region,
+            grains,
+        })
+    }
+    pub fn provider(&self) -> &ProviderId {
+        &self.provider
+    }
+    pub fn query(&self) -> &SearchQuery {
+        &self.query
+    }
+    pub const fn page(&self) -> u32 {
+        self.page
+    }
+    pub fn locale(&self) -> Option<&MetadataLocale> {
+        self.locale.as_ref()
+    }
+    pub fn region(&self) -> Option<&MetadataRegion> {
+        self.region.as_ref()
+    }
+    pub fn grains(&self) -> &[Grain] {
+        &self.grains
+    }
+    pub fn digest(&self) -> Sha256Digest {
+        use sha2::{Digest, Sha256};
+        let bytes = serde_json::to_vec(&(
+            "fasti.search.page.v1",
+            self.query.as_str(),
+            self.provider.as_str(),
+            self.page,
+            &self.locale,
+            &self.region,
+            &self.grains,
+        ))
+        .expect("fixed Search tuple contains only serializable values");
+        Sha256Digest::from_bytes(&Sha256::digest(bytes).into())
+    }
+}
+
+/// Server-side request context, never a public wire DTO. Policy and terms come
+/// from the configured provider owner; grant/configuration digests come from storage.
+#[derive(Debug, Clone)]
+pub struct SearchPageRequest {
+    pub correlation_id: RequestCorrelationId,
+    pub access: ApplicationAccessContext,
+    pub query: SearchProviderQuery,
+    pub outbound_policy: OutboundAccessPolicy,
+    pub terms_revision: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreparedSearchPage {
+    pub partition: SearchReceiptPartition,
+    pub provider_state: ProviderCapabilityState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredSearchPage {
+    pub sequence: u64,
+    pub candidates: Vec<SearchCandidateReceipt>,
+    pub next_page: Option<u32>,
+}
+
+pub trait SearchPersistencePort {
+    fn prepare_search_page(
+        &self,
+        request: &SearchPageRequest,
+    ) -> ApplicationResult<PreparedSearchPage>;
+    fn commit_search_page(
+        &self,
+        request: &SearchPageRequest,
+        prepared: &PreparedSearchPage,
+        candidates: &[SearchCandidate],
+        response_digest: &Sha256Digest,
+        next_page: Option<u32>,
+    ) -> ApplicationResult<StoredSearchPage>;
+    fn read_cached_search_page(
+        &self,
+        request: &SearchPageRequest,
+        upstream_unavailable: bool,
+    ) -> ApplicationResult<Option<StoredSearchPage>>;
+}
 
 /// The allowlist persisted from provider search. No raw body or request headers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -343,6 +459,43 @@ impl SearchCandidateReceipt {
 mod tests {
     use super::*;
     use fasti_domain::BrowserSessionId;
+
+    #[test]
+    fn query_digest_binds_all_coordinates_without_rewriting_search_syntax() {
+        let query = SearchProviderQuery::try_new(
+            SearchQuery::try_new("Star OR title:Moon").unwrap(),
+            ProviderId::try_new("tmdb").unwrap(),
+            1,
+            None,
+            None,
+            vec![Grain::Film, Grain::Series],
+        )
+        .unwrap();
+        let mutations: [fn(&mut SearchProviderQuery); 6] = [
+            |q| q.query = SearchQuery::try_new("star OR title:Moon").unwrap(),
+            |q| q.provider = ProviderId::try_new("google-books").unwrap(),
+            |q| q.page = 2,
+            |q| q.locale = Some(MetadataLocale::try_new("fr-FR").unwrap()),
+            |q| q.region = Some(MetadataRegion::try_new("FR").unwrap()),
+            |q| q.grains = vec![Grain::Series],
+        ];
+        for change in mutations {
+            let mut changed = query.clone();
+            change(&mut changed);
+            assert_ne!(query.digest(), changed.digest());
+        }
+        let reordered = SearchProviderQuery::try_new(
+            query.query.clone(),
+            query.provider.clone(),
+            1,
+            None,
+            None,
+            vec![Grain::Series, Grain::Film, Grain::Film],
+        )
+        .unwrap();
+        assert_eq!(query.digest(), reordered.digest());
+        assert!(!format!("{query:?}").contains("Star OR"));
+    }
 
     fn candidate_data() -> SearchCandidateData {
         SearchCandidateData {

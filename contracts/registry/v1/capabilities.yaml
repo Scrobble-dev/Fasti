@@ -4,6 +4,67 @@ capability_base_uri: https://fasti.scrobble.dev/ns/capabilities/v1/
 # Profiles keep repeated transport dispositions in one place. A required
 # binding is a contract-generation target, not a claim that its runtime exists.
 surface_profiles:
+  m4_search:
+    domain_application:
+      { state: required, binding: "application:{application_key}" }
+    http_openapi:
+      {
+        state: later_body,
+        body: m4,
+        reason: Search route integration is in progress in M4.,
+      }
+    sse_asyncapi:
+      {
+        state: not_applicable,
+        reason: Search returns finite result pages without an event stream.,
+      }
+    cli:
+      {
+        state: later_body,
+        body: m4,
+        reason: Search CLI projection follows the frozen M4 contract.,
+      }
+    json_schema:
+      {
+        state: later_body,
+        body: m4,
+        reason: Search public data shapes are being integrated in M4.,
+      }
+    json_ld:
+      {
+        state: not_applicable,
+        reason: Private query and candidate receipts are not linked data.,
+      }
+    okf:
+      {
+        state: later_body,
+        body: m4,
+        reason: Search catalogue projection follows M4 activation.,
+      }
+    sdk:
+      {
+        state: later_body,
+        body: m4,
+        reason: Search SDK follows the frozen M4 route contract.,
+      }
+    knowledge:
+      {
+        state: later_body,
+        body: m4,
+        reason: Search recovery guidance follows M4 route integration.,
+      }
+    package_smoke:
+      {
+        state: later_body,
+        body: m4,
+        reason: Search runtime package verification remains an M4 gate.,
+      }
+    ui:
+      {
+        state: later_body,
+        body: m4,
+        reason: Search Workbench integration remains an M4 gate.,
+      }
   health:
     domain_application:
       { state: required, binding: "application:{application_key}" }
@@ -566,6 +627,36 @@ surface_profiles:
     ui: { state: not_applicable, reason: Fasti is headless through B3. }
 
 capabilities:
+  - application_key: search_metadata
+    id: metadata.search
+    bounded_context: search.candidates
+    contract_body: m4
+    runtime_body: m4
+    authorization: scoped_or_browser_session
+    lifecycle:
+      {
+        introduced_in: m4,
+        contract_state: reserved,
+        runtime_availability: guarded,
+      }
+    surface_profile: m4_search
+    scopes: [metadata_search]
+    problems:
+      [
+        authentication_failed,
+        browser_session_expired,
+        browser_session_revoked,
+        capability_unavailable,
+        capacity_exceeded,
+        forbidden,
+        idempotency_conflict,
+        integrity_failed,
+        session_policy_changed,
+        storage_unavailable,
+        validation_failed,
+      ]
+    examples: []
+    uat: []
   - application_key: system_health
     id: system.health
     bounded_context: system.operations

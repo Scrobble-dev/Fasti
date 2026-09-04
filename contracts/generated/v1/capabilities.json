@@ -828,6 +828,37 @@
       "uat": []
     },
     {
+      "authorization": "scoped_or_browser_session",
+      "bounded_context": "search.candidates",
+      "contract_body": "m4",
+      "examples": [],
+      "id": "metadata.search",
+      "lifecycle": {
+        "contract_state": "reserved",
+        "introduced_in": "m4",
+        "runtime_availability": "guarded"
+      },
+      "problems": [
+        "authentication_failed",
+        "browser_session_expired",
+        "browser_session_revoked",
+        "capability_unavailable",
+        "capacity_exceeded",
+        "forbidden",
+        "idempotency_conflict",
+        "integrity_failed",
+        "session_policy_changed",
+        "storage_unavailable",
+        "validation_failed"
+      ],
+      "runtime_body": "m4",
+      "scopes": [
+        "metadata_search"
+      ],
+      "surface_profile": "m4_search",
+      "uat": []
+    },
+    {
       "authorization": "bootstrap_only",
       "bounded_context": "node.administration",
       "contract_body": "b1",
@@ -2431,6 +2462,60 @@
         "binding": "ui:anime-grouping-policy",
         "binding_visibility": "public",
         "state": "required"
+      }
+    },
+    "m4_search": {
+      "cli": {
+        "body": "m4",
+        "reason": "Search CLI projection follows the frozen M4 contract.",
+        "state": "later_body"
+      },
+      "domain_application": {
+        "binding_visibility": "internal",
+        "state": "required"
+      },
+      "http_openapi": {
+        "body": "m4",
+        "reason": "Search route integration is in progress in M4.",
+        "state": "later_body"
+      },
+      "json_ld": {
+        "reason": "Private query and candidate receipts are not linked data.",
+        "state": "not_applicable"
+      },
+      "json_schema": {
+        "body": "m4",
+        "reason": "Search public data shapes are being integrated in M4.",
+        "state": "later_body"
+      },
+      "knowledge": {
+        "body": "m4",
+        "reason": "Search recovery guidance follows M4 route integration.",
+        "state": "later_body"
+      },
+      "okf": {
+        "body": "m4",
+        "reason": "Search catalogue projection follows M4 activation.",
+        "state": "later_body"
+      },
+      "package_smoke": {
+        "body": "m4",
+        "reason": "Search runtime package verification remains an M4 gate.",
+        "state": "later_body"
+      },
+      "sdk": {
+        "body": "m4",
+        "reason": "Search SDK follows the frozen M4 route contract.",
+        "state": "later_body"
+      },
+      "sse_asyncapi": {
+        "reason": "Search returns finite result pages without an event stream.",
+        "state": "not_applicable"
+      },
+      "ui": {
+        "body": "m4",
+        "reason": "Search Workbench integration remains an M4 gate.",
+        "state": "later_body"
       }
     }
   }
