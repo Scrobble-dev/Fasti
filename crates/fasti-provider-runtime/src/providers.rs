@@ -1,12 +1,13 @@
 use crate::transport::{bounded_body, GovernedTransport};
 use crate::ProviderRuntimeError;
 use fasti_application::{
-    provider_identity_mapping, ConfigurationDigest, CredentialReference, CredentialRequirement,
-    CredentialSecret, CredentialVaultError, CredentialVaultPort, CredentialVaultSource,
-    NetworkClass, OutboundAccessDeclaration, OutboundAccessPolicy, ProviderCapabilityState,
-    ProviderCapabilityStatus, ProviderCheckKind, ProviderCredentialStatus, ProviderIdentityMapping,
-    ProviderMetadataField, StoredCredential, GOOGLE_BOOKS_PROVIDER_ID,
-    MAX_PROVIDER_CREDENTIAL_BYTES, TMDB_PROVIDER_ID,
+    provider_identity_mapping, valid_search_candidate_image,
+    valid_search_candidate_text as valid_candidate_text, ConfigurationDigest, CredentialReference,
+    CredentialRequirement, CredentialSecret, CredentialVaultError, CredentialVaultPort,
+    CredentialVaultSource, NetworkClass, OutboundAccessDeclaration, OutboundAccessPolicy,
+    ProviderCapabilityState, ProviderCapabilityStatus, ProviderCheckKind, ProviderCredentialStatus,
+    ProviderIdentityMapping, ProviderMetadataField, SearchCandidate, SearchCandidateData,
+    StoredCredential, GOOGLE_BOOKS_PROVIDER_ID, MAX_PROVIDER_CREDENTIAL_BYTES, TMDB_PROVIDER_ID,
 };
 use fasti_domain::{
     ExternalIdentifierClaim, FieldClaim, FieldClaimProvenance, FieldClaimStatus, FieldKey, Grain,
@@ -394,6 +395,22 @@ pub struct ProviderCandidate {
 }
 
 impl ProviderCandidate {
+    /// Admit only normalized public fields to the durable Search receipt.
+    pub fn search_evidence(&self) -> Result<SearchCandidate, ProviderRuntimeError> {
+        SearchCandidate::try_new(SearchCandidateData {
+            provider: self.provider.to_owned(),
+            provider_id: self.provider_id.clone(),
+            kind: self.kind.to_owned(),
+            title: self.title.clone(),
+            original_title: self.original_title.clone(),
+            release_year: self.release_year,
+            authors: self.authors.clone(),
+            image_url: self.image_url.clone(),
+            overview: self.overview.clone(),
+        })
+        .map_err(|error| ProviderRuntimeError::response_invalid(error.to_string()))
+    }
+
     fn identity_mapping(&self) -> Result<ProviderIdentityMapping, ProviderRuntimeError> {
         provider_identity_mapping(self.provider, self.kind).ok_or_else(|| {
             ProviderRuntimeError::response_invalid(
@@ -1337,10 +1354,13 @@ fn tmdb_candidate(
     let overview = item
         .overview
         .filter(|value| !value.is_empty() && valid_candidate_text(value, 4096));
-    let image_url = item.poster_path.and_then(|path| {
-        (path.starts_with('/') && path.len() <= 256 && !path.chars().any(char::is_control))
-            .then(|| format!("{TMDB_IMAGE_BASE_URL}{path}"))
-    });
+    let image_url = item
+        .poster_path
+        .and_then(|path| {
+            (path.starts_with('/') && path.len() <= 256 && !path.chars().any(char::is_control))
+                .then(|| format!("{TMDB_IMAGE_BASE_URL}{path}"))
+        })
+        .filter(|image| valid_search_candidate_image(TMDB_PROVIDER, image));
     Some(ProviderCandidate {
         provider: TMDB_PROVIDER,
         provider_id,
@@ -1382,14 +1402,7 @@ fn normalize_google_image(value: String) -> Option<String> {
     url.set_scheme("https").ok()?;
     url.set_fragment(None);
     let normalized = url.to_string();
-    (normalized.len() <= 2048).then_some(normalized)
-}
-
-fn valid_candidate_text(value: &str, limit: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= limit
-        && value.trim() == value
-        && !value.chars().any(char::is_control)
+    valid_search_candidate_image(GOOGLE_BOOKS_PROVIDER, &normalized).then_some(normalized)
 }
 
 #[cfg(test)]
@@ -1399,6 +1412,21 @@ mod tests {
         ConfigurationDigest, ProblemCode, ProviderCapabilityId, ProviderCheckMetadata, ProviderId,
     };
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn invalid_optional_artwork_does_not_poison_search_evidence() {
+        let tmdb = br#"{"page":1,"total_pages":1,"results":[{"id":42,"media_type":"movie","title":"Film","poster_path":"/bad image.jpg"}]}"#;
+        let google = br#"{"totalItems":1,"items":[{"id":"book-1","volumeInfo":{"title":"Book","imageLinks":{"thumbnail":"https://books.google.com:8443/image"}}}]}"#;
+        for candidate in parse_tmdb_candidates(tmdb, 1)
+            .unwrap()
+            .candidates
+            .into_iter()
+            .chain(parse_google_candidates(google, 1).unwrap().candidates)
+        {
+            assert!(candidate.image_url.is_none());
+            assert!(candidate.search_evidence().is_ok());
+        }
+    }
 
     #[test]
     fn parses_one_complete_neutral_book_page() {

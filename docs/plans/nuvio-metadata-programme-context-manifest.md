@@ -225,3 +225,60 @@ No M4 runtime Search endpoint, durable candidate cache, action receipt, local
 index, migration, archive format, or browser flow is activated by these commits.
 Those implementation and verification requirements remain in the active M4
 workfront above. The full programme goal remains active.
+
+### M4 evidence admission and shared hardening checkpoint — 2026-09-04
+
+Codex Security remains intentionally skipped. Native independent review and
+negative tests remain active; no external AI key was used. The commander keeps
+sole write ownership of M4 shared surfaces. Parallel agents reviewed evidence
+admission, optimized secret erasure, typed-ID parsing, and the v15 archive
+compatibility prerequisite. The next bounded read-only review maps Search
+partition inputs to existing authorization and provider-configuration owners.
+
+Three isolated shared-owner commits were handed to C2 for cherry-pick:
+
+- `f46e5de8c94d6e31d43cc0e0a78f61ea7a501d08`: frozen executable PAT resource
+  `pat_` and immutable consent revision `cnr_` identifiers. Neither is a bearer
+  secret. No Search candidate identifier is included in that handoff.
+- `fee9059d0a59d8b26bacbfbd8568636f4ec92ff3`: reuse existing `zeroize` for
+  `SecretMaterial::drop` and enable the installed SHA-256 zeroizing feature.
+  A compile-time regression requires `Sha256: ZeroizeOnDrop`. Independent
+  optimized compilation of the actual owner retained 32 volatile zero stores.
+  This does not prove erasure of prior copies or exposed hexadecimal strings.
+- `8657a9124609ffe767f2131399714f6e944aa357`: fix the pre-existing concrete-ID
+  JSON deserialization bypass by routing through the existing strict `FromStr`.
+  The reproduced bug accepted a Record or consent ID as a PAT ID. The generated
+  test matrix now checks every concrete type against every registered prefix.
+  This proves a validation defect and fix, not an authorization exploit.
+
+The M4 application evidence owner now validates normalized candidate fields,
+canonical provider coordinates, bounded JSON and image origins. Provider
+normalization reuses the text/image predicates. Invalid optional artwork is
+discarded without losing the candidate; persisted unsafe artwork is rejected.
+Candidate identity uses a reserved `scr_` typed ID, not an invented Record ID.
+
+Receipt partitions bind workspace, profile, stable actor, grant, query digest,
+grant digest, provider-configuration digest and terms. Browser-session rotation
+alone does not change the stable actor. Current authorization and configuration
+must be recomputed by the service before comparing a persisted partition.
+The caller's complete digest inputs are not yet implemented or verified.
+Lifetime tests enforce 120-second freshness, 600-second stale-on-error without
+stale-while-revalidate, and the independent 24-hour candidate-details expiry.
+Clock rollback before creation and timestamp overflow fail closed.
+
+Verification: 537 tests passed across domain (90), application (127), provider
+runtime (28) and store (292), with three intentional store subprocess-worker
+tests ignored. Strict all-target clippy passed for these four crates. The
+additional published-v15 fingerprint regression passed independently and pins
+`sha256:36720ca62ef606e52f960e71cb40452323269f14e4a4af984e2fe875279a155e`.
+It explicitly runs the historical v1–v15 migration chain, not the current-version
+dispatcher. All published migration functions remain unchanged.
+
+Schema is still v15; M4 retains v16. No new archive version or shared-file
+release has occurred. Before changing schema version, explicitly preserve
+archive-v5/schema-v15 acceptance with that fingerprint and prove genuine old
+archive restore plus forged-fingerprint rejection. Durable action receipts
+must determine the archive disposition; disposable candidate cache is not a
+reason to export node-local authority. Receipt persistence, atomic actions,
+local index, API/SDK/host/Workbench integration and real browser QA remain
+required M4 work, not completed capabilities. No programme scope is removed.
