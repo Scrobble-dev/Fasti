@@ -400,3 +400,41 @@ reselect the first 500 Records, unlike the corrected selected-ID metadata loader
 all three must follow the actual keyset page. The UI's inferred saved/watching
 defaults are not independent Library state and must not become Search side effects.
 Native Collection membership is still a predecessor, not the Nuvio catalog document.
+
+### M4 provider cancellation and failure-state checkpoint — 2026-09-05
+
+Candidate-details head `75331d30184e1d823ac96075cfb70196ccc0806e`, tree
+`11c901ccaed216ef969a7fa3054c61b73ddccc81`, passed all 27 native contract gates
+with a clean exact-head receipt. That receipt precedes the following hardening.
+
+Provider integration review found that cancelled API/Desktop callers could drop
+their gate while blocking vault work continued. Desktop now moves the existing
+gate's owned guard into its blocking closure. The four API state-mutating paths
+acquire their existing per-provider gate before spawning one admitted worker,
+reauthorize after waiting, and retain it through complete state reconciliation.
+Cancelled waiters never start later. This is request-cancellation protection,
+not process-crash recovery, and must not become detached Search network work.
+No new gate map, service, dependency or schema surface was introduced.
+
+Real router tests cover cancelled vault writes, removal finalization, rollback,
+credential/health result persistence, waiting cancellation and independent
+provider progress. A discovered missing-credential check returned an integrity
+error because its status contradicted its absent reference. One application
+failure-status helper now preserves reference invariants and health/credential
+separation in both hosts. The Desktop regression also covers an externally
+removed credential while a reference remains. Native read-only review reports
+no P0/P1/P2 issue; post-wait revocation is an additional negative-test target.
+
+Focused application/provider API tests and all 45 Desktop library tests pass.
+Strict API and Desktop all-target Clippy pass. Desktop's locked graph needed
+only the two existing SHA-256 zeroize feature edges from prior M4 hardening;
+no package version changed. Its unused production `scoped_account` function
+had only test callers and now lives in that test module; account identity
+behavior is unchanged. Browser QA is not claimed by these host tests.
+
+Parallel local-Search preparation confirms identifier/activity enrichment must
+use selected IDs. It also found that the current activity loader omits profile
+scope. Fix this before reuse. Existing SQLite/keyset/metadata owners remain the
+path to local Search; no external index service is allocated. Provider page
+results must retain page-level freshness, including empty pages. M4 v16 remains
+unfrozen, archive v5 unchanged, and all shared surfaces remain M4-owned.

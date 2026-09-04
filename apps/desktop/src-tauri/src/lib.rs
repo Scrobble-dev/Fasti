@@ -19,12 +19,11 @@ use axum::response::IntoResponse;
 #[cfg(feature = "desktop-runtime")]
 use endpoint::{EndpointConnectionInput, EndpointConnectionStatus};
 #[cfg(feature = "desktop-runtime")]
-use fasti_application::{AccessAdministrationPort, CapabilityKey};
-#[cfg(feature = "desktop-runtime")]
 use fasti_api::{
-    FASTI_ACCESS_BINDING_COOKIE, FASTI_ACCESS_CALLBACK_PATH, FASTI_ACCESS_HOST,
-    FASTI_ACCESS_ORIGIN,
+    FASTI_ACCESS_BINDING_COOKIE, FASTI_ACCESS_CALLBACK_PATH, FASTI_ACCESS_HOST, FASTI_ACCESS_ORIGIN,
 };
+#[cfg(feature = "desktop-runtime")]
+use fasti_application::{AccessAdministrationPort, CapabilityKey};
 #[cfg(feature = "desktop-runtime")]
 use fasti_domain::{AuthCeremonyPurpose, AuthCeremonySelection, RecordId, RequestCorrelationId};
 #[cfg(feature = "desktop-runtime")]
@@ -38,12 +37,12 @@ use providers::{
     SaveProviderCredentialInput,
 };
 #[cfg(feature = "desktop-runtime")]
+use serde::Serialize;
+#[cfg(feature = "desktop-runtime")]
 use setup::{DesktopProblem, KeyringSetupSecretStore, SetupStatus};
 use std::ffi::OsString;
 use std::io;
 use std::path::PathBuf;
-#[cfg(feature = "desktop-runtime")]
-use serde::Serialize;
 #[cfg(feature = "desktop-runtime")]
 use std::sync::{Arc, Mutex};
 #[cfg(feature = "desktop-runtime")]
@@ -69,9 +68,12 @@ struct AccessServerInner {
 #[cfg(all(feature = "desktop-runtime", not(target_os = "android")))]
 impl AccessServer {
     fn is_running(&self) -> bool {
-        self.inner
-            .lock()
-            .is_ok_and(|inner| inner.task.as_ref().is_some_and(|task| !task.inner().is_finished()))
+        self.inner.lock().is_ok_and(|inner| {
+            inner
+                .task
+                .as_ref()
+                .is_some_and(|task| !task.inner().is_finished())
+        })
     }
 
     async fn shutdown(&self) -> io::Result<()> {
@@ -90,7 +92,9 @@ impl AccessServer {
         };
         tokio::time::timeout(ACCESS_SERVER_SHUTDOWN_TIMEOUT, task)
             .await
-            .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "Access server shutdown timed out"))?
+            .map_err(|_| {
+                io::Error::new(io::ErrorKind::TimedOut, "Access server shutdown timed out")
+            })?
             .map_err(io::Error::other)??;
         Ok(())
     }
@@ -116,7 +120,7 @@ struct DesktopState {
     artwork: artwork::ArtworkCache,
     provider_runtime: Mutex<Option<Arc<fasti_provider_runtime::ProviderRuntime>>>,
     // ponytail: one provider gate prevents credential races; split by provider if contention appears.
-    provider_operation_gate: tokio::sync::Mutex<()>,
+    provider_operation_gate: Arc<tokio::sync::Mutex<()>>,
     access_runtime: Option<Arc<fasti_api::DirectLoopbackAccessRuntime>>,
     #[cfg(not(target_os = "android"))]
     access_server: Arc<AccessServer>,
@@ -354,17 +358,21 @@ async fn test_endpoint_connection(
 
 #[cfg(feature = "desktop-runtime")]
 async fn run_blocking_provider_operation<T, F>(
-    gate: &tokio::sync::Mutex<()>,
+    gate: &Arc<tokio::sync::Mutex<()>>,
     operation: F,
 ) -> Result<T, DesktopProblem>
 where
     T: Send + 'static,
     F: FnOnce() -> Result<T, DesktopProblem> + Send + 'static,
 {
-    let _provider_guard = gate.lock().await;
-    tokio::task::spawn_blocking(operation)
-        .await
-        .map_err(|_| DesktopProblem::storage("The provider operation task did not complete."))?
+    let provider_guard = Arc::clone(gate).lock_owned().await;
+    tokio::task::spawn_blocking(move || {
+        // A cancelled caller cannot stop blocking vault work or release its gate early.
+        let _provider_guard = provider_guard;
+        operation()
+    })
+    .await
+    .map_err(|_| DesktopProblem::storage("The provider operation task did not complete."))?
 }
 
 #[cfg(feature = "desktop-runtime")]
@@ -885,7 +893,9 @@ pub fn run() {
                             let Some(asset) = resolver.get(path.to_owned()) else {
                                 return axum::http::StatusCode::NOT_FOUND.into_response();
                             };
-                            let Ok(content_type) = asset.mime_type().parse::<axum::http::HeaderValue>() else {
+                            let Ok(content_type) =
+                                asset.mime_type().parse::<axum::http::HeaderValue>()
+                            else {
                                 return axum::http::StatusCode::INTERNAL_SERVER_ERROR
                                     .into_response();
                             };
@@ -897,10 +907,9 @@ pub fn run() {
                                 axum::body::Body::from(asset.bytes)
                             };
                             let mut response = axum::response::Response::new(body);
-                            response.headers_mut().insert(
-                                axum::http::header::CONTENT_TYPE,
-                                content_type,
-                            );
+                            response
+                                .headers_mut()
+                                .insert(axum::http::header::CONTENT_TYPE, content_type);
                             response.headers_mut().insert(
                                 axum::http::header::CONTENT_LENGTH,
                                 axum::http::HeaderValue::try_from(content_length.to_string())
@@ -911,10 +920,9 @@ pub fn run() {
                                     return axum::http::StatusCode::INTERNAL_SERVER_ERROR
                                         .into_response();
                                 };
-                                response.headers_mut().insert(
-                                    axum::http::header::CONTENT_SECURITY_POLICY,
-                                    csp,
-                                );
+                                response
+                                    .headers_mut()
+                                    .insert(axum::http::header::CONTENT_SECURITY_POLICY, csp);
                             }
                             response
                         }
@@ -936,14 +944,10 @@ pub fn run() {
                         shutdown: Some(shutdown),
                     }),
                 });
-                *setup_access_server_owner
-                    .lock()
-                    .map_err(|_| io::Error::other("the Access server owner lock is unavailable"))? =
-                    Some(Arc::clone(&access_server));
-                (
-                    Some(runtime),
-                    access_server,
-                )
+                *setup_access_server_owner.lock().map_err(|_| {
+                    io::Error::other("the Access server owner lock is unavailable")
+                })? = Some(Arc::clone(&access_server));
+                (Some(runtime), access_server)
             };
             #[cfg(target_os = "android")]
             let access_runtime = None;
@@ -956,14 +960,16 @@ pub fn run() {
                 provider_runtime: Mutex::new(None),
                 // ponytail: serialize provider vault mutation and metadata claim
                 // refresh; use per-provider gates only if measured throughput needs it.
-                provider_operation_gate: tokio::sync::Mutex::new(()),
+                provider_operation_gate: Arc::new(tokio::sync::Mutex::new(())),
                 access_runtime,
                 #[cfg(not(target_os = "android"))]
                 access_server,
             });
             #[cfg(not(target_os = "android"))]
             app.get_webview_window("main")
-                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "the main WebView is missing"))?
+                .ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::NotFound, "the main WebView is missing")
+                })?
                 .navigate(
                     tauri::Url::parse(FASTI_ACCESS_ORIGIN)
                         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?,
@@ -1070,7 +1076,11 @@ mod tests {
         let value = serde_json::to_value(response).expect("serialize command response");
 
         assert_eq!(
-            value.as_object().expect("response object").keys().collect::<Vec<_>>(),
+            value
+                .as_object()
+                .expect("response object")
+                .keys()
+                .collect::<Vec<_>>(),
             ["authorization_url", "expires_at"]
         );
         let encoded = value.to_string();
@@ -1097,18 +1107,15 @@ mod tests {
     #[cfg(feature = "desktop-runtime")]
     #[test]
     fn packaged_capability_allows_only_the_main_exact_loopback_origin() {
-        let configuration: serde_json::Value = serde_json::from_str(include_str!(
-            "../tauri.conf.json"
-        ))
-        .expect("packaged Tauri configuration JSON");
-        let desktop: serde_json::Value = serde_json::from_str(include_str!(
-            "../capabilities/main-loopback.json"
-        ))
-        .expect("packaged capability JSON");
-        let android: serde_json::Value = serde_json::from_str(include_str!(
-            "../capabilities/main-android-local.json"
-        ))
-        .expect("Android capability JSON");
+        let configuration: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json"))
+                .expect("packaged Tauri configuration JSON");
+        let desktop: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/main-loopback.json"))
+                .expect("packaged capability JSON");
+        let android: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/main-android-local.json"))
+                .expect("Android capability JSON");
 
         assert_eq!(desktop["windows"], serde_json::json!(["main"]));
         assert_eq!(
@@ -1135,8 +1142,14 @@ mod tests {
     #[cfg(all(feature = "desktop-runtime", not(target_os = "android")))]
     #[test]
     fn embedded_spa_fallback_serves_navigation_without_masking_api_or_mutations() {
-        assert!(serves_embedded_asset(&axum::http::Method::GET, "/first-run"));
-        assert!(serves_embedded_asset(&axum::http::Method::HEAD, "/first-run"));
+        assert!(serves_embedded_asset(
+            &axum::http::Method::GET,
+            "/first-run"
+        ));
+        assert!(serves_embedded_asset(
+            &axum::http::Method::HEAD,
+            "/first-run"
+        ));
         assert!(!serves_embedded_asset(&axum::http::Method::GET, "/api"));
         assert!(!serves_embedded_asset(
             &axum::http::Method::GET,
@@ -1198,7 +1211,7 @@ mod tests {
     #[cfg(feature = "desktop-runtime")]
     #[tokio::test]
     async fn blocking_provider_operations_wait_for_the_shared_gate() {
-        let gate = tokio::sync::Mutex::new(());
+        let gate = Arc::new(tokio::sync::Mutex::new(()));
         let held = gate.lock().await;
         let started = Arc::new(AtomicBool::new(false));
         let operation_started = Arc::clone(&started);
@@ -1218,5 +1231,34 @@ mod tests {
         drop(held);
         operation.await.expect("serialized provider operation");
         assert!(started.load(Ordering::SeqCst));
+    }
+
+    #[cfg(feature = "desktop-runtime")]
+    #[tokio::test]
+    async fn cancelled_provider_caller_keeps_gate_until_blocking_work_finishes() {
+        let gate = Arc::new(tokio::sync::Mutex::new(()));
+        let operation_gate = Arc::clone(&gate);
+        let (started, entered) = tokio::sync::oneshot::channel();
+        let (finish, release) = std::sync::mpsc::channel();
+        let caller = tokio::spawn(async move {
+            run_blocking_provider_operation(&operation_gate, move || {
+                started.send(()).expect("caller is waiting");
+                release.recv().expect("release blocking work");
+                Ok(())
+            })
+            .await
+        });
+        entered.await.expect("blocking operation started");
+        caller.abort();
+        assert!(caller.await.expect_err("caller cancelled").is_cancelled());
+        let still_locked = gate.try_lock().is_err();
+        finish.send(()).expect("finish outstanding blocking work");
+        let _finished = tokio::time::timeout(Duration::from_secs(5), gate.lock())
+            .await
+            .expect("completed blocking operation releases its gate");
+        assert!(
+            still_locked,
+            "cancellation must not release the provider gate"
+        );
     }
 }

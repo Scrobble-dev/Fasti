@@ -317,6 +317,24 @@ pub const fn credential_status_after_successful_check(
     }
 }
 
+pub fn credential_status_after_failed_check(
+    kind: ProviderCheckKind,
+    current: &ProviderCapabilityState,
+    code: ProblemCode,
+) -> ProviderCredentialStatus {
+    // Health is not credential verification. An absent reference must keep the
+    // requirement's Missing/Optional/NotRequired state, not invent a credential.
+    if kind == ProviderCheckKind::Health || current.credential_reference().is_none() {
+        return current.credential_status();
+    }
+    match code {
+        ProblemCode::ProviderCredentialMissing => ProviderCredentialStatus::Unavailable,
+        ProblemCode::ProviderCredentialInvalid => ProviderCredentialStatus::Invalid,
+        ProblemCode::ProviderCredentialExpired => ProviderCredentialStatus::Expired,
+        _ => current.credential_status(),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderCheckMetadata {
     status: ProviderCheckStatus,
@@ -768,5 +786,84 @@ mod tests {
             ),
             ProviderCredentialStatus::Valid
         );
+    }
+
+    #[test]
+    fn failed_checks_preserve_reference_and_health_boundaries() {
+        for (requirement, absent_status) in [
+            (
+                CredentialRequirement::ApiKey,
+                ProviderCredentialStatus::Missing,
+            ),
+            (
+                CredentialRequirement::OptionalApiKey,
+                ProviderCredentialStatus::Optional,
+            ),
+            (
+                CredentialRequirement::None,
+                ProviderCredentialStatus::NotRequired,
+            ),
+        ] {
+            for present in [false, true] {
+                if present && requirement == CredentialRequirement::None {
+                    continue;
+                }
+                let state = ProviderCapabilityState::try_new(
+                    ProviderId::try_new("tmdb").expect("provider"),
+                    ProviderCapabilityId::try_new("metadata.read").expect("capability"),
+                    ProviderCapabilityStatus::Available,
+                    1,
+                    requirement,
+                    present.then(|| {
+                        CredentialReference::try_new("secret:providers/tmdb/api-key")
+                            .expect("reference")
+                    }),
+                    if present {
+                        ProviderCredentialStatus::StoredUnverified
+                    } else {
+                        absent_status
+                    },
+                    digest(),
+                    ProviderCheckMetadata::never_run(),
+                    ProviderCheckMetadata::never_run(),
+                )
+                .expect("valid state");
+                for (code, expected) in [
+                    (
+                        ProblemCode::ProviderCredentialMissing,
+                        ProviderCredentialStatus::Unavailable,
+                    ),
+                    (
+                        ProblemCode::ProviderCredentialInvalid,
+                        ProviderCredentialStatus::Invalid,
+                    ),
+                    (
+                        ProblemCode::ProviderCredentialExpired,
+                        ProviderCredentialStatus::Expired,
+                    ),
+                    (ProblemCode::ProviderUnavailable, state.credential_status()),
+                ] {
+                    assert_eq!(
+                        credential_status_after_failed_check(
+                            ProviderCheckKind::Health,
+                            &state,
+                            code
+                        ),
+                        state.credential_status()
+                    );
+                    let status = credential_status_after_failed_check(
+                        ProviderCheckKind::Credential,
+                        &state,
+                        code,
+                    );
+                    assert_eq!(status, if present { expected } else { absent_status });
+                    assert!(valid_credential_state(
+                        requirement,
+                        state.credential_reference(),
+                        status
+                    ));
+                }
+            }
+        }
     }
 }
