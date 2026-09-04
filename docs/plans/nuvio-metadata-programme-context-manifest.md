@@ -282,3 +282,24 @@ must determine the archive disposition; disposable candidate cache is not a
 reason to export node-local authority. Receipt persistence, atomic actions,
 local index, API/SDK/host/Workbench integration and real browser QA remain
 required M4 work, not completed capabilities. No programme scope is removed.
+
+The completed partition-owner review fixes the next integration sequence:
+derive query/page digests from exact validated text, provider, effective
+locale/region, sorted grain filters and upstream page using version-tagged
+deterministic serialization. Derive authorization digests inside the store
+from current scopes and credential/subject epochs, not API-supplied digests.
+Include provider capability version and current outbound policy: the existing
+transport configuration digest covers only provider, capability and origin.
+Acquire the existing shared provider lock; authorize before cache/network work;
+reauthorize and compare current authority/provider state in the final commit
+transaction. Locks do not prevent authorization changes during network I/O.
+Preserve browser rotation without binding cache identity to its session ID.
+
+TMDB Search currently sends locale but no region; Google Books Search sends
+neither. Record actual upstream coordinates without claiming detail-specific
+region semantics. A candidate detail fetch must separately authorize metadata
+read; Record actions retain their existing mutation scopes. No new grant
+revision or restore-generation API is allocated by this preparation. Existing
+revocation is terminal; future in-place regrant needs its owner's explicit
+generation contract. Also verified: all 29 contract unit tests passed after
+the shared identifier parsing fix. M4 remains unmerged.
