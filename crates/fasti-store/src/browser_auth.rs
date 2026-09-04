@@ -1415,6 +1415,107 @@ mod tests {
     }
 
     #[test]
+    fn successful_search_reads_persist_browser_activity_and_read_proof_cannot_commit() {
+        use crate::kernel::now;
+        use fasti_application::{
+            BrowserRequestBoundaryPolicy, BrowserSessionAccessContext, OutboundAccessPolicy,
+            ProviderId, ProviderStatePort, SearchPageRequest, SearchPersistencePort,
+            SearchProviderQuery,
+        };
+        let mut fixture = fixture();
+        fixture.created_at = now() - ChronoDuration::seconds(15);
+        fixture
+            .kernel
+            .inner
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO grant_scopes(grant_id, scope_key) VALUES (?1, 'metadata_search')",
+                [fixture.grants[0].to_string()],
+            )
+            .unwrap();
+        fixture
+            .kernel
+            .put_provider_capability_state(fixture.workspace_id, crate::search::tests::state(1))
+            .unwrap();
+        for cache_read in [false, true] {
+            let created = create_session(&fixture, &fixture.grants[..1], fixture.grants[0], 0);
+            let access = BrowserSessionAccessContext::read(
+                BrowserSessionQuery::new(
+                    fasti_domain::RequestCorrelationId::new_v7(),
+                    secret_copy(created.session_secret()),
+                    now(),
+                ),
+                BrowserRequestBoundaryPolicy::try_new("https://fasti.example", "fasti.example")
+                    .unwrap()
+                    .validate_read(Some("fasti.example"))
+                    .unwrap(),
+            );
+            let request = SearchPageRequest {
+                correlation_id: fasti_domain::RequestCorrelationId::new_v7(),
+                access: access.into(),
+                query: SearchProviderQuery::try_new(
+                    fasti_domain::SearchQuery::try_new("Film").unwrap(),
+                    ProviderId::try_new("tmdb").unwrap(),
+                    1,
+                    None,
+                    None,
+                    vec![],
+                )
+                .unwrap(),
+                outbound_policy: OutboundAccessPolicy::default(),
+                terms_revision: "tmdb-v1".into(),
+            };
+            if cache_read {
+                assert!(fixture
+                    .kernel
+                    .read_cached_search_page(&request, false)
+                    .unwrap()
+                    .is_none());
+            } else {
+                fixture.kernel.prepare_search_page(&request).unwrap();
+            }
+            let last_seen: String = fixture
+                .kernel
+                .inner
+                .connection
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT last_seen_at FROM fasti_browser_sessions WHERE browser_session_id = ?1",
+                    [created.session().id().to_string()],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert!(
+                parse_timestamp(
+                    &last_seen,
+                    CapabilityKey::SearchMetadata,
+                    request.correlation_id
+                )
+                .unwrap()
+                    > fixture.created_at
+            );
+            let prepared = fixture.kernel.prepare_search_page(&request).unwrap();
+            assert_eq!(
+                fixture
+                    .kernel
+                    .commit_search_page(
+                        &request,
+                        &prepared,
+                        &[],
+                        &fasti_domain::Sha256Digest::from_bytes(&[7; 32]),
+                        None
+                    )
+                    .unwrap_err()
+                    .code(),
+                ProblemCode::Forbidden
+            );
+        }
+    }
+
+    #[test]
     fn rotation_revokes_the_old_secret_without_extending_absolute_expiry() {
         let fixture = fixture();
         let created = create_session(&fixture, &fixture.grants[..1], fixture.grants[0], 0);

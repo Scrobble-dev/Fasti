@@ -7,7 +7,7 @@ use fasti_domain::{Grain, MetadataClaimId, MAX_EXTERNAL_IDENTIFIER_BYTES};
 use rusqlite::{Connection, Result, Transaction, TransactionBehavior};
 use std::fmt::Write as _;
 
-pub(crate) const SCHEMA_VERSION: i64 = 15;
+pub(crate) const SCHEMA_VERSION: i64 = 16;
 
 pub(crate) fn migrate(connection: &Connection) -> Result<()> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -86,12 +86,121 @@ pub(crate) fn migrate(connection: &Connection) -> Result<()> {
     }
 
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version == 15 {
+        migrate_v16(connection)?;
+    }
+
+    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if version == SCHEMA_VERSION {
         let transaction = Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
         repair_legacy_provider_coordinates_v1(&transaction)?;
         transaction.commit()?;
     }
     Ok(())
+}
+
+fn migrate_v16(connection: &Connection) -> Result<()> {
+    let transaction = Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+    transaction.execute_batch(r#"
+        ALTER TABLE provider_capability_states ADD COLUMN authority_version INTEGER NOT NULL DEFAULT 1 CHECK (authority_version >= 1);
+        UPDATE provider_capability_states SET authority_version = capability_version;
+        CREATE TRIGGER provider_search_authority_changed AFTER UPDATE ON provider_capability_states
+        WHEN OLD.credential_reference IS NOT NEW.credential_reference
+          OR OLD.credential_requirement IS NOT NEW.credential_requirement
+          OR OLD.credential_status IS NOT NEW.credential_status
+          OR OLD.configuration_digest IS NOT NEW.configuration_digest
+          OR (OLD.capability_status IS NOT NEW.capability_status AND (
+              OLD.capability_status NOT IN ('available', 'degraded')
+              OR NEW.capability_status NOT IN ('available', 'degraded')))
+          OR (OLD.capability_version IS NOT NEW.capability_version
+              AND OLD.capability_status IS NEW.capability_status
+              AND OLD.health_status IS NEW.health_status
+              AND OLD.health_checked_at IS NEW.health_checked_at
+              AND OLD.health_problem_code IS NEW.health_problem_code
+              AND OLD.credential_test_status IS NEW.credential_test_status
+              AND OLD.credential_test_checked_at IS NEW.credential_test_checked_at
+              AND OLD.credential_test_problem_code IS NEW.credential_test_problem_code)
+        BEGIN
+            UPDATE provider_capability_states SET authority_version = OLD.authority_version + 1
+            WHERE workspace_id = NEW.workspace_id AND provider_id = NEW.provider_id AND capability_id = NEW.capability_id;
+        END;
+        CREATE TABLE search_pages (
+            sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+            partition_json TEXT NOT NULL CHECK (
+                length(CAST(partition_json AS BLOB)) <= 4096
+                AND json_valid(partition_json) AND json_type(partition_json) = 'object'
+            ),
+            partition_digest TEXT NOT NULL CHECK (
+                length(partition_digest) = 71 AND substr(partition_digest, 1, 7) = 'sha256:'
+                AND substr(partition_digest, 8) NOT GLOB '*[^0-9a-f]*'
+            ),
+            workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id),
+            profile_id TEXT NOT NULL REFERENCES profiles(profile_id),
+            actor_client_id TEXT NOT NULL REFERENCES clients(client_id),
+            actor_subject_id TEXT REFERENCES auth_subjects(auth_subject_id),
+            grant_id TEXT NOT NULL REFERENCES profile_grants(grant_id),
+            provider_id TEXT NOT NULL CHECK (length(provider_id) BETWEEN 1 AND 128),
+            upstream_page INTEGER NOT NULL CHECK (upstream_page BETWEEN 1 AND 4294967295),
+            next_page INTEGER CHECK (next_page > upstream_page AND next_page <= 4294967295),
+            candidate_count INTEGER NOT NULL CHECK (candidate_count BETWEEN 0 AND 100),
+            candidate_bytes INTEGER NOT NULL CHECK (candidate_bytes BETWEEN 0 AND 6553600),
+            response_digest TEXT NOT NULL CHECK (
+                length(response_digest) = 71 AND substr(response_digest, 1, 7) = 'sha256:'
+                AND substr(response_digest, 8) NOT GLOB '*[^0-9a-f]*'
+            ),
+            created_at TEXT NOT NULL,
+            fresh_until TEXT NOT NULL CHECK (fresh_until >= created_at),
+            stale_until TEXT NOT NULL CHECK (stale_until >= fresh_until),
+            expires_at TEXT NOT NULL CHECK (expires_at >= stale_until)
+        ) STRICT;
+        CREATE INDEX search_pages_lookup_idx ON search_pages(partition_digest, sequence DESC);
+        CREATE INDEX search_pages_expiry_idx ON search_pages(expires_at, sequence);
+        CREATE TABLE search_candidate_receipts (
+            candidate_receipt_id TEXT PRIMARY KEY NOT NULL,
+            page_sequence INTEGER NOT NULL REFERENCES search_pages(sequence) ON DELETE CASCADE,
+            ordinal INTEGER NOT NULL CHECK (ordinal BETWEEN 0 AND 99),
+            kind TEXT NOT NULL,
+            provider_record_id TEXT NOT NULL,
+            candidate_json TEXT NOT NULL CHECK (
+                length(CAST(candidate_json AS BLOB)) <= 65536
+                AND json_valid(candidate_json) AND json_type(candidate_json) = 'object'
+            ),
+            UNIQUE (page_sequence, ordinal),
+            UNIQUE (page_sequence, kind, provider_record_id),
+            CHECK (json_extract(candidate_json, '$.kind') IS kind),
+            CHECK (json_extract(candidate_json, '$.provider_id') IS provider_record_id)
+        ) STRICT;
+        CREATE TRIGGER search_pages_scope_insert BEFORE INSERT ON search_pages
+        WHEN NOT EXISTS (
+            SELECT 1 FROM profile_grants g
+            JOIN profiles p ON p.profile_id = g.profile_id AND p.workspace_id = g.workspace_id
+            JOIN clients c ON c.client_id = g.client_id AND c.workspace_id = g.workspace_id
+            WHERE g.grant_id = NEW.grant_id AND g.workspace_id = NEW.workspace_id
+              AND g.profile_id = NEW.profile_id AND g.client_id = NEW.actor_client_id
+              AND (NEW.actor_subject_id IS NULL OR EXISTS (
+                SELECT 1 FROM auth_subject_profile_grants s
+                WHERE s.auth_subject_id = NEW.actor_subject_id AND s.profile_grant_id = g.grant_id
+              ))
+        ) OR json_extract(NEW.partition_json, '$.workspace_id') IS NOT NEW.workspace_id
+          OR json_extract(NEW.partition_json, '$.profile_id') IS NOT NEW.profile_id
+          OR json_extract(NEW.partition_json, '$.actor_client_id') IS NOT NEW.actor_client_id
+          OR json_extract(NEW.partition_json, '$.actor_subject_id') IS NOT NEW.actor_subject_id
+          OR json_extract(NEW.partition_json, '$.grant_id') IS NOT NEW.grant_id
+        BEGIN SELECT RAISE(ABORT, 'invalid search page scope'); END;
+        CREATE TRIGGER search_candidates_parent_insert BEFORE INSERT ON search_candidate_receipts
+        WHEN NOT EXISTS (
+            SELECT 1 FROM search_pages p WHERE p.sequence = NEW.page_sequence
+              AND NEW.ordinal < p.candidate_count
+              AND json_extract(NEW.candidate_json, '$.provider') IS p.provider_id
+        )
+        BEGIN SELECT RAISE(ABORT, 'invalid search candidate parent'); END;
+        CREATE TRIGGER search_pages_immutable_update BEFORE UPDATE ON search_pages
+        BEGIN SELECT RAISE(ABORT, 'search pages are immutable'); END;
+        CREATE TRIGGER search_candidates_immutable_update BEFORE UPDATE ON search_candidate_receipts
+        BEGIN SELECT RAISE(ABORT, 'search candidate receipts are immutable'); END;
+    "#)?;
+    transaction.pragma_update(None, "user_version", 16)?;
+    transaction.commit()
 }
 
 fn migrate_v1(connection: &Connection) -> Result<()> {
@@ -3445,6 +3554,269 @@ mod tests {
         );
     }
 
+    #[test]
+    fn v16_failure_rolls_back_and_same_connection_retry_preserves_v15() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .unwrap();
+        migrate_to_version_fourteen(&connection);
+        migrate_v15(&connection).unwrap();
+        connection
+            .execute(
+                "CREATE TABLE search_candidate_receipts(conflicting_fixture TEXT)",
+                [],
+            )
+            .unwrap();
+        assert!(migrate_v16(&connection).is_err());
+        assert!(connection.is_autocommit());
+        assert_eq!(
+            connection
+                .query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            15
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_schema WHERE name = 'search_pages'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0
+        );
+        connection
+            .execute("DROP TABLE search_candidate_receipts", [])
+            .unwrap();
+        migrate_v16(&connection).unwrap();
+        assert_eq!(
+            connection
+                .query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            16
+        );
+        assert_eq!(connection.query_row("SELECT COUNT(*) FROM sqlite_schema WHERE name LIKE 'workspace_revision_%' AND tbl_name IN ('search_pages', 'search_candidate_receipts')", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn historical_v15_archive_v5_restores_into_v16() {
+        use crate::archive::{ArchiveLimits, ArchiveWriter};
+        use crate::kernel::LockedDataRoot;
+        use crate::portability::{schema_fingerprint, stream_archive_entity};
+        use crate::restore_activation::RESTORE_STAGING_DIRECTORY;
+        use crate::restore_import::{stage_workspace_archive_pass_two, RestoreImportError};
+        use fasti_application::{
+            CancellationSignal, PortabilityLimits, WorkspaceExportEntity, WorkspaceManifest,
+            WORKSPACE_ARCHIVE_CONTRACT_VERSION,
+        };
+        use fasti_contracts::CanonicalWorkspaceManifestProjection;
+        use fasti_domain::{
+            ClientId, ProfileId, RecordId, RequestCorrelationId, RestoreAttemptId, Sha256Digest,
+            WorkspaceId,
+        };
+        use std::{io::Cursor, num::NonZeroU64};
+
+        // Produce real v15 streams; do not relabel a current-schema archive.
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .unwrap();
+        migrate_to_version_fourteen(&connection);
+        migrate_v15(&connection).unwrap();
+        let correlation_id = RequestCorrelationId::new_v7();
+        let fingerprint = schema_fingerprint(&connection, correlation_id).unwrap();
+        assert_eq!(fingerprint.migration_version(), 15);
+        assert_eq!(
+            fingerprint.digest().as_str(),
+            "sha256:36720ca62ef606e52f960e71cb40452323269f14e4a4af984e2fe875279a155e"
+        );
+
+        let workspace = WorkspaceId::new_v7();
+        let profile = ProfileId::new_v7();
+        let client = ClientId::new_v7();
+        let record = RecordId::new_v7();
+        connection
+            .execute(
+                "INSERT INTO workspaces(workspace_id, created_at) VALUES (?1, ?2)",
+                params![workspace.to_string(), CREATED_AT],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO profiles(profile_id, workspace_id, created_at) VALUES (?1, ?2, ?3)",
+                params![profile.to_string(), workspace.to_string(), CREATED_AT],
+            )
+            .unwrap();
+        connection.execute(
+            "INSERT INTO clients(client_id, workspace_id, status, current_credential_epoch, created_at)
+             VALUES (?1, ?2, 'active', 1, ?3)",
+            params![client.to_string(), workspace.to_string(), CREATED_AT],
+        ).unwrap();
+        connection
+            .execute(
+                "INSERT INTO records(record_id, workspace_id, grain, status, created_at)
+             VALUES (?1, ?2, 'film', 'active', ?3)",
+                params![record.to_string(), workspace.to_string(), CREATED_AT],
+            )
+            .unwrap();
+
+        let nonzero = |value| NonZeroU64::new(value).unwrap();
+        let limits = PortabilityLimits {
+            max_snapshot_bytes: nonzero(32 * 1024 * 1024),
+            max_wal_growth_bytes: nonzero(8 * 1024 * 1024),
+            max_archive_bytes: nonzero(64 * 1024 * 1024),
+            max_uncompressed_bytes: nonzero(32 * 1024 * 1024),
+            max_entry_bytes: nonzero(8 * 1024 * 1024),
+            max_entries: nonzero(64),
+            max_rows_per_stream: nonzero(1024),
+            max_path_bytes: nonzero(100),
+            max_path_depth: nonzero(8),
+            max_decompression_ratio: nonzero(1024),
+            scratch_ceiling_bytes: nonzero(64 * 1024 * 1024),
+            cleanup_reserve_bytes: nonzero(1024 * 1024),
+            backup_step_pages: nonzero(64),
+            backup_step_millis: nonzero(1000),
+        };
+        let revision =
+            u64::try_from(workspace_revision(&connection, &workspace.to_string()).unwrap())
+                .unwrap();
+        for hostile in [false, true] {
+            let archive_limits =
+                ArchiveLimits::new(64 * 1024 * 1024, 128, 16 * 1024 * 1024, 64 * 1024 * 1024)
+                    .unwrap();
+            let mut writer = ArchiveWriter::new(Vec::new(), archive_limits).unwrap();
+            let mut descriptors = Vec::new();
+            let entities = WorkspaceExportEntity::for_format(5).unwrap();
+            assert_eq!(entities.len(), 34);
+            for &entity in entities {
+                let mut bytes = Vec::new();
+                let descriptor = stream_archive_entity(
+                    &connection,
+                    workspace,
+                    entity,
+                    limits,
+                    &mut bytes,
+                    &mut || Ok(()),
+                    correlation_id,
+                )
+                .unwrap();
+                writer
+                    .append(
+                        &format!("{}.ndjson", entity.as_str()),
+                        bytes.len() as u64,
+                        Cursor::new(bytes),
+                    )
+                    .unwrap();
+                descriptors.push(descriptor);
+            }
+            let manifest = WorkspaceManifest::try_new_for_format(
+                5,
+                workspace,
+                revision,
+                WORKSPACE_ARCHIVE_CONTRACT_VERSION.to_owned(),
+                fingerprint.migration_version(),
+                if hostile {
+                    Sha256Digest::from_bytes(&[0xff; 32])
+                } else {
+                    fingerprint.digest().clone()
+                },
+                descriptors,
+                Vec::new(),
+            )
+            .unwrap();
+            let projection =
+                CanonicalWorkspaceManifestProjection::try_from_application(manifest).unwrap();
+            let manifest_bytes = projection.canonical_json_bytes();
+            writer
+                .append(
+                    "manifest.json",
+                    manifest_bytes.len() as u64,
+                    Cursor::new(manifest_bytes),
+                )
+                .unwrap();
+            let root = tempfile::tempdir().unwrap();
+            let lock = LockedDataRoot::acquire(root.path()).unwrap();
+            let attempt = RestoreAttemptId::new_v7();
+            let result = stage_workspace_archive_pass_two(
+                &lock,
+                &mut Cursor::new(writer.finish().unwrap()),
+                attempt,
+                correlation_id,
+                limits,
+                &CancellationSignal::new(),
+            );
+            if hostile {
+                assert!(matches!(result, Err(RestoreImportError::SchemaMismatch)));
+            } else {
+                let staged = result.expect("published v15 archive restores");
+                let restored = Connection::open_with_flags(
+                    staged.database_path(),
+                    rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+                )
+                .unwrap();
+                assert_eq!(
+                    restored
+                        .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                        .unwrap(),
+                    SCHEMA_VERSION
+                );
+                let restored_record: (String, String, String) = restored
+                    .query_row(
+                        "SELECT workspace_id, grain, status FROM records WHERE record_id = ?1",
+                        [record.to_string()],
+                        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                    )
+                    .unwrap();
+                assert_eq!(
+                    restored_record,
+                    (
+                        workspace.to_string(),
+                        "film".to_owned(),
+                        "active".to_owned()
+                    )
+                );
+                for table in ["workspaces", "profiles", "clients", "records"] {
+                    assert_eq!(
+                        restored
+                            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row
+                                .get::<_, i64>(0))
+                            .unwrap(),
+                        1,
+                        "{table}"
+                    );
+                }
+                for table in [
+                    "search_pages",
+                    "search_candidate_receipts",
+                    "node_state",
+                    "credentials",
+                    "profile_grants",
+                    "grant_scopes",
+                    "auth_subjects",
+                    "fasti_browser_sessions",
+                ] {
+                    assert_eq!(
+                        restored
+                            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row
+                                .get::<_, i64>(0))
+                            .unwrap(),
+                        0,
+                        "{table}"
+                    );
+                }
+                drop(restored);
+                staged.cleanup().unwrap();
+            }
+            assert!(!root
+                .path()
+                .join(RESTORE_STAGING_DIRECTORY)
+                .join(attempt.to_string())
+                .exists());
+        }
+    }
+
     fn seed_legacy_override_root(connection: &Connection, profile_count: usize) {
         connection
             .execute_batch(
@@ -3849,7 +4221,7 @@ mod tests {
             assert_eq!(count, 0, "{table} must not exist in published v14");
         }
 
-        migrate(&connection).expect("upgrade v14 to v15");
+        migrate_v15(&connection).expect("upgrade v14 to v15");
 
         let after: i64 = connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))
@@ -5208,6 +5580,8 @@ mod tests {
                 "metadata_cache_entries".to_owned(),
                 "metadata_cache_claims".to_owned(),
                 "metadata_refresh_receipts".to_owned(),
+                "search_pages".to_owned(),
+                "search_candidate_receipts".to_owned(),
                 "trailbase_installation".to_owned(),
                 "trailbase_auth_anchors".to_owned(),
                 "workspace_memberships".to_owned(),

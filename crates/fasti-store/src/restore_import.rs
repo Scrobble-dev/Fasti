@@ -838,6 +838,7 @@ fn accepted_archive_schema(
         || (format_version == WORKSPACE_ARCHIVE_V2_FORMAT_VERSION && (7..=11).contains(&version))
         || (format_version == WORKSPACE_ARCHIVE_V3_FORMAT_VERSION && version == 12)
         || (format_version == WORKSPACE_ARCHIVE_V4_FORMAT_VERSION && matches!(version, 13 | 14))
+        || (format_version == 5 && version == 15)
     {
         // Continue to the exact historical fingerprint match below.
     } else if version == u32::try_from(SCHEMA_VERSION).unwrap_or(u32::MAX) {
@@ -861,6 +862,7 @@ fn accepted_archive_schema(
             12 => "sha256:eea7d899b8c257b7bafa359a540bd25ba2cdc4d9ddb7f50ce0ec8f80e251cfb9",
             13 => "sha256:e470f2e8ae2972aa05fecd5b39642b79ef739de89eda204c37bf1d3e48f892c3",
             14 => "sha256:630bc759b1bc6148931fe1b496e6e149553c5c005cf8d5956da683f2872c0375",
+            15 => "sha256:36720ca62ef606e52f960e71cb40452323269f14e4a4af984e2fe875279a155e",
             _ => return false,
         }
 }
@@ -1089,6 +1091,8 @@ fn verify_derived_metadata_state_absent(
             SELECT (SELECT COUNT(*) FROM metadata_projections)
                  + (SELECT COUNT(*) FROM metadata_cache_entries)
                  + (SELECT COUNT(*) FROM metadata_cache_claims)
+                 + (SELECT COUNT(*) FROM search_pages)
+                 + (SELECT COUNT(*) FROM search_candidate_receipts)
             "#,
             [],
             |row| row.get(0),
@@ -5340,6 +5344,14 @@ mod tests {
             "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
             "unused-current-digest",
         ));
+    }
+
+    #[test]
+    fn archive_v5_retains_only_the_exact_published_v15_fingerprint() {
+        let digest = "sha256:36720ca62ef606e52f960e71cb40452323269f14e4a4af984e2fe875279a155e";
+        assert!(accepted_archive_schema(5, 15, digest, "current"));
+        assert!(!accepted_archive_schema(5, 15, "forged", "current"));
+        assert!(!accepted_archive_schema(4, 15, digest, "current"));
     }
 
     #[test]

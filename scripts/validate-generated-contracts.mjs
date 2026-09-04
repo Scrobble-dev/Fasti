@@ -261,7 +261,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
 
   assert.equal(registry.contract_version, "1.0.0");
   assert.equal(registry.capability_base_uri.endsWith("/v1/"), true);
-  assert.equal(registry.capabilities.length, 52);
+  assert.equal(registry.capabilities.length, 53);
   const capabilityIds = registry.capabilities.map(({ id }) => id);
   assert.equal(new Set(capabilityIds).size, capabilityIds.length);
   assert.deepEqual(capabilityIds, [...capabilityIds].sort());
@@ -269,6 +269,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     registry.capabilities.map((capability) => [capability.id, capability]),
   );
   const expectedProfile = (capability) => {
+    if (capability.id === "metadata.search") return "m4_search";
     if (capability.lifecycle.contract_state === "reserved") {
       return `later_${capability.contract_body}`;
     }

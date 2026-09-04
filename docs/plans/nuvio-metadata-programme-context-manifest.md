@@ -303,3 +303,53 @@ revision or restore-generation API is allocated by this preparation. Existing
 revocation is terminal; future in-place regrant needs its owner's explicit
 generation contract. Also verified: all 29 contract unit tests passed after
 the shared identifier parsing fix. M4 remains unmerged.
+
+### M4 immutable Search storage checkpoint — 2026-09-04
+
+The commander now owns an internal, unmerged v16 implementation with immutable
+Search pages and candidate receipts. Published migration functions v1–v15 remain
+byte-identical to merged M3. No v16 freeze, v17 allocation, shared-file release,
+or public Search activation has occurred. `metadata.search` is registered with
+its explicit scope and guarded/reserved disposition while integration proceeds.
+
+Storage derives current authorization and provider partitions, rechecks them in
+the final transaction, retains browser activity on successful reads and misses,
+and requires mutation proof for browser snapshot writes. Pages survive restart,
+retain upstream order, and create no Records. Admission is bounded to 100
+candidates per page, 1,024 pages and 64 MiB of normalized candidate payload.
+Expired-only cleanup progresses even when admission remains over quota.
+
+The existing provider-state owner now distinguishes Search authority generation
+from ordinary health updates. Credential/configuration changes and disabled
+transitions invalidate receipts; a routine available/degraded health transition
+does not invalidate the cache needed during an outage. No second provider
+registry, credential owner, dependency or service was introduced.
+
+Archive v5 remains 34 streams. A new regression builds all streams from an actual
+published-v15 database, restores populated Records into v16, verifies absent
+Search and node-local authority, rejects a forged fingerprint, and proves staging
+cleanup. This does not merely relabel a current-schema archive. The existing M3
+identity/policy receipt round-trip remains required alongside it. Durable Search
+actions, not disposable caches, must determine any later archive-v6 disposition.
+
+Focused Search/schema/browser tests and the genuine historical-archive test pass.
+The 114 JavaScript contract/SDK tests pass; strict workspace clippy passes.
+Exact capability/profile/problem inventory assertions are retained at 53/18/383.
+Run `TMPDIR=/mnt/secondary-ssd/cache/home/tmp cargo xtask contract verify --locked`
+on the committed tree for the authoritative receipt. The host's default temporary
+directory traverses a symlink; do not weaken SQLite NOFOLLOW to accommodate it.
+
+Parallel read-only reviews confirmed the next required sequence: persist bounded
+locale/region/filter route context; implement authorized 24-hour candidate lookup
+without raw query text; re-fetch through the existing provider `metadata.read`
+state and shared lock; reauthorize after I/O; implement atomic Record actions,
+local indexing and the 10,000-Record query-plan gate; then complete API/SDK/host/
+Workbench and actual browser QA. These remain active M4 work, not deferrals.
+
+M8 preparation confirms existing M2/M3 policy, cache, override and alias owners
+must be reused. Proven execution gaps remain in field coverage, Find execution,
+fallback acquisition and related-entity routes. Source conflict: TMDB movie
+details documents language and append_to_response, not region; current code's
+region query parameter does not prove region-specific claims. Resolve this using
+documented release-date/watch-provider response semantics. No M8 production file
+ownership is allocated by this checkpoint. Codex Security remains skipped.

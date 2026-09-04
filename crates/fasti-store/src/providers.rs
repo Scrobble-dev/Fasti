@@ -92,7 +92,7 @@ impl ProviderStatePort for SqliteKernel {
     }
 }
 
-fn state_select(suffix: &str) -> String {
+pub(crate) fn state_select(suffix: &str) -> String {
     format!(
         r#"
         SELECT provider_id, capability_id, capability_status, capability_version,
@@ -237,7 +237,7 @@ fn check_timestamp(check: &ProviderCheckMetadata) -> Option<String> {
         .map(|value| value.to_rfc3339_opts(SecondsFormat::Micros, true))
 }
 
-fn read_state(row: &Row<'_>) -> rusqlite::Result<ProviderCapabilityState> {
+pub(crate) fn read_state(row: &Row<'_>) -> rusqlite::Result<ProviderCapabilityState> {
     let provider_id = ProviderId::try_new(row.get::<_, String>(0)?)
         .map_err(|error| conversion_error(0, error))?;
     let capability_id = ProviderCapabilityId::try_new(row.get::<_, String>(1)?)

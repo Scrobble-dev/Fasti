@@ -38,6 +38,7 @@ define_scope_keys!(
     (MetadataClaimRefresh, "metadata_claim_refresh"),
     (MetadataProjectionRead, "metadata_projection_read"),
     (MetadataProjectionConfigure, "metadata_projection_configure"),
+    (MetadataSearch, "metadata_search"),
     (ReviewRead, "review_read"),
     (ReviewWrite, "review_write"),
     (CorrectionRead, "correction_read"),
