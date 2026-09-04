@@ -163,3 +163,36 @@ Codex Security is intentionally disabled for this programme. Exact-diff review,
 canonical CI, CodeQL, Codacy, CodeRabbit, advisory checks, browser QA, OCI,
 coverage, documentation, contract parity, and both low-hardware envelopes are
 the retained M3 evidence.
+
+### M4 provider paging checkpoint — 2026-09-04
+
+The shared provider runtime now accepts an explicit upstream page and TMDB
+locale. It preserves each normalized page and response digest, validates the
+returned TMDB page, and returns a bounded continuation. The existing desktop
+entry point uses the same implementation. TMDB retains all 20 upstream results;
+Google Books requests 10. Empty raw pages stop traversal; pages containing only
+filtered candidates can continue. Search query debug output is redacted.
+
+Primary sources inspected on 2026-09-04:
+[TMDB multi-search](https://developer.themoviedb.org/reference/search-multi),
+[TMDB page limits](https://developer.themoviedb.org/docs/errors), and
+[Google Books volume search](https://developers.google.com/books/docs/v1/reference/volumes/list).
+Provider runtime tests pass (27), strict clippy passes, and an independent
+read-only review found no actionable defect (15 focused provider tests pass).
+This evidence covers parsing, URL construction, bounds, and credential ordering;
+it does not prove live upstream paging or completed M4 Search.
+
+The next implementation work is durable, authorized candidate receipts and
+atomic Record actions; selected-Record metadata loading; the local search index;
+and API/SDK/host/UI integration. Stable public cursors must refer to persisted
+ordering, not directly to changing upstream pages. Cross-page duplicate handling,
+offline cache, partial results, real browser QA, and the 10,000-Record performance
+gate remain required before M4 delivery. Schema remains v15 at this checkpoint;
+M4 retains allocation v16 and the archive decision is still unallocated.
+
+Parallel preparation confirmed reuse of the M2 projection resolver and provider
+locks, M3 workspace-wide operation replay semantics, and the existing C1 browser
+authentication boundary. SQLite already compiles FTS5; no dependency is needed.
+C2 owns its isolated Access credential modules and additive Access exports in
+domain/application lib.rs. M4 owns Search exports and all previously allocated
+shared surfaces. Codex Security remains disabled.

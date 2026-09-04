@@ -41,6 +41,7 @@ const READ_CAPABILITY: &str = "metadata.read";
 const QUERY_LIMIT: usize = 256;
 const RESPONSE_LIMIT: usize = 2_000_000;
 const RESULT_LIMIT: usize = 10;
+const TMDB_PAGE_SIZE: usize = 20;
 
 const GOOGLE_BOOKS_ACCESS: OutboundAccessDeclaration<'static> = OutboundAccessDeclaration {
     provider: GOOGLE_BOOKS_PROVIDER,
@@ -216,7 +217,10 @@ const TMDB_SPEC: ProviderSpec = ProviderSpec {
     cache_policy: "no_runtime_cache",
     offline_behavior: "fail_without_mutating_local_state",
     licence_and_terms: "tmdb_attribution_required",
-    request_limits: REQUEST_LIMITS,
+    request_limits: ProviderRequestLimits {
+        result_count: TMDB_PAGE_SIZE,
+        ..REQUEST_LIMITS
+    },
     runtime_available: true,
 };
 
@@ -338,11 +342,30 @@ pub const fn registry() -> &'static [ProviderSpec] {
     ]
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderSearchInput {
     pub provider: String,
     pub query: String,
+}
+
+impl std::fmt::Debug for ProviderSearchInput {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ProviderSearchInput")
+            .field("provider", &self.provider)
+            .field("query", &"[redacted]")
+            .finish()
+    }
+}
+
+/// One normalized upstream page. Callers must persist its ordered candidates
+/// before issuing a stable Fasti cursor; an upstream page is not a snapshot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderSearchPage {
+    pub candidates: Vec<ProviderCandidate>,
+    pub next_page: Option<u32>,
+    pub evidence_digest: Sha256Digest,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -501,6 +524,8 @@ fn provider_field(
 
 #[derive(Debug, Deserialize)]
 struct GoogleVolumesResponse {
+    #[serde(rename = "totalItems")]
+    total_items: u64,
     #[serde(default)]
     items: Vec<GoogleVolume>,
 }
@@ -538,7 +563,8 @@ struct GoogleImageLinks {
 
 #[derive(Debug, Deserialize)]
 struct TmdbSearchResponse {
-    #[serde(default)]
+    page: u32,
+    total_pages: u32,
     results: Vec<TmdbItem>,
 }
 
@@ -665,10 +691,36 @@ impl ProviderRuntime {
         policy: &OutboundAccessPolicy,
         state: &ProviderCapabilityState,
     ) -> Result<Vec<ProviderCandidate>, ProviderRuntimeError> {
+        Ok(self
+            .search_page(input, 1, None, policy, state)
+            .await?
+            .candidates)
+    }
+
+    pub async fn search_page(
+        &self,
+        input: ProviderSearchInput,
+        page: u32,
+        locale: Option<&MetadataLocale>,
+        policy: &OutboundAccessPolicy,
+        state: &ProviderCapabilityState,
+    ) -> Result<ProviderSearchPage, ProviderRuntimeError> {
         validate_query(&input.query)?;
+        let url = search_url(&input, page, locale)?;
+        let spec = self.active_spec(&input.provider)?;
+        let (access, endpoint) = endpoint(&input.provider, SEARCH_CAPABILITY)?;
+        let client = self
+            .authorized_credential(access, spec, SEARCH_CAPABILITY, endpoint, policy, state)
+            .await?;
+        let credential = self.load_bound_credential(&client, spec, state)?;
+        let body = send_json(
+            credential_request(&input.provider, &client, url, &credential)?,
+            spec,
+        )
+        .await?;
         match input.provider.as_str() {
-            GOOGLE_BOOKS_PROVIDER => self.search_google_books(&input.query, policy, state).await,
-            TMDB_PROVIDER => self.search_tmdb(&input.query, policy, state).await,
+            GOOGLE_BOOKS_PROVIDER => parse_google_candidates(&body, page),
+            TMDB_PROVIDER => parse_tmdb_candidates(&body, page),
             _ => Err(unsupported_provider()),
         }
     }
@@ -762,70 +814,6 @@ impl ProviderRuntime {
             .map_err(|_| {
                 ProviderRuntimeError::response_invalid("The provider check returned invalid JSON.")
             })
-    }
-
-    async fn search_google_books(
-        &self,
-        query: &str,
-        policy: &OutboundAccessPolicy,
-        state: &ProviderCapabilityState,
-    ) -> Result<Vec<ProviderCandidate>, ProviderRuntimeError> {
-        let mut url = reqwest::Url::parse(GOOGLE_BOOKS_URL)
-            .map_err(|_| ProviderRuntimeError::provider("The Google Books endpoint is invalid."))?;
-        let client = self
-            .authorized_credential(
-                GOOGLE_BOOKS_ACCESS,
-                GOOGLE_BOOKS_SPEC,
-                SEARCH_CAPABILITY,
-                url.clone(),
-                policy,
-                state,
-            )
-            .await?;
-        let credential = self.load_bound_credential(&client, GOOGLE_BOOKS_SPEC, state)?;
-        url.query_pairs_mut()
-            .append_pair("q", query)
-            .append_pair("startIndex", "0")
-            .append_pair("maxResults", &RESULT_LIMIT.to_string())
-            .append_pair("projection", "lite");
-        let body = send_json(
-            credential_request(GOOGLE_BOOKS_PROVIDER, &client, url, &credential)?,
-            GOOGLE_BOOKS_SPEC,
-        )
-        .await?;
-        parse_google_candidates(&body)
-    }
-
-    async fn search_tmdb(
-        &self,
-        query: &str,
-        policy: &OutboundAccessPolicy,
-        state: &ProviderCapabilityState,
-    ) -> Result<Vec<ProviderCandidate>, ProviderRuntimeError> {
-        let mut url = reqwest::Url::parse(TMDB_SEARCH_URL)
-            .map_err(|_| ProviderRuntimeError::provider("The TMDB endpoint is invalid."))?;
-        let client = self
-            .authorized_credential(
-                TMDB_ACCESS,
-                TMDB_SPEC,
-                SEARCH_CAPABILITY,
-                url.clone(),
-                policy,
-                state,
-            )
-            .await?;
-        let credential = self.load_bound_credential(&client, TMDB_SPEC, state)?;
-        url.query_pairs_mut()
-            .append_pair("query", query)
-            .append_pair("include_adult", "false")
-            .append_pair("language", "en-US")
-            .append_pair("page", "1");
-        let body = send_json(
-            credential_request(TMDB_PROVIDER, &client, url, &credential)?,
-            TMDB_SPEC,
-        )
-        .await?;
-        parse_tmdb_candidates(&body)
     }
 
     async fn fetch_google_book(
@@ -1187,19 +1175,72 @@ fn validate_query(query: &str) -> Result<(), ProviderRuntimeError> {
     Ok(())
 }
 
-fn parse_google_candidates(body: &[u8]) -> Result<Vec<ProviderCandidate>, ProviderRuntimeError> {
+fn search_url(
+    input: &ProviderSearchInput,
+    page: u32,
+    locale: Option<&MetadataLocale>,
+) -> Result<reqwest::Url, ProviderRuntimeError> {
+    let invalid_page =
+        || ProviderRuntimeError::configuration("The provider search page is invalid.");
+    let offset = page.checked_sub(1).ok_or_else(invalid_page)?;
+    let (_, mut url) = endpoint(&input.provider, SEARCH_CAPABILITY)?;
+    match input.provider.as_str() {
+        GOOGLE_BOOKS_PROVIDER => {
+            let start = offset
+                .checked_mul(RESULT_LIMIT as u32)
+                .ok_or_else(invalid_page)?;
+            url.query_pairs_mut()
+                .append_pair("q", &input.query)
+                .append_pair("startIndex", &start.to_string())
+                .append_pair("maxResults", &RESULT_LIMIT.to_string())
+                .append_pair("projection", "lite");
+        }
+        TMDB_PROVIDER => {
+            // TMDB rejects pages after 500 even when total_pages is larger.
+            if page > 500 {
+                return Err(invalid_page());
+            }
+            url.query_pairs_mut()
+                .append_pair("query", &input.query)
+                .append_pair("include_adult", "false")
+                .append_pair("language", locale.map_or("en-US", MetadataLocale::as_str))
+                .append_pair("page", &page.to_string());
+        }
+        _ => return Err(unsupported_provider()),
+    }
+    Ok(url)
+}
+
+fn parse_google_candidates(
+    body: &[u8],
+    page: u32,
+) -> Result<ProviderSearchPage, ProviderRuntimeError> {
     let response: GoogleVolumesResponse = serde_json::from_slice(body).map_err(|_| {
         ProviderRuntimeError::response_invalid("Google Books returned invalid JSON.")
     })?;
+    if page == 0 || response.items.len() > RESULT_LIMIT {
+        return Err(ProviderRuntimeError::response_invalid(
+            "Google Books returned an invalid search page.",
+        ));
+    }
+    let next_page = (!response.items.is_empty()
+        && u64::from(page) * (RESULT_LIMIT as u64) < response.total_items)
+        .then_some(page)
+        .and_then(|page| page.checked_add(1))
+        .filter(|page| (page - 1).checked_mul(RESULT_LIMIT as u32).is_some());
     let mut seen = BTreeSet::new();
     let evidence_digest = provider_evidence_digest(body);
-    Ok(response
+    let candidates = response
         .items
         .into_iter()
         .filter_map(|item| google_candidate(item, evidence_digest.clone()))
         .filter(|candidate| seen.insert(candidate.provider_id.clone()))
-        .take(RESULT_LIMIT)
-        .collect())
+        .collect();
+    Ok(ProviderSearchPage {
+        candidates,
+        next_page,
+        evidence_digest,
+    })
 }
 
 fn google_candidate(
@@ -1240,18 +1281,32 @@ fn google_candidate(
     })
 }
 
-fn parse_tmdb_candidates(body: &[u8]) -> Result<Vec<ProviderCandidate>, ProviderRuntimeError> {
+fn parse_tmdb_candidates(
+    body: &[u8],
+    page: u32,
+) -> Result<ProviderSearchPage, ProviderRuntimeError> {
     let response: TmdbSearchResponse = serde_json::from_slice(body)
         .map_err(|_| ProviderRuntimeError::response_invalid("TMDB returned invalid JSON."))?;
+    if page == 0 || page > 500 || response.page != page || response.results.len() > TMDB_PAGE_SIZE {
+        return Err(ProviderRuntimeError::response_invalid(
+            "TMDB returned an invalid search page.",
+        ));
+    }
+    let next_page =
+        (!response.results.is_empty() && page < response.total_pages.min(500)).then_some(page + 1);
     let mut seen = BTreeSet::new();
     let evidence_digest = provider_evidence_digest(body);
-    Ok(response
+    let candidates = response
         .results
         .into_iter()
         .filter_map(|item| tmdb_candidate(item, None, evidence_digest.clone()))
         .filter(|candidate| seen.insert((candidate.kind, candidate.provider_id.clone())))
-        .take(RESULT_LIMIT)
-        .collect())
+        .collect();
+    Ok(ProviderSearchPage {
+        candidates,
+        next_page,
+        evidence_digest,
+    })
 }
 
 fn tmdb_candidate(
@@ -1357,8 +1412,8 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
-    fn parses_at_most_ten_neutral_book_candidates() {
-        let items = (0..12)
+    fn parses_one_complete_neutral_book_page() {
+        let items = (0..10)
             .map(|index| {
                 format!(
                     r#"{{"id":"book-{index}","volumeInfo":{{"title":"Book {index}","authors":["Author"]}}}}"#
@@ -1366,8 +1421,10 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join(",");
-        let body = format!(r#"{{"items":[{items}]}}"#);
-        let candidates = parse_google_candidates(body.as_bytes()).expect("provider candidates");
+        let body = format!(r#"{{"totalItems":12,"items":[{items}]}}"#);
+        let page = parse_google_candidates(body.as_bytes(), 1).expect("provider candidates");
+        assert_eq!(page.next_page, Some(2));
+        let candidates = page.candidates;
 
         assert_eq!(candidates.len(), RESULT_LIMIT);
         assert_eq!(candidates[0].provider, GOOGLE_BOOKS_PROVIDER);
@@ -1404,6 +1461,7 @@ mod tests {
     #[test]
     fn skips_partial_or_unsafe_provider_items() {
         let body = br#"{
+          "totalItems": 4,
           "items": [
             {"id":"valid","volumeInfo":{"title":"A Book","authors":["An Author"]}},
             {"id":"../other-path","volumeInfo":{"title":"Unsafe ID","authors":[]}},
@@ -1411,7 +1469,9 @@ mod tests {
             {"id":"control","volumeInfo":{"title":"Bad\nTitle","authors":[]}}
           ]
         }"#;
-        let candidates = parse_google_candidates(body).expect("partial response");
+        let candidates = parse_google_candidates(body, 1)
+            .expect("partial response")
+            .candidates;
 
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].provider_id, "valid");
@@ -1420,12 +1480,15 @@ mod tests {
     #[test]
     fn duplicate_provider_ids_are_removed_before_the_ui() {
         let body = br#"{
+          "totalItems": 2,
           "items": [
             {"id":"same","volumeInfo":{"title":"First","authors":["Author"]}},
             {"id":"same","volumeInfo":{"title":"Second","authors":["Author"]}}
           ]
         }"#;
-        let candidates = parse_google_candidates(body).expect("deduplicated response");
+        let candidates = parse_google_candidates(body, 1)
+            .expect("deduplicated response")
+            .candidates;
 
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].title, "First");
@@ -1456,6 +1519,134 @@ mod tests {
         let invalid = CredentialSecret::try_from_bytes(b"key with spaces".to_vec())
             .expect("bounded credential");
         assert!(credential_request(GOOGLE_BOOKS_PROVIDER, &client, url, &invalid).is_err());
+    }
+
+    #[test]
+    fn search_urls_keep_query_data_encoded_and_select_the_requested_page() {
+        let mut input = ProviderSearchInput {
+            provider: GOOGLE_BOOKS_PROVIDER.to_owned(),
+            query: "海 &page=99#title".to_owned(),
+        };
+        let books = search_url(&input, 3, None).expect("book page");
+        assert_eq!(books.host_str(), Some(GOOGLE_BOOKS_HOST));
+        assert_eq!(books.fragment(), None);
+        let pairs: std::collections::BTreeMap<_, _> = books.query_pairs().collect();
+        assert_eq!(
+            pairs.get("q").map(|v| v.as_ref()),
+            Some(input.query.as_str())
+        );
+        assert_eq!(pairs.get("startIndex").map(|v| v.as_ref()), Some("20"));
+        assert!(!pairs.contains_key("page"));
+        assert!(search_url(&input, 0, None).is_err());
+        assert!(search_url(&input, u32::MAX, None).is_err());
+        assert!(!format!("{input:?}").contains(&input.query));
+
+        input.provider = TMDB_PROVIDER.to_owned();
+        let locale = MetadataLocale::try_new("fr-FR").expect("locale");
+        let tmdb = search_url(&input, 2, Some(&locale)).expect("TMDB page");
+        let pairs: std::collections::BTreeMap<_, _> = tmdb.query_pairs().collect();
+        assert_eq!(
+            pairs.get("query").map(|v| v.as_ref()),
+            Some(input.query.as_str())
+        );
+        assert_eq!(pairs.get("page").map(|v| v.as_ref()), Some("2"));
+        assert_eq!(pairs.get("language").map(|v| v.as_ref()), Some("fr-fr"));
+        assert_eq!(
+            pairs.get("include_adult").map(|v| v.as_ref()),
+            Some("false")
+        );
+        assert!(search_url(&input, 501, None).is_err());
+    }
+
+    #[test]
+    fn tmdb_pages_retain_all_twenty_candidates_and_verify_the_requested_page() {
+        let items: Vec<_> = (1..=20)
+            .map(|id| {
+                serde_json::json!({
+                    "id": id, "adult": false, "media_type": "movie", "title": format!("Film {id}")
+                })
+            })
+            .collect();
+        let body = serde_json::to_vec(&serde_json::json!({
+            "page": 2, "total_pages": 3, "results": items
+        }))
+        .expect("fixture");
+        let page = parse_tmdb_candidates(&body, 2).expect("whole page");
+        assert_eq!(page.candidates.len(), 20);
+        assert_eq!(page.candidates[19].provider_id, "20");
+        assert_eq!(page.next_page, Some(3));
+        assert_eq!(page.evidence_digest, provider_evidence_digest(&body));
+        assert!(parse_tmdb_candidates(&body, 1).is_err());
+        let too_many = serde_json::to_vec(&serde_json::json!({
+            "page": 1, "total_pages": 1, "results": vec![items[0].clone(); 21]
+        }))
+        .expect("fixture");
+        assert!(parse_tmdb_candidates(&too_many, 1).is_err());
+        assert!(parse_tmdb_candidates(br#"{"page":1,"total_pages":1}"#, 1).is_err());
+    }
+
+    #[test]
+    fn filtered_and_empty_pages_have_bounded_continuations() {
+        let filtered = br#"{"page":1,"total_pages":2,"results":[{"id":7,"adult":false,"media_type":"person","name":"Person"}]}"#;
+        let page = parse_tmdb_candidates(filtered, 1).expect("filtered page");
+        assert!(page.candidates.is_empty());
+        assert_eq!(page.next_page, Some(2));
+        let last = br#"{"page":500,"total_pages":800,"results":[{"id":7,"adult":false,"media_type":"person","name":"Person"}]}"#;
+        assert_eq!(
+            parse_tmdb_candidates(last, 500)
+                .expect("last page")
+                .next_page,
+            None
+        );
+        assert_eq!(
+            parse_tmdb_candidates(br#"{"page":1,"total_pages":800,"results":[]}"#, 1)
+                .expect("empty page")
+                .next_page,
+            None
+        );
+        assert_eq!(
+            parse_google_candidates(br#"{"totalItems":100}"#, 1)
+                .expect("empty books page")
+                .next_page,
+            None
+        );
+        assert!(parse_google_candidates(br#"{"items":[]}"#, 1).is_err());
+        let body = serde_json::to_vec(
+            &serde_json::json!({"totalItems":11,"items":vec![serde_json::json!({});11]}),
+        )
+        .expect("fixture");
+        assert!(parse_google_candidates(&body, 1).is_err());
+    }
+
+    #[tokio::test]
+    async fn invalid_search_input_fails_before_provider_authorization_or_credential_load() {
+        let vault = Arc::new(CountingVault::default());
+        let runtime = ProviderRuntime::new(vault.clone());
+        let state = provider_state("ab".repeat(32));
+        let policy = OutboundAccessPolicy::default();
+        for (query, page) in [
+            ("".to_owned(), 1),
+            ("bad\nquery".to_owned(), 1),
+            ("海".repeat(86), 1),
+            ("book".to_owned(), 0),
+            ("book".to_owned(), u32::MAX),
+        ] {
+            let error = runtime
+                .search_page(
+                    ProviderSearchInput {
+                        provider: GOOGLE_BOOKS_PROVIDER.to_owned(),
+                        query,
+                    },
+                    page,
+                    None,
+                    &policy,
+                    &state,
+                )
+                .await
+                .expect_err("invalid input");
+            assert!(error.detail().contains("query") || error.detail().contains("page"));
+        }
+        assert_eq!(vault.loads.load(Ordering::Relaxed), 0);
     }
 
     #[test]
@@ -1512,6 +1703,7 @@ mod tests {
     #[test]
     fn tmdb_candidates_keep_movie_and_show_identity_distinct() {
         let body = br#"{
+          "page": 1, "total_pages": 1,
           "results": [
             {"id": 42, "adult": false, "media_type": "movie", "title": "A Film", "original_title": "Original Film", "release_date": "2025-04-03", "overview": "Film overview", "poster_path": "/film.jpg"},
             {"id": 42, "adult": false, "media_type": "tv", "name": "A Show", "first_air_date": "2024-01-02", "poster_path": "/show.jpg"},
@@ -1520,7 +1712,9 @@ mod tests {
             {"id": 0, "adult": false, "media_type": "movie", "title": "Invalid identity"}
           ]
         }"#;
-        let candidates = parse_tmdb_candidates(body).expect("TMDB candidates");
+        let candidates = parse_tmdb_candidates(body, 1)
+            .expect("TMDB candidates")
+            .candidates;
 
         assert_eq!(candidates.len(), 2);
         assert_eq!(candidates[0].kind, "movie");
