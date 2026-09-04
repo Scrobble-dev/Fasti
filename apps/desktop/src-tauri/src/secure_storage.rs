@@ -19,10 +19,6 @@ pub(crate) fn account_scope(identity: DataRootIdentity) -> String {
     account
 }
 
-pub(crate) fn scoped_account(label: &str, identity: DataRootIdentity) -> String {
-    format!("{label}-{}", account_scope(identity))
-}
-
 pub(crate) fn initialize() -> Result<(), ()> {
     #[cfg(target_os = "android")]
     {
@@ -39,6 +35,10 @@ pub(crate) fn initialize() -> Result<(), ()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn scoped_account(label: &str, identity: DataRootIdentity) -> String {
+        format!("{label}-{}", account_scope(identity))
+    }
 
     #[test]
     #[cfg(any(target_os = "linux", target_os = "android"))]
