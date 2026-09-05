@@ -762,6 +762,7 @@
   let discoverLoadId = 0;
   let discoverSectionActive = false;
   const searchActionOperationIds = new Map<string, string>();
+  const SEARCH_CANDIDATE_HISTORY_KEY = "fastiSearchCandidate";
 
   async function loadDiscover(): Promise<void> {
     if (!canAccessProfileData) {
@@ -896,14 +897,28 @@
     activeSection = "discover";
     const path = canonicalCandidatePath(receipt);
     if (window.location.pathname !== path)
-      window.history.pushState({}, "", path);
+      window.history.pushState(
+        { ...window.history.state, [SEARCH_CANDIDATE_HISTORY_KEY]: true },
+        "",
+        path,
+      );
     window.requestAnimationFrame(() =>
       document.getElementById("candidate-detail-title")?.focus(),
     );
   }
 
   function closeSearchCandidate(): void {
-    window.history.back();
+    if (window.history.state?.[SEARCH_CANDIDATE_HISTORY_KEY] === true) {
+      window.history.back();
+      return;
+    }
+    candidateRoute = undefined;
+    candidateRouteProblem = undefined;
+    activeSection = "discover";
+    window.history.replaceState(window.history.state ?? {}, "", "/discover");
+    window.requestAnimationFrame(() =>
+      document.getElementById("discover-title")?.focus(),
+    );
   }
 
   function clearDetailState(): void {
@@ -1230,10 +1245,10 @@
       throw new Error("Sign in before creating a Record from Search.");
     }
     const authorityIdentity = profileAuthorityIdentity;
+    const operationKey = `${receipt.candidate_receipt_id}:create:${evidenceMode}`;
     const operationId =
-      searchActionOperationIds.get(receipt.candidate_receipt_id) ??
-      newOperationId();
-    searchActionOperationIds.set(receipt.candidate_receipt_id, operationId);
+      searchActionOperationIds.get(operationKey) ?? newOperationId();
+    searchActionOperationIds.set(operationKey, operationId);
     const result = await host.saveSearchCandidate(
       receipt.candidate.provider,
       receipt.grain,
@@ -1254,7 +1269,7 @@
         `The provider could not confirm this candidate (${result.problem_code}).`,
       );
     }
-    searchActionOperationIds.delete(receipt.candidate_receipt_id);
+    searchActionOperationIds.delete(operationKey);
     recordsLoaded = false;
     await loadRecords();
     return {

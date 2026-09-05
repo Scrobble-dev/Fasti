@@ -780,7 +780,7 @@
             >{actionKey ? pendingLabel : actionLabel}</button
           >
         {/if}
-        {#if actionProblem}
+        {#if actionProblem && actionProblemKey === routeReceipt?.candidate_receipt_id}
           <p class="problem" role="alert">{actionProblem}</p>
         {/if}
       {:else if !routeLoading && !routeProblem}
@@ -849,7 +849,10 @@
       <p class="problem" role="alert">{localProblem}</p>
     {/if}
     {#if searched && localResults.length === 0 && !localProblem}
-      <p role="status">No local Records found for {completedQuery}.</p>
+      <p role="status">
+        No local Records found {localNext ? "on this page" : ""} for
+        {completedQuery}.
+      </p>
     {:else if localResults.length > 0}
       <p role="status">
         {localResults.length}
@@ -889,16 +892,16 @@
           </li>
         {/each}
       </ol>
-      {#if localNext}
-        <button
-          type="button"
-          class="btn btn-outline-secondary"
-          disabled={searching || Boolean(actionKey) || Boolean(detailKey)}
-          onclick={loadMoreLocal}>Load more local Records</button
-        >
-      {/if}
     {:else if !searched}
       <p>Local Records remain searchable without a network connection.</p>
+    {/if}
+    {#if localNext}
+      <button
+        type="button"
+        class="btn btn-outline-secondary"
+        disabled={searching || Boolean(actionKey) || Boolean(detailKey)}
+        onclick={loadMoreLocal}>Load more local Records</button
+      >
     {/if}
   </section>
 
@@ -987,7 +990,10 @@
           <p class="problem" role="alert">{problem}</p>
         {:else if searched && results.length === 0}
           <p role="status">
-            No compatible titles found for {completedQuery}.
+            No compatible titles found {Object.keys(providerNextPages).length >
+            0
+              ? "on this page"
+              : ""} for {completedQuery}.
           </p>
         {:else if results.length > 0}
           {#if problem}
@@ -1016,24 +1022,24 @@
               {@const { result, index } = grouped}
               {@const candidate = result.candidate}
               {@const resultKey = candidateKey(result, index)}
-              {#if grouped.groupSize > 1 && grouped.groupPosition === 0}
-                <li
-                  id={`candidate-group-${grouped.groupIndex}`}
-                  class="duplicate-intro"
-                >
-                  <strong
-                    >Possible match across {grouped.groupSize} results.</strong
-                  >
-                  Sources: {grouped.providers.join(", ")}. Review each source;
-                  Fasti has not merged these candidates.
-                </li>
-              {/if}
               <li
                 class:possible-duplicate={grouped.groupSize > 1}
                 aria-describedby={grouped.groupSize > 1
                   ? `candidate-group-${grouped.groupIndex}`
                   : undefined}
               >
+                {#if grouped.groupSize > 1 && grouped.groupPosition === 0}
+                  <p
+                    id={`candidate-group-${grouped.groupIndex}`}
+                    class="duplicate-intro"
+                  >
+                    <strong
+                      >Possible match across {grouped.groupSize} results.</strong
+                    >
+                    Sources: {grouped.providers.join(", ")}. Review each source;
+                    Fasti has not merged these candidates.
+                  </p>
+                {/if}
                 <svelte:element
                   this={embedded ? "h5" : "h3"}
                   class="result-title"
@@ -1157,19 +1163,19 @@
               </li>
             {/each}
           </ol>
-          {#if Object.keys(providerNextPages).length > 0 && onSearchProviderPage}
-            <button
-              type="button"
-              class="btn btn-outline-secondary"
-              disabled={searching || Boolean(actionKey) || Boolean(detailKey)}
-              onclick={loadMoreProvider}
-              >Retry or load more provider results</button
-            >
-          {/if}
         {:else}
           <p>
             Provider results appear here when a configured source is available.
           </p>
+        {/if}
+        {#if Object.keys(providerNextPages).length > 0 && onSearchProviderPage}
+          <button
+            type="button"
+            class="btn btn-outline-secondary"
+            disabled={searching || Boolean(actionKey) || Boolean(detailKey)}
+            onclick={loadMoreProvider}
+            >Retry or load more provider results</button
+          >
         {/if}
       </section>
     {/if}
