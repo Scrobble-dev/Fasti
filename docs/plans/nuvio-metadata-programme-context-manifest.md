@@ -3056,3 +3056,31 @@ surfaces. M5 and M8 preparation remains read-only until an exact M4 merge and
 ownership handoff. ~~Codex Security~~ remains removed by the current tooling
 override and was not used for this slice; ordinary review, negative tests and
 product safeguards remain active.
+
+### 2026-09-05 — Durable candidate route freeze
+
+Clean local head `89dda387d6edc32895a3fe54301c65b894460d18`, tree
+`794998c451c796e2dd5ee240afa92da62c03d590`, adds the canonical candidate route
+without another backend or contract surface. Every receipted result links to
+`/explore/{source}/{grain}/{candidate_receipt_id}/{slug}`. The route resolves the
+existing authorized durable receipt, survives direct load and refresh,
+canonicalizes a stale presentation slug, preserves the Search page on browser
+Back, rejects malformed locators, and moves a successful Record creation to the
+existing canonical Record route. Online creation now uses governed refetch;
+offline creation retains the explicit cached-evidence path.
+
+The focused route and Workbench checks passed 10 tests. `pnpm test` passed 328
+JavaScript tests with 2 explicit skips and all build, contract and UI-policy
+checks at product head `8b2bfe25a0b3a8aa62136b294b1569096fad9955`.
+The first full browser run exposed one unrelated pre-existing flaky Settings
+measurement: sequential element measurements auto-scrolled the page by 13px.
+The shared test helper now brings the common action row into view first. That
+test passed 5/5 repetitions and the exact `89dda387` full browser gate passed
+131/131. No Settings production source changed.
+
+This freezes the candidate-route owner for the next M4 unit. Duplicate candidate
+grouping remains presentation-only work and must retain every receipt, provider
+identifier and independent action. The bundle-size warning, dense synthetic
+Search concern, final 10,000-Record release rerun and landing review remain open.
+No push, PR, merge, migration/archive allocation or shared-file release occurred.
+~~Codex Security~~ was not used and remains outside the programme requirements.
