@@ -145,6 +145,7 @@ kernel. It must not start `fastid`, Vite, or a browser credential fallback.
 Also run focused checks for changed surfaces. Add regression tests for fixed defects.
 
 - For the isolated [C3 signing qualification](qualification/access-c3-signing/README.md), follow its native-override isolation steps and run `cargo +1.97.1 test --offline --locked --manifest-path qualification/access-c3-signing/Cargo.toml`, plus the documented release, formatting, Clippy and advisory checks. Root workspace tests do not include this package. Qualification does not approve a production crypto profile or recovery capability.
+- For the isolated [C3 framing qualification](qualification/access-c3-framing/README.md), follow its target and native-override isolation steps, then run `cargo +1.97.1 test --offline --locked --manifest-path qualification/access-c3-framing/Cargo.toml -j 2 -- --test-threads=1` and the documented release, formatting, Clippy and advisory checks. Each full debug/release suite must pass 20 unit tests and two compile-fail doctests. Root workspace tests exclude this package; it does not activate production encryption, joint backups or recovery.
 
 UI changes require design review. Headless changes should state when visual evidence is not applicable.
 

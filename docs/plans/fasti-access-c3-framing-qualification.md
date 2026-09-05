@@ -403,6 +403,31 @@ and rejected each of the four empty-but-set native overrides without printing
 values. Initial host-wrapper target-selection failures and the original Clippy
 failure remain retained; neither was removed or relabelled as passing.
 
+### Clean-commit gate and documentation release
+
+Clean commit `316d1dca061e3c16ceb0fd9403eb9c886e3944f9`, tree
+`1133470ecd0036def4d0359618b4371f481861c8`, passed the complete isolated
+debug20+2, release20+2, formatting and strict Clippy gate. Its unchanged
+canonical PR run also passed all 27 contract and 11 portable gates; both
+receipts bind this clean commit/tree. Evidence ledgers:
+
+- `2026-09-05T20-22-55-894Z-qualification-18464-1a0c1b6a.log`
+- `2026-09-05T20-22-56-984Z-tests-18729-d505be5e.log`
+
+The metadata owner explicitly released two additional documentation regions:
+AGENTS qualification instructions and one Unreleased CHANGELOG qualification
+bullet. The follow-up adds only the framing command/count, discovery link and
+non-production boundary, plus this plan checkpoint. No other AGENTS/changelog
+content, version, runtime behavior or ownership changes. Existing Fasti version
+conventions remain unchanged. This is a factual documentation update, not an
+expansion of the seven-file implementation or production authorization.
+
+The package README and plan cover reference, complete contributor commands and
+explanation. No product diagram entity moved or changed. Local links across
+100 Markdown files passed before the follow-up; check them again after editing.
+Qualification evidence remains distinct from full resource, platform, native
+notice and recovery approval. Hosted checks and merged-tree proof remain open.
+
 ## GSTACK REVIEW REPORT
 
 | Review | Runs | Status | Findings |
