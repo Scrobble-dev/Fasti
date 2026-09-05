@@ -112,6 +112,14 @@
     cacheState?: ProviderPage["cacheState"];
     problem?: string;
   }
+  interface GroupedProviderResult {
+    result: ProviderResult;
+    index: number;
+    groupIndex: number;
+    groupPosition: number;
+    groupSize: number;
+    providers: string[];
+  }
   let results: ProviderResult[] = $state([]);
   let providerNextPages = $state<Record<string, number>>({});
   let providerCacheState: ProviderPage["cacheState"] = $state();
@@ -384,6 +392,42 @@
   const searchAvailable = $derived(
     Boolean(onSearchLocal) || selectedProviders.length > 0,
   );
+  const groupedProviderResults = $derived.by(() => {
+    const groups = new Map<
+      string,
+      Array<{ result: ProviderResult; index: number }>
+    >();
+    results.forEach((result, index) => {
+      const title = result.candidate.title
+        .normalize("NFKC")
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}]+/gu, " ")
+        .trim();
+      const grain = result.receipt?.grain ?? result.candidate.kind;
+      const key =
+        title && result.candidate.release_year
+          ? `${grain}\u001f${result.candidate.release_year}\u001f${title}`
+          : `unique\u001f${candidateKey(result, index)}`;
+      const group = groups.get(key) ?? [];
+      group.push({ result, index });
+      groups.set(key, group);
+    });
+    return Array.from(groups.values()).flatMap((group, groupIndex) => {
+      const providers = Array.from(
+        new Set(group.map(({ result }) => result.candidate.provider)),
+      );
+      return group.map(
+        ({ result, index }, groupPosition): GroupedProviderResult => ({
+          result,
+          index,
+          groupIndex,
+          groupPosition,
+          groupSize: group.length,
+          providers,
+        }),
+      );
+    });
+  });
 
   $effect(() => {
     if (supportedProviders.length === 0) return;
@@ -968,10 +1012,28 @@
             </p>
           {/if}
           <ol>
-            {#each results as result, index (candidateKey(result, index))}
+            {#each groupedProviderResults as grouped (candidateKey(grouped.result, grouped.index))}
+              {@const { result, index } = grouped}
               {@const candidate = result.candidate}
               {@const resultKey = candidateKey(result, index)}
-              <li>
+              {#if grouped.groupSize > 1 && grouped.groupPosition === 0}
+                <li
+                  id={`candidate-group-${grouped.groupIndex}`}
+                  class="duplicate-intro"
+                >
+                  <strong
+                    >Possible match across {grouped.groupSize} results.</strong
+                  >
+                  Sources: {grouped.providers.join(", ")}. Review each source;
+                  Fasti has not merged these candidates.
+                </li>
+              {/if}
+              <li
+                class:possible-duplicate={grouped.groupSize > 1}
+                aria-describedby={grouped.groupSize > 1
+                  ? `candidate-group-${grouped.groupIndex}`
+                  : undefined}
+              >
                 <svelte:element
                   this={embedded ? "h5" : "h3"}
                   class="result-title"
@@ -1256,6 +1318,20 @@
     padding: 16px 0;
     border-top: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 22%, transparent);
+  }
+
+  .duplicate-intro,
+  .possible-duplicate {
+    border-inline-start: 3px solid var(--fasti-state-attention);
+    padding-inline-start: 16px;
+  }
+
+  .duplicate-intro {
+    background: color-mix(
+      in srgb,
+      var(--fasti-state-attention) 8%,
+      transparent
+    );
   }
 
   .result-title {
