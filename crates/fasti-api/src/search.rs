@@ -24,9 +24,7 @@ use fasti_contracts::{
     SearchProviderPageRequest, SearchProviderPageResponse,
 };
 use fasti_domain::{Grain, MetadataLocale, MetadataRegion, RequestCorrelationId, SearchQuery};
-use fasti_provider_runtime::{
-    ProviderCandidateDetailsOutcome, ProviderSearchOutcome, ProviderSearchService,
-};
+use fasti_provider_runtime::{ProviderCandidateDetailsOutcome, ProviderSearchService};
 use std::sync::Arc;
 
 const CAPABILITY: CapabilityKey = CapabilityKey::SearchMetadata;
@@ -197,7 +195,6 @@ pub(crate) async fn search_provider_page(
         .map_err(|error| json_rejection(CAPABILITY, id, error))?
         .0;
     let offline = request.offline;
-    let page_number = request.page;
     let query = query(provider.clone(), request, id)?;
     let gate = state
         .locks
@@ -210,7 +207,7 @@ pub(crate) async fn search_provider_page(
             SearchPageRequest {
                 correlation_id: id,
                 access,
-                query,
+                query: query.clone(),
                 outbound_policy: OutboundAccessPolicy::default(),
                 // The service replaces this with its trusted provider cache-policy revision.
                 terms_revision: String::new(),
@@ -220,33 +217,7 @@ pub(crate) async fn search_provider_page(
         )
         .await
         .map_err(application_problem)?;
-    let response = match outcome {
-        ProviderSearchOutcome::Live {
-            candidates,
-            next_page,
-        } => SearchProviderPageResponse::Live {
-            provider_id: provider,
-            page: page_number,
-            candidates: candidates.iter().map(Into::into).collect(),
-            next_page,
-        },
-        ProviderSearchOutcome::Page {
-            page,
-            upstream_problem,
-        } => SearchProviderPageResponse::Page {
-            provider_id: provider,
-            page: page_number,
-            candidates: page.candidates.iter().map(Into::into).collect(),
-            next_page: page.next_page,
-            cache_state: page.cache_state.into(),
-            lifetime: (&page.lifetime).into(),
-            upstream_problem: upstream_problem.map(|code| code.as_str().to_owned()),
-        },
-        ProviderSearchOutcome::Unavailable { problem } => SearchProviderPageResponse::Unavailable {
-            provider_id: provider,
-            problem_code: problem.as_str().to_owned(),
-        },
-    };
+    let response = SearchProviderPageResponse::from_outcome(&query, outcome);
     Ok((
         [(header::CACHE_CONTROL, "private, no-store")],
         Json(response),
@@ -315,53 +286,7 @@ pub(crate) async fn read_search_candidate(
 }
 
 fn candidate_details_response(outcome: Option<ProviderCandidateDetailsOutcome>) -> Response {
-    let response = match outcome {
-        None => SearchCandidateDetailsResponse::Missing {},
-        Some(ProviderCandidateDetailsOutcome::Snapshot(snapshot)) => {
-            SearchCandidateDetailsResponse::Snapshot {
-                snapshot: (&snapshot).into(),
-            }
-        }
-        Some(ProviderCandidateDetailsOutcome::Unavailable { snapshot, problem }) => {
-            SearchCandidateDetailsResponse::Unavailable {
-                snapshot: (&snapshot).into(),
-                problem_code: problem.as_str().to_owned(),
-            }
-        }
-        Some(ProviderCandidateDetailsOutcome::Refetched {
-            snapshot,
-            details,
-            locale,
-        }) => SearchCandidateDetailsResponse::Refetched {
-            snapshot: (&snapshot).into(),
-            details: details.as_ref().into(),
-            locale: locale.map(|value| value.as_str().to_owned()),
-        },
-        Some(ProviderCandidateDetailsOutcome::RefetchedWithoutSnapshot {
-            candidate_receipt_id,
-            provider,
-            grain,
-            details,
-            locale,
-        }) => SearchCandidateDetailsResponse::RefetchedWithoutSnapshot {
-            candidate_receipt_id: candidate_receipt_id.to_string(),
-            provider_id: provider.as_str().to_owned(),
-            grain: grain.as_str().to_owned(),
-            details: details.as_ref().into(),
-            locale: locale.map(|value| value.as_str().to_owned()),
-        },
-        Some(ProviderCandidateDetailsOutcome::UnavailableWithoutSnapshot {
-            candidate_receipt_id,
-            provider,
-            grain,
-            problem,
-        }) => SearchCandidateDetailsResponse::UnavailableWithoutSnapshot {
-            candidate_receipt_id: candidate_receipt_id.to_string(),
-            provider_id: provider.as_str().to_owned(),
-            grain: grain.as_str().to_owned(),
-            problem_code: problem.as_str().to_owned(),
-        },
-    };
+    let response = SearchCandidateDetailsResponse::from(outcome);
     (
         [(header::CACHE_CONTROL, "private, no-store")],
         Json(response),
@@ -449,24 +374,14 @@ pub(crate) async fn save_search_candidate(
         .save_candidate(command, lease)
         .await
         .map_err(application_problem)?;
-    let response = match outcome {
-        fasti_provider_runtime::ProviderSearchActionOutcome::Saved(receipt) => {
-            fasti_contracts::SearchCandidateActionResponse::Saved {
-                receipt: receipt.as_ref().try_into().map_err(|_| {
-                    application_problem(Box::new(FastiProblem::from_code(
-                        fasti_application::ProblemCode::IntegrityFailed,
-                        capability,
-                        id,
-                    )))
-                })?,
-            }
-        }
-        fasti_provider_runtime::ProviderSearchActionOutcome::Unavailable { problem } => {
-            fasti_contracts::SearchCandidateActionResponse::Unavailable {
-                problem_code: problem.as_str().to_owned(),
-            }
-        }
-    };
+    let response =
+        fasti_contracts::SearchCandidateActionResponse::try_from(outcome).map_err(|_| {
+            application_problem(Box::new(FastiProblem::from_code(
+                fasti_application::ProblemCode::IntegrityFailed,
+                capability,
+                id,
+            )))
+        })?;
     Ok((
         [(header::CACHE_CONTROL, "private, no-store")],
         Json(response),

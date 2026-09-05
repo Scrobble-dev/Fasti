@@ -5,62 +5,15 @@ use crate::{
 };
 use fasti_application::{
     ApplicationResult, CapabilityKey, ProblemCode, ProviderCapabilityState, ProviderOperationLease,
-    ReadSearchCandidateRequest, SearchPageRequest, SearchPersistencePort, StoredSearchCandidate,
-    StoredSearchPage,
+    ReadSearchCandidateRequest, SearchPageRequest, SearchPersistencePort, StoredSearchPage,
 };
 use std::{future::Future, sync::Arc};
 
-/// One source's outcome. Source failure must not discard another source's local
-/// or remote results; authorization and persistence failures remain typed errors.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ProviderSearchOutcome {
-    Live {
-        candidates: Vec<fasti_application::SearchCandidate>,
-        next_page: Option<u32>,
-    },
-    Page {
-        page: StoredSearchPage,
-        upstream_problem: Option<ProblemCode>,
-    },
-    Unavailable {
-        problem: ProblemCode,
-    },
-}
-
-/// Read-only observations. A refetch never replaces the immutable Search
-/// snapshot and is not authority to create or attach a Record.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ProviderCandidateDetailsOutcome {
-    Snapshot(StoredSearchCandidate),
-    Refetched {
-        snapshot: StoredSearchCandidate,
-        details: Box<fasti_application::SearchCandidate>,
-        locale: Option<fasti_domain::MetadataLocale>,
-    },
-    Unavailable {
-        snapshot: StoredSearchCandidate,
-        problem: ProblemCode,
-    },
-    RefetchedWithoutSnapshot {
-        candidate_receipt_id: fasti_domain::SearchCandidateReceiptId,
-        provider: fasti_application::ProviderId,
-        grain: fasti_domain::Grain,
-        details: Box<fasti_application::SearchCandidate>,
-        locale: Option<fasti_domain::MetadataLocale>,
-    },
-    UnavailableWithoutSnapshot {
-        candidate_receipt_id: fasti_domain::SearchCandidateReceiptId,
-        provider: fasti_application::ProviderId,
-        grain: fasti_domain::Grain,
-        problem: ProblemCode,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ProviderSearchActionOutcome {
-    Saved(Box<fasti_application::SearchCandidateActionReceipt>),
-    Unavailable { problem: ProblemCode },
-}
+#[cfg(test)]
+use fasti_application::StoredSearchCandidate;
+pub use fasti_application::{
+    ProviderCandidateDetailsOutcome, ProviderSearchActionOutcome, ProviderSearchOutcome,
+};
 
 /// Governed provider-page orchestration. Hosts acquire their existing provider
 /// gate before calling; this service neither creates locks nor owns user state.
