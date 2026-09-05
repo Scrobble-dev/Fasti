@@ -1869,6 +1869,143 @@ mod tests {
     }
 
     #[test]
+    fn uncommitted_candidate_action_cannot_commit_after_browser_profile_switch() {
+        use fasti_application::{
+            provider_candidate_metadata_fields, provider_metadata_response_locale,
+            SearchCandidateActionPreparation, SearchCandidateEvidenceMode, SearchPersistencePort,
+        };
+        use fasti_domain::{FieldClaimStatus, OperationId, ReceivedAt, Sha256Digest};
+
+        // Snapshot the action's existing persistence owners and browser activity,
+        // including revision changes that must roll back with a rejected action.
+        let rows = |fixture: &Fixture| {
+            let connection = fixture.kernel.inner.connection.lock().unwrap();
+            [
+                "records",
+                "namespace_definitions",
+                "external_identifiers",
+                "metadata_field_claims",
+                "metadata_claims",
+                "metadata_claim_provenance",
+                "local_search_grams",
+                "search_action_receipts",
+                "workspace_revisions",
+                "fasti_browser_sessions",
+                "profile_record_tracking_dispositions",
+                "metadata_profile_field_overrides",
+                "metadata_projection_policies",
+                "metadata_rating_claims",
+                "profile_nuvio_collections",
+            ]
+            .map(|table| {
+                let mut statement = connection
+                    .prepare(&format!("SELECT * FROM {table} ORDER BY 1,2"))
+                    .unwrap();
+                let columns = statement.column_count();
+                statement
+                    .query_map([], |row| {
+                        (0..columns)
+                            .map(|column| row.get::<_, rusqlite::types::Value>(column))
+                            .collect::<rusqlite::Result<Vec<_>>>()
+                    })
+                    .unwrap()
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .unwrap()
+            })
+        };
+
+        for mode in [
+            SearchCandidateEvidenceMode::Cached,
+            SearchCandidateEvidenceMode::Refetch,
+        ] {
+            let (fixture, created, saved) = candidate_receipt_fixture_with_identity(true);
+            let operation = OperationId::new_v7();
+            let mut command =
+                browser_candidate_action(&created, saved.candidates[0].id(), operation);
+            command.evidence_mode = mode;
+            let prepared = fixture
+                .kernel
+                .prepare_search_candidate_action(&command)
+                .unwrap();
+            let fields = match &prepared {
+                SearchCandidateActionPreparation::Cached(_) => {
+                    assert_eq!(mode, SearchCandidateEvidenceMode::Cached);
+                    None
+                }
+                SearchCandidateActionPreparation::Refetch(details) => {
+                    assert_eq!(mode, SearchCandidateEvidenceMode::Refetch);
+                    let fetched = crate::kernel::now();
+                    Some(
+                        provider_candidate_metadata_fields(
+                            details.candidate.receipt.candidate(),
+                            provider_metadata_response_locale(
+                                "tmdb",
+                                details.candidate.context.locale(),
+                            ),
+                            None,
+                            &Sha256Digest::from_bytes(&[9; 32]),
+                            ReceivedAt::from_application_clock(fetched),
+                            Some(
+                                fetched
+                                    + ChronoDuration::seconds(fasti_domain::METADATA_FRESH_SECONDS),
+                            ),
+                            FieldClaimStatus::Fresh,
+                        )
+                        .unwrap(),
+                    )
+                }
+                SearchCandidateActionPreparation::Replay(_) => {
+                    panic!("the action must remain uncommitted before the profile switch")
+                }
+            };
+            let selected = fixture
+                .kernel
+                .select_browser_session_profile(SelectBrowserSessionProfileCommand::new(
+                    mutation_command(
+                        fasti_domain::RequestCorrelationId::new_v7(),
+                        secret_copy(created.session_secret()),
+                        secret_copy(created.csrf_secret()),
+                        crate::kernel::now(),
+                    ),
+                    fixture.grants[1],
+                ))
+                .unwrap();
+            // The switch itself legitimately rotates the session. Compare only
+            // subsequent rejected actions with this post-switch baseline.
+            let before = rows(&fixture);
+            for index in [0, 2, 3, 4, 5, 7] {
+                assert!(before[index].is_empty(), "no action has committed");
+            }
+            assert_problem(
+                fixture.kernel.commit_search_candidate_action(
+                    &command,
+                    &prepared,
+                    fields.as_deref(),
+                ),
+                ProblemCode::BrowserSessionRevoked,
+            );
+            assert_eq!(rows(&fixture), before, "old proof mutated state: {mode:?}");
+
+            let mut switched =
+                browser_candidate_action(&selected, saved.candidates[0].id(), operation);
+            switched.evidence_mode = mode;
+            assert_problem(
+                fixture.kernel.commit_search_candidate_action(
+                    &switched,
+                    &prepared,
+                    fields.as_deref(),
+                ),
+                ProblemCode::ValidationFailed,
+            );
+            assert_eq!(
+                rows(&fixture),
+                before,
+                "new profile mutated state: {mode:?}"
+            );
+        }
+    }
+
+    #[test]
     fn candidate_action_browser_replay_survives_rotation_and_cache_deletion_but_requires_mutation_authority(
     ) {
         use fasti_application::{SearchCandidateActionPreparation, SearchPersistencePort};

@@ -1046,3 +1046,37 @@ or replaced with a permissive bound. Other 138 mutation/SDK checks passed in tha
 run; no complete verification receipt was emitted. Public Search action wiring
 must also review the shared conflict next-action wording, which still mentions
 an observation despite its existing metadata/Search uses.
+
+### M4 profile-switch regression and parallel preparation — 2026-09-05
+
+Commit `580998f40ba09ec1d41230bab0841093ab5be841`, tree
+`cafa63cec20ec67372b92d074337c2a8e192cdb7`, passed all 27 canonical
+contract gates with a clean exact-source receipt. That verifies the committed
+internal action/archive slice, not public Search activation or an M4 merge.
+
+Independent review identified a test gap, not a demonstrated defect: prepare an
+uncommitted action, switch the real browser session's profile, then attempt to
+commit. The new regression covers Cached and Refetch. The old proof returns
+BrowserSessionRevoked; the new profile returns ValidationFailed for the original
+candidate. Fifteen existing persistence owners, including browser sessions and
+workspace revisions, remain unchanged after each rejected action. The focused
+test passes with physical SSD TMPDIR. No production behavior changes here.
+
+Parallel readers refreshed the exact public Search wiring map and bounded M9a
+and M11a preparation. Search must reuse scoped-or-browser application
+authentication, not the bearer-only metadata HTTP helper. MDBList aggregate-score
+origin and account/profile/purpose retention require an explicit disposition in
+existing rating owners before activation. M11's in-memory conformance outbox and
+process-local provider lock are not durable journal or fencing implementations;
+completed Search replay rules also must not be copied as synchronization authority.
+These are read-only dependency maps, not new APIs, migration allocations or
+production branches. Commander retains v16, archive v6 and shared integration
+surfaces. M4 remains unmerged; no v17 or shared-file release has occurred.
+
+The clean predecessor's 100-Record dense release baseline passed its memory
+ceiling (median 3.141628070 s, max 3.440542170 s, peak 21,676,032 bytes).
+The 500-Record run returned StorageUnavailable before timings. Investigation is
+in progress: this host's /tmp is now tmpfs, unlike the prior explicit SSD
+benchmark environment. Do not classify the cause or change the resolver until
+the underlying failure and a controlled physical-SSD baseline are verified.
+Codex Security remains prohibited; all review and verification here are native.
