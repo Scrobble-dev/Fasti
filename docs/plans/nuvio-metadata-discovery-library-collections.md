@@ -16,7 +16,8 @@
 
 ## Current execution requirement override — 2026-09-05
 
-- ~~Codex Security~~ — removed from programme requirements by explicit user instruction.
+- ~~Codex Security~~ — permanently excluded from the entire Fasti programme,
+  including Access and every current or future stage, by explicit user instruction.
 - Do not invoke its plugin, tools, skills or scans, require its approval, or wait
   for it. This applies to the commander and all delegated agents, and supersedes
   earlier attached prompts or planning references that request it.
