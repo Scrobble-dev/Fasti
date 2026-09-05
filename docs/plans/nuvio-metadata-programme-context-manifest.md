@@ -3496,3 +3496,38 @@ The final affected run passed 24/24 in
 newer `on_hold` choice as well as global Record/tracking warnings. The formatting
 issue is removed with that correction. Full clean-head verification remains the
 next gate; the previous 138-case result is historical, not the final-head receipt.
+
+### 2026-09-05 — Corrected exact head published and locally qualified
+
+PR #128 publishes `9cbcd7134a8fdd81ef0b3661769d5b0ca78fb3d3`, tree
+`636b44aca4ac504dd755878d9d2a1a735a304bcb`. The canonical command completed
+with exit zero. Both local receipts bind this clean commit/tree: 27 contract
+gates and 11 portable gates, every gate passed with exit zero. The final browser
+run also completed with exit zero: 138/138 passed without retries or skips.
+The focused real Docusaurus dependency-path regression passed again. The native
+permission correction retains its 83-test evidence and unchanged exact-origin
+checks. Outgoing diff redaction found no exposed secrets.
+
+The browser reservation is released after terminal completion. Access now owns
+`qualification/access-c3-framing/**`, its dedicated framing plan, and the
+`access-c3-signing-qualification.yml` two-package matrix until its material
+handoff. These are independent qualification surfaces, not production crypto or
+recovery approval; M4 remains read-only there. No migration, archive or shared
+runtime release follows from this checkpoint.
+
+Post-push documentation review checked the lifecycle/archive statements, current
+requirement overrides, QA scope and remaining acceptance list against the source.
+Five prior CodeRabbit items are now fixed in the published code. The three other
+review items remain disproven by source/history; six Codacy annotations are
+fixture-only false positives. Previous-head CodeQL success is not current-head
+hosted qualification. Four pre-existing dependency alerts remain under their
+documented dispositions. PR #128 stays open; no hosted success or merge is claimed.
+
+Read-only filter preparation confirms that media domain and identity grain are
+not interchangeable. A UI-only Anime=series or Book=edition mapping cannot meet
+M4. Reuse the existing provider identity mapping and M2 claims/projection owners;
+source-native catalog type and overlapping classifications need a bounded
+semantic freeze before implementation. An extra advanced grain control is not
+automatically required by the approved media-domain filter. This is preparation,
+not a new API/schema allocation or a reduction of the required filter scope.
+All other M4 and later programme requirements remain active.
