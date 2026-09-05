@@ -1177,3 +1177,37 @@ physical-docs-path regression. This is not a new dev-push qualification claim.
 Merged v15/archive v5 remain frozen; M4 retains v16/archive v6 and every named
 shared surface. No v17 allocation or M4 shared-file release is authorized by
 this C2 foundation merge. Codex Security remains prohibited.
+
+### M4 integration onto the verified C2 foundation — 2026-09-05
+
+Fetched origin/dev exactly matches C2's handoff: commit
+`62e10d2e9bd738ed5da425c008eb839f89cdbea5`, tree
+`d6fcea1563b673f83cb4cabe1ef50d1c6dc5c087`. The pre-rebase M4 head
+`ffcb61b596e63a2f4833e206513c785245d0a481`, tree
+`5abe7b9eaa970acec9bd5f10f6ad632748b11bca`, is retained on the local recovery
+reference `codex/m4-before-c2-foundation`. No remote history was rewritten.
+
+The clean rebase produced `eb6d32be786dfa44fa98f42e2d071b45a709cee3`, tree
+`ca82c5e90d2ae16123d87033e175ef0550931c30`, with the exact handoff as its
+merge base. Range comparison preserves all M4 implementation patches. Four
+already-upstream ID/secret/dependency prerequisites were automatically omitted.
+The only conflict was the older docs-path source assertion; the production
+configuration was already byte-identical, and the newer executable symlink/ENOENT
+regression supersedes that assertion. Its resolved blob exactly matches dev:
+`e036664d7904fa6d9e6426697764c9b997135917`. No other M4 implementation was dropped.
+
+Independent post-rebase comparison confirms unchanged M4 IDs, scopes,
+capabilities, access/store, v16 schema, archive v6 and entire UI sources. Domain
+and application module lists only gain the expected access_credentials exports;
+Search remains exported, Reserved/Guarded and absent from FULL_ADMIN_SCOPES.
+The incoming C2 source, dependencies and behavioral docs regression remain
+byte-identical to the merged dependency. This source-preservation review has no
+concrete findings. It does not establish runtime PAT support, full M4 completion,
+or post-rebase verification. The review checklist is applied to this integration;
+completed planning gates and unrelated global artifact-sync queues are not rerun.
+
+Run the unchanged canonical PR gate on the next clean checkpoint commit with
+`TMPDIR=/mnt/secondary-ssd/cache/home/tmp PKG_CONFIG=/usr/bin/pkg-config cargo xtask test pr`.
+It includes contract verification, docs verification and the portable B1 checks.
+M4 still owns v16/archive v6 and every shared integration surface; C2 activation
+waits for M4's actual merged handoff. No v17 or shared-file release has occurred.
