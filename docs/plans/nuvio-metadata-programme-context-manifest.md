@@ -3084,3 +3084,49 @@ identifier and independent action. The bundle-size warning, dense synthetic
 Search concern, final 10,000-Record release rerun and landing review remain open.
 No push, PR, merge, migration/archive allocation or shared-file release occurred.
 ~~Codex Security~~ was not used and remains outside the programme requirements.
+
+### 2026-09-05 — M4 Search implementation-complete local gate
+
+Clean local product head `c4ad43e520eec3ae66756c2cc32f4bfd130c162e`, tree
+`63d367b81edabffd3130966f9b6c6e2492b0adbf`, completes the remaining bounded
+M4 Search behavior. The existing Search result presentation now groups only
+same-grain candidates with the same normalized Unicode title and release year.
+The grouping is advisory: every provider, identifier, receipt and action remains
+independent, and same-title candidates from different years remain separate.
+No schema, archive, API or storage owner changed for grouping.
+
+Candidate details and grouped Search passed their focused browser checks,
+including Axe, local plus three-provider fan-out, partial provider failure,
+duplicate and non-duplicate cases, exact provider selection, direct route load,
+reload, Back-state preservation, stale-slug canonicalization, malformed-route
+rejection, governed online refetch, offline cached evidence and canonical Record
+navigation. The complete browser gate passed 131/131 at product head
+`4fe5e91d3cd7a32005b427bd5df66a4f10fce26c`; `c4ad43e5` adds only those focused
+Axe assertions, which also pass. `pnpm test` at `c4ad43e5` passed 328 tests with
+2 explicit skips and all generated, contract, build, example, OKF and UI-policy
+checks. The existing main-bundle warning remains visible at about 782.54 kB
+minified and 157.05 kB gzip.
+
+The ignored release-only 10,000-Record Store fixture passed its 250 ms policy:
+without observed policy p50 was 2.401166 ms, p95 2.507276 ms and max 2.539316 ms;
+with observed policy p50 was 3.263486 ms, p95 3.455985 ms and max 4.150184 ms.
+Formatting and strict workspace clippy passed.
+
+The canonical PR gate was rerun with the host's physical temporary directory so
+SQLite `NOFOLLOW` remained enforced. Registry, generation, contracts, examples,
+documentation, formatting, JavaScript, 299 mutation/SDK tests, strict locked and
+offline clippy, the full Rust workspace, HTTP conformance, workspace build and
+package-policy checks passed. The gate then stopped at the isolated Tauri release
+benchmark build because this host lacks the required GTK, Cairo, Pango, ATK,
+GDK Pixbuf, libsoup 3 and JavaScriptCoreGTK development packages. This is an
+unresolved host prerequisite, not a waived or passing performance gate. The first
+attempt with the symlinked default `TMPDIR` also failed four snapshot tests because
+SQLite correctly rejected the symlink; using its physical target resolved that
+separate host condition.
+
+M4 Search is implementation-complete locally. Full landing review, the isolated
+Tauri benchmark build, exact PR-head qualification and merged-head verification
+remain open. No push, PR, merge, v18 allocation or shared-file release occurred.
+~~Codex Security~~ remains permanently outside this programme; its plugin, skills,
+scans and findings are not permitted gates or blockers. Ordinary review, QA,
+dependency advisories and product safeguards remain active.
