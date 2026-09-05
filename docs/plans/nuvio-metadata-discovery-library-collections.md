@@ -838,11 +838,12 @@ changes no schema or archive bytes.
 
 Durable action evidence needs a new versioned archive stream, not an extension
 of published archive v5 or a disguised observation/metadata-refresh receipt.
-M4 allocates archive v6 for that durable owner; activation must accompany its
-strict exporter/importer, schema-v16 compatibility and historical v1–v5 tests.
-The current M4 source implements archive v6 with 35 streams; this remains
-unmerged programme work, not a new public export activation. Frozen v1–v5
-artifacts remain byte-identical, including the published v5/schema-v15 pairing.
+M4 introduced archive v6 with 35 streams and schema v16 for that durable owner,
+with strict exporter/importer and historical v1–v5 tests. Archive v7 and schema
+v17 subsequently added response-policy evidence. The current M4 source implements
+v7; this remains unmerged programme work, not a new public export activation.
+Frozen v1–v6 artifacts remain byte-identical, including the published
+v5/schema-v15 pairing and the v6/schema-v16 action-receipt format.
 Ephemeral Search pages and candidates remain excluded. A historical browser
 subject ID is typed audit evidence, with no foreign key to excluded accounts or
 sessions; it never recreates authentication or grants. Profile/client/Record

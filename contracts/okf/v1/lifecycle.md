@@ -47,7 +47,8 @@ the provider registry, governed credential state, and provider health surface.
 freshness, and attribution. `m3` owns purpose-specific identity routing and
 profile or application-client anime grouping policy with preview and receipts.
 `m4` owns local-first multi-source Search and bounded candidate receipts. Its
-internal persistence is in progress; public Search routes remain guarded until
-the application, transport, SDK, host and Workbench gates pass.
+finalized Search contracts have durable application, transport, SDK, host and
+Workbench implementations. Exact-head delivery and merge evidence remain
+separate from this runtime classification.
 Consult [capabilities](capabilities.md), [problems](problems.md), and [scopes](scopes.md)
 as one linked contract catalogue.
