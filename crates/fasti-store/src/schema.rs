@@ -102,6 +102,8 @@ pub(crate) fn migrate(connection: &Connection) -> Result<()> {
 fn migrate_v16(connection: &Connection) -> Result<()> {
     let transaction = Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
     transaction.execute_batch(r#"
+        CREATE INDEX metadata_claim_provenance_recent_idx
+            ON metadata_claim_provenance(workspace_id, record_id, field_key, fetched_at DESC, source DESC);
         CREATE TABLE local_search_grams (
             workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id),
             profile_partition TEXT NOT NULL,
@@ -3601,7 +3603,7 @@ mod tests {
         assert_eq!(
             connection
                 .query_row(
-                    "SELECT COUNT(*) FROM sqlite_schema WHERE name = 'search_pages'",
+                    "SELECT COUNT(*) FROM sqlite_schema WHERE name IN ('search_pages', 'local_search_grams', 'metadata_claim_provenance_recent_idx')",
                     [],
                     |r| r.get::<_, i64>(0)
                 )
