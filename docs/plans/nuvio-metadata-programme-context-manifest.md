@@ -3789,3 +3789,49 @@ publication; do not reuse the earlier 151-case browser run as proof of the later
 Access integration. The commander stays the sole shared-surface writer while
 three read-only lanes prepare the domain-filter budget decision, real-process
 Search harness composition and isolated M8 field-group gaps.
+
+### Published M4 review corrections and next real-process gap
+
+Clean commit `7195b19bb9e5d0745e59414938e6e0d862be7a8b`, tree
+`6180134ff0fd0d08414ee5f88f78f3bc85faee2b`, passed canonical 27+11, full
+JavaScript (354 passed, two existing live-docs skips), Desktop library
+(86 passed, two existing intentional ignores), and strict Desktop Clippy.
+The isolated ordinary browser run passed 181/181; the separate serial
+Lighthouse run passed 2/2. Both browser processes exited zero and their
+resource reservation was released to Access. Reports are retained under
+`.gstack/qa-reports/m4-final-7195-browser` and
+`.gstack/qa-reports/m4-final-7195-performance`. These remain fixture-based
+browser checks, not real-process Search or field-performance evidence.
+
+That exact head is now published on existing PR #128; GitHub confirms its
+head identity and OPEN state. Hosted checks have started, including the
+JavaScript fixture-prebuild correction; recovery is not yet proven. The
+operator guide now also specifies the receipt-limit integer ceiling and
+`InvalidConfiguration` failure behavior, completing the previously partial
+review correction. This later documentation edit is not part of head 7195.
+
+Read-only real-process preparation found an actual product gap: browser Search
+supports sessions, but Discover's provider inventory still uses bearer-only
+`provider.list`. The next bounded correction reuses the existing browser
+boundary and Store authorization owner for that read-only capability. A parsed
+cookie alone is not authorization; current session, membership, profile and
+provider-read scope must be validated before inventory or vault inspection.
+Credential writes, tests and health operations remain separately governed.
+Independent agents are checking the exact trust and projection changes while
+the commander remains sole writer for all shared production surfaces.
+
+The existing real Access smoke harness owns the eventual Search journey;
+do not create a second orchestrator. Its deterministic real-provider transport
+seam is still absent and must retain pinned HTTPS, credential-ordering and
+default-build isolation. Full media-domain filtering, retained and Live
+continuation, no-store details, navigation cancellation and the real-process
+Search journey remain required M4 work. M8 preparation confirms that current
+TMDB runtime admits only four of thirteen approved field groups; its isolated
+implementation still waits for M4 merge and explicit file ownership.
+
+Access confirmed C2 foundation PR #125 MERGED at
+`62e10d2e9bd738ed5da425c008eb839f89cdbea5`, reviewed tree
+`d6fcea1563b673f83cb4cabe1ef50d1c6dc5c087`; C2 runtime integration remains OPEN.
+Its documentation correction is not an instruction to merge the old C2 branch.
+M4 retains migration17/archive7 and all shared integration ownership. No
+migration18 allocation, M4 merge or shared-file release follows from this checkpoint.
