@@ -3931,3 +3931,65 @@ the full real-process Search/Create/Attach/offline/restart browser journey in
 the existing Access smoke harness, and one checks the isolated TMDB TLS fixture
 transport seam. The commander retains sole integration ownership. No future
 migration, capability, shared-file release or reduced acceptance scope is implied.
+
+### Provider-inventory exact verification and next real-process ownership
+
+Clean commit `7767681b4a4345cb2ea0c07e06125faa9666a111`, tree
+`ec4733f028439051957a389f6724ab5011b0854d`, passes canonical 27+11.
+Both JSON receipts bind that exact commit/tree with `dirty: false` and every
+gate passing. Full JavaScript passes 357 tests with two existing live-docs
+skips. Desktop strict all-target Clippy passes; its full library passes 86
+tests with the two existing private-keyring/public-image ignores. Independent
+native contract review is clear; both frozen hybrid lists retain exact equality
+and the negative authorization-broadening check.
+
+Isolated ordinary browser QA passes 184/184. Separate serial Lighthouse passes
+2/2, with CLS 0 at both widths and INP 33.066 ms at 320px and 39.529 ms at
+1440px. Each trace records three interactions, Chrome 152.0.7977.82 and the
+clean source head. Reports remain under
+`.gstack/qa-reports/m4-final-7767681b-browser` and
+`.gstack/qa-reports/m4-final-7767681b-performance`. These are short, unthrottled,
+fixture-based UI checks, not real-provider Search, field performance, hardware
+qualification or packaged authentication evidence. All local runs are terminal;
+browser ports 4173/18422 are released. This later checkpoint edit is not part
+of the verified head.
+
+Next integration keeps the existing `scripts/smoke-access-browser.py` and
+`.mjs` as the real-process harness. No second provider-only binary, in-memory
+vault, direct SQL seed, browser interception or alternate Search implementation
+is accepted. The default C1/M3 journey remains unchanged. A default-off provider
+transport feature, forwarded only by an explicitly built isolated fastid target,
+will keep canonical TMDB HTTPS URLs, Host/SNI, proxy/redirect rejection,
+bounded private CA trust and actual-address authorization. Production TMDB's
+Public-only declaration remains unchanged; a test-only Loopback declaration
+still passes through operator-deny policy. No dependency or migration is needed.
+The locked connector source proves an implicit HTTPS port preserves a nonzero
+resolver override port; a privileged port or network namespace is unnecessary.
+
+Provider inventory synthesizes missing rows; it does not persist them. The
+existing bearer-authorized credential-test owner supplies legitimate setup:
+call both `metadata.search/tests` and `metadata.read/tests` for TMDB, each
+performing the real governed `/3/configuration` exchange and persisting only
+its selected capability. Keep the enrolled bearer only until both complete,
+then clear it. No new startup reconciliation or Store virtual-state bypass is
+allocated. The harness owns ephemeral certificates and a synthetic per-run
+provider credential; neither it nor any Fasti credential reaches browser input,
+URLs, logs or receipts. Do not claim Python immutable-string zeroization.
+
+After that setup, the actual browser must Search, open each candidate's details,
+Create one Record, Attach the second candidate through the local Record picker,
+requery cached-only with zero upstream calls, and reload the canonical Record
+after daemon restart and fresh real sign-in. Stop the daemon before read-only
+SQLite checks of both exact identifiers and both action receipts. This proves
+data persistence, not session continuity. Commander owns fastid/harness/shared
+integration; bounded provider transport and browser-test leaves may be allocated
+separately only after explicit handoff. No writer is allocated by these maps.
+
+No-store details remain a separate proven M4 gap. Adding their full details
+view must preserve existing direct Create/Attach controls, must not fabricate a
+retained receipt, and must not store hidden provider payloads. Media-domain
+filters, retained/Live continuation and navigation cancellation also remain
+required. M4/PR #128 stays open and schema17/archive7 stay owned by M4.
+Access PR #130 is published at `cc701a47f55187199791b3acd2056b7f746ba511`,
+tree `e2a3180bed0748863cb3e829a06a677a0561a6b8`, but no merged-dev handoff
+has arrived. Do not integrate its unmerged branch or release migration18.
