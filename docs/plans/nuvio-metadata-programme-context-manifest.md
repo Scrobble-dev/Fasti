@@ -2736,3 +2736,15 @@ Access reported local mobile-fix commit
 `bbf38e6739e560a339663fb69228e0b0cd2c148450d4aa72cf6020a08046cf96`.
 This is a reported checkpoint, not an independently verified merge or handback.
 Its exclusive component ownership and M4's v17/archive-v7 ownership remain intact.
+
+Bounded Discover preparation confirms canonical numbering: M5 is Library and
+M6 is Discover. The current `discover-view.svelte` still presents single-provider
+Search, not catalog rails; the prior rail gap disposition remains current. M6
+must reuse M5's authoritative paged local query for smart rails and the existing
+provider/metadata owners for governed TMDB Discover. Catalog's approved
+15-minute fresh, 15-minute refresh grace and 24-hour error fallback are not Search
+receipt semantics. Preserve independent rail state, retry/focus, original policy
+deadlines, offline local reads, canonical navigation and bounded 10,000-Record
+evidence. M7 continues to own Collection bindings. Exact catalog admission and
+fixture implementation remain unresolved implementation work, not permission to
+invent contracts now. No M6 production files or shared surfaces are allocated.
