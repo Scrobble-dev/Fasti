@@ -3,7 +3,9 @@
 Status: bounded header, mobile layout and notice fixes implemented and
 independently reviewed. Latest combined browser run passes 52/52. Earlier
 41/41, 6/6 and canonical results retain their original source identities.
-Final-commit canonical and remaining delivery gates are pending. Unshipped.
+Exact clean implementation canonical gates pass at `20c0b030` (27 contract,
+11 portable). Persistent performance CI and remaining delivery gates are pending.
+Unshipped.
 Base: `62e10d2e9bd738ed5da425c008eb839f89cdbea5`.
 
 ## Ownership and purpose
@@ -330,7 +332,7 @@ documentation tree already has fresh canonical receipts. Preserve all raw
 failure evidence. No PR, push, merge, migration/archive allocation or shared-file
 release has occurred here; packaged Tauri authentication stays deferred.
 
-## GSTACK REVIEW REPORT
+## Historical GSTACK review report before notice authorization
 
 | Review | Trigger | Why | Runs | Status | Findings |
 | --- | --- | --- | --- | --- | --- |
@@ -347,3 +349,102 @@ green on 3cbd52b6, not a blanket qualification of later documentation commits.
 **UNRESOLVED DECISIONS:**
 - Shipping-convention disposition for the helper's missing VERSION assumption.
 - Separate notice design/behavior scope and performance-gate disposition.
+
+## Current delivery checkpoint, 2026-09-05
+
+The historical decisions above are superseded by the user's notice/version
+authorization recorded at the top. They are not renewed approval requests.
+Source `20c0b030e4bc31862a012f1b34c81e23774818a3`, tree
+`25b235d602be391601c2761cf6e3ef41c789e8e1`, passed the exact clean-source
+canonical gates: 27 contract and 11 portable checks. The combined browser suite
+passed 52/52; a fresh pending/settled Light/Dark matrix at 320/768/1440 passed 6/6.
+All 12 new images were inspected. Independent final source review found no
+concrete introduced defect. Final Impeccable and scoped security review completed
+with explicit evidence limits; no Codex Security service was used.
+
+Two fresh disposable Chromium traces at 320 and 1440 measured the held fixture
+confirmation and subsequent account navigation. Official installed DevTools
+insights reported CLS 0 for both routes at both widths. First-run observed INP
+was 19.919/24.520 ms; account-transition INP was 47.113/37.855 ms. Each trace had
+ten recognized interactions, one fixture-only POST and no page errors. These
+are unthrottled light-theme local lab observations, not Lighthouse CI, field
+performance or full authentication proof. Initial parser output lacked locale
+initialization and is explicitly superseded by reanalysis of the same traces.
+Raw trace SHA-256 identities:
+
+- 320: `649be2fe7be1eb1d380921dee424dd617414572c22fb5027c683f8fceef6e347`.
+- 1440: `8439181bdd9d2f90ed6d1b6f0dd0110b1fc29b9a04a13d0213660707c3f27954`.
+
+### Persistent performance sentinel gate
+
+M4 explicitly released one isolated Access browser-performance script/config
+and the Browser UI job wiring in `.github/workflows/ci.yml`. It retains all
+Search tests, runtime/shared ownership, migration v17 and archive v7. Any needed
+manifest/lockfile dependency edit requires naming the exact package and files
+to M4 first. No installed-host cache may become an undocumented CI dependency.
+
+M4 subsequently released exactly root `package.json` and `pnpm-lock.yaml` for
+development-only `lighthouse: 13.4.1` and `puppeteer-core: 25.8.0`. Official npm
+metadata confirms Apache-2.0 for both, Lighthouse Node >=22.19 and Puppeteer
+Node >=22.12. Lighthouse's Puppeteer range includes the exact selected version.
+The existing Node 22 CI line resolves a compatible current patch; local Node is
+24.20.0. Use Lighthouse's official timespan user-flow API, not a navigation-only
+report or a replacement raw-observer implementation. The Browser UI job runs the
+sentinel serially without retries and retains separate evidence. No `@lhci/cli`
+service or production instrumentation is proposed; this is Lighthouse in CI.
+
+The first run correctly failed both widths: Playwright's Chromium
+151.0.7922.34 lacks the legacy interaction trace event required by Lighthouse
+13.4.1, so INP was not applicable despite real fixture interactions. Official
+source for that exact Chromium tag proves the event is absent; the exact
+152.0.7977.82 source restores it. The local existing stable Chrome is that
+152 version. The sentinel therefore launches a fresh owned stable-Chrome profile
+through Puppeteer's supported channel option. Ordinary Playwright tests retain
+their configured browser. CI refreshes stable Chrome only inside its ephemeral
+job using the existing Playwright installer. No local user browser installation
+is changed, and no user browser profile is connected. Browser versions are
+recorded per run; this is not a pinned-browser guarantee. Missing metrics remain
+failures. No synthetic trace event, threshold waiver or alternative metric was
+introduced. The original 151 failure reports remain retained.
+
+Focused Lighthouse execution then passed both widths on existing Chrome
+152.0.7977.82: CLS 0 at each width, INP 95.946 ms at 320 and 54.199 ms at 1440.
+Each recorded three distinct positive interaction IDs, one intercepted fixture
+POST and no page error. These are working-source lab measurements, not final
+commit or hosted results. A negative control removed only the notice minimum
+in browser memory: both cases failed the unchanged CLS assertion, with
+0.03542709350585938 and 0.00655845359519676. The temporary test override was
+removed and the exact green-test SHA-256 restored:
+`35ce3ce30c749068302c6d9df96ef7bdb07610071c14760f8ca63742b99c18cc`.
+
+Green report SHA-256:
+`9887ec0d4df91f3bfd0ffd287f51fa1c9359ab87af673a516f0205fcc149a3de`.
+Negative-control report SHA-256:
+`69dc74aebc0a0f53ec53018679d53e2bc7d5aa666a9aac12d5f68b647ca5a165`.
+Independent source review confirmed fixture isolation, missing-metric failures,
+owned-browser cleanup and the serial/no-retry CI split. Parsed lock comparison
+confirmed 70 additions and no changed prior package or snapshot entry. Fresh
+audit output has no unsuppressed advisory entry; its metadata retains two high
+image-size findings covered by the unchanged existing patch/policy. No new waiver.
+
+Reproduce with installed Node >=22.19, the frozen pnpm lock and stable Chrome
+with the restored trace event (locally verified at 152.0.7977.82):
+`pnpm test:ui --grep @performance --workers=1 --retries=0 --output=test-results-performance`.
+The existing harness starts its own listeners and refuses occupied ports.
+Run ordinary cases separately with `pnpm test:ui --grep-invert @performance`.
+The CI-only Chrome refresh is not an instruction to replace a user's browser.
+Lighthouse outputs remain fixture-only local Vite timespan evidence. Final
+commit verification and exact hosted results remain delivery postconditions.
+
+1. Reuse repository-installed tooling if it can produce the specified metrics.
+   Do not call raw shifts CLS or event-duration maxima INP.
+2. If the required Lighthouse flow is unavailable, qualify and pin the smallest
+   test-only dependency with explicit shared-file coordination before editing.
+3. Add a bounded fixture-only delayed-confirmation sentinel, fail on absent
+   metrics, and retain its report. No real account mutation or native transport.
+4. Independently review it; run focused and final canonical/hosted gates before
+   merge. Existing tests and thresholds remain intact.
+
+Manual assistive-technology and full WCAG/EN conformance remain unclaimed.
+Packaged Tauri authentication remains deferred. No PR or merge of this browser
+slice has occurred; the C3 qualification PR can deliver independently.
