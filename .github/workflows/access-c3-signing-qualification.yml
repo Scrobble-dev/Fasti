@@ -28,6 +28,8 @@ permissions:
 jobs:
   qualification:
     name: Detached-signature qualification (not runtime)
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -61,6 +63,8 @@ jobs:
 
   advisories:
     name: Signing qualification dependency advisories
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

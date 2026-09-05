@@ -6,7 +6,8 @@ No Fasti production package depends on it.
 
 ## Run from the repository root
 
-Prerequisites: Rust 1.97.1, a C compiler, make, and the locked Cargo archives.
+Prerequisites: rustup with the Rust 1.97.1 toolchain and its rustfmt and Clippy
+components installed, a C compiler, make, and the locked Cargo archives.
 The native binding builds its bundled source. On a prepared Linux machine:
 
 ```sh
