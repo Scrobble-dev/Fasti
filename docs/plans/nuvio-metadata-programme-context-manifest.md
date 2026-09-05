@@ -2886,3 +2886,32 @@ Debug report, investigation workflow:
 Next: rebuild current source, run the exact clean canonical gate and native
 artwork regression, then continue M4's real Search host/UI integration. The
 investigation does not justify delaying that dependency-ready implementation.
+
+### 2026-09-05 — Clean optimization qualification and return to Search integration
+
+Verified clean source `3b64424f7bfe8daf47720881d4f8a8c68e31972e`, tree
+`b352044b7f879b6beab299828073262f17ff52b2`. Current-source release Store binary
+was rebuilt and restored to SHA-256
+`af8649699d1c37d3de9331c4a982fa9e1cc38331a5fd90e5d46aa41cfeb79fca`.
+The canonical `cargo xtask test pr` passed: both receipts identify that clean
+commit/tree, with 27/27 contract and 11/11 portable gates passing. Desktop release
+build, library tests (79 passed, 2 explicit ignores), and strict all-target clippy
+also passed. These are local results, not merge or release evidence.
+
+The real Desktop artwork regression passed again in a loopback-only network
+namespace with zero external routes before and after. Receipt:
+`target/native-artwork/run-u_hi50rl/receipt.json`; inspected screenshot:
+`target/native-artwork/run-u_hi50rl/record.png`. It identifies the same clean
+source and Desktop SHA-256
+`79fd85f171dd5e00de4847c373d67bc82e9c6b7a0e9f46a2e4cb56bbde8a610c`.
+Canonical Record artwork, reload and restored image decoded at 512 × 512;
+the query-bearing locator was rejected with an image error and zero dimensions.
+This does not qualify packaged authentication or cross-platform accessibility.
+
+The bounded investigation workflow is closed with the recorded concerns intact:
+the historical slow outlier remains unexplained. No second production performance
+change is justified. Continue the existing M4 Search vertical integration; first
+reuse the application outcome types and contracts conversion across transports.
+Commander remains the sole shared writer. Agents provide read-only conversion
+test and current-diff review. No Codex Security, dependency, migration, archive,
+Access component, push, merge or shared-file release is part of this step.
