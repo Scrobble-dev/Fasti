@@ -2046,15 +2046,16 @@ fn enrich_production_openapi(
         let search_outcomes = openapi
             .pointer_mut(&format!("/components/schemas/{name}/oneOf"))
             .and_then(Value::as_array_mut)
-            .context("SearchProviderPageResponse variants are absent")?;
+            .with_context(|| format!("{name} variants are absent"))?;
         ensure!(
             search_outcomes.len() == count,
-            "Search page outcome count changed"
+            "{name} variant count changed: expected {count}, got {}",
+            search_outcomes.len()
         );
         for variant in search_outcomes {
             variant
                 .as_object_mut()
-                .context("Search outcome must be an object")?
+                .with_context(|| format!("{name} outcome must be an object"))?
                 .insert("additionalProperties".to_owned(), Value::Bool(false));
         }
     }
