@@ -942,7 +942,7 @@ async fn send_json(
         .map_err(ProviderRuntimeError::response_invalid)
 }
 
-fn provider_status_error(
+pub(crate) fn provider_status_error(
     spec: ProviderSpec,
     status: reqwest::StatusCode,
 ) -> Option<ProviderRuntimeError> {
@@ -960,6 +960,19 @@ fn provider_status_error(
         return Some(ProviderRuntimeError::rate_limited(format!(
             "{} rate limited the request. Wait, then retry.",
             spec.label
+        )));
+    }
+    if matches!(
+        status,
+        reqwest::StatusCode::INTERNAL_SERVER_ERROR
+            | reqwest::StatusCode::BAD_GATEWAY
+            | reqwest::StatusCode::SERVICE_UNAVAILABLE
+            | reqwest::StatusCode::GATEWAY_TIMEOUT
+    ) {
+        return Some(ProviderRuntimeError::provider(format!(
+            "{} is temporarily unavailable (HTTP {}).",
+            spec.label,
+            status.as_u16()
         )));
     }
     (status != reqwest::StatusCode::OK).then(|| {
@@ -1643,6 +1656,38 @@ mod tests {
         let tmdb = provider_status_error(TMDB_SPEC, reqwest::StatusCode::BAD_REQUEST)
             .expect("TMDB 400 is a provider problem");
         assert_eq!(tmdb.problem_code(), ProblemCode::ProviderResponseInvalid);
+    }
+
+    #[test]
+    fn http_status_mapping_distinguishes_outages_from_invalid_responses() {
+        for spec in [GOOGLE_BOOKS_SPEC, TMDB_SPEC] {
+            assert!(provider_status_error(spec, reqwest::StatusCode::OK).is_none());
+            for (status, expected) in [
+                (401, ProblemCode::ProviderCredentialInvalid),
+                (403, ProblemCode::ProviderCredentialInvalid),
+                (404, ProblemCode::ProviderResponseInvalid),
+                (429, ProblemCode::ProviderRateLimited),
+                (500, ProblemCode::ProviderUnavailable),
+                (501, ProblemCode::ProviderResponseInvalid),
+                (502, ProblemCode::ProviderUnavailable),
+                (503, ProblemCode::ProviderUnavailable),
+                (504, ProblemCode::ProviderUnavailable),
+                (505, ProblemCode::ProviderResponseInvalid),
+            ] {
+                let error =
+                    provider_status_error(spec, reqwest::StatusCode::from_u16(status).unwrap())
+                        .unwrap();
+                assert_eq!(
+                    error.problem_code(),
+                    expected,
+                    "{} HTTP {status}",
+                    spec.provider
+                );
+                if expected == ProblemCode::ProviderUnavailable {
+                    assert_eq!(error.kind(), crate::ProviderRuntimeErrorKind::Provider);
+                }
+            }
+        }
     }
 
     #[test]

@@ -889,12 +889,31 @@ mod tests {
     async fn only_transient_upstream_failures_allow_stale_fallback() {
         for (error, fallback) in [
             (ProviderRuntimeError::network("offline"), true),
+            (ProviderRuntimeError::provider("upstream outage"), true),
             (ProviderRuntimeError::rate_limited("limit"), true),
             (ProviderRuntimeError::credential("denied"), false),
             (ProviderRuntimeError::configuration("policy"), false),
             (ProviderRuntimeError::vault("locked"), false),
             (ProviderRuntimeError::response_invalid("invalid"), false),
-        ] {
+        ]
+        .into_iter()
+        .chain(
+            crate::providers::registry()
+                .iter()
+                .filter(|spec| spec.runtime_available)
+                .flat_map(|spec| {
+                    [401, 403, 404, 429, 500, 501, 502, 503, 504, 505].map(|status| {
+                        (
+                            crate::providers::provider_status_error(
+                                *spec,
+                                reqwest::StatusCode::from_u16(status).unwrap(),
+                            )
+                            .unwrap(),
+                            matches!(status, 429 | 500 | 502 | 503 | 504),
+                        )
+                    })
+                }),
+        ) {
             let mut stale = page();
             stale.cache_state = SearchCacheState::StaleOnError;
             let (service, persistence, request) = setup(None, Some(stale));

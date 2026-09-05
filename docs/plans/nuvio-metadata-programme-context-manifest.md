@@ -1211,3 +1211,31 @@ Run the unchanged canonical PR gate on the next clean checkpoint commit with
 It includes contract verification, docs verification and the portable B1 checks.
 M4 still owns v16/archive v6 and every shared integration surface; C2 activation
 waits for M4's actual merged handoff. No v17 or shared-file release has occurred.
+
+### M4 exact C2-foundation gate and provider outage correction — 2026-09-05
+
+The full canonical PR gate passed on clean commit
+`ebbb15bf0c8bbfe3374b9399d99472d8c63dee96`, tree
+`973d90f35f745141989bb10793debe95e95ce604`. Both local receipts identify that
+exact clean source: 27 contract gates and 11 portable gates passed; documentation
+verification also passed. This is local software evidence, not new hardware,
+deployment or M4 completion evidence.
+
+The subsequent read-only offline audit found that real HTTP 500/502/503/504
+responses were mapped to invalid-response errors, bypassing eligible stale Search
+pages. The shared status mapper now reports provider-unavailable for exactly those
+statuses. Search, provider checks and detail fetches reuse this owner; credential,
+policy, vault and malformed-response boundaries are unchanged. Actual mapper
+results enter the stale-fallback regression for each active provider, including
+negative 401/403/404/501/505 cases. All 56 provider-runtime tests and strict
+all-target Clippy pass after the change. The preceding full-gate receipt does not
+cover this later diff.
+
+The audit also confirmed an open section-18 implementation requirement: response
+cache directives currently do not shorten the fixed Search lifetimes. Address it
+through existing response and receipt-lifetime owners, not another cache/schema.
+Fresh-page reuse, stale-page reuse and 24-hour candidate evidence retention remain
+separate. In particular, zero freshness is not equivalent to no storage. Resolve
+no-store/private admission and historical-save semantics explicitly before claiming
+response-policy coverage. Public provider Search composition remains unfinished;
+do not confuse backend receipts with verified browser offline/partial behavior.
