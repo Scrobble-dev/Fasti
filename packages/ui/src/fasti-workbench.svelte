@@ -1,19 +1,17 @@
 <script lang="ts">
   import { FastiAbortError, FastiProblemError } from "@fasti/sdk";
   import { flushSync, onMount, tick } from "svelte";
-  import {
-    IconChevronRight,
-    IconActivityHeartbeat,
-    IconDatabase,
-    IconLayoutSidebar,
-    IconLayoutSidebarLeftExpand,
-    IconPalette,
-    IconPlugConnected,
-    IconSettings,
-    IconShieldCheck,
-    IconLogout,
-    IconUserCircle,
-  } from "@tabler/icons-svelte";
+  import IconChevronRight from "@tabler/icons-svelte/icons/chevron-right";
+  import IconActivityHeartbeat from "@tabler/icons-svelte/icons/activity-heartbeat";
+  import IconDatabase from "@tabler/icons-svelte/icons/database";
+  import IconLayoutSidebar from "@tabler/icons-svelte/icons/layout-sidebar";
+  import IconLayoutSidebarLeftExpand from "@tabler/icons-svelte/icons/layout-sidebar-left-expand";
+  import IconPalette from "@tabler/icons-svelte/icons/palette";
+  import IconPlugConnected from "@tabler/icons-svelte/icons/plug-connected";
+  import IconSettings from "@tabler/icons-svelte/icons/settings";
+  import IconShieldCheck from "@tabler/icons-svelte/icons/shield-check";
+  import IconLogout from "@tabler/icons-svelte/icons/logout";
+  import IconUserCircle from "@tabler/icons-svelte/icons/user-circle";
   import AccountSecurityView from "./account-security-view.svelte";
   import AuthModal from "./auth-modal.svelte";
   import GlobalSearch from "./global-search.svelte";

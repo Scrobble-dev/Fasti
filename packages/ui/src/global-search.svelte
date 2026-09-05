@@ -1,10 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import {
-    IconArrowRight,
-    IconCommand,
-    IconSearch,
-  } from "@tabler/icons-svelte";
+  import IconArrowRight from "@tabler/icons-svelte/icons/arrow-right";
+  import IconCommand from "@tabler/icons-svelte/icons/command";
+  import IconSearch from "@tabler/icons-svelte/icons/search";
   import type { MediaRecord, NavItemConfig } from "./types.js";
 
   interface Props {

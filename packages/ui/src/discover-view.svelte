@@ -5,7 +5,8 @@
     ProviderSearchCandidate,
   } from "./types.js";
   import { hostProblemText } from "./host-problem.js";
-  import { IconCompass, IconSearch } from "@tabler/icons-svelte";
+  import IconCompass from "@tabler/icons-svelte/icons/compass";
+  import IconSearch from "@tabler/icons-svelte/icons/search";
 
   interface Props {
     providerCredentials?: ProviderCredentialStatus[];
