@@ -1,4 +1,4 @@
-use crate::metadata::run_blocking;
+use crate::metadata::{provider_response_locale, run_blocking};
 use crate::{
     ProviderRuntime, ProviderRuntimeError, ProviderRuntimeErrorKind, ProviderSearchInput,
     ProviderSearchPage,
@@ -39,10 +39,11 @@ impl ProviderSearchService {
 
     pub async fn search_page(
         &self,
-        request: SearchPageRequest,
+        mut request: SearchPageRequest,
         offline: bool,
         lease: ProviderOperationLease,
     ) -> ApplicationResult<ProviderSearchOutcome> {
+        request.query = effective_query(&request.query, request.correlation_id)?;
         let runtime = Arc::clone(&self.runtime);
         let query = request.query.clone();
         let policy = request.outbound_policy.clone();
@@ -198,6 +199,32 @@ impl ProviderSearchService {
     }
 }
 
+fn effective_query(
+    query: &fasti_application::SearchProviderQuery,
+    id: fasti_domain::RequestCorrelationId,
+) -> ApplicationResult<fasti_application::SearchProviderQuery> {
+    let capability = CapabilityKey::SearchMetadata;
+    let locale =
+        provider_response_locale(query.provider().as_str(), query.locale(), capability, id)?;
+    // Current TMDB multi-search and Google Books routes have no response-region
+    // parameter. Regional enrichment remains a separate, route-specific owner.
+    fasti_application::SearchProviderQuery::try_new(
+        query.query().clone(),
+        query.provider().clone(),
+        query.page(),
+        locale,
+        None,
+        query.grains().to_vec(),
+    )
+    .map_err(|_| {
+        Box::new(fasti_application::FastiProblem::from_code(
+            ProblemCode::IntegrityFailed,
+            capability,
+            id,
+        ))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -261,7 +288,7 @@ mod tests {
             ProfileGrantId::new_v7(),
             1,
         );
-        let request = SearchPageRequest {
+        let mut request = SearchPageRequest {
             correlation_id: RequestCorrelationId::new_v7(),
             access: access.into(),
             query: SearchProviderQuery::try_new(
@@ -276,6 +303,7 @@ mod tests {
             outbound_policy: OutboundAccessPolicy::default(),
             terms_revision: "fixture-terms".into(),
         };
+        request.query = effective_query(&request.query, request.correlation_id).unwrap();
         let prepared = PreparedSearchPage {
             partition: SearchReceiptPartition::try_new(
                 AuthorizedApplicationAccess::new(
@@ -331,6 +359,10 @@ mod tests {
             &self,
             request: &SearchPageRequest,
         ) -> ApplicationResult<PreparedSearchPage> {
+            assert_eq!(
+                request.query,
+                effective_query(&request.query, request.correlation_id).unwrap()
+            );
             self.calls.lock().unwrap().push("prepare");
             if self.deny_prepare.load(Ordering::SeqCst) {
                 return Err(Box::new(FastiProblem::forbidden(
@@ -403,6 +435,70 @@ mod tests {
 
     async fn lease() -> ProviderOperationLease {
         ProviderOperationLease::new(Arc::new(tokio::sync::Mutex::new(())).lock_owned().await)
+    }
+
+    #[test]
+    fn effective_search_coordinates_match_provider_routes() {
+        let id = RequestCorrelationId::new_v7();
+        for provider in [crate::TMDB_PROVIDER, crate::GOOGLE_BOOKS_PROVIDER] {
+            let query = |locale: Option<&str>, region: Option<&str>| {
+                SearchProviderQuery::try_new(
+                    SearchQuery::try_new("Fixture").unwrap(),
+                    ProviderId::try_new(provider).unwrap(),
+                    2,
+                    locale.map(|value| MetadataLocale::try_new(value).unwrap()),
+                    region.map(|value| MetadataRegion::try_new(value).unwrap()),
+                    vec![Grain::Film],
+                )
+                .unwrap()
+            };
+            let default = effective_query(&query(None, None), id).unwrap();
+            let explicit = effective_query(&query(Some("en-US"), Some("US")), id).unwrap();
+            let french = effective_query(&query(Some("fr-FR"), Some("FR")), id).unwrap();
+            assert_eq!(default, explicit);
+            assert_eq!(
+                default.receipt_context().digest(),
+                explicit.receipt_context().digest()
+            );
+            assert_eq!(french.region(), None);
+            assert_eq!(french.page(), 2);
+            assert_eq!(french.grains(), &[Grain::Film]);
+            assert_eq!(french.query().as_str(), "Fixture");
+            assert_eq!(french.provider().as_str(), provider);
+            if provider == crate::TMDB_PROVIDER {
+                assert_eq!(default.locale().map(MetadataLocale::as_str), Some("en-us"));
+                assert_eq!(french.locale().map(MetadataLocale::as_str), Some("fr-fr"));
+                assert_ne!(default.digest(), french.digest());
+            } else {
+                assert_eq!(french, default);
+                assert_eq!(french.locale(), None);
+            }
+            assert_eq!(effective_query(&french, id).unwrap(), french);
+        }
+    }
+
+    #[tokio::test]
+    async fn public_search_normalizes_before_empty_cache_and_offline_reads() {
+        for offline in [false, true] {
+            let (service, persistence, mut request) = setup(Some(page()), None);
+            request.query = SearchProviderQuery::try_new(
+                request.query.query().clone(),
+                request.query.provider().clone(),
+                1,
+                None,
+                Some(MetadataRegion::try_new("FR").unwrap()),
+                vec![],
+            )
+            .unwrap();
+            let outcome = service
+                .search_page(request, offline, lease().await)
+                .await
+                .unwrap();
+            assert!(
+                matches!(outcome, ProviderSearchOutcome::Page { page, upstream_problem: None } if page.candidates.is_empty())
+            );
+            assert_eq!(*persistence.calls.lock().unwrap(), ["prepare", "fresh"]);
+        }
     }
 
     #[tokio::test]
