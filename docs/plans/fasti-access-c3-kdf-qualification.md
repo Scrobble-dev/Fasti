@@ -179,7 +179,7 @@ plus ECHILD after cleanup; no instrumented branch-coverage claim is made.
 
 One fresh measured run exited0/SUCCESS, service runtime18.462s, invocation
 `ed6f1a9bfc5a4342946c5b9d9e92a4cb`. M4 explicitly released and regained the
-CPU slot; no programme build or browser launch overlapped this measurement.
+CPU slot; no local programme build or browser launch overlapped this measurement.
 In-process checks and a separately captured active/running systemd unit agreed
 on96MiB, one-CPU quota, zero swap, CPU0 affinity and core0. Active Result fields
 were not treated as terminal proof; terminal output established success.
