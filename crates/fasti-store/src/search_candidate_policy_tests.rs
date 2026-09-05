@@ -107,14 +107,15 @@ mod search_candidate_policy_tests {
 
     #[test]
     fn candidate_policy_reusable_zero_freshness_remains_explicit_stale_save_evidence() {
+        for freshness in [StdDuration::ZERO, StdDuration::from_nanos(1)] {
         let (node, request) = setup();
         let command = seed(
             &node,
             &request,
             &observed_policy(
                 ProviderResponseReuse::Reusable,
-                now() - Duration::seconds(601),
-                Some(StdDuration::ZERO),
+                chrono::DateTime::from_timestamp(now().timestamp() - 601, 0).unwrap(),
+                Some(freshness),
             ),
         );
         let snapshot = node
@@ -135,6 +136,7 @@ mod search_candidate_policy_tests {
             saved.search_response_digest,
             *snapshot.receipt.response_digest()
         );
+        }
     }
 
     #[test]

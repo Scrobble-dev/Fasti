@@ -12,7 +12,8 @@ const MAX_DIRECTIVES: usize = 128;
 #[cfg(test)]
 include!("cache_policy_tests.rs");
 
-pub(crate) fn observe(
+/// Observe one governed response before consuming its body. Raw headers remain host-only.
+pub fn observe(
     headers: &HeaderMap,
     received_at: DateTime<Utc>,
     request_delay: Duration,

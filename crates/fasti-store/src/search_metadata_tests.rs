@@ -60,6 +60,7 @@ mod candidate_metadata_tests {
                 Grain::Film,
                 snapshot.receipt.candidate().identifier().clone(),
                 fields,
+                snapshot.response_policy,
             ))
     }
 
@@ -78,8 +79,7 @@ mod candidate_metadata_tests {
                     record,
                     field.field_key(),
                     CAPABILITY,
-                    RequestCorrelationId::new_v7(),
-                )
+                    RequestCorrelationId::new_v7(), crate::kernel::now())
                 .unwrap();
                 assert_eq!(values.len(), 1);
                 values.remove(0)
@@ -138,6 +138,7 @@ mod candidate_metadata_tests {
                 record,
                 snapshot.receipt.candidate().identifier().clone(),
                 replay,
+                snapshot.response_policy,
             ))
             .unwrap();
         assert_eq!(source_rows(&node), before);
@@ -210,6 +211,7 @@ mod candidate_metadata_tests {
                 record,
                 snapshot.receipt.candidate().identifier().clone(),
                 conflict.metadata_fields().unwrap(),
+                conflict.response_policy,
             ))
             .unwrap_err();
         assert_eq!(error.code(), ProblemCode::IntegrityFailed);

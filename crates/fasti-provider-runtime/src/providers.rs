@@ -421,6 +421,16 @@ impl ProviderCandidate {
         self.response_cache_policy.as_ref()
     }
 
+    pub fn recorded_response_policy(
+        &self,
+    ) -> Result<&ProviderResponseCachePolicy, ProviderRuntimeError> {
+        self.response_cache_policy().ok_or_else(|| {
+            ProviderRuntimeError::response_invalid(
+                "The provider response has no recorded cache policy.",
+            )
+        })
+    }
+
     fn with_response_cache_policy(mut self, policy: ProviderResponseCachePolicy) -> Self {
         self.response_cache_policy = Some(policy);
         self
@@ -477,17 +487,31 @@ impl ProviderCandidate {
         locale: Option<MetadataLocale>,
         region: Option<fasti_domain::MetadataRegion>,
     ) -> Result<Vec<ProviderMetadataField>, ProviderRuntimeError> {
-        let fetched_at = ReceivedAt::from_application_clock(chrono::Utc::now());
+        let policy = self.recorded_response_policy()?;
+        let fetched_at = ReceivedAt::from_application_clock(policy.received_at());
+        let (fresh_until, _) = policy
+            .deadlines(
+                std::time::Duration::from_secs(METADATA_FRESH_SECONDS as u64),
+                std::time::Duration::from_secs(
+                    fasti_domain::METADATA_STALE_ON_ERROR_SECONDS as u64,
+                ),
+            )
+            .ok_or_else(|| {
+                ProviderRuntimeError::response_invalid("The provider response cannot be stored.")
+            })?;
+        let expires_at = (fresh_until > fetched_at.value()).then_some(fresh_until);
         provider_candidate_metadata_fields(
             &self.search_evidence()?,
             locale,
             region,
             &self.evidence_digest,
             fetched_at,
-            fetched_at
-                .value()
-                .checked_add_signed(chrono::Duration::seconds(METADATA_FRESH_SECONDS)),
-            FieldClaimStatus::Fresh,
+            expires_at,
+            if expires_at.is_some() {
+                FieldClaimStatus::Fresh
+            } else {
+                FieldClaimStatus::Stale
+            },
         )
         .map_err(|_| {
             ProviderRuntimeError::response_invalid("The provider metadata evidence is invalid.")
@@ -1412,11 +1436,17 @@ mod tests {
     #[test]
     fn metadata_conversion_uses_one_received_time_and_existing_freshness_policy() {
         let candidate = search_page_fixture().candidates.remove(0);
-        let before = chrono::Utc::now();
+        let observed = candidate.recorded_response_policy().unwrap().received_at();
         let fields = candidate.metadata_fields(None, None).unwrap();
-        let after = chrono::Utc::now();
         let fetched = fields[0].claim().fetched_at();
-        assert!(before <= fetched && fetched <= after);
+        assert_eq!(fetched, observed);
+        for (original, repeated) in fields
+            .iter()
+            .zip(candidate.metadata_fields(None, None).unwrap())
+        {
+            assert_eq!(original.claim().fetched_at(), repeated.claim().fetched_at());
+            assert_eq!(original.claim().expires_at(), repeated.claim().expires_at());
+        }
         for field in fields {
             let claim = field.claim();
             assert_eq!(claim.fetched_at(), fetched);
@@ -1472,6 +1502,12 @@ mod tests {
             .join(",");
         let body = format!(r#"{{"totalItems":12,"items":[{items}]}}"#);
         let page = parse_google_candidates(body.as_bytes(), 1).expect("provider candidates");
+        assert!(page.candidates[0].metadata_fields(None, None).is_err());
+        let page = page.with_response_cache_policy(crate::cache_policy::observe(
+            &reqwest::header::HeaderMap::new(),
+            chrono::Utc::now(),
+            std::time::Duration::ZERO,
+        ));
         assert_eq!(page.next_page, Some(2));
         let candidates = page.candidates;
 
@@ -1796,6 +1832,11 @@ mod tests {
         }"#;
         let candidates = parse_tmdb_candidates(body, 1)
             .expect("TMDB candidates")
+            .with_response_cache_policy(crate::cache_policy::observe(
+                &reqwest::header::HeaderMap::new(),
+                chrono::Utc::now(),
+                std::time::Duration::ZERO,
+            ))
             .candidates;
 
         assert_eq!(candidates.len(), 2);

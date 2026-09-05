@@ -101,7 +101,10 @@ mod candidate_details_tests {
             &self,
             _: &fasti_application::SearchCandidateActionCommand,
             _: &fasti_application::SearchCandidateActionPreparation,
-            _: Option<&[fasti_application::ProviderMetadataField]>,
+            _: Option<(
+                &[fasti_application::ProviderMetadataField],
+                &ProviderResponseCachePolicy,
+            )>,
         ) -> ApplicationResult<fasti_application::SearchCandidateActionReceipt> {
             panic!("detail reads must not commit actions")
         }

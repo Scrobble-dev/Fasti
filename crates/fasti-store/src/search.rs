@@ -272,7 +272,10 @@ impl SearchPersistencePort for SqliteKernel {
         &self,
         command: &fasti_application::SearchCandidateActionCommand,
         prepared: &fasti_application::SearchCandidateActionPreparation,
-        refetched_fields: Option<&[fasti_application::ProviderMetadataField]>,
+        refetched_fields: Option<(
+            &[fasti_application::ProviderMetadataField],
+            &fasti_application::ProviderResponseCachePolicy,
+        )>,
     ) -> ApplicationResult<fasti_application::SearchCandidateActionReceipt> {
         crate::search_actions::commit(self, command, prepared, refetched_fields)
     }

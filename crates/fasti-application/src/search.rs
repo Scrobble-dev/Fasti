@@ -639,7 +639,10 @@ pub trait SearchPersistencePort: Send + Sync {
         &self,
         command: &SearchCandidateActionCommand,
         prepared: &SearchCandidateActionPreparation,
-        refetched_fields: Option<&[crate::ProviderMetadataField]>,
+        refetched_fields: Option<(
+            &[crate::ProviderMetadataField],
+            &crate::ProviderResponseCachePolicy,
+        )>,
     ) -> ApplicationResult<SearchCandidateActionReceipt>;
 }
 

@@ -141,7 +141,8 @@ impl ProviderSearchService {
                     if fresh.search_evidence()?.identifier() != candidate.identifier() {
                         return Err(ProviderRuntimeError::response_invalid("The provider detail identity does not match the selected candidate."));
                     }
-                    fresh.metadata_fields(locale, None)
+                    let policy = *fresh.recorded_response_policy()?;
+                    fresh.metadata_fields(locale, None).map(|fields| (fields, policy))
                 }))
             }
         };
@@ -177,7 +178,13 @@ impl ProviderSearchService {
         };
         let persistence = Arc::clone(&self.persistence);
         let receipt = run_blocking(&lease, capability, id, move || {
-            persistence.commit_search_candidate_action(&command, &prepared, fields.as_deref())
+            persistence.commit_search_candidate_action(
+                &command,
+                &prepared,
+                fields
+                    .as_ref()
+                    .map(|(fields, policy)| (fields.as_slice(), policy)),
+            )
         })
         .await?;
         Ok(ProviderSearchActionOutcome::Saved(Box::new(receipt)))
@@ -725,7 +732,10 @@ mod tests {
             &self,
             _: &fasti_application::SearchCandidateActionCommand,
             _: &fasti_application::SearchCandidateActionPreparation,
-            _: Option<&[fasti_application::ProviderMetadataField]>,
+            _: Option<(
+                &[fasti_application::ProviderMetadataField],
+                &fasti_application::ProviderResponseCachePolicy,
+            )>,
         ) -> ApplicationResult<fasti_application::SearchCandidateActionReceipt> {
             panic!("page orchestration must not commit actions")
         }

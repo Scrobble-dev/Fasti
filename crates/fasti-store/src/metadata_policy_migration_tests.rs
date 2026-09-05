@@ -142,7 +142,11 @@ mod metadata_policy_migration_tests {
     }
 
     #[cfg(target_os = "linux")]
-    fn assert_archive_roundtrip(fixture: &Fixture, format: u32) {
+    fn assert_archive_roundtrip(
+        fixture: &Fixture,
+        format: u32,
+        check_restored: impl FnOnce(&Connection),
+    ) {
         use crate::archive::{ArchiveLimits, ArchiveWriter};
         use crate::kernel::LockedDataRoot;
         use crate::portability::{schema_fingerprint, stream_archive_entity};
@@ -331,12 +335,13 @@ mod metadata_policy_migration_tests {
                 "node-local {table}"
             );
         }
+        check_restored(&restored);
     }
 
     #[cfg(target_os = "linux")]
     #[test]
     fn metadata_policy_migration_genuine_v16_archive_v6_restores_original_bytes_into_v17() {
-        assert_archive_roundtrip(&populated_v16(), 6);
+        assert_archive_roundtrip(&populated_v16(), 6, |_| {});
     }
 
     #[cfg(target_os = "linux")]
@@ -377,7 +382,201 @@ mod metadata_policy_migration_tests {
                 .unwrap(),
             1
         );
-        assert_archive_roundtrip(&fixture, 7);
+        assert_archive_roundtrip(&fixture, 7, |_| {});
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn metadata_policy_v7_restore_preserves_restriction_buried_below_256_null_observations() {
+        use crate::metadata::{
+            load_field_claims, load_rating_claims, load_record_metadata_batch, write_field_claim,
+            write_rating_claim,
+        };
+        use fasti_domain::{FieldClaim, FieldKey, RatingClaim, RatingScale, ReceivedAt};
+
+        let mut fixture = populated_v16();
+        migrate_v17(&fixture.connection).unwrap();
+        let observed = crate::kernel::now() - Duration::seconds(30);
+        let key = FieldKey::try_new("core.original_title").unwrap();
+        let capability = CapabilityKey::ReadMetadataProjection;
+        let id = RequestCorrelationId::new_v7();
+        let restriction = ProviderResponseCachePolicy::new(
+            ProviderResponseReuse::ValidateEveryReuse,
+            observed,
+            StdDuration::ZERO,
+            Some(StdDuration::from_secs(120)),
+            None,
+        )
+        .to_canonical_json();
+        {
+            let transaction = fixture.connection.transaction().unwrap();
+            for ordinal in 0..=256 {
+                let fetched = observed + Duration::microseconds(ordinal);
+                let expires = (ordinal > 0).then(|| fetched + Duration::hours(1));
+                let status = if ordinal == 0 {
+                    FieldClaimStatus::Stale
+                } else {
+                    FieldClaimStatus::Fresh
+                };
+                let provenance = FieldClaimProvenance::try_new(
+                    MetadataProviderId::try_new("tmdb").unwrap(),
+                    NamespaceKey::try_new("tmdb.movie").unwrap(),
+                    "42",
+                    None,
+                    None,
+                    None,
+                    Sha256Digest::from_bytes(&[7; 32]),
+                )
+                .unwrap();
+                let field = FieldClaim::try_new_provider(
+                    MetadataClaimId::new_v7(),
+                    fixture.record,
+                    key.clone(),
+                    "Restricted restored original title",
+                    provenance.clone(),
+                    ReceivedAt::from_application_clock(fetched),
+                    expires,
+                    status,
+                )
+                .unwrap();
+                let rating = RatingClaim::try_new(
+                    MetadataClaimId::new_v7(),
+                    fixture.record,
+                    8_750,
+                    RatingScale::try_new(0, 10_000).unwrap(),
+                    provenance,
+                    ReceivedAt::from_application_clock(fetched),
+                    expires,
+                    status,
+                )
+                .unwrap();
+                let policy = (ordinal == 0).then_some(restriction.as_str());
+                write_field_claim(
+                    &transaction,
+                    fixture.workspace,
+                    fixture.record,
+                    &key,
+                    &field,
+                    capability,
+                    id,
+                    policy,
+                )
+                .unwrap();
+                write_rating_claim(
+                    &transaction,
+                    fixture.workspace,
+                    &rating,
+                    capability,
+                    id,
+                    policy,
+                )
+                .unwrap();
+            }
+            transaction.commit().unwrap();
+        }
+        assert_archive_roundtrip(&fixture, 7, |restored| {
+            let before = preserved_rows(restored);
+            let ratings_before = rows(
+                restored,
+                "SELECT * FROM metadata_rating_claims ORDER BY claim_id",
+            );
+            assert_eq!(ratings_before.len(), 257);
+            let registered_before =
+                rows(restored, "SELECT * FROM metadata_claims ORDER BY claim_id");
+            assert_eq!(registered_before.len(), 515);
+            for (table, filter) in [
+                (
+                    "metadata_claim_provenance",
+                    "AND evidence.field_key='core.original_title'",
+                ),
+                ("metadata_rating_claims", ""),
+            ] {
+                let mut statement = restored.prepare(&format!(
+                    "SELECT registry.response_policy_json FROM {table} evidence JOIN metadata_claims registry ON registry.claim_id=evidence.claim_id WHERE evidence.record_id=?1 {filter} ORDER BY evidence.fetched_at DESC LIMIT 256"
+                )).unwrap();
+                let newest = statement
+                    .query_map([fixture.record.to_string()], |row| {
+                        row.get::<_, Option<String>>(0)
+                    })
+                    .unwrap()
+                    .collect::<Result<Vec<_>>>()
+                    .unwrap();
+                assert_eq!(newest.len(), 256);
+                assert!(
+                    newest.iter().all(Option::is_none),
+                    "restriction remains below the restored payload window: {table}"
+                );
+            }
+            let read_at = crate::kernel::now();
+            assert!(load_field_claims(
+                restored,
+                fixture.workspace,
+                fixture.record,
+                &key,
+                capability,
+                id,
+                read_at
+            )
+            .unwrap()
+            .is_empty());
+            assert!(load_rating_claims(
+                restored,
+                fixture.workspace,
+                fixture.record,
+                capability,
+                id,
+                read_at
+            )
+            .unwrap()
+            .is_empty());
+            let profile: String = restored
+                .query_row("SELECT profile_id FROM profiles", [], |row| row.get(0))
+                .unwrap();
+            let keys = [
+                "core.title",
+                "core.original_title",
+                "core.overview",
+                "core.poster_url",
+                "core.release_year",
+            ]
+            .map(|value| FieldKey::try_new(value).unwrap());
+            let batch = load_record_metadata_batch(
+                restored,
+                fixture.workspace,
+                profile.parse().unwrap(),
+                &[fixture.record],
+                &keys,
+                capability,
+                id,
+            )
+            .unwrap();
+            assert_eq!(
+                batch
+                    .resolve(fixture.record, &key, capability, id)
+                    .unwrap()
+                    .value(),
+                None
+            );
+            assert_eq!(
+                batch
+                    .resolve(fixture.record, &keys[0], capability, id)
+                    .unwrap()
+                    .value(),
+                Some("Private preserved title")
+            );
+            assert_eq!(preserved_rows(restored), before);
+            assert_eq!(
+                rows(
+                    restored,
+                    "SELECT * FROM metadata_rating_claims ORDER BY claim_id"
+                ),
+                ratings_before
+            );
+            assert_eq!(
+                rows(restored, "SELECT * FROM metadata_claims ORDER BY claim_id"),
+                registered_before
+            );
+        });
     }
 
     fn claim_columns(connection: &Connection) -> Vec<Vec<Value>> {

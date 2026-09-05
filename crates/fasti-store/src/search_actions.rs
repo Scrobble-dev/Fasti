@@ -94,8 +94,9 @@ pub(crate) fn decode_receipt(
                 }
         }
         SearchCandidateEvidenceMode::Refetch => {
-            receipt.initial_status == FieldClaimStatus::Fresh
-                && receipt.expires_at.is_some_and(|expiry| {
+            match (receipt.initial_status, receipt.expires_at) {
+                (FieldClaimStatus::Stale, None) => true,
+                (FieldClaimStatus::Fresh, Some(expiry)) => {
                     expiry > receipt.fetched_at
                         && receipt
                             .fetched_at
@@ -103,7 +104,9 @@ pub(crate) fn decode_receipt(
                                 fasti_domain::METADATA_FRESH_SECONDS,
                             ))
                             .is_some_and(|cap| expiry <= cap)
-                })
+                }
+                _ => false,
+            }
         }
     };
     if !action_valid
@@ -224,7 +227,10 @@ pub(crate) fn commit(
     kernel: &SqliteKernel,
     command: &SearchCandidateActionCommand,
     prepared: &SearchCandidateActionPreparation,
-    refetched_fields: Option<&[ProviderMetadataField]>,
+    refetched_fields: Option<(
+        &[ProviderMetadataField],
+        &fasti_application::ProviderResponseCachePolicy,
+    )>,
 ) -> ApplicationResult<SearchCandidateActionReceipt> {
     let request = &command.request;
     let id = request.correlation_id;
@@ -240,7 +246,7 @@ pub(crate) fn commit(
         return Ok(*receipt);
     }
     let cached_fields;
-    let (snapshot, fields) = match (&current, prepared) {
+    let (snapshot, fields, response_policy) = match (&current, prepared) {
         (
             SearchCandidateActionPreparation::Cached(current),
             SearchCandidateActionPreparation::Cached(original),
@@ -248,7 +254,7 @@ pub(crate) fn commit(
             cached_fields = current
                 .metadata_fields()
                 .map_err(|_| problem(ProblemCode::IntegrityFailed, id))?;
-            (current, cached_fields.as_slice())
+            (current, cached_fields.as_slice(), &current.response_policy)
         }
         (
             SearchCandidateActionPreparation::Refetch(current),
@@ -257,10 +263,9 @@ pub(crate) fn commit(
             && current.provider_authority_fingerprint
                 == original.provider_authority_fingerprint =>
         {
-            (
-                &current.candidate,
-                refetched_fields.ok_or_else(|| problem(ProblemCode::ValidationFailed, id))?,
-            )
+            let (fields, policy) =
+                refetched_fields.ok_or_else(|| problem(ProblemCode::ValidationFailed, id))?;
+            (&current.candidate, fields, policy)
         }
         _ => return Err(problem(ProblemCode::Forbidden, id)),
     };
@@ -333,6 +338,14 @@ pub(crate) fn commit(
     }
     SearchCandidate::try_new(normalized).map_err(|_| problem(ProblemCode::ValidationFailed, id))?;
     let access = authorize_application_transaction(&tx, CAPABILITY, &request.access, id)?;
+    crate::metadata::validate_provider_fields(
+        identifier,
+        None,
+        fields,
+        response_policy,
+        CAPABILITY,
+        id,
+    )?;
     let mapping = provider_identity_mapping_for_grain(request.provider.as_str(), request.grain)
         .ok_or_else(|| problem(ProblemCode::InvalidIdentifier, id))?;
     register_namespace_tx(
@@ -383,6 +396,7 @@ pub(crate) fn commit(
         fields,
         CAPABILITY,
         id,
+        response_policy,
     )?;
     let receipt = SearchCandidateActionReceipt {
         workspace_id: access.workspace_id(),

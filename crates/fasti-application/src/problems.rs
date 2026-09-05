@@ -328,10 +328,10 @@ define_problem_catalog!(
     },
     MetadataClaimStale => "metadata_claim_stale" {
         title: "Metadata claim stale", status: 409,
-        detail: ProblemDetail::Static("the provider refresh did not produce a fresh claim; the last-known-good claim remains active"),
+        detail: ProblemDetail::Static("the provider metadata is unavailable or cannot be reused; existing claims are retained"),
         documentation_path: "v1/problems/metadata-claim-stale", safe_state: PriorStateRetained,
         retryability: RetrySafe,
-        default_next_action: ("retry_metadata_refresh", "Retry the metadata refresh or use the labelled last-known-good value"),
+        default_next_action: ("retry_metadata_refresh", "Start a new metadata refresh or use an available local value"),
         param_policy: ProblemParamPolicy::None
     },
     OperationCanceled => "operation_canceled" {
