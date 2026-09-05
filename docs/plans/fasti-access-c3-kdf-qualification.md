@@ -166,3 +166,69 @@ bounded records/exact EOF and unchanged timing/crypto boundaries. It requested
 a live WouldBlock-to-expiry regression in addition to already-expired checks;
 that focused test remains required before the code gate passes. README and
 all execution/intake/native measurement gates remain open at this checkpoint.
+
+### Measured source checkpoint
+
+Code source `82a9e21a2946b11d0a3db41201a90b1acfed9561`, tree
+`ac68fac4096ee78ea39ba6674dba943262e0e356`, clean. Final independent source
+review accepted the live owned-pipe timeout regression and found no concrete
+unresolved defect within the repair scope. Debug13/13 and release13/13,
+formatting and strict all-target Clippy passed; no ignored or filtered tests.
+The live timeout test exercises held-open EOF and requires watchdog rejection
+plus ECHILD after cleanup; no instrumented branch-coverage claim is made.
+
+One fresh measured run exited0/SUCCESS, service runtime18.462s, invocation
+`ed6f1a9bfc5a4342946c5b9d9e92a4cb`. M4 explicitly released and regained the
+CPU slot; no programme build or browser launch overlapped this measurement.
+In-process checks and a separately captured active/running systemd unit agreed
+on96MiB, one-CPU quota, zero swap, CPU0 affinity and core0. Active Result fields
+were not treated as terminal proof; terminal output established success.
+
+| Independently recomputed observation | Value |
+| --- | --- |
+| Samples, contiguous and unique | 8 warm-ups;128 warm;8 cold |
+| Warm p50/p95/p99 | 123.811338/133.867671/150.894350ms |
+| Cold maximum | 124.803407ms |
+| Maximum warm/cold high-water RSS | 69861376bytes |
+| Oracle high-water RSS | 69971968bytes |
+| Whole test cgroup peak | 68235264bytes |
+| Swap/OOM events | 0/0 |
+
+No sample failed or was replaced. Host load changed2.31/4.89/4.93 to
+2.97/4.91/4.94; a quota/coordination slot is not exclusive ownership of the host.
+The existing Linuxbrew loader/libgcc remain linked; this is not hermetic
+distribution evidence. Native build output points to this package's own
+static sodium archive and bundled1.0.22 source. Bundled source archive hash
+remains `b20a92e7ec25b285eafa349d721a5bb27e3a8ba94c0816630a127883f1d1b3ab`.
+
+Prelaunch tool output recorded executable SHA-256
+`8944f5eb0482fc23988b6cf1ca6f1b52189436992a298ff9417373d1f465ea5e`;
+postrun and independent hashes match. The measurement ledger itself records
+the executable path, not an embedded executable digest; this distinction is
+retained. Raw log SHA-256:
+`dbe7c1802467a4c0cec2061e82d63292ba085dfd9e113e5e9d30626c7ae83d6d`.
+Source/test hashes:
+`7519524e6ef70a5d3e870a9249f55e0deabc9239c467fefc73b3f01917db19de` /
+`cc4c4a4c0359aa8febb86526072007f63a401e97c11b729d804c2f0133d79477`.
+
+Fresh67-archive verification passed against the actual unchanged lock. Cargo
+deny0.20.2 passed licences/bans/sources with eight unmatched-policy warnings
+and one duplicate-hashbrown warning; no policy was changed. Unsuppressed
+cargo-audit0.22.2 passed against1239 advisories at database
+`5a0ebedfe8bdd2e295b171f4162f8c977bcad9a5`. This is not native-notice/legal
+clearance. Metadata retains the sys package's empty transitive default marker;
+no fetch-latest/minimal/optimized/system-source feature is selected.
+
+Evidence ledgers under the project logs directory:
+
+- `2026-09-05T21-00-09-256Z-kdf-intake-222336-bcae576d.log`.
+- `2026-09-05T21-01-57-519Z-kdf-build-226284-5bc19d70.log`.
+- `2026-09-05T21-02-16-993Z-kdf-measurement-226852-0b407ff4.log`.
+- `2026-09-05T21-05-14-375Z-kdf-tests-233102-f6aaa71c.log`.
+- `2026-09-05T21-07-43-629Z-kdf-closure-265650-60c202dd.log`.
+
+Initial new-runner compilation and formatting failures remain preserved; they
+are not baseline RED evidence. Canonical delivery, shared workflow/discovery
+integration, final hosted review/checks and merge remain open. Production C3,
+recovery, other hardware and packaged Tauri authentication remain unapproved
+or deferred as previously recorded. No migration/archive/shared ownership changes.

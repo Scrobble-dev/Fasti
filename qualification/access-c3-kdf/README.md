@@ -5,10 +5,11 @@ This Linux-only, isolated package preserves the RustCrypto/native experiment
 Fasti. It does not approve production cryptography, passphrase policy, recovery
 or packaged authentication.
 
-Current measurement state: **NOT_QUALIFIED — the changed runner has not been
-measured under its required kernel controls.** Unit tests do not derive keys
-or execute the qualification. Run the separate measurement only after the
-Commander releases an uncontended resource slot.
+One isolated measurement passed at clean source
+`82a9e21a2946b11d0a3db41201a90b1acfed9561` on 2026-09-05 under the required
+kernel controls. It is not a production or whole-application qualification.
+Unit tests do not derive keys or execute that measurement. Run any later
+measurement only after a coordinated uncontended resource slot is released.
 
 ## Source and dependency boundary
 
@@ -23,6 +24,9 @@ Never relabel historical timings as results from this source or compiler.
 All five direct dependency pins remain unchanged: Argon2 0.5.3 with zeroize,
 zeroize 1.9.0 with alloc, Alkali 0.3.0 with std and no defaults,
 libsodium-sys-stable 1.24.0 with no defaults, and libc 0.2.189.
+Those are direct manifest declarations. The resolved sys graph also includes
+its transitive `default` marker, which is empty in 1.24.0; it enables no
+fetch-latest, optimized, minimal or system-library selection feature.
 The manifest adds only separate-workspace and first-party licence metadata.
 Alkali remains the native oracle and hardened-buffer dependency here. That does
 not rehabilitate its rejected, separate framing behavior.
@@ -111,3 +115,14 @@ The [package plan](../../docs/plans/fasti-access-c3-kdf-qualification.md) owns
 delivery gates. No isolated result proves the joint Fasti/TrailBase 192 MiB
 envelope, other architectures, complete temporary erasure, memory locking,
 production recovery or distribution readiness.
+
+## Recorded isolated result
+
+The [package plan](../../docs/plans/fasti-access-c3-kdf-qualification.md#measured-source-checkpoint)
+records the exact source/tree, executable and raw-log hashes, active-unit
+controls and independent recount. One run retained eight warm-ups, 128 warm
+samples and eight cold samples. Warm p50/p95/p99 were
+123.811338/133.867671/150.894350ms; cold maximum was124.803407ms.
+Whole-cgroup peak was68235264bytes; swap and OOM events were zero.
+These are this host's isolated fixture observations, not production claims.
+Shared CI integration, canonical delivery, hosted checks and merge remain open.
