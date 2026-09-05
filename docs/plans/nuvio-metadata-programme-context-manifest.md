@@ -2044,3 +2044,44 @@ will not establish that stronger claim. Keep rollback journaling and integrity
 checks intact. Rollback remains forward correction; preserve v17/v7 and all
 earlier formats. No push, PR, merge, migration allocation or shared-file release
 has occurred.
+
+### 2026-09-05 — Exact capture gate and database allocation guard
+
+Private capture commit `db4a9d7b5a82d47c8586d82e4369e3d0b769d8ee`, tree
+`46c1d0dafd10a9ce9f91ba125bb9a96030c1ccbb`, passed the canonical PR command
+with physical SSD TMPDIR. Both receipts were machine-checked against that exact
+clean commit/tree: all 27 contract and 11 portable gates passed with exit 0.
+Those receipts apply to capture, not to the following allocation-guard changes.
+
+The next bounded correction enforces the main-database allowance before schema
+creation through the existing SQLite connection. It reads actual page size,
+rounds the byte budget down to pages, sets and checks `max_page_count`, and
+rejects zero or ineffective limits. The same connection owns migration, import,
+repairs, Search index rebuild and commit. Existing DELETE/FULL journaling,
+integrity checks, final file-size verification and staged cleanup remain intact.
+At the existing import outcome boundary, SQLite FULL from direct operations or
+row insertion becomes a capacity failure, not a corruption claim. Cancellation
+still takes precedence and cleanup failures remain explicit.
+
+This uses [SQLite's page-limit primitive](https://www.sqlite.org/pragma.html#pragma_max_page_count),
+not a new allocator, VFS, dependency or migration. Journals and temporary files
+remain [separate resources](https://www.sqlite.org/tempfiles.html); neither the
+database limit nor scratch admission claims an aggregate filesystem quota.
+Native exact-diff review found no remaining defect. Six focused capacity tests
+pass, including real allocation failure, subpage/rounded limits, ineffective
+lowering, a populated 258-Record archive, cleanup and successful retry. Existing
+restore tests also pass, including old formats and SIGKILL recovery. These
+pre-commit results are not a new exact-head canonical receipt.
+
+Parallel preparation identified a reader disposition that must be recorded
+before implementation: legacy provenance exists to keep pre-M2 claims readable,
+while NULL policy grants no new upstream reuse permission. Complete coordinates
+can match a newer restrictive observation exactly; incomplete legacy provider
+and source-ID coordinates cannot. The approved sources do not specify the
+overlap rule. Preserve rows, timestamps and user overrides; do not silently
+choose blanket NULL permission or blanket historical suppression. This does not
+block the independently prepared whole-response writers or allocation guard.
+Commander retains shared production ownership; agent edits were confined to the
+assigned capacity-test leaf. No Codex Security, push, PR, merge or shared-file
+release occurred. M4 owns v17/v7; Access v18 remains conditional on exact merged
+commit/tree and explicit release.

@@ -191,4 +191,218 @@ mod restore_capture_capacity_tests {
             assert!(!root.path().join("current").exists());
         }
     }
+
+    #[test]
+    fn subpage_database_limit_rejects_without_allocating_schema() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("empty.sqlite3");
+        let connection = Connection::open(&path).unwrap();
+        let page_size: u64 = connection
+            .query_row("PRAGMA main.page_size", [], |row| {
+                row.get::<_, u32>(0).map(u64::from)
+            })
+            .unwrap();
+        assert!(page_size > 1);
+        assert!(matches!(
+            enforce_restore_database_limit(&connection, page_size - 1),
+            Err(RestoreImportError::CapacityExceeded)
+        ));
+        let tables: i64 = connection
+            .query_row("SELECT COUNT(*) FROM sqlite_schema", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(tables, 0);
+        assert_eq!(path.metadata().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn nonaligned_database_limit_floors_pages_and_sqlite_enforces_allocation() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("bounded.sqlite3");
+        let connection = Connection::open(&path).unwrap();
+        let page_size: u64 = connection
+            .query_row("PRAGMA main.page_size", [], |row| {
+                row.get::<_, u32>(0).map(u64::from)
+            })
+            .unwrap();
+        let budget = 8 * page_size + page_size - 1;
+        enforce_restore_database_limit(&connection, budget).unwrap();
+        let maximum: u64 = connection
+            .query_row("PRAGMA main.max_page_count", [], |row| {
+                row.get::<_, u32>(0).map(u64::from)
+            })
+            .unwrap();
+        assert_eq!(maximum, 8);
+        connection
+            .execute_batch(
+                "CREATE TABLE bounded_payload(id INTEGER PRIMARY KEY, payload BLOB NOT NULL);",
+            )
+            .unwrap();
+        connection
+            .execute("INSERT INTO bounded_payload VALUES (1, X'01')", [])
+            .unwrap();
+        let constraint = connection
+            .execute("INSERT INTO bounded_payload VALUES (1, X'02')", [])
+            .unwrap_err();
+        assert_eq!(
+            constraint.sqlite_error_code(),
+            Some(rusqlite::ErrorCode::ConstraintViolation)
+        );
+        let full = connection
+            .execute(
+                "INSERT INTO bounded_payload VALUES (2, zeroblob(?1))",
+                [i64::try_from(16 * page_size).unwrap()],
+            )
+            .unwrap_err();
+        assert_eq!(
+            full.sqlite_error_code(),
+            Some(rusqlite::ErrorCode::DiskFull)
+        );
+        let count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM bounded_payload", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1, "rejected allocation must not leave a partial row");
+        let value: Vec<u8> = connection
+            .query_row(
+                "SELECT payload FROM bounded_payload WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(value, [1]);
+        let integrity: String = connection
+            .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(integrity, "ok");
+        assert!(path.metadata().unwrap().len() <= 8 * page_size);
+        assert!(path.metadata().unwrap().len() <= budget);
+        assert!(path.metadata().unwrap().len() > page_size);
+        assert!(
+            matches!(
+                enforce_restore_database_limit(&connection, page_size),
+                Err(RestoreImportError::CapacityExceeded)
+            ),
+            "SQLite cannot lower the limit below its existing allocation"
+        );
+    }
+
+    #[test]
+    fn genuine_restore_database_limit_failures_cleanup_and_retry() {
+        let fixture = full_fixture();
+        // Use the real Record owner to ensure populated table/index pages exceed
+        // the empty schema, without fabricating archive rows or SQLite errors.
+        for _ in 0..256 {
+            fixture
+                .node
+                .kernel
+                .create_record(CreateRecordCommand::new(
+                    RequestCorrelationId::new_v7(),
+                    fixture.node.access,
+                    Grain::Release,
+                ))
+                .unwrap();
+        }
+        let destination = Arc::new(Mutex::new(DestinationState::default()));
+        export_online_workspace_archive(
+            &fixture.node.kernel,
+            ExportWorkspaceRequest::new(
+                ExportWorkspaceQuery::new(RequestCorrelationId::new_v7(), fixture.node.access),
+                limits(),
+                CancellationSignal::new(),
+            ),
+            Box::new(MemoryDestination(Arc::clone(&destination))),
+        )
+        .unwrap();
+        let archive = destination.lock().unwrap().bytes.clone();
+        let schema_root = tempfile::tempdir().unwrap();
+        let schema_path = schema_root.path().join("schema.sqlite3");
+        let schema = Connection::open(&schema_path).unwrap();
+        schema.pragma_update(None, "foreign_keys", "ON").unwrap();
+        let page_size: u64 = schema
+            .query_row("PRAGMA main.page_size", [], |row| {
+                row.get::<_, u32>(0).map(u64::from)
+            })
+            .unwrap();
+        migrate(&schema).unwrap();
+        let schema_pages: u64 = schema
+            .query_row("PRAGMA main.page_count", [], |row| {
+                row.get::<_, u32>(0).map(u64::from)
+            })
+            .unwrap();
+        let schema_bytes = schema_pages.checked_mul(page_size).unwrap();
+        assert!(schema_pages > 1);
+        schema.close().unwrap();
+
+        for budget in [page_size - 1, page_size, schema_bytes] {
+            let root = tempfile::tempdir().unwrap();
+            let lock = LockedDataRoot::acquire(root.path()).unwrap();
+            let cancellation = CancellationSignal::new();
+            let mut configured = limits();
+            configured.max_snapshot_bytes = nonzero(budget);
+            let captured = capture_restore_source(
+                lock.anchored_directory().unwrap(),
+                &mut Cursor::new(&archive),
+                configured,
+                &cancellation,
+            )
+            .unwrap();
+            let attempt = RestoreAttemptId::new_v7();
+            let result = stage_preflighted_workspace_archive_pass_two(
+                &lock,
+                captured,
+                attempt,
+                RequestCorrelationId::new_v7(),
+                configured,
+                &cancellation,
+            );
+            assert!(
+                matches!(result, Err(RestoreImportError::CapacityExceeded)),
+                "budget {budget} must report capacity, not storage or row corruption"
+            );
+            assert_attempt_removed(root.path(), attempt);
+            assert!(!root.path().join("current").exists());
+            assert!(
+                std::fs::read_dir(root.path().join(RESTORE_STAGING_DIRECTORY))
+                    .unwrap()
+                    .next()
+                    .is_none()
+            );
+
+            let retry = RestoreAttemptId::new_v7();
+            let captured = capture_restore_source(
+                lock.anchored_directory().unwrap(),
+                &mut Cursor::new(&archive),
+                limits(),
+                &cancellation,
+            )
+            .unwrap();
+            let staged = stage_preflighted_workspace_archive_pass_two(
+                &lock,
+                captured,
+                retry,
+                RequestCorrelationId::new_v7(),
+                limits(),
+                &cancellation,
+            )
+            .expect("normal budget restores the same populated archive after rejection");
+            assert_eq!(staged.workspace_id(), fixture.node.access.workspace_id());
+            assert!(staged.database_path().metadata().unwrap().len() > schema_bytes);
+            assert!(
+                staged.database_path().metadata().unwrap().len()
+                    <= limits().max_snapshot_bytes.get()
+            );
+            let database = Connection::open_with_flags(
+                staged.database_path(),
+                OpenFlags::SQLITE_OPEN_READ_ONLY,
+            )
+            .unwrap();
+            let records: i64 = database
+                .query_row("SELECT COUNT(*) FROM records", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(records, 258);
+            database.close().unwrap();
+            staged.cleanup().unwrap();
+            assert_attempt_removed(root.path(), retry);
+            assert!(!root.path().join("current").exists());
+        }
+    }
 }
