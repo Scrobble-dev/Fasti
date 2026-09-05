@@ -14,6 +14,16 @@
 **CEO review mode:** Hold scope
 **Product boundary:** **Fasti records. Players play.**
 
+## Current execution requirement override — 2026-09-05
+
+- ~~Codex Security~~ — removed from programme requirements by explicit user instruction.
+- Do not invoke its plugin, tools, skills or scans, require its approval, or wait
+  for it. This applies to the commander and all delegated agents, and supersedes
+  earlier attached prompts or planning references that request it.
+- Retain ordinary source review, negative tests, QA and the existing security
+  invariants. Removing this tool requirement does not remove product safeguards
+  or scope, and does not reopen completed planning gates.
+
 ## 1. Decision
 
 Build one source-neutral media surface inside Fasti.
