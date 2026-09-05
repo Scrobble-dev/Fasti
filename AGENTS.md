@@ -79,6 +79,7 @@ Generated files are outputs, not sources of truth.
 - Derive app-managed credential accounts from `SqliteKernel::data_root_identity()`, not from a configured path. Bind the identity to the opened root descriptor and its persisted random lock nonce. Renaming an opened root must keep its account; replacing that path with another root must select another account.
 - Keep node connection settings separate from provider outbound policy. A provider allow list must not block an operator-selected `.internal` Fasti service URL.
 - Bound memory, files, requests, archives, and retries.
+- Keep data-root lock release with the existing `LockedDataRoot` owner and its failed-acquisition cleanup. Preserve `KernelInner.data_root` as the last dropped field. Inherited descriptors must not prolong a completed owner; a live Rust guard/kernel must not transfer or run its destructor across fork. Do not replace this boundary with acquisition retries or test serialization.
 - Validate recovery and interruption paths.
 
 Performance targets remain:
@@ -145,6 +146,7 @@ kernel. It must not start `fastid`, Vite, or a browser credential fallback.
 Also run focused checks for changed surfaces. Add regression tests for fixed defects.
 
 - For the isolated [C3 signing qualification](qualification/access-c3-signing/README.md), follow its native-override isolation steps and run `cargo +1.97.1 test --offline --locked --manifest-path qualification/access-c3-signing/Cargo.toml`, plus the documented release, formatting, Clippy and advisory checks. Root workspace tests do not include this package. Qualification does not approve a production crypto profile or recovery capability.
+- For the isolated [C3 framing qualification](qualification/access-c3-framing/README.md), follow its target and native-override isolation steps, then run `cargo +1.97.1 test --offline --locked --manifest-path qualification/access-c3-framing/Cargo.toml -j 2 -- --test-threads=1` and the documented release, formatting, Clippy and advisory checks. Each full debug/release suite must pass 20 unit tests and two compile-fail doctests. Root workspace tests exclude this package; it does not activate production encryption, joint backups or recovery.
 
 UI changes require design review. Headless changes should state when visual evidence is not applicable.
 

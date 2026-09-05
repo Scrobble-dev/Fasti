@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Exact TrailBase `v0.33.5` native and OCI development packaging, private lifecycle operations, full-depot backup and restore, hermetic account/social/TOTP conformance, combined resource enforcement, and a test-only `v0.33.4` adjacent upgrade and rollback fixture.
 - Checked domain/application models for named clients, personal access tokens, consent revisions, bounded inventories, and one-time issuance results. These are an internal [C2 foundation](docs/plans/fasti-access-c2-foundation.md), not callable token or client-administration operations.
 - Contributor-only [C3 signing qualification](qualification/access-c3-signing/README.md) with a separate locked test package and dedicated CI, so its checks can run from a checkout without the prior temporary probe. This does not approve production signing or recovery.
+- Contributors can reproduce the retained [C3 framing qualification](qualification/access-c3-framing/README.md) from a separate locked package and CI matrix, including malformed-input and interrupted-I/O checks. This does not approve production encryption or recovery.
 
 ### Changed
 
@@ -49,6 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Released data-root locks when their final kernel owner drops, even while a child temporarily retains an inherited descriptor. Failed identity initialization also releases its acquired lock without hiding the original error.
 - Kept Account and security confirmations visible during retries, protected pending first-run actions, and corrected mobile notice and choice layout. A dedicated browser CI check guards the delayed-confirmation layout and fixture interaction-latency limits; see the [Access verification guide](docs/plans/fasti-access-parallel-regressions.md).
 - Prevented consumed enrollment proofs from panicking when the kernel returns `bootstrap_closed`.
 - Prevented ambiguous or cross-workspace credential grants from panicking when authentication fails closed.
