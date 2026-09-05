@@ -1492,3 +1492,58 @@ Next active work: candidate details/actions, local Search transport and Workbenc
 multi-source composition, then the already mapped response-cache policy enforcement.
 These remain in-scope implementation work, not removed or deferred capabilities.
 No M4 PR, merge, v17 allocation or shared-file release has occurred.
+
+### 2026-09-05 — Candidate detail and atomic Record action transport
+
+This slice follows clean commit `217ced209f43bdcc603b99f1377ba9cc67b094f1`
+(tree `412a22d6eeeed16bba8e85a9552b8929f75e3a9c`), whose canonical PR gate and
+both exact-head, clean-tree verification receipts passed. All earlier M3/M4
+commits remain preserved. No migration, archive version, dependency, provider
+owner, external AI key or Codex Security invocation was added by this slice.
+
+- **Implementation:** candidate GET with explicit offline mode, atomic candidate
+  action POST, strict public DTOs, generated OpenAPI and SDK operations
+  `readSearchCandidate` and `saveSearchCandidate`. These reuse existing Search
+  receipt, provider-details and atomic identity/metadata transaction owners.
+  They are mounted through the existing Search router and provider operation
+  gates. No Library, progress or watched-state mutation is implied.
+- **Authority:** GET uses current Search read proof. POST uses current
+  IdentityWrite before parsing malformed input. The existing atomic owner retains
+  IdentityWrite → exact durable replay → Search for a new save. Browser POST
+  requires CSRF; browser GET does not. Receipt reads retain original lifetime and
+  actor/profile partition. Refetch failure never becomes an implicit cached save.
+- **Public evidence:** DTOs omit internal actors, grants, configuration and query
+  digests. Refetched fields remain separate from the original snapshot. Action
+  receipts retain historical timestamps and initial status on replay. SDK retries
+  keep one operation ID and identical serialized body; immutable primitive
+  bindings reject mismatched action, target, disposition, source, receipt and mode.
+  No current-freshness decision is fabricated in the SDK.
+- **Focused evidence before the exact-head gate:** 15 real SQLite/router Search
+  tests, 8 store authorization tests, 28 provider-runtime Search checks, 27 detail
+  SDK checks and 33 action SDK checks passed. The broader SDK/generated-contract
+  subset passed 135 checks before the final action leaf was added. Contract
+  strict-shape tests, docs validation, generated artifacts and strict clippy passed.
+  Both new SDK leaves are included in the canonical gate's explicit inventory.
+  The new exact-head canonical gate is required after this slice is committed;
+  the prior commit's receipt must not be presented as this slice's proof.
+- **Native findings resolved:** serde's internally tagged unit Create accepted an
+  extra Record ID; an empty struct variant now rejects it before mutation. Missing
+  detail outcomes use the same strict shape. The shared SDK path validator now
+  rejects terminal-newline matches and non-string coercion. Fresh action evidence
+  must contain an expiry string, not omitted/undefined or null expiry. Tests retain
+  legitimately expired historical receipts without recalculating their status.
+- **Parallel allocation:** commander retained all shared production writes.
+  Store agent owned only the authorization regression leaf, then reviewed the
+  transport read-only. HTTP agent owned only the existing Search HTTP test leaf.
+  Contract agent owned only the two new SDK regression leaves. All test ownership
+  is released. Existing next-slice and M8 preparation maps remain authoritative
+  preparation, not permission for overlapping production writes.
+
+These HTTP tests prove real local receipt reads and atomic cached saves, not a
+successful live-provider refetch, rendered Search UI or packaged-host behavior.
+This is headless transport work; prior browser accessibility evidence retains its
+original source identity. Workbench and local/provider composition remain next
+active work, followed by the mapped response-cache policy and full programme
+scope. Rollback this transport with the matching SDK; no database downgrade or
+receipt deletion is needed for this additive slice. M4 still owns v16/archive v6
+and all shared integration files; no PR, merge, v17 or C2 activation release.

@@ -38,6 +38,10 @@ import {
   parseProviderHealthResponse,
   parseSearchProviderPageRequest,
   parseSearchProviderPageResponse,
+  parseSearchCandidateDetailsQueryParameters,
+  parseSearchCandidateDetailsResponse,
+  parseSearchCandidateActionRequest,
+  parseSearchCandidateActionResponse,
   parseRefreshMetadataClaimsRequest,
   parseRefreshMetadataClaimsResponse,
   parseResolveIdentityRouteResponse,
@@ -98,6 +102,10 @@ import {
   type ProviderHealthResponse,
   type SearchProviderPageRequest,
   type SearchProviderPageResponse,
+  type SearchCandidateDetailsQueryParameters,
+  type SearchCandidateDetailsResponse,
+  type SearchCandidateActionRequest,
+  type SearchCandidateActionResponse,
   type RefreshMetadataClaimsRequest,
   type RefreshMetadataClaimsResponse,
   type ResolveIdentityRouteResponse,
@@ -289,6 +297,8 @@ const MAX_SSE_EVENT_LINES = 256;
 const MAX_SSE_CURSOR_CHARACTERS = 512;
 const RECEIPT_ID = /^rcp_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/;
 const RECORD_ID = /^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/;
+const SEARCH_CANDIDATE_RECEIPT_ID =
+  /^scr_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/;
 const BROWSER_SESSION_ID = /^ses_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/;
 const PROVIDER_PATH_ID = /^[a-z0-9][a-z0-9._-]{0,127}$/;
 const RESOLUTION_INTENTS = new Set([
@@ -939,6 +949,122 @@ export class FastiClient {
         return response;
       },
       responseLabel: "Provider Search response",
+      options,
+    });
+  }
+
+  readSearchCandidate(
+    providerId: string,
+    grain: string,
+    candidateReceiptId: string,
+    query: SearchCandidateDetailsQueryParameters,
+    options: CallOptions = {},
+  ): Promise<SearchCandidateDetailsResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.readSearchCandidate;
+    const locator = searchCandidatePath(
+      operation.path,
+      providerId,
+      grain,
+      candidateReceiptId,
+    );
+    const offline = parseOutgoing(
+      parseSearchCandidateDetailsQueryParameters,
+      query,
+      "Candidate details query",
+    ).offline;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: `${locator.path}?${new URLSearchParams({ offline: String(offline) })}`,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      responseParser: (value) => {
+        const response = parseSearchCandidateDetailsResponse(value);
+        if (response.outcome === "missing") return response;
+        const receipt = response.snapshot.receipt;
+        if (
+          receipt.candidate_receipt_id !== locator.receiptId ||
+          receipt.grain !== locator.grain ||
+          receipt.candidate.provider !== locator.providerId ||
+          (offline
+            ? response.outcome !== "snapshot"
+            : response.outcome === "snapshot") ||
+          (response.outcome === "refetched" &&
+            (response.details.provider !== receipt.candidate.provider ||
+              response.details.provider_id !== receipt.candidate.provider_id ||
+              response.details.kind !== receipt.candidate.kind))
+        )
+          throw new FastiContractParseError(
+            "Candidate details response does not match the requested locator and mode",
+          );
+        return response;
+      },
+      responseLabel: "Candidate details response",
+      options,
+    });
+  }
+
+  saveSearchCandidate(
+    providerId: string,
+    grain: string,
+    candidateReceiptId: string,
+    request: SearchCandidateActionRequest,
+    options: CallOptions = {},
+  ): Promise<SearchCandidateActionResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.saveSearchCandidate;
+    const locator = searchCandidatePath(
+      operation.path,
+      providerId,
+      grain,
+      candidateReceiptId,
+    );
+    const body = parseOutgoing(
+      parseSearchCandidateActionRequest,
+      request,
+      "Candidate action request",
+    );
+    const operationId = body.operation_id;
+    const actionKind = body.action.kind;
+    const targetRecord =
+      body.action.kind === "attach" ? body.action.record_id : undefined;
+    const evidenceMode = body.evidence_mode;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: locator.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      browserMutation: true,
+      retryMode: "stable-idempotency",
+      body,
+      responseParser: (value) => {
+        const response = parseSearchCandidateActionResponse(value);
+        if (response.outcome === "unavailable") return response;
+        const receipt = response.receipt;
+        const historicalStatusValid =
+          receipt.initial_status === "fresh"
+            ? typeof receipt.expires_at === "string"
+            : receipt.evidence_mode === "cached" && receipt.expires_at == null;
+        if (
+          !historicalStatusValid ||
+          receipt.operation_id !== operationId ||
+          receipt.candidate_receipt_id !== locator.receiptId ||
+          receipt.provider_id !== locator.providerId ||
+          receipt.grain !== locator.grain ||
+          receipt.action.kind !== actionKind ||
+          receipt.evidence_mode !== evidenceMode ||
+          (targetRecord !== undefined
+            ? receipt.action.kind !== "attach" ||
+              receipt.action.record_id !== targetRecord ||
+              receipt.record_id !== targetRecord ||
+              !["attached", "already_attached"].includes(receipt.disposition)
+            : !["created", "reused"].includes(receipt.disposition))
+        )
+          throw new FastiContractParseError(
+            "Candidate action receipt does not match the submitted intent",
+          );
+        return response;
+      },
+      responseLabel: "Candidate action response",
       options,
     });
   }
@@ -2292,7 +2418,7 @@ function contractPathIdentifier(
   pattern: RegExp,
   label: string,
 ): string {
-  if (!pattern.test(value)) {
+  if (typeof value !== "string" || pattern.exec(value)?.[0] !== value) {
     throw new TypeError(`${label} does not match the generated contract`);
   }
   return value;
@@ -2356,6 +2482,34 @@ function providerOperationPath(
     );
   }
   return path;
+}
+
+function searchCandidatePath(
+  template: string,
+  providerId: string,
+  grain: string,
+  candidateReceiptId: string,
+) {
+  const identifiers = providerPathIdentifiers(providerId);
+  const safeGrain = contractPathIdentifier(
+    grain,
+    /^[a-z][a-z0-9_]{0,63}$/,
+    "grain",
+  );
+  const receiptId = contractPathIdentifier(
+    candidateReceiptId,
+    SEARCH_CANDIDATE_RECEIPT_ID,
+    "candidateReceiptId",
+  );
+  const path = providerOperationPath(template, identifiers)
+    .replace("{grain}", encodeURIComponent(safeGrain))
+    .replace("{candidate_receipt_id}", encodeURIComponent(receiptId));
+  return {
+    path,
+    providerId: identifiers.providerId,
+    grain: safeGrain,
+    receiptId,
+  };
 }
 
 function providerCapabilityParser(

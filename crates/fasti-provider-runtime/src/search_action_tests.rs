@@ -73,6 +73,12 @@ mod candidate_action_tests {
     }
 
     impl SearchPersistencePort for ActionPersistence {
+        fn authorize_search_candidate_read_request(&self, _: RequestCorrelationId, _: &ApplicationAccessContext) -> ApplicationResult<()> {
+            unreachable!("runtime tests enter after transport authorization")
+        }
+        fn authorize_search_candidate_action_request(&self, _: RequestCorrelationId, _: &ApplicationAccessContext) -> ApplicationResult<()> {
+            unreachable!("runtime tests enter after transport authorization")
+        }
         fn authorize_search_page_request(&self, _: RequestCorrelationId, _: &ApplicationAccessContext) -> ApplicationResult<()> {
             unreachable!("action tests do not acquire pages through HTTP")
         }

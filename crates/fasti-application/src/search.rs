@@ -499,6 +499,22 @@ pub trait SearchPersistencePort: Send + Sync {
         access: &ApplicationAccessContext,
     ) -> ApplicationResult<()>;
 
+    /// A candidate snapshot read accepts current Search read authority. It does
+    /// not renew the receipt or authorize a later mutation.
+    fn authorize_search_candidate_read_request(
+        &self,
+        correlation_id: RequestCorrelationId,
+        access: &ApplicationAccessContext,
+    ) -> ApplicationResult<()>;
+
+    /// Save preflight requires current IdentityWrite, not Search. The atomic
+    /// owner checks durable replay before requiring Search for a new save.
+    fn authorize_search_candidate_action_request(
+        &self,
+        correlation_id: RequestCorrelationId,
+        access: &ApplicationAccessContext,
+    ) -> ApplicationResult<()>;
+
     fn search_local_records(
         &self,
         request: &LocalSearchRequest,

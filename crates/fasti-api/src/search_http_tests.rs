@@ -368,6 +368,499 @@ mod search_http_tests {
         .collect()
     }
 
+    fn candidate_path(receipt: &str) -> String {
+        format!("/api/v1/search/candidates/tmdb/film/{receipt}?offline=true")
+    }
+
+    fn action_path(receipt: &str) -> String {
+        format!("/api/v1/search/candidates/tmdb/film/{receipt}/actions")
+    }
+
+    fn action_body(operation: &str, record: Option<&str>) -> serde_json::Value {
+        serde_json::json!({
+            "operation_id": operation,
+            "action": record.map_or_else(
+                || serde_json::json!({"kind": "create"}),
+                |id| serde_json::json!({"kind": "attach", "record_id": id})
+            ),
+            "evidence_mode": "cached"
+        })
+    }
+
+    fn action_counts(f: &Fixture) -> Vec<i64> {
+        let connection = rusqlite::Connection::open(f.kernel.database_path()).unwrap();
+        [
+            "records",
+            "external_identifiers",
+            "metadata_field_claims",
+            "metadata_claims",
+            "metadata_claim_provenance",
+            "local_search_grams",
+            "search_action_receipts",
+            "profile_record_tracking_dispositions",
+            "observations",
+            "metadata_profile_field_overrides",
+        ]
+        .into_iter()
+        .map(|table| {
+            connection
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap()
+        })
+        .chain(std::iter::once(
+            connection
+                .query_row(
+                    "SELECT COALESCE(SUM(revision), 0) FROM workspace_revisions",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap(),
+        ))
+        .collect()
+    }
+
+    #[tokio::test]
+    async fn search_http_candidate_action_cached_create_and_replay_preserve_acceptance_history() {
+        for browser in [false, true] {
+            let f = fixture().await;
+            let receipt = seed(&f, browser);
+            let path = action_path(&receipt);
+            let operation = OperationId::new_v7().to_string();
+            let body = action_body(&operation, None);
+            let sources = candidate_source_rows(&f);
+            let (_, snapshot) = response(
+                &f.app,
+                candidate_get(&f, browser, &candidate_path(&receipt)),
+            )
+            .await;
+            let (status, saved) =
+                response(&f.app, request(&f, browser, &path, body.to_string())).await;
+            assert_eq!(status, StatusCode::OK, "{saved}");
+            let accepted = &saved["receipt"];
+            assert_eq!(
+                saved,
+                serde_json::json!({"outcome":"saved", "receipt": {
+                    "operation_id": operation,
+                    "candidate_receipt_id": receipt,
+                    "provider_id": "tmdb",
+                    "grain": "film",
+                    "action": {"kind":"create"},
+                    "evidence_mode": "cached",
+                    "record_id": accepted["record_id"],
+                    "disposition": "created",
+                    "fetched_at": snapshot["snapshot"]["lifetime"]["created_at"],
+                    "expires_at": snapshot["snapshot"]["lifetime"]["fresh_until"],
+                    "initial_status": "fresh",
+                    "committed_at": accepted["committed_at"]
+                }})
+            );
+            accepted["record_id"]
+                .as_str()
+                .unwrap()
+                .parse::<fasti_domain::RecordId>()
+                .unwrap();
+            chrono::DateTime::parse_from_rfc3339(accepted["committed_at"].as_str().unwrap())
+                .unwrap();
+            let after = action_counts(&f);
+            assert_eq!(after[0], 1);
+            assert_eq!(after[1], 1);
+            assert!(after[2] > 0);
+            assert_eq!(after[6], 1);
+            assert_eq!(&after[7..10], &[0, 0, 0]);
+            // Replay remains authorized by current IdentityWrite even when
+            // Search is removed. A different operation is not a replay.
+            rusqlite::Connection::open(f.kernel.database_path()).unwrap().execute(
+                "DELETE FROM grant_scopes WHERE grant_id = ?1 AND scope_key = 'metadata_search'",
+                [f.access.grant_id().to_string()],
+            ).unwrap();
+            let (status, replay) =
+                response(&f.app, request(&f, browser, &path, body.to_string())).await;
+            assert_eq!(status, StatusCode::OK, "{replay}");
+            assert_eq!(replay, saved);
+            let new_body = action_body(&OperationId::new_v7().to_string(), None);
+            let (status, denied) =
+                response(&f.app, request(&f, browser, &path, new_body.to_string())).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{denied}");
+            rusqlite::Connection::open(f.kernel.database_path())
+                .unwrap()
+                .execute(
+                    "DELETE FROM grant_scopes WHERE grant_id = ?1 AND scope_key = 'identity_write'",
+                    [f.access.grant_id().to_string()],
+                )
+                .unwrap();
+            let (status, denied_replay) =
+                response(&f.app, request(&f, browser, &path, body.to_string())).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{denied_replay}");
+            assert!(denied_replay.get("receipt").is_none());
+            assert_eq!(action_counts(&f), after);
+            assert_eq!(candidate_source_rows(&f), sources);
+            assert_eq!(f.vault.0.load(Ordering::SeqCst), 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn search_http_candidate_action_cached_attach_uses_the_explicit_record_and_conflicts_on_changed_intent(
+    ) {
+        use fasti_application::{CreateRecordCommand, IdentityPort};
+        for browser in [false, true] {
+            let f = fixture().await;
+            let receipt = seed(&f, browser);
+            let record = f
+                .kernel
+                .create_record(CreateRecordCommand::new(
+                    RequestCorrelationId::new_v7(),
+                    f.access,
+                    fasti_domain::Grain::Film,
+                ))
+                .unwrap()
+                .record_id()
+                .to_string();
+            let path = action_path(&receipt);
+            let operation = OperationId::new_v7().to_string();
+            let body = action_body(&operation, Some(&record));
+            let (status, saved) =
+                response(&f.app, request(&f, browser, &path, body.to_string())).await;
+            assert_eq!(status, StatusCode::OK, "{saved}");
+            assert_eq!(saved["receipt"]["record_id"], record);
+            assert_eq!(saved["receipt"]["disposition"], "attached");
+            assert_eq!(saved["receipt"]["action"], body["action"]);
+            let after = action_counts(&f);
+            assert_eq!(after[0], 1);
+            assert_eq!(after[1], 1);
+            assert_eq!(after[6], 1);
+            let (status, replay) =
+                response(&f.app, request(&f, browser, &path, body.to_string())).await;
+            assert_eq!(status, StatusCode::OK, "{replay}");
+            assert_eq!(replay, saved);
+            let changed = action_body(&operation, None);
+            let (status, conflict) =
+                response(&f.app, request(&f, browser, &path, changed.to_string())).await;
+            assert_eq!(status, StatusCode::CONFLICT, "{conflict}");
+            assert_eq!(action_counts(&f), after);
+            assert_eq!(f.vault.0.load(Ordering::SeqCst), 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn search_http_candidate_action_identity_authority_precedes_malformed_intent() {
+        let f = fixture().await;
+        let receipt = seed(&f, false);
+        let path = action_path(&receipt);
+        let before = action_counts(&f);
+        let valid = action_body(&OperationId::new_v7().to_string(), None);
+        let mut missing_mode = valid.clone();
+        missing_mode
+            .as_object_mut()
+            .unwrap()
+            .remove("evidence_mode");
+        let mut invalid_operation = valid.clone();
+        invalid_operation["operation_id"] = "not-an-operation".into();
+        let mut unwanted = valid.clone();
+        unwanted["action"]["record_id"] = fasti_domain::RecordId::new_v7().to_string().into();
+        let cases = [
+            (path.clone(), "{".into(), StatusCode::BAD_REQUEST),
+            (
+                path.clone(),
+                missing_mode.to_string(),
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+            (
+                path.clone(),
+                invalid_operation.to_string(),
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+            (
+                path.clone(),
+                unwanted.to_string(),
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+            (
+                path.replace("/tmdb/", "/%FF/"),
+                valid.to_string(),
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+            (
+                path.replace(&receipt, "invalid-receipt"),
+                valid.to_string(),
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+        ];
+        for browser in [false, true] {
+            for (path, body, expected) in &cases {
+                let (status, problem) =
+                    response(&f.app, request(&f, browser, path, body.clone())).await;
+                assert_eq!(status, *expected, "{path} {body}: {problem}");
+            }
+        }
+        rusqlite::Connection::open(f.kernel.database_path())
+            .unwrap()
+            .execute(
+                "DELETE FROM grant_scopes WHERE grant_id = ?1 AND scope_key = 'identity_write'",
+                [f.access.grant_id().to_string()],
+            )
+            .unwrap();
+        for browser in [false, true] {
+            for (path, body, _) in &cases {
+                let (status, problem) =
+                    response(&f.app, request(&f, browser, path, body.clone())).await;
+                assert_eq!(status, StatusCode::FORBIDDEN, "{problem}");
+                assert_eq!(problem["code"], "forbidden");
+                assert_eq!(problem["capability_id"], "identity.identifier.attach");
+            }
+        }
+        assert_eq!(action_counts(&f), before);
+        assert_eq!(f.vault.0.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn search_http_candidate_action_browser_requires_csrf_and_refetch_does_not_silently_save_cache(
+    ) {
+        let f = fixture().await;
+        let receipt = seed(&f, true);
+        let path = action_path(&receipt);
+        let body = action_body(&OperationId::new_v7().to_string(), None);
+        let before = action_counts(&f);
+        for removed in [local::CSRF_HEADER, "origin", "host"] {
+            let mut req = request(&f, true, &path, body.to_string());
+            req.headers_mut().remove(removed);
+            let (status, problem) = response(&f.app, req).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{removed}: {problem}");
+        }
+        let (status, problem) =
+            response(&f.generic, request(&f, true, &path, body.to_string())).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{problem}");
+        let mut refetch = body;
+        refetch["evidence_mode"] = "refetch".into();
+        let (status, problem) =
+            response(&f.app, request(&f, true, &path, refetch.to_string())).await;
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{problem}");
+        assert_eq!(problem["code"], "capability_unavailable");
+        assert_eq!(action_counts(&f), before);
+        assert_eq!(f.vault.0.load(Ordering::SeqCst), 0);
+    }
+
+    fn candidate_get(f: &Fixture, browser: bool, path: &str) -> Request<Body> {
+        let mut builder = Request::get(path);
+        if browser {
+            // Reads require the exact browser boundary and session, not an
+            // Origin header, CSRF header, or CSRF cookie.
+            builder = builder
+                .header(header::HOST, FASTI_ACCESS_HOST)
+                .header(header::COOKIE, f.cookie.split(';').next().unwrap());
+        } else {
+            builder = builder.header(header::AUTHORIZATION, format!("Bearer {}", f.credential));
+        }
+        builder.body(Body::empty()).unwrap()
+    }
+
+    fn candidate_source_rows(f: &Fixture) -> Vec<String> {
+        let connection = rusqlite::Connection::open(f.kernel.database_path()).unwrap();
+        let rows = connection
+            .prepare(
+                "SELECT json_array(c.candidate_receipt_id, c.page_sequence, c.ordinal,
+                    c.kind, c.provider_record_id, c.candidate_json, p.context_json,
+                    p.partition_json, p.response_digest, p.created_at, p.fresh_until,
+                    p.stale_until, p.expires_at)
+                 FROM search_candidate_receipts c JOIN search_pages p ON p.sequence = c.page_sequence
+                 ORDER BY c.candidate_receipt_id",
+            )
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        rows
+    }
+
+    #[tokio::test]
+    async fn search_http_candidate_get_offline_preserves_original_evidence_and_actor_partition() {
+        let f = fixture().await;
+        let bearer_receipt = seed(&f, false);
+        let browser_receipt = seed(&f, true);
+        let before = counts(&f);
+        let sources = candidate_source_rows(&f);
+        for (browser, receipt, other) in [
+            (false, &bearer_receipt, &browser_receipt),
+            (true, &browser_receipt, &bearer_receipt),
+        ] {
+            let (status, page) = response(&f.app, request(&f, browser, PATH, body("Dune"))).await;
+            assert_eq!(status, StatusCode::OK, "{page}");
+            let (status, details) =
+                response(&f.app, candidate_get(&f, browser, &candidate_path(receipt))).await;
+            assert_eq!(status, StatusCode::OK, "{details}");
+            assert_eq!(
+                details,
+                serde_json::json!({
+                    "outcome": "snapshot",
+                    "snapshot": {
+                        "receipt": page["candidates"][0],
+                        "lifetime": page["lifetime"],
+                        "locale": "en-us"
+                    }
+                })
+            );
+            // Exact response equality also excludes internal actor, partition,
+            // raw query, credential and digest fields from the public snapshot.
+            let missing_id = fasti_domain::SearchCandidateReceiptId::new_v7().to_string();
+            for path in [
+                candidate_path(other),
+                candidate_path(receipt).replace("/tmdb/", "/google-books/"),
+                candidate_path(receipt).replace("/film/", "/series/"),
+                candidate_path(&missing_id),
+            ] {
+                let (status, missing) = response(&f.app, candidate_get(&f, browser, &path)).await;
+                assert_eq!(status, StatusCode::OK, "{missing}");
+                assert_eq!(missing, serde_json::json!({"outcome": "missing"}));
+            }
+        }
+        assert_eq!(candidate_source_rows(&f), sources);
+        assert_eq!(counts(&f), before);
+        assert_eq!(f.vault.0.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn search_http_candidate_get_requires_explicit_query_and_authorizes_before_locator() {
+        let f = fixture().await;
+        let receipt = seed(&f, false);
+        let before = counts(&f);
+        let valid = candidate_path(&receipt);
+        let cases = [
+            valid.replace("?offline=true", ""),
+            valid.replace("offline=true", "offline=maybe"),
+            valid.replace("offline=true", "offline=1"),
+            format!("{valid}&offline=false"),
+            format!("{valid}&terms_revision=untrusted"),
+            valid.replace(&receipt, "invalid-receipt"),
+            valid.replace("/film/", "/not-a-grain/"),
+            valid.replace("/tmdb/", "/unknown-provider/"),
+            valid.replace("/tmdb/", "/%FF/"),
+        ];
+        for browser in [false, true] {
+            for path in &cases {
+                let (status, problem) = response(&f.app, candidate_get(&f, browser, path)).await;
+                assert_eq!(
+                    status,
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "{path}: {problem}"
+                );
+                assert_eq!(problem["code"], "validation_failed");
+                assert_eq!(problem["capability_id"], "metadata.search");
+            }
+        }
+        rusqlite::Connection::open(f.kernel.database_path())
+            .unwrap()
+            .execute(
+                "DELETE FROM grant_scopes WHERE grant_id = ?1 AND scope_key = 'metadata_search'",
+                [f.access.grant_id().to_string()],
+            )
+            .unwrap();
+        for browser in [false, true] {
+            for path in &cases {
+                let (status, problem) = response(&f.app, candidate_get(&f, browser, path)).await;
+                assert_eq!(status, StatusCode::FORBIDDEN, "{path}: {problem}");
+                assert_eq!(problem["code"], "forbidden");
+                assert!(problem.get("snapshot").is_none());
+            }
+        }
+        assert_eq!(counts(&f), before);
+        assert_eq!(f.vault.0.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn search_http_candidate_get_browser_read_boundary_and_revoked_session_fail_closed() {
+        let f = fixture().await;
+        let receipt = seed(&f, true);
+        let path = candidate_path(&receipt);
+        let sources = candidate_source_rows(&f);
+        let before = counts(&f);
+        for host in [None, Some("untrusted.example")] {
+            let mut req = candidate_get(&f, true, &path);
+            req.headers_mut().remove(header::HOST);
+            if let Some(host) = host {
+                req.headers_mut()
+                    .insert(header::HOST, host.parse().unwrap());
+            }
+            let (status, problem) = response(&f.app, req).await;
+            assert_eq!(status, StatusCode::UNAUTHORIZED, "{problem}");
+            assert!(problem.get("snapshot").is_none());
+        }
+        let mut mixed = candidate_get(&f, true, &path);
+        mixed.headers_mut().insert(
+            header::AUTHORIZATION,
+            format!("Bearer {}", f.credential).parse().unwrap(),
+        );
+        let (status, problem) = response(&f.app, mixed).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{problem}");
+        let (status, problem) = response(&f.generic, candidate_get(&f, true, &path)).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{problem}");
+        for app in [health_router(), integration_router(f.kernel.clone())] {
+            assert_eq!(
+                app.oneshot(candidate_get(&f, true, &path))
+                    .await
+                    .unwrap()
+                    .status(),
+                StatusCode::NOT_FOUND
+            );
+        }
+        let ApplicationAccessContext::BrowserSession(proof) = &f.browser else {
+            panic!("browser fixture");
+        };
+        let boundary =
+            BrowserRequestBoundaryPolicy::try_new(FASTI_ACCESS_ORIGIN, FASTI_ACCESS_HOST).unwrap();
+        assert!(f
+            .kernel
+            .revoke_current_browser_session(BrowserSessionMutationCommand::new(
+                RequestCorrelationId::new_v7(),
+                SecretMaterial::try_from_hex(&proof.session_secret().expose_hex()).unwrap(),
+                SecretMaterial::try_from_hex(&f.csrf).unwrap(),
+                boundary
+                    .validate(Some(FASTI_ACCESS_ORIGIN), Some(FASTI_ACCESS_HOST))
+                    .unwrap(),
+                chrono::Utc::now(),
+            ))
+            .unwrap());
+        let (status, problem) = response(&f.app, candidate_get(&f, true, &path)).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{problem}");
+        assert_eq!(problem["code"], "browser_session_revoked");
+        assert!(!problem.to_string().contains(&receipt));
+        assert_eq!(candidate_source_rows(&f), sources);
+        assert_eq!(counts(&f), before);
+        assert_eq!(f.vault.0.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn search_http_candidate_get_online_requires_details_capability_without_destroying_snapshot(
+    ) {
+        let f = fixture().await;
+        for browser in [false, true] {
+            let receipt = seed(&f, browser);
+            let path = candidate_path(&receipt);
+            let sources = candidate_source_rows(&f);
+            let before = counts(&f);
+            // This fixture enables real metadata.search state only. Online
+            // details must not borrow that authority or touch the vault.
+            let (status, problem) = response(
+                &f.app,
+                candidate_get(&f, browser, &path.replace("offline=true", "offline=false")),
+            )
+            .await;
+            assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{problem}");
+            assert_eq!(problem["code"], "capability_unavailable");
+            let (status, snapshot) = response(&f.app, candidate_get(&f, browser, &path)).await;
+            assert_eq!(status, StatusCode::OK, "{snapshot}");
+            assert_eq!(snapshot["outcome"], "snapshot");
+            assert_eq!(
+                snapshot["snapshot"]["receipt"]["candidate_receipt_id"],
+                receipt
+            );
+            assert_eq!(candidate_source_rows(&f), sources);
+            assert_eq!(counts(&f), before);
+        }
+        assert_eq!(f.vault.0.load(Ordering::SeqCst), 0);
+    }
+
     #[tokio::test]
     async fn search_http_offline_real_receipts_preserve_actor_partition_without_vault_access() {
         let f = fixture().await;

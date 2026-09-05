@@ -5,22 +5,28 @@ use crate::problem::{application_problem, json_rejection, HttpProblem};
 use crate::ProviderOperationLocks;
 use axum::{
     extract::{
-        rejection::{JsonRejection, PathRejection},
-        DefaultBodyLimit, FromRequestParts, Path, State,
+        rejection::{JsonRejection, PathRejection, QueryRejection},
+        DefaultBodyLimit, FromRequestParts, Path, Query, State,
     },
     http::{header, request::Parts},
     response::{IntoResponse, Response},
-    routing::post,
+    routing::{get, post},
     Json, Router,
 };
 use fasti_application::{
     ApplicationAccessContext, BrowserRequestBoundaryPolicy, CapabilityKey, FastiProblem,
-    LocalKernel, OutboundAccessPolicy, ProviderId, ProviderOperationLease, SearchPageRequest,
-    SearchPersistencePort, SearchProviderQuery, Violation,
+    LocalKernel, OutboundAccessPolicy, ProviderId, ProviderOperationLease,
+    ReadSearchCandidateRequest, SearchPageRequest, SearchPersistencePort, SearchProviderQuery,
+    Violation,
 };
-use fasti_contracts::{ProblemDetails, SearchProviderPageRequest, SearchProviderPageResponse};
+use fasti_contracts::{
+    ProblemDetails, SearchCandidateDetailsQueryParameters, SearchCandidateDetailsResponse,
+    SearchProviderPageRequest, SearchProviderPageResponse,
+};
 use fasti_domain::{Grain, MetadataLocale, MetadataRegion, RequestCorrelationId, SearchQuery};
-use fasti_provider_runtime::{ProviderSearchOutcome, ProviderSearchService};
+use fasti_provider_runtime::{
+    ProviderCandidateDetailsOutcome, ProviderSearchOutcome, ProviderSearchService,
+};
 use std::sync::Arc;
 
 const CAPABILITY: CapabilityKey = CapabilityKey::SearchMetadata;
@@ -35,47 +41,85 @@ pub(crate) struct SearchApiState {
     pub(crate) browser_boundary: Option<BrowserRequestBoundaryPolicy>,
 }
 
-pub(crate) struct SearchPageAccess {
+pub(crate) struct SearchAccess<const MUTATION: bool> {
     id: RequestCorrelationId,
     access: ApplicationAccessContext,
 }
 
-impl FromRequestParts<SearchApiState> for SearchPageAccess {
+impl<const MUTATION: bool> FromRequestParts<SearchApiState> for SearchAccess<MUTATION> {
     type Rejection = HttpProblem;
 
     async fn from_request_parts(
         parts: &mut Parts,
         state: &SearchApiState,
     ) -> Result<Self, HttpProblem> {
-        let id = RequestCorrelationId::new_v7();
-        let authentication = application_request_authentication(
-            &parts.headers,
-            state.browser_boundary.as_ref(),
-            true,
-            CAPABILITY,
-            id,
-        )?;
-        let kernel = Arc::clone(&state.kernel);
-        let persistence = Arc::clone(&state.persistence);
-        let access = tokio::task::spawn_blocking(move || {
-            let access =
-                authenticate_application_request(kernel.as_ref(), authentication, CAPABILITY, id)?;
-            persistence.authorize_search_page_request(id, &access)?;
-            Ok(access)
-        })
-        .await
-        .map_err(|_| {
-            application_problem(Box::new(FastiProblem::storage_unavailable(CAPABILITY, id)))
-        })?
-        .map_err(application_problem)?;
+        let (id, access) = authorize(parts, state, CAPABILITY, MUTATION).await?;
         Ok(Self { id, access })
     }
 }
 
+pub(crate) struct SearchActionAccess {
+    id: RequestCorrelationId,
+    access: ApplicationAccessContext,
+}
+
+impl FromRequestParts<SearchApiState> for SearchActionAccess {
+    type Rejection = HttpProblem;
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &SearchApiState,
+    ) -> Result<Self, HttpProblem> {
+        let (id, access) = authorize(parts, state, CapabilityKey::AttachIdentifier, true).await?;
+        Ok(Self { id, access })
+    }
+}
+
+async fn authorize(
+    parts: &Parts,
+    state: &SearchApiState,
+    capability: CapabilityKey,
+    mutation: bool,
+) -> Result<(RequestCorrelationId, ApplicationAccessContext), HttpProblem> {
+    let id = RequestCorrelationId::new_v7();
+    let authentication = application_request_authentication(
+        &parts.headers,
+        state.browser_boundary.as_ref(),
+        mutation,
+        capability,
+        id,
+    )?;
+    let kernel = Arc::clone(&state.kernel);
+    let persistence = Arc::clone(&state.persistence);
+    let access = tokio::task::spawn_blocking(move || {
+        let access =
+            authenticate_application_request(kernel.as_ref(), authentication, capability, id)?;
+        if capability == CapabilityKey::AttachIdentifier {
+            persistence.authorize_search_candidate_action_request(id, &access)?;
+        } else if mutation {
+            persistence.authorize_search_page_request(id, &access)?;
+        } else {
+            persistence.authorize_search_candidate_read_request(id, &access)?;
+        }
+        Ok(access)
+    })
+    .await
+    .map_err(|_| application_problem(Box::new(FastiProblem::storage_unavailable(capability, id))))?
+    .map_err(application_problem)?;
+    Ok((id, access))
+}
+
 fn invalid(id: RequestCorrelationId, pointer: &'static str) -> HttpProblem {
+    invalid_for(CAPABILITY, id, pointer)
+}
+
+fn invalid_for(
+    capability: CapabilityKey,
+    id: RequestCorrelationId,
+    pointer: &'static str,
+) -> HttpProblem {
     application_problem(Box::new(
         FastiProblem::validation_failed(
-            CAPABILITY,
+            capability,
             id,
             vec![Violation::try_new(
                 "invalid_search_input",
@@ -144,7 +188,7 @@ fn query(
 )]
 pub(crate) async fn search_provider_page(
     State(state): State<SearchApiState>,
-    SearchPageAccess { id, access }: SearchPageAccess,
+    SearchAccess { id, access }: SearchAccess<true>,
     provider: Result<Path<String>, PathRejection>,
     body: Result<Json<SearchProviderPageRequest>, JsonRejection>,
 ) -> Result<Response, HttpProblem> {
@@ -201,8 +245,217 @@ pub(crate) async fn search_provider_page(
         .into_response())
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/search/candidates/{provider_id}/{grain}/{candidate_receipt_id}",
+    operation_id = "read_search_candidate",
+    tag = "search",
+    params(
+        ("provider_id" = String, Path, description = "Registered provider identity"),
+        ("grain" = String, Path, description = "Canonical candidate grain"),
+        ("candidate_receipt_id" = String, Path, description = "Opaque Search candidate receipt identity"),
+        SearchCandidateDetailsQueryParameters
+    ),
+    security(("credential_bearer" = []), ("browser_session_cookie" = [])),
+    responses(
+        (status = 200, description = "Original snapshot, refetched details, source failure with snapshot, or non-enumerating missing outcome", body = SearchCandidateDetailsResponse),
+        (status = 400, description = "Malformed request", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 413, description = "Request exceeds the Search body limit", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 415, description = "Unsupported request content type", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 401, description = "Authentication is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "Search authority or browser boundary denied", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "Current session or receipt authority changed", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "Invalid candidate locator or query", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 500, description = "Receipt state failed integrity checks", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 501, description = "Provider capability is unavailable", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 503, description = "Storage is unavailable", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 507, description = "Receipt capacity is exhausted", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub(crate) async fn read_search_candidate(
+    State(state): State<SearchApiState>,
+    SearchAccess { id, access }: SearchAccess<false>,
+    locator: Result<Path<(String, String, String)>, PathRejection>,
+    query: Result<Query<SearchCandidateDetailsQueryParameters>, QueryRejection>,
+) -> Result<Response, HttpProblem> {
+    let (provider, grain, receipt) = locator.map_err(|_| invalid(id, "/candidate_receipt_id"))?.0;
+    let query = query.map_err(|_| invalid(id, "/query"))?.0;
+    let request = ReadSearchCandidateRequest {
+        correlation_id: id,
+        access,
+        candidate_receipt_id: receipt
+            .parse()
+            .map_err(|_| invalid(id, "/candidate_receipt_id"))?,
+        provider: ProviderId::try_new(provider.clone()).map_err(|_| invalid(id, "/provider_id"))?,
+        grain: grain.parse().map_err(|_| invalid(id, "/grain"))?,
+        outbound_policy: OutboundAccessPolicy::default(),
+        // Replaced by the service's trusted descriptor, never caller input.
+        terms_revision: String::new(),
+    };
+    let gate = state
+        .locks
+        .get(&provider)
+        .ok_or_else(|| invalid(id, "/provider_id"))?;
+    let lease = ProviderOperationLease::new(gate.lock_owned().await);
+    let outcome = state
+        .service
+        .candidate_details(request, query.offline, lease)
+        .await
+        .map_err(application_problem)?;
+    let response = match outcome {
+        None => SearchCandidateDetailsResponse::Missing {},
+        Some(ProviderCandidateDetailsOutcome::Snapshot(snapshot)) => {
+            SearchCandidateDetailsResponse::Snapshot {
+                snapshot: (&snapshot).into(),
+            }
+        }
+        Some(ProviderCandidateDetailsOutcome::Unavailable { snapshot, problem }) => {
+            SearchCandidateDetailsResponse::Unavailable {
+                snapshot: (&snapshot).into(),
+                problem_code: problem.as_str().to_owned(),
+            }
+        }
+        Some(ProviderCandidateDetailsOutcome::Refetched {
+            snapshot,
+            details,
+            locale,
+        }) => {
+            let evidence = details.search_evidence().map_err(|_| {
+                application_problem(Box::new(FastiProblem::from_code(
+                    fasti_application::ProblemCode::ProviderResponseInvalid,
+                    CAPABILITY,
+                    id,
+                )))
+            })?;
+            SearchCandidateDetailsResponse::Refetched {
+                snapshot: (&snapshot).into(),
+                details: (&evidence).into(),
+                locale: locale.map(|value| value.as_str().to_owned()),
+            }
+        }
+    };
+    Ok((
+        [(header::CACHE_CONTROL, "private, no-store")],
+        Json(response),
+    )
+        .into_response())
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/search/candidates/{provider_id}/{grain}/{candidate_receipt_id}/actions",
+    operation_id = "save_search_candidate",
+    tag = "search",
+    params(
+        ("provider_id" = String, Path, description = "Registered provider identity"),
+        ("grain" = String, Path, description = "Canonical candidate grain"),
+        ("candidate_receipt_id" = String, Path, description = "Opaque Search candidate receipt identity")
+    ),
+    security(("credential_bearer" = []), ("browser_session_cookie" = [], "csrf_cookie" = [], "csrf_header" = [])),
+    request_body(content = fasti_contracts::SearchCandidateActionRequest, content_type = "application/json"),
+    responses(
+        (status = 200, description = "Atomic Record action acceptance or explicit source failure; saved receipt is historical, including on replay", body = fasti_contracts::SearchCandidateActionResponse),
+        (status = 400, description = "Malformed JSON", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 401, description = "Authentication is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "Current identity-write authority, new-save Search authority or browser boundary denied", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "Target Record is not accessible", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "Operation intent, identity or session state conflicts", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 413, description = "Request exceeds the Search body limit", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 415, description = "Content-Type is not application/json", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "Invalid candidate locator or action intent", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 500, description = "Receipt state failed integrity checks", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 501, description = "Provider capability is unavailable", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 503, description = "Storage is unavailable", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub(crate) async fn save_search_candidate(
+    State(state): State<SearchApiState>,
+    SearchActionAccess { id, access }: SearchActionAccess,
+    locator: Result<Path<(String, String, String)>, PathRejection>,
+    body: Result<Json<fasti_contracts::SearchCandidateActionRequest>, JsonRejection>,
+) -> Result<Response, HttpProblem> {
+    let capability = CapabilityKey::AttachIdentifier;
+    let invalid = |pointer| invalid_for(capability, id, pointer);
+    let (provider, grain, receipt) = locator.map_err(|_| invalid("/candidate_receipt_id"))?.0;
+    let body = body
+        .map_err(|error| json_rejection(capability, id, error))?
+        .0;
+    let action = match body.action {
+        fasti_contracts::SearchRecordActionDto::Create {} => {
+            fasti_application::SearchRecordAction::Create
+        }
+        fasti_contracts::SearchRecordActionDto::Attach { record_id } => {
+            fasti_application::SearchRecordAction::Attach(
+                record_id
+                    .parse()
+                    .map_err(|_| invalid("/action/record_id"))?,
+            )
+        }
+    };
+    let command = fasti_application::SearchCandidateActionCommand {
+        request: ReadSearchCandidateRequest {
+            correlation_id: id,
+            access,
+            candidate_receipt_id: receipt
+                .parse()
+                .map_err(|_| invalid("/candidate_receipt_id"))?,
+            provider: ProviderId::try_new(provider.clone()).map_err(|_| invalid("/provider_id"))?,
+            grain: grain.parse().map_err(|_| invalid("/grain"))?,
+            outbound_policy: OutboundAccessPolicy::default(),
+            terms_revision: String::new(),
+        },
+        operation_id: body
+            .operation_id
+            .parse()
+            .map_err(|_| invalid("/operation_id"))?,
+        action,
+        evidence_mode: body.evidence_mode.into(),
+    };
+    let gate = state
+        .locks
+        .get(&provider)
+        .ok_or_else(|| invalid("/provider_id"))?;
+    let lease = ProviderOperationLease::new(gate.lock_owned().await);
+    let outcome = state
+        .service
+        .save_candidate(command, lease)
+        .await
+        .map_err(application_problem)?;
+    let response = match outcome {
+        fasti_provider_runtime::ProviderSearchActionOutcome::Saved(receipt) => {
+            fasti_contracts::SearchCandidateActionResponse::Saved {
+                receipt: receipt.as_ref().try_into().map_err(|_| {
+                    application_problem(Box::new(FastiProblem::from_code(
+                        fasti_application::ProblemCode::IntegrityFailed,
+                        capability,
+                        id,
+                    )))
+                })?,
+            }
+        }
+        fasti_provider_runtime::ProviderSearchActionOutcome::Unavailable { problem } => {
+            fasti_contracts::SearchCandidateActionResponse::Unavailable {
+                problem_code: problem.as_str().to_owned(),
+            }
+        }
+    };
+    Ok((
+        [(header::CACHE_CONTROL, "private, no-store")],
+        Json(response),
+    )
+        .into_response())
+}
+
 pub(crate) fn router() -> Router<SearchApiState> {
     Router::new()
+        .route(
+            "/api/v1/search/candidates/{provider_id}/{grain}/{candidate_receipt_id}/actions",
+            post(save_search_candidate),
+        )
+        .route(
+            "/api/v1/search/candidates/{provider_id}/{grain}/{candidate_receipt_id}",
+            get(read_search_candidate),
+        )
         .route(
             "/api/v1/search/providers/{provider_id}",
             post(search_provider_page),

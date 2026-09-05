@@ -182,6 +182,8 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     "/api/v1/records/identifiers",
     "/api/v1/records/{record_id}/identity-route",
     "/api/v1/records/{record_id}/metadata-projection",
+    "/api/v1/search/candidates/{provider_id}/{grain}/{candidate_receipt_id}",
+    "/api/v1/search/candidates/{provider_id}/{grain}/{candidate_receipt_id}/actions",
     "/api/v1/search/providers/{provider_id}",
   ]);
   assert.deepEqual(Object.keys(openapi.components.securitySchemes), [
@@ -478,6 +480,8 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     "select_browser_session_profile",
   ]);
   const hybridOperations = new Set([
+    "save_search_candidate",
+    "read_search_candidate",
     "search_provider_page",
     "submit_observation",
     "create_record",
@@ -495,6 +499,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     "apply_anime_grouping_policy_change",
   ]);
   const hybridMutations = new Set([
+    "save_search_candidate",
     "search_provider_page",
     "submit_observation",
     "create_record",

@@ -188,24 +188,53 @@ fn prepare_partition(
     })
 }
 
+impl SqliteKernel {
+    fn authorize_search_transport(
+        &self,
+        id: RequestCorrelationId,
+        access: &ApplicationAccessContext,
+        capability: CapabilityKey,
+        mutation: bool,
+    ) -> ApplicationResult<()> {
+        let mut connection = self
+            .inner
+            .connection
+            .lock()
+            .map_err(|_| Box::new(FastiProblem::storage_unavailable(capability, id)))?;
+        let transaction = map_sql(connection.transaction(), capability, id)?;
+        authorize_application_transaction(&transaction, capability, access, id)?;
+        if mutation
+            && matches!(access, ApplicationAccessContext::BrowserSession(proof) if !proof.is_mutation())
+        {
+            return Err(Box::new(FastiProblem::forbidden(capability, id)));
+        }
+        map_sql(transaction.commit(), capability, id)
+    }
+}
+
 impl SearchPersistencePort for SqliteKernel {
     fn authorize_search_page_request(
         &self,
         id: RequestCorrelationId,
         access: &ApplicationAccessContext,
     ) -> ApplicationResult<()> {
-        let mut connection = self
-            .inner
-            .connection
-            .lock()
-            .map_err(|_| failure(ProblemCode::StorageUnavailable, id))?;
-        let transaction = map_sql(connection.transaction(), CAPABILITY, id)?;
-        authorize_application_transaction(&transaction, CAPABILITY, access, id)?;
-        if matches!(access, ApplicationAccessContext::BrowserSession(proof) if !proof.is_mutation())
-        {
-            return Err(failure(ProblemCode::Forbidden, id));
-        }
-        map_sql(transaction.commit(), CAPABILITY, id)
+        self.authorize_search_transport(id, access, CAPABILITY, true)
+    }
+
+    fn authorize_search_candidate_read_request(
+        &self,
+        id: RequestCorrelationId,
+        access: &ApplicationAccessContext,
+    ) -> ApplicationResult<()> {
+        self.authorize_search_transport(id, access, CAPABILITY, false)
+    }
+
+    fn authorize_search_candidate_action_request(
+        &self,
+        id: RequestCorrelationId,
+        access: &ApplicationAccessContext,
+    ) -> ApplicationResult<()> {
+        self.authorize_search_transport(id, access, CapabilityKey::AttachIdentifier, true)
     }
 
     fn prepare_search_candidate_action(

@@ -69,6 +69,12 @@ mod candidate_details_tests {
     }
 
     impl SearchPersistencePort for DetailsPersistence {
+        fn authorize_search_candidate_read_request(&self, _: RequestCorrelationId, _: &ApplicationAccessContext) -> ApplicationResult<()> {
+            unreachable!("runtime tests enter after transport authorization")
+        }
+        fn authorize_search_candidate_action_request(&self, _: RequestCorrelationId, _: &ApplicationAccessContext) -> ApplicationResult<()> {
+            unreachable!("runtime tests enter after transport authorization")
+        }
         fn authorize_search_page_request(&self, _: RequestCorrelationId, _: &ApplicationAccessContext) -> ApplicationResult<()> {
             unreachable!("details tests do not acquire pages through HTTP")
         }

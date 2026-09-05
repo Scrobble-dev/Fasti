@@ -3312,6 +3312,244 @@ const PRODUCTION_SCHEMAS = {
     ],
     "type": "string"
   },
+  "SearchCandidateActionReceiptDto": {
+    "additionalProperties": false,
+    "description": "Immutable acceptance history, not current Record state or current freshness.\nInternal actor, authorization and query-context data never enter this DTO.",
+    "properties": {
+      "action": {
+        "$ref": "#/components/schemas/SearchRecordActionDto"
+      },
+      "candidate_receipt_id": {
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^scr_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      },
+      "committed_at": {
+        "format": "date-time",
+        "type": "string"
+      },
+      "disposition": {
+        "$ref": "#/components/schemas/SearchRecordActionDispositionDto"
+      },
+      "evidence_mode": {
+        "$ref": "#/components/schemas/SearchCandidateEvidenceModeDto"
+      },
+      "expires_at": {
+        "format": "date-time",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "fetched_at": {
+        "format": "date-time",
+        "type": "string"
+      },
+      "grain": {
+        "type": "string"
+      },
+      "initial_status": {
+        "$ref": "#/components/schemas/SearchEvidenceStatusDto"
+      },
+      "operation_id": {
+        "maxLength": 35,
+        "minLength": 35,
+        "pattern": "^op_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      },
+      "provider_id": {
+        "type": "string"
+      },
+      "record_id": {
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "operation_id",
+      "candidate_receipt_id",
+      "provider_id",
+      "grain",
+      "action",
+      "evidence_mode",
+      "record_id",
+      "disposition",
+      "fetched_at",
+      "initial_status",
+      "committed_at"
+    ],
+    "type": "object"
+  },
+  "SearchCandidateActionRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "action": {
+        "$ref": "#/components/schemas/SearchRecordActionDto"
+      },
+      "evidence_mode": {
+        "$ref": "#/components/schemas/SearchCandidateEvidenceModeDto"
+      },
+      "operation_id": {
+        "maxLength": 35,
+        "minLength": 35,
+        "pattern": "^op_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "operation_id",
+      "action",
+      "evidence_mode"
+    ],
+    "type": "object"
+  },
+  "SearchCandidateActionResponse": {
+    "oneOf": [
+      {
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "enum": [
+              "saved"
+            ],
+            "type": "string"
+          },
+          "receipt": {
+            "$ref": "#/components/schemas/SearchCandidateActionReceiptDto"
+          }
+        },
+        "required": [
+          "receipt",
+          "outcome"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "enum": [
+              "unavailable"
+            ],
+            "type": "string"
+          },
+          "problem_code": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "problem_code",
+          "outcome"
+        ],
+        "type": "object"
+      }
+    ]
+  },
+  "SearchCandidateDetailsQueryParameters": {
+    "additionalProperties": false,
+    "properties": {
+      "offline": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "offline"
+    ],
+    "type": "object"
+  },
+  "SearchCandidateDetailsResponse": {
+    "oneOf": [
+      {
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "enum": [
+              "missing"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "outcome"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "enum": [
+              "snapshot"
+            ],
+            "type": "string"
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/SearchCandidateSnapshotDto"
+          }
+        },
+        "required": [
+          "snapshot",
+          "outcome"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "details": {
+            "$ref": "#/components/schemas/SearchCandidateDto"
+          },
+          "locale": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "outcome": {
+            "enum": [
+              "refetched"
+            ],
+            "type": "string"
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/SearchCandidateSnapshotDto"
+          }
+        },
+        "required": [
+          "snapshot",
+          "details",
+          "outcome"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "enum": [
+              "unavailable"
+            ],
+            "type": "string"
+          },
+          "problem_code": {
+            "type": "string"
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/SearchCandidateSnapshotDto"
+          }
+        },
+        "required": [
+          "snapshot",
+          "problem_code",
+          "outcome"
+        ],
+        "type": "object"
+      }
+    ]
+  },
   "SearchCandidateDto": {
     "additionalProperties": false,
     "properties": {
@@ -3378,6 +3616,13 @@ const PRODUCTION_SCHEMAS = {
     ],
     "type": "object"
   },
+  "SearchCandidateEvidenceModeDto": {
+    "enum": [
+      "cached",
+      "refetch"
+    ],
+    "type": "string"
+  },
   "SearchCandidateReceiptDto": {
     "additionalProperties": false,
     "properties": {
@@ -3400,6 +3645,36 @@ const PRODUCTION_SCHEMAS = {
       "candidate"
     ],
     "type": "object"
+  },
+  "SearchCandidateSnapshotDto": {
+    "additionalProperties": false,
+    "description": "Original Search evidence. Its lifetime never describes a subsequent refetch.",
+    "properties": {
+      "lifetime": {
+        "$ref": "#/components/schemas/SearchReceiptLifetimeDto"
+      },
+      "locale": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "receipt": {
+        "$ref": "#/components/schemas/SearchCandidateReceiptDto"
+      }
+    },
+    "required": [
+      "receipt",
+      "lifetime"
+    ],
+    "type": "object"
+  },
+  "SearchEvidenceStatusDto": {
+    "enum": [
+      "fresh",
+      "stale"
+    ],
+    "type": "string"
   },
   "SearchProviderPageRequest": {
     "additionalProperties": false,
@@ -3559,6 +3834,56 @@ const PRODUCTION_SCHEMAS = {
       "expires_at"
     ],
     "type": "object"
+  },
+  "SearchRecordActionDispositionDto": {
+    "enum": [
+      "created",
+      "reused",
+      "attached",
+      "already_attached"
+    ],
+    "type": "string"
+  },
+  "SearchRecordActionDto": {
+    "oneOf": [
+      {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "create"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "attach"
+            ],
+            "type": "string"
+          },
+          "record_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "record_id",
+          "kind"
+        ],
+        "type": "object"
+      }
+    ]
   },
   "SelectBrowserSessionProfileRequest": {
     "additionalProperties": false,
@@ -4117,6 +4442,18 @@ export type AnimeGroupingPolicyChangeDto = { readonly applied_operation_id: stri
 // prettier-ignore
 export type SearchCacheStateDto = "fresh" | "stale_on_error";
 
+// prettier-ignore
+export type SearchCandidateEvidenceModeDto = "cached" | "refetch";
+
+// prettier-ignore
+export type SearchRecordActionDispositionDto = "already_attached" | "attached" | "created" | "reused";
+
+// prettier-ignore
+export type SearchEvidenceStatusDto = "fresh" | "stale";
+
+// prettier-ignore
+export type SearchRecordActionDto = { readonly kind: "attach"; readonly record_id: string } | { readonly kind: "create" };
+
 // The Nuvio wire document intentionally preserves extension fields.
 export type NuvioCollectionsDocumentDto = ReadonlyArray<Record<string, unknown>>;
 
@@ -4326,6 +4663,43 @@ export interface SearchProviderPageRequest {
 
 // prettier-ignore
 export type SearchProviderPageResponse = { readonly cache_state: SearchCacheStateDto; readonly candidates: ReadonlyArray<SearchCandidateReceiptDto>; readonly lifetime: SearchReceiptLifetimeDto; readonly next_page?: null | number; readonly outcome: "page"; readonly page: number; readonly provider_id: string; readonly upstream_problem?: null | string } | { readonly outcome: "unavailable"; readonly problem_code: string; readonly provider_id: string };
+
+export interface SearchCandidateDetailsQueryParameters {
+  readonly offline: boolean;
+}
+
+// prettier-ignore
+export type SearchCandidateDetailsResponse = { readonly details: SearchCandidateDto; readonly locale?: null | string; readonly outcome: "refetched"; readonly snapshot: SearchCandidateSnapshotDto } | { readonly outcome: "missing" } | { readonly outcome: "snapshot"; readonly snapshot: SearchCandidateSnapshotDto } | { readonly outcome: "unavailable"; readonly problem_code: string; readonly snapshot: SearchCandidateSnapshotDto };
+
+export interface SearchCandidateSnapshotDto {
+  readonly lifetime: SearchReceiptLifetimeDto;
+  readonly locale?: null | string;
+  readonly receipt: SearchCandidateReceiptDto;
+}
+
+export interface SearchCandidateActionRequest {
+  readonly action: SearchRecordActionDto;
+  readonly evidence_mode: SearchCandidateEvidenceModeDto;
+  readonly operation_id: string;
+}
+
+// prettier-ignore
+export type SearchCandidateActionResponse = { readonly outcome: "saved"; readonly receipt: SearchCandidateActionReceiptDto } | { readonly outcome: "unavailable"; readonly problem_code: string };
+
+export interface SearchCandidateActionReceiptDto {
+  readonly action: SearchRecordActionDto;
+  readonly candidate_receipt_id: string;
+  readonly committed_at: string;
+  readonly disposition: SearchRecordActionDispositionDto;
+  readonly evidence_mode: SearchCandidateEvidenceModeDto;
+  readonly expires_at?: null | string;
+  readonly fetched_at: string;
+  readonly grain: string;
+  readonly initial_status: SearchEvidenceStatusDto;
+  readonly operation_id: string;
+  readonly provider_id: string;
+  readonly record_id: string;
+}
 
 export interface SearchCandidateReceiptDto {
   readonly candidate: SearchCandidateDto;
@@ -4746,6 +5120,8 @@ export interface AccessProjectionResponse {
 
 // prettier-ignore
 export const LOCAL_RUNTIME_OPERATIONS = {
+  saveSearchCandidate: { operationId: "save_search_candidate", method: "POST", path: "/api/v1/search/candidates/{provider_id}/{grain}/{candidate_receipt_id}/actions", capabilityId: "identity.identifier.attach", authorization: "scoped_or_browser_session", requiredScopes: ["identity_write"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","idempotency_conflict","identity_conflict","integrity_failed","invalid_identifier","malformed_json","payload_too_large","record_not_found","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["identity.identifier.attach.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: "SearchCandidateActionRequest", responseSchema: "SearchCandidateActionResponse" },
+  readSearchCandidate: { operationId: "read_search_candidate", method: "GET", path: "/api/v1/search/candidates/{provider_id}/{grain}/{candidate_receipt_id}", capabilityId: "metadata.search", authorization: "scoped_or_browser_session", requiredScopes: ["metadata_search"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "SearchCandidateDetailsResponse" },
   searchProviderPage: { operationId: "search_provider_page", method: "POST", path: "/api/v1/search/providers/{provider_id}", capabilityId: "metadata.search", authorization: "scoped_or_browser_session", requiredScopes: ["metadata_search"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "SearchProviderPageRequest", responseSchema: "SearchProviderPageResponse" },
   submitObservation: { operationId: "submit_observation", method: "POST", path: "/api/v1/observations", capabilityId: "observation.accept", authorization: "scoped_or_browser_session", requiredScopes: ["observation_accept"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","invalid_observation","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["observation.accept.capacity_exceeded","observation.accept.receipt","observation.accept.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: "SubmitObservationRequest", responseSchema: "SubmitObservationResponse" },
   nuvioWebhook: { operationId: "nuvio_webhook", method: "POST", path: "/api/v1/integrations/nuvio/webhook", capabilityId: "observation.accept", authorization: "scoped", requiredScopes: ["observation_accept"], problemCodes: ["authentication_failed","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","invalid_observation","malformed_json","payload_too_large","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["observation.accept.capacity_exceeded","observation.accept.receipt","observation.accept.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: "IntegrationObservationRequest", responseSchema: "SubmitObservationResponse" },
@@ -4892,6 +5268,26 @@ export function parseSearchProviderPageRequest(value: unknown): SearchProviderPa
 // prettier-ignore
 export function parseSearchProviderPageResponse(value: unknown): SearchProviderPageResponse {
   return parseProductionDto("SearchProviderPageResponse", value);
+}
+
+// prettier-ignore
+export function parseSearchCandidateDetailsQueryParameters(value: unknown): SearchCandidateDetailsQueryParameters {
+  return parseProductionDto("SearchCandidateDetailsQueryParameters", value);
+}
+
+// prettier-ignore
+export function parseSearchCandidateDetailsResponse(value: unknown): SearchCandidateDetailsResponse {
+  return parseProductionDto("SearchCandidateDetailsResponse", value);
+}
+
+// prettier-ignore
+export function parseSearchCandidateActionRequest(value: unknown): SearchCandidateActionRequest {
+  return parseProductionDto("SearchCandidateActionRequest", value);
+}
+
+// prettier-ignore
+export function parseSearchCandidateActionResponse(value: unknown): SearchCandidateActionResponse {
+  return parseProductionDto("SearchCandidateActionResponse", value);
 }
 
 // prettier-ignore

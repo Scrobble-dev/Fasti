@@ -16,6 +16,32 @@ mod search_authorization_tests {
             .authorize_search_page_request(RequestCorrelationId::new_v7(), access)
     }
 
+    fn read_authority(node: &TestNode, access: &ApplicationAccessContext) -> ApplicationResult<()> {
+        node.kernel
+            .authorize_search_candidate_read_request(RequestCorrelationId::new_v7(), access)
+    }
+
+    fn action_authority(
+        node: &TestNode,
+        access: &ApplicationAccessContext,
+    ) -> ApplicationResult<()> {
+        node.kernel
+            .authorize_search_candidate_action_request(RequestCorrelationId::new_v7(), access)
+    }
+
+    fn remove_scope(node: &TestNode, scope: &str) {
+        node.kernel
+            .inner
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "DELETE FROM grant_scopes WHERE grant_id = ?1 AND scope_key = ?2",
+                params![node.access.grant_id().to_string(), scope],
+            )
+            .unwrap();
+    }
+
     // Compare full persisted values, not just row counts: authorization must not
     // refresh provider health or rewrite an existing cache entry either.
     fn source_state(node: &TestNode) -> Vec<Vec<Vec<Value>>> {
@@ -26,6 +52,9 @@ mod search_authorization_tests {
             "search_candidate_receipts",
             "search_action_receipts",
             "metadata_refresh_receipts",
+            "records",
+            "external_identifiers",
+            "metadata_field_claims",
         ]
         .into_iter()
         .map(|table| {
@@ -232,6 +261,177 @@ mod search_authorization_tests {
                 .unwrap_err()
                 .code(),
             ProblemCode::Forbidden
+        );
+        assert_eq!(last_seen(&node, &created), activity);
+        assert_eq!(source_state(&node), before);
+    }
+
+    #[test]
+    fn search_candidate_preflights_use_distinct_current_scopes_without_source_writes() {
+        let (node, request) = setup();
+        commit(&node, &request, &[candidate("42")]);
+        let before = source_state(&node);
+        read_authority(&node, &request.access).unwrap();
+        action_authority(&node, &request.access).unwrap();
+
+        let identity_only: ApplicationAccessContext = node
+            .add_profile_with_scopes(&[ScopeKey::IdentityWrite])
+            .into();
+        let search_only: ApplicationAccessContext = node
+            .add_profile_with_scopes(&[ScopeKey::MetadataSearch])
+            .into();
+        action_authority(&node, &identity_only).unwrap();
+        read_authority(&node, &search_only).unwrap();
+        assert_eq!(
+            read_authority(&node, &identity_only).unwrap_err().code(),
+            ProblemCode::Forbidden
+        );
+        assert_eq!(
+            action_authority(&node, &search_only).unwrap_err().code(),
+            ProblemCode::Forbidden
+        );
+
+        // Use the already-issued access snapshot: current durable scopes win.
+        remove_scope(&node, "metadata_search");
+        assert_eq!(
+            read_authority(&node, &request.access).unwrap_err().code(),
+            ProblemCode::Forbidden
+        );
+        action_authority(&node, &request.access).unwrap();
+        remove_scope(&node, "identity_write");
+        assert_eq!(
+            action_authority(&node, &request.access).unwrap_err().code(),
+            ProblemCode::Forbidden
+        );
+        assert_eq!(source_state(&node), before);
+    }
+
+    #[test]
+    fn search_candidate_preflights_reject_current_credential_revocation() {
+        let (node, request) = setup();
+        commit(&node, &request, &[candidate("42")]);
+        let before = source_state(&node);
+        read_authority(&node, &request.access).unwrap();
+        action_authority(&node, &request.access).unwrap();
+        node.kernel
+            .revoke_credential(RevokeCredentialCommand::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+                node.access.credential_id(),
+            ))
+            .unwrap();
+        assert_eq!(
+            read_authority(&node, &request.access).unwrap_err().code(),
+            ProblemCode::Forbidden
+        );
+        assert_eq!(
+            action_authority(&node, &request.access).unwrap_err().code(),
+            ProblemCode::Forbidden
+        );
+        assert_eq!(source_state(&node), before);
+    }
+
+    #[test]
+    fn search_candidate_preflights_preserve_browser_read_and_mutation_boundaries() {
+        for action in [false, true] {
+            let (node, request) = setup();
+            commit(&node, &request, &[candidate("42")]);
+            let created = browser_session(&node);
+            let before = source_state(&node);
+            let activity = last_seen(&node, &created);
+            let authorize = if action {
+                action_authority
+            } else {
+                read_authority
+            };
+
+            assert_eq!(
+                authorize(&node, &browser_access(&created, true, true))
+                    .unwrap_err()
+                    .code(),
+                ProblemCode::Forbidden
+            );
+            assert_eq!(last_seen(&node, &created), activity);
+            if action {
+                assert_eq!(
+                    authorize(&node, &browser_access(&created, false, false))
+                        .unwrap_err()
+                        .code(),
+                    ProblemCode::Forbidden
+                );
+                assert_eq!(last_seen(&node, &created), activity);
+                // Completed saves must not acquire a Search dependency in preflight.
+                remove_scope(&node, "metadata_search");
+            } else {
+                remove_scope(&node, "identity_write");
+            }
+            authorize(&node, &browser_access(&created, action, false)).unwrap();
+            assert!(last_seen(&node, &created) > activity);
+            assert_eq!(source_state(&node), before);
+        }
+    }
+
+    #[test]
+    fn search_candidate_preflights_missing_browser_scope_roll_back_activity() {
+        for action in [false, true] {
+            let (node, request) = setup();
+            commit(&node, &request, &[candidate("42")]);
+            let created = browser_session(&node);
+            let access = browser_access(&created, action, false);
+            remove_scope(
+                &node,
+                if action {
+                    "identity_write"
+                } else {
+                    "metadata_search"
+                },
+            );
+            let before = source_state(&node);
+            let activity = last_seen(&node, &created);
+            let result = if action {
+                action_authority(&node, &access)
+            } else {
+                read_authority(&node, &access)
+            };
+            assert_eq!(result.unwrap_err().code(), ProblemCode::Forbidden);
+            assert_eq!(last_seen(&node, &created), activity);
+            assert_eq!(source_state(&node), before);
+        }
+    }
+
+    #[test]
+    fn search_candidate_preflights_reject_real_browser_session_revocation() {
+        let (node, request) = setup();
+        commit(&node, &request, &[candidate("42")]);
+        let created = browser_session(&node);
+        let read = browser_access(&created, false, false);
+        let action = browser_access(&created, true, false);
+        read_authority(&node, &read).unwrap();
+        action_authority(&node, &action).unwrap();
+        let before = source_state(&node);
+        let boundary =
+            BrowserRequestBoundaryPolicy::try_new("https://fasti.example", "fasti.example")
+                .unwrap();
+        assert!(node
+            .kernel
+            .revoke_current_browser_session(BrowserSessionMutationCommand::new(
+                RequestCorrelationId::new_v7(),
+                copy_secret(created.session_secret()),
+                copy_secret(created.csrf_secret()),
+                boundary
+                    .validate(Some("https://fasti.example"), Some("fasti.example"))
+                    .unwrap(),
+                now(),
+            ))
+            .unwrap());
+        let activity = last_seen(&node, &created);
+        assert_eq!(
+            read_authority(&node, &read).unwrap_err().code(),
+            ProblemCode::BrowserSessionRevoked
+        );
+        assert_eq!(
+            action_authority(&node, &action).unwrap_err().code(),
+            ProblemCode::BrowserSessionRevoked
         );
         assert_eq!(last_seen(&node, &created), activity);
         assert_eq!(source_state(&node), before);
