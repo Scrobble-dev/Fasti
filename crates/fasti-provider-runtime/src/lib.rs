@@ -1,5 +1,6 @@
 //! Shared governed provider registry and concrete metadata adapters.
 
+mod cache_policy;
 mod metadata;
 mod platform_vault;
 mod providers;

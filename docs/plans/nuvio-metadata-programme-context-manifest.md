@@ -1606,3 +1606,74 @@ host bindings and governed response-cache policy, followed by the full approved
 programme. Roll back this additive route with its SDK binding; do not downgrade the
 database or delete Search evidence. M4 retains v16/archive v6 and shared ownership;
 no PR, merge, v17 allocation or C2 activation release has occurred.
+
+### 2026-09-05 — Shared provider response-policy observation
+
+The preceding local Search commit `bad6f35025883f017900f75a6607c2550e19d588`,
+tree `60234bc062aa1b4a82540c80b07cbf9396a79142`, passed the canonical PR gate
+on that exact clean source: 27/27 contract and 11/11 portable gates, including
+262 SDK checks. Its exact-commit release 10,000-Record rerun passed 100 samples:
+p50 1.753 ms, p95 1.796 ms, max 1.817 ms. These are local synthetic measurements,
+not hardware, live-provider or rendered Search evidence.
+
+- **Current implementation:** the existing governed JSON boundary retains one
+  normalized response policy and header-receipt time. Page and detail parsers
+  share that observation; empty and filtered pages cannot lose restrictions.
+  The application computes absolute purpose-capped deadlines. HTTP syntax stays
+  in the runtime adapter. Missing freshness differs from explicit zero, and
+  no-store has no storage deadline rather than a fabricated zero-TTL admission.
+- **Source and native review:** [RFC 9111](https://www.rfc-editor.org/rfc/rfc9111.html)
+  owns cache syntax, age and variant matching;
+  [RFC 5861](https://www.rfc-editor.org/rfc/rfc5861.html) owns stale-if-error.
+  Fasti conservatively treats malformed overall Cache-Control as live-only,
+  duplicate/invalid freshness as validation-required and invalid stale grace as
+  zero. It does not retain request-header variants, so nonempty Vary requires
+  validation. Independent review found and fixed oversized valid Age being
+  treated as zero and ignored Vary wildcard matching. First Age list members
+  remain authoritative even when a later member is long; overflow saturates.
+  Numeric work beyond the explicit limit requires validation instead of granting
+  freshness. No raw policy headers enter public candidate serialization.
+- **Focused evidence:** nine application policy tests and all 83 provider-runtime
+  tests pass. The latter include 22 parser tests and five real loopback HTTP
+  boundary tests for body timing, populated/empty/filtered pages, detail parsing,
+  public JSON, status classification, truncation and the exact 2 MB body limit.
+  Strict application/runtime all-target clippy passes. The loopback fixture does
+  not bypass or prove governed TLS, DNS or live-provider behavior. A clean
+  exact-head canonical gate is still required for this new diff.
+- **Implementation boundary:** policy capture is not admission/reuse enforcement.
+  Search persistence, offline details, cached and refetched actions, metadata
+  refresh, existing Desktop track/apply callers and selected metadata projections
+  still need the same restriction checks. A no-store body must not enter SQLite
+  or WAL through claims, refresh receipts or a cached-save conversion. Do not
+  call this complete, silently grant an explicit-Save exception, fabricate a
+  durable receipt, or replace live results with an unavailable placeholder.
+- **Bounded parallel allocation:** commander remains the sole shared production
+  writer. The three agents wrote only their allocated application policy,
+  runtime parser and HTTP-boundary test leaves; all leaves are released. Their
+  read-only continuation identified the existing context_json envelope as a
+  no-schema policy carrier: keep provider/page at the root, the query context
+  digest unchanged, strict canonical decoding and the combined 2,048-byte bound.
+  Lookup must select by the existing partition and then validate the envelope;
+  exact old context_json equality would miss every new page. Newest restrictive
+  evidence must not fall back to older permissive rows. Online coordinates and
+  offline payload permission must be separate, including failure snapshots.
+  Existing `ProviderSelectionInput` can drive a governed fresh fetch without a
+  payload-retaining transient-handle service. It does not prove prior membership
+  in a scoped Search receipt. Coordinate-origin Create/Attach and no-store Save
+  therefore require an explicit action/history disposition before implementation;
+  do not overload existing receipt or provenance fields. M5's updated preparation
+  reuses the committed canonical detail owner, complete-Record hydration pattern
+  and unknown-versus-absent tracking distinction. It does not reuse Search's
+  query cursor or authorization for Library. Exact tracking selection, full
+  Library pagination and saved intent remain in scope and unimplemented.
+
+Ponytail reuses the existing response, provider, lifetime and JSON owners plus
+the already locked `httpdate` 1.0.3 package; only its direct runtime dependency
+edge was added. No new cache service, schema, archive, public API or UI was
+introduced. Next, integrate policy-aware admission/reuse and truthful live-only
+Search before freezing host/Workbench result shapes. Preserve completed action
+history and published migrations. No Codex Security was used. This headless slice
+adds no visual/accessibility or packaged-host claim. Rollback is the matching
+application/runtime observation diff; no stored data needs deletion or downgrade.
+M4 remains local and unmerged, owns v16/archive v6 and all shared integration
+surfaces, and has not released v17 or C2 activation. Full programme scope remains.

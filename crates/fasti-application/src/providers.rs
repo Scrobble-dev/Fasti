@@ -11,6 +11,9 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use zeroize::Zeroize;
 
+mod response_cache;
+pub use response_cache::{ProviderResponseCachePolicy, ProviderResponseReuse};
+
 pub const MAX_PROVIDER_ID_BYTES: usize = 128;
 pub const MAX_PROVIDER_CAPABILITY_ID_BYTES: usize = 128;
 pub const MAX_CREDENTIAL_REFERENCE_BYTES: usize = 253;
