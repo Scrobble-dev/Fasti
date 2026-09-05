@@ -1,9 +1,9 @@
 # Access A+C parallel regressions
 
-Status: bounded header and mobile layout fixes implemented and independently
-reviewed. Combined source-byte-identical browser evidence is 41/41; fresh pending
-matrix is 6/6. Canonical verification passed on clean implementation commit
-`3cbd52b6`. Remaining delivery gates are pending. Unshipped.
+Status: bounded header, mobile layout and notice fixes implemented and
+independently reviewed. Latest combined browser run passes 52/52. Earlier
+41/41, 6/6 and canonical results retain their original source identities.
+Final-commit canonical and remaining delivery gates are pending. Unshipped.
 Base: `62e10d2e9bd738ed5da425c008eb839f89cdbea5`.
 
 ## Ownership and purpose
@@ -48,6 +48,33 @@ Evidence: `.gstack/qa-reports/notice-retention-red-contract.json` and
 `.gstack/qa-reports/notice-retention-green.json`. These are controlled browser
 tests, not real authentication or full accessibility conformance. Layout and
 exact final delivery gates remain pending.
+
+Notice-layout checkpoint: persistent polite/atomic live-region markup now owns
+the existing Tabler alert. Its status role is present only when it has a notice;
+empty reserved space is not another semantic status or keyboard stop. A minimum
+of two text lines (three on narrow layouts), plus Tabler's padding and borders,
+reserves space without clipping longer content. The first 52-test run passed
+49 and failed three: an extra empty status broke an existing first-run assertion,
+and both enlarged-text cases exposed a continuation-choice flex item overflowing
+by 20px. The final markup removes the empty status role while retaining the live
+region. The shared choice text now permits flex shrink and word wrapping.
+Existing tests and helpers are unchanged.
+
+The corrected focused run passed 12/12. Eight normal-text Light/Dark cases at
+320/375/768/1440px measured zero change in the choice's document position after
+the acknowledgement appeared. At 320px with 200% text and increased spacing,
+the region grew by 192px to keep the whole notice visible; horizontal overflow
+and clipping checks passed. This is measured geometry, not CLS/INP or universal
+zero-shift conformance. Screenshots were inspected at narrow/wide Light and
+narrow enlarged Dark. Evidence remains under
+`.gstack/qa-reports/notice-layout-first` and `notice-layout-corrected`, with their
+JSON reports. The full corrected combined run now passes 52/52, zero failed,
+skipped or flaky, in `.gstack/qa-reports/notice-layout-combined.json`.
+Independent source and screenshot review found no concrete introduced defect.
+The existing C1 cases include forced colors, Night, reduced motion, Axe, focus,
+session expiry and callback recovery. This remains bounded browser-fixture
+evidence, not screen-reader announcement verification or WCAG/EN conformance.
+Final-commit canonical verification and applicable delivery review remain next.
 
 The metadata commander explicitly released a new isolated
 `tests/e2e/access-parallel-regressions.spec.ts` for Access tests on 2026-09-05.

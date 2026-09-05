@@ -628,16 +628,18 @@
     {/if}
   </header>
 
-  {#if notice}
-    <p
-      id="access-notice"
-      class="alert alert-success"
-      role="status"
-      tabindex="-1"
-    >
-      {notice}
-    </p>
-  {/if}
+  <div
+    class="access-notice-region"
+    role={notice ? "status" : undefined}
+    aria-live="polite"
+    aria-atomic="true"
+  >
+    {#if notice}
+      <p id="access-notice" class="alert alert-success mb-0" tabindex="-1">
+        {notice}
+      </p>
+    {/if}
+  </div>
 
   {#if viewState.kind === "ready" && viewState.projection.profile_grants_truncated}
     <p class="alert alert-info mb-0" role="status">
@@ -1221,6 +1223,16 @@
     min-width: 0;
   }
 
+  .access-notice-region {
+    min-block-size: calc(2lh + 1.5rem + 2px);
+  }
+
+  @media (max-width: 47.99rem) {
+    .access-notice-region {
+      min-block-size: calc(3lh + 1.5rem + 2px);
+    }
+  }
+
   .access-surface :global(.text-secondary) {
     color: var(--fasti-text-muted) !important;
   }
@@ -1354,6 +1366,11 @@
     gap: 0.75rem;
     min-height: 4.5rem;
     cursor: pointer;
+  }
+
+  .continuation-choice > span {
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
 
   .remember-browser-check {
