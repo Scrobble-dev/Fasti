@@ -168,7 +168,7 @@ async function installSearchHost(
 
 // Regression: ISSUE-003 — Local-only Search claimed an empty provider result without querying a provider.
 // Found by /qa on 2026-09-05.
-// Report: .gstack/qa-reports/qa-report-fasti-local-2026-09-05.md
+// Report: .gstack/qa-reports/qa-report-fasti-m4-review-2026-09-05.md
 test("local-only Search does not claim an empty provider query", async ({
   page,
 }, testInfo) => {
@@ -194,6 +194,11 @@ test("local-only Search does not claim an empty provider query", async ({
   await expect(
     page.getByText("No compatible titles found", { exact: false }),
   ).toHaveCount(0);
+  await expect(
+    page.getByText("No provider was queried. Local results are shown above.", {
+      exact: true,
+    }),
+  ).toBeVisible();
   expect(
     await page.evaluate(
       () => window.__SEARCH_BOUNDARY_FIXTURE__?.providerQueries,

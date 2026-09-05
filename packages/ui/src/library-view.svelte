@@ -232,7 +232,7 @@
       </div>
 
       <div
-        class="filter-pills"
+        class="filter-pills flex-wrap"
         role="radiogroup"
         aria-label="Media kind filter"
       >
@@ -250,7 +250,11 @@
         {/each}
       </div>
 
-      <div class="filter-pills" role="radiogroup" aria-label="Status filter">
+      <div
+        class="filter-pills flex-wrap"
+        role="radiogroup"
+        aria-label="Status filter"
+      >
         {#each statuses as s}
           <button
             type="button"
