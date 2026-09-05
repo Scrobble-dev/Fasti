@@ -267,6 +267,77 @@ mod search_authorization_tests {
     }
 
     #[test]
+    fn search_page_discard_requires_browser_mutation_and_commits_only_successful_activity() {
+        let (node, bearer_request) = setup();
+        let created = browser_session(&node);
+        let mut request = bearer_request.clone();
+        request.access = browser_access(&created, true, false);
+        let saved = commit(&node, &request, &[candidate("42")]);
+        let prepared = node.kernel.prepare_search_page(&request).unwrap();
+        let wrong_partition = node.kernel.prepare_search_page(&bearer_request).unwrap();
+
+        // Seeding the real browser-owned page already refreshed activity. Put
+        // this fixture back at its original, still-active timestamp so a
+        // subsequent authorization crosses the real owner's write interval.
+        let initial_activity = timestamp(created.session().last_seen_at());
+        node.kernel
+            .inner
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE fasti_browser_sessions SET last_seen_at = ?1 WHERE browser_session_id = ?2",
+                params![initial_activity, created.session().id().to_string()],
+            )
+            .unwrap();
+        let before = source_state(&node);
+        assert_eq!(before[1].len(), 1);
+        assert_eq!(before[2].len(), 1);
+
+        for access in [
+            browser_access(&created, false, false),
+            browser_access(&created, true, true),
+        ] {
+            let mut invalid = request.clone();
+            invalid.access = access;
+            assert_eq!(
+                node.kernel
+                    .discard_cached_search_page(&invalid, &prepared)
+                    .unwrap_err()
+                    .code(),
+                ProblemCode::Forbidden
+            );
+            assert_eq!(last_seen(&node, &created), initial_activity);
+            assert_eq!(source_state(&node), before);
+        }
+        // A valid mutation authenticates and attempts an activity write before
+        // the prepared-partition mismatch. Both that write and purge roll back.
+        assert_eq!(
+            node.kernel
+                .discard_cached_search_page(&request, &wrong_partition)
+                .unwrap_err()
+                .code(),
+            ProblemCode::Forbidden
+        );
+        assert_eq!(last_seen(&node, &created), initial_activity);
+        assert_eq!(source_state(&node), before);
+
+        node.kernel
+            .discard_cached_search_page(&request, &prepared)
+            .unwrap();
+        assert!(last_seen(&node, &created) > initial_activity);
+        let mut expected = before;
+        expected[1].clear();
+        expected[2].clear();
+        assert_eq!(source_state(&node), expected);
+        assert!(node
+            .kernel
+            .read_search_candidate(&details(&request, saved.candidates[0].id()))
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
     fn search_candidate_preflights_use_distinct_current_scopes_without_source_writes() {
         let (node, request) = setup();
         commit(&node, &request, &[candidate("42")]);

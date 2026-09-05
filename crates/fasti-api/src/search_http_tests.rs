@@ -343,6 +343,7 @@ mod search_http_tests {
                 &[candidate],
                 &Sha256Digest::from_bytes(&[7; 32]),
                 None,
+                &fasti_application::ProviderResponseCachePolicy::new(fasti_application::ProviderResponseReuse::Reusable, chrono::Utc::now(), std::time::Duration::ZERO, None, None),
             )
             .unwrap()
             .candidates[0]

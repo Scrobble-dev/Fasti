@@ -148,6 +148,7 @@ mod candidate_action_tests {
         ) -> ApplicationResult<PreparedSearchPage> {
             panic!("actions must not create a Search page")
         }
+        fn discard_cached_search_page(&self, _: &SearchPageRequest, _: &PreparedSearchPage) -> ApplicationResult<()> { panic!("actions must not discard Search pages") }
         fn commit_search_page(
             &self,
             _: &SearchPageRequest,
@@ -155,6 +156,7 @@ mod candidate_action_tests {
             _: &[SearchCandidate],
             _: &Sha256Digest,
             _: Option<u32>,
+            _: &fasti_application::ProviderResponseCachePolicy,
         ) -> ApplicationResult<StoredSearchPage> {
             panic!("actions must not overwrite the immutable Search snapshot")
         }

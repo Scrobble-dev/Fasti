@@ -3387,6 +3387,7 @@ const PRODUCTION_SCHEMAS = {
   },
   "SearchCacheStateDto": {
     "enum": [
+      "observed",
       "fresh",
       "stale_on_error"
     ],
@@ -3807,6 +3808,47 @@ const PRODUCTION_SCHEMAS = {
   },
   "SearchProviderPageResponse": {
     "oneOf": [
+      {
+        "additionalProperties": false,
+        "properties": {
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/SearchCandidateDto"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "next_page": {
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "outcome": {
+            "enum": [
+              "live"
+            ],
+            "type": "string"
+          },
+          "page": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "provider_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider_id",
+          "page",
+          "candidates",
+          "outcome"
+        ],
+        "type": "object"
+      },
       {
         "additionalProperties": false,
         "properties": {
@@ -4520,7 +4562,7 @@ export type AnimeGroupingPolicySourceDto = "client_override" | "profile_default"
 export type AnimeGroupingPolicyChangeDto = { readonly applied_operation_id: string; readonly kind: "rollback" } | { readonly kind: "inherit_profile" } | { readonly kind: "set"; readonly preference: AnimeGroupingPreferenceDto };
 
 // prettier-ignore
-export type SearchCacheStateDto = "fresh" | "stale_on_error";
+export type SearchCacheStateDto = "fresh" | "observed" | "stale_on_error";
 
 // prettier-ignore
 export type SearchCandidateEvidenceModeDto = "cached" | "refetch";
@@ -4758,7 +4800,7 @@ export interface LocalSearchCursorDto {
 }
 
 // prettier-ignore
-export type SearchProviderPageResponse = { readonly cache_state: SearchCacheStateDto; readonly candidates: ReadonlyArray<SearchCandidateReceiptDto>; readonly lifetime: SearchReceiptLifetimeDto; readonly next_page?: null | number; readonly outcome: "page"; readonly page: number; readonly provider_id: string; readonly upstream_problem?: null | string } | { readonly outcome: "unavailable"; readonly problem_code: string; readonly provider_id: string };
+export type SearchProviderPageResponse = { readonly cache_state: SearchCacheStateDto; readonly candidates: ReadonlyArray<SearchCandidateReceiptDto>; readonly lifetime: SearchReceiptLifetimeDto; readonly next_page?: null | number; readonly outcome: "page"; readonly page: number; readonly provider_id: string; readonly upstream_problem?: null | string } | { readonly candidates: ReadonlyArray<SearchCandidateDto>; readonly next_page?: null | number; readonly outcome: "live"; readonly page: number; readonly provider_id: string } | { readonly outcome: "unavailable"; readonly problem_code: string; readonly provider_id: string };
 
 export interface SearchCandidateDetailsQueryParameters {
   readonly offline: boolean;

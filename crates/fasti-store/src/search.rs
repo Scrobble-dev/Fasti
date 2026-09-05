@@ -37,6 +37,30 @@ fn digest(value: &impl Serialize, id: RequestCorrelationId) -> ApplicationResult
     .map_err(|_| failure(ProblemCode::IntegrityFailed, id))
 }
 
+fn response_lifetime(
+    policy: &fasti_application::ProviderResponseCachePolicy,
+    id: RequestCorrelationId,
+) -> ApplicationResult<SearchReceiptLifetime> {
+    let (fresh, stale) = policy
+        .deadlines(
+            std::time::Duration::from_secs(SEARCH_FRESH_SECONDS as u64),
+            std::time::Duration::from_secs(SEARCH_STALE_ON_ERROR_SECONDS as u64),
+        )
+        .ok_or_else(|| failure(ProblemCode::ValidationFailed, id))?;
+    let canonical = |value| parse_timestamp(&timestamp(value), CAPABILITY, id);
+    let expires = policy
+        .received_at()
+        .checked_add_signed(Duration::seconds(SEARCH_RECEIPT_SECONDS))
+        .ok_or_else(|| failure(ProblemCode::ValidationFailed, id))?;
+    SearchReceiptLifetime::try_new(
+        canonical(policy.received_at())?,
+        canonical(fresh)?,
+        canonical(stale)?,
+        canonical(expires)?,
+    )
+    .map_err(|_| failure(ProblemCode::ValidationFailed, id))
+}
+
 fn prepare(
     transaction: &Transaction<'_>,
     request: &SearchPageRequest,
@@ -281,6 +305,7 @@ impl SearchPersistencePort for SqliteKernel {
         candidates: &[SearchCandidate],
         response_digest: &Sha256Digest,
         next_page: Option<u32>,
+        response_policy: &fasti_application::ProviderResponseCachePolicy,
     ) -> ApplicationResult<StoredSearchPage> {
         let id = request.correlation_id;
         if let ApplicationAccessContext::BrowserSession(access) = &request.access {
@@ -289,20 +314,15 @@ impl SearchPersistencePort for SqliteKernel {
             }
         }
         let context = request.query.receipt_context();
-        if candidates.len() > MAX_SEARCH_PAGE_CANDIDATES
-            || next_page.is_some_and(|page| page <= request.query.page())
-            || candidates
-                .iter()
-                .any(|candidate| !context.accepts(candidate))
-        {
+        // Admission precedes payload serialization or SQLite/WAL work. NoStore
+        // is a live response, never a zero-TTL durable receipt.
+        let life = response_lifetime(response_policy, id)?;
+        if response_policy.received_at() > now() || !life.receipt_is_current(now()) {
             return Err(failure(ProblemCode::ValidationFailed, id));
         }
-        let mut coordinates = std::collections::HashSet::new();
-        if candidates.iter().any(|candidate| {
-            !coordinates.insert((&candidate.data().kind, &candidate.data().provider_id))
-        }) {
-            return Err(failure(ProblemCode::ValidationFailed, id));
-        }
+        context
+            .validate_page(candidates, next_page)
+            .map_err(|_| failure(ProblemCode::ValidationFailed, id))?;
         let candidate_json = candidates
             .iter()
             .map(|candidate| {
@@ -327,17 +347,10 @@ impl SearchPersistencePort for SqliteKernel {
             return Err(failure(ProblemCode::Forbidden, id));
         }
         let partition = &current.partition;
-        let created = parse_timestamp(&timestamp(now()), CAPABILITY, id)?;
-        let life = SearchReceiptLifetime::try_new(
-            created,
-            created + Duration::seconds(SEARCH_FRESH_SECONDS),
-            created + Duration::seconds(SEARCH_STALE_ON_ERROR_SECONDS),
-            created + Duration::seconds(SEARCH_RECEIPT_SECONDS),
-        )
-        .map_err(|_| failure(ProblemCode::IntegrityFailed, id))?;
+        let created = life.created_at();
         map_sql(transaction.execute(
             "DELETE FROM search_pages WHERE sequence IN (SELECT sequence FROM search_pages WHERE expires_at <= ?1 ORDER BY expires_at, sequence LIMIT 100)",
-            [timestamp(created)]), CAPABILITY, id)?;
+            [timestamp(now())]), CAPABILITY, id)?;
         let (pages, bytes): (i64, i64) = map_sql(
             transaction.query_row(
                 "SELECT COUNT(*), COALESCE(SUM(candidate_bytes), 0) FROM search_pages",
@@ -363,7 +376,7 @@ impl SearchPersistencePort for SqliteKernel {
                 partition.actor_subject_id().map(|value| value.to_string()), partition.grant_id().to_string(),
                 request.query.provider().as_str(), request.query.page(), next_page, candidates.len() as i64,
                 response_digest.as_str(), timestamp(created), timestamp(life.fresh_until()), timestamp(life.stale_until()), timestamp(life.expires_at()), candidate_bytes,
-                context.to_json().map_err(|_| failure(ProblemCode::ValidationFailed, id))?]
+                context.to_response_json(response_policy).map_err(|_| failure(ProblemCode::ValidationFailed, id))?]
         ), CAPABILITY, id)?;
         let sequence = transaction.last_insert_rowid();
         let mut receipts = Vec::with_capacity(candidates.len());
@@ -387,10 +400,46 @@ impl SearchPersistencePort for SqliteKernel {
             sequence: sequence as u64,
             candidates: receipts,
             next_page,
-            cache_state: fasti_application::SearchCacheState::Fresh,
+            cache_state: life
+                .cache_state(now(), false)
+                .unwrap_or(fasti_application::SearchCacheState::Observed),
             lifetime: life,
             response_digest: response_digest.clone(),
         })
+    }
+
+    fn discard_cached_search_page(
+        &self,
+        request: &SearchPageRequest,
+        prepared: &PreparedSearchPage,
+    ) -> ApplicationResult<()> {
+        let id = request.correlation_id;
+        if matches!(&request.access, ApplicationAccessContext::BrowserSession(access) if !access.is_mutation())
+        {
+            return Err(failure(ProblemCode::Forbidden, id));
+        }
+        let mut connection = self.lock_connection(CAPABILITY, id)?;
+        let transaction = map_sql(
+            connection.transaction_with_behavior(TransactionBehavior::Immediate),
+            CAPABILITY,
+            id,
+        )?;
+        let current = prepare(&transaction, request)?;
+        if current.partition != prepared.partition {
+            return Err(failure(ProblemCode::Forbidden, id));
+        }
+        map_sql(
+            transaction.execute(
+                "DELETE FROM search_pages WHERE partition_digest = ?1 AND partition_json = ?2",
+                params![
+                    digest(&current.partition, id)?.as_str(),
+                    json(&current.partition, id)?
+                ],
+            ),
+            CAPABILITY,
+            id,
+        )?;
+        map_sql(transaction.commit(), CAPABILITY, id)
     }
 
     fn read_cached_search_page(
@@ -408,14 +457,23 @@ impl SearchPersistencePort for SqliteKernel {
         let current = prepare(&transaction, request)?;
         let context = request.query.receipt_context();
         let row = map_sql(transaction.query_row(
-            "SELECT sequence, next_page, candidate_count, response_digest, created_at, fresh_until, stale_until, expires_at
-             FROM search_pages WHERE partition_digest = ?1 AND partition_json = ?2 AND context_json = ?3 ORDER BY sequence DESC LIMIT 1",
-            params![digest(&current.partition, id)?.as_str(), json(&current.partition, id)?,
-                context.to_json().map_err(|_| failure(ProblemCode::ValidationFailed, id))?],
+            "SELECT sequence, next_page, candidate_count, response_digest, created_at, fresh_until, stale_until, expires_at, context_json
+             FROM search_pages WHERE partition_digest = ?1 AND partition_json = ?2 ORDER BY sequence DESC LIMIT 1",
+            params![digest(&current.partition, id)?.as_str(), json(&current.partition, id)?],
             |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Option<u32>>(1)?, r.get::<_, u32>(2)?, r.get::<_, String>(3)?,
-                r.get::<_, String>(4)?, r.get::<_, String>(5)?, r.get::<_, String>(6)?, r.get::<_, String>(7)?))
+                r.get::<_, String>(4)?, r.get::<_, String>(5)?, r.get::<_, String>(6)?, r.get::<_, String>(7)?, r.get::<_, String>(8)?))
         ).optional(), CAPABILITY, id)?;
-        let Some((sequence, next_page, count, response, created, fresh, stale, expires)) = row
+        let Some((
+            sequence,
+            next_page,
+            count,
+            response,
+            created,
+            fresh,
+            stale,
+            expires,
+            context_json,
+        )) = row
         else {
             map_sql(transaction.commit(), CAPABILITY, id)?;
             return Ok(None);
@@ -427,7 +485,24 @@ impl SearchPersistencePort for SqliteKernel {
             parse_timestamp(&expires, CAPABILITY, id)?,
         )
         .map_err(|_| failure(ProblemCode::IntegrityFailed, id))?;
-        let Some(cache_state) = life.cache_state(now(), upstream_unavailable) else {
+        let (stored_context, policy) = SearchPageContext::from_response_json(&context_json)
+            .map_err(|_| failure(ProblemCode::IntegrityFailed, id))?;
+        if stored_context != context {
+            return Err(failure(ProblemCode::IntegrityFailed, id));
+        }
+        let Some(policy) = policy else {
+            map_sql(transaction.commit(), CAPABILITY, id)?;
+            return Ok(None);
+        };
+        if response_lifetime(&policy, id).ok().as_ref() != Some(&life) {
+            return Err(failure(ProblemCode::IntegrityFailed, id));
+        }
+        let read_at = now();
+        if read_at < policy.received_at() {
+            map_sql(transaction.commit(), CAPABILITY, id)?;
+            return Ok(None);
+        }
+        let Some(cache_state) = life.cache_state(read_at, upstream_unavailable) else {
             map_sql(transaction.commit(), CAPABILITY, id)?;
             return Ok(None);
         };
@@ -581,7 +656,7 @@ pub(crate) fn read_search_candidate(
     else {
         return Ok(None);
     };
-    let context = SearchPageContext::from_json(&context_json)
+    let (context, policy) = SearchPageContext::from_response_json(&context_json)
         .map_err(|_| failure(ProblemCode::IntegrityFailed, id))?;
     if context.provider() != provider || context.page() != page {
         return Err(failure(ProblemCode::IntegrityFailed, id));
@@ -596,7 +671,17 @@ pub(crate) fn read_search_candidate(
         parse_timestamp(&expires, CAPABILITY, id)?,
     )
     .map_err(|_| failure(ProblemCode::IntegrityFailed, id))?;
-    if !life.receipt_is_current(now()) {
+    let Some(policy) = policy else {
+        return Ok(None);
+    };
+    if response_lifetime(&policy, id).ok().as_ref() != Some(&life) {
+        return Err(failure(ProblemCode::IntegrityFailed, id));
+    }
+    let read_at = now();
+    if read_at < policy.received_at() {
+        return Ok(None);
+    }
+    if !life.receipt_is_current(read_at) {
         return Ok(None);
     }
     let current = prepare_partition(
@@ -693,11 +778,21 @@ fn read_candidates(
 
 #[cfg(test)]
 pub(crate) mod tests {
+    include!("search_response_policy_tests.rs");
     include!("search_authorization_tests.rs");
     include!("search_details_tests.rs");
     include!("search_metadata_tests.rs");
     include!("search_action_tests.rs");
     use super::*;
+    pub(crate) fn response_policy() -> fasti_application::ProviderResponseCachePolicy {
+        fasti_application::ProviderResponseCachePolicy::new(
+            fasti_application::ProviderResponseReuse::Reusable,
+            now(),
+            std::time::Duration::ZERO,
+            None,
+            None,
+        )
+    }
     use crate::test_support::TestNode;
     use fasti_application::{
         ConfigurationDigest, CredentialReference, CredentialRequirement, OutboundAccessPolicy,
@@ -789,6 +884,7 @@ pub(crate) mod tests {
                 candidates,
                 &Sha256Digest::from_bytes(&[7; 32]),
                 Some(2),
+                &crate::search::tests::response_policy(),
             )
             .unwrap()
     }
@@ -933,10 +1029,25 @@ pub(crate) mod tests {
             .execute_batch("DROP TRIGGER search_pages_immutable_update")
             .unwrap();
         let created = now() - Duration::seconds(age);
+        let context_json: String = connection
+            .query_row(
+                "SELECT context_json FROM search_pages WHERE sequence = ?1",
+                [i64::try_from(sequence).unwrap()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let (context, _) = SearchPageContext::from_response_json(&context_json).unwrap();
+        let policy = fasti_application::ProviderResponseCachePolicy::new(
+            fasti_application::ProviderResponseReuse::Reusable,
+            created,
+            std::time::Duration::ZERO,
+            None,
+            None,
+        );
         connection.execute(
-            "UPDATE search_pages SET created_at = ?1, fresh_until = ?2, stale_until = ?3, expires_at = ?4 WHERE sequence = ?5",
+            "UPDATE search_pages SET created_at = ?1, fresh_until = ?2, stale_until = ?3, expires_at = ?4, context_json = ?6 WHERE sequence = ?5",
             params![timestamp(created), timestamp(created + Duration::seconds(120)),
-                timestamp(created + Duration::seconds(600)), timestamp(created + Duration::seconds(86400)), i64::try_from(sequence).unwrap()],
+                timestamp(created + Duration::seconds(600)), timestamp(created + Duration::seconds(86400)), i64::try_from(sequence).unwrap(), context.to_response_json(&policy).unwrap()],
         ).unwrap();
         connection.execute_batch(&guard).unwrap();
     }
@@ -1001,11 +1112,13 @@ pub(crate) mod tests {
                 .unwrap();
         }
         assert!(node.kernel.read_search_candidate(&read).unwrap().is_none());
-        assert!(node
-            .kernel
-            .read_cached_search_page(&request, true)
-            .unwrap()
-            .is_none());
+        assert_eq!(
+            node.kernel
+                .read_cached_search_page(&request, true)
+                .unwrap_err()
+                .code(),
+            ProblemCode::IntegrityFailed
+        );
     }
 
     #[test]
@@ -1029,7 +1142,8 @@ pub(crate) mod tests {
                     &prepared,
                     &[candidate("42")],
                     &Sha256Digest::from_bytes(&[7; 32]),
-                    None
+                    None,
+                    &crate::search::tests::response_policy(),
                 )
                 .unwrap_err()
                 .code(),
@@ -1137,7 +1251,8 @@ pub(crate) mod tests {
                 &prepared,
                 &[],
                 &Sha256Digest::from_bytes(&[7; 32]),
-                None
+                None,
+                &crate::search::tests::response_policy(),
             )
             .is_err());
         let prepared = node.kernel.prepare_search_page(&request).unwrap();
@@ -1159,7 +1274,8 @@ pub(crate) mod tests {
                 &prepared,
                 &[],
                 &Sha256Digest::from_bytes(&[7; 32]),
-                None
+                None,
+                &crate::search::tests::response_policy(),
             )
             .is_err());
     }
@@ -1175,7 +1291,8 @@ pub(crate) mod tests {
                 &prepared,
                 &[candidate("42"), candidate("42")],
                 &Sha256Digest::from_bytes(&[7; 32]),
-                None
+                None,
+                &crate::search::tests::response_policy(),
             )
             .is_err());
         assert!(node
@@ -1293,7 +1410,8 @@ pub(crate) mod tests {
                 &prepared,
                 &[],
                 &Sha256Digest::from_bytes(&[7; 32]),
-                None
+                None,
+                &crate::search::tests::response_policy(),
             )
             .is_err());
     }
@@ -1321,7 +1439,8 @@ pub(crate) mod tests {
                     &prepared,
                     &[],
                     &Sha256Digest::from_bytes(&[7; 32]),
-                    None
+                    None,
+                    &crate::search::tests::response_policy(),
                 )
                 .unwrap_err()
                 .code(),
@@ -1358,7 +1477,8 @@ pub(crate) mod tests {
                     &prepared,
                     &[],
                     &Sha256Digest::from_bytes(&[7; 32]),
-                    None
+                    None,
+                    &crate::search::tests::response_policy(),
                 )
                 .unwrap_err()
                 .code(),
@@ -1383,6 +1503,7 @@ pub(crate) mod tests {
                     &[],
                     &Sha256Digest::from_bytes(&[7; 32]),
                     None,
+                    &crate::search::tests::response_policy(),
                 )
                 .is_ok()
             {

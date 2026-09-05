@@ -54,6 +54,22 @@ const pageResponse = () => ({
   upstream_problem: null,
 });
 
+const liveResponse = () => ({
+  outcome: "live",
+  provider_id: "tmdb",
+  page: 1,
+  candidates: [candidate().candidate],
+  next_page: 2,
+});
+
+const observedResponse = () => {
+  const value = pageResponse();
+  value.cache_state = "observed";
+  value.lifetime.fresh_until = value.lifetime.created_at;
+  value.lifetime.stale_until = value.lifetime.created_at;
+  return value;
+};
+
 const json = (value) =>
   new Response(JSON.stringify(value), {
     headers: { "content-type": "application/json" },
@@ -124,6 +140,216 @@ test("provider Search parsers preserve fresh, stale, unavailable and empty pages
     assert.deepEqual(parseSearchProviderPageResponse(value), value);
   }
   assert.equal(parseSearchProviderPageResponse(empty).next_page, 2);
+});
+
+test("provider Search preserves populated, empty and bounded live-only results without receipts", async () => {
+  for (const candidates of [
+    [candidate().candidate],
+    [],
+    Array.from({ length: 100 }, (_, index) => candidate(index + 1).candidate),
+  ]) {
+    const expected = { ...liveResponse(), candidates };
+    assert.deepEqual(parseSearchProviderPageResponse(expected), expected);
+    let calls = 0;
+    const client = clientWith(async () => {
+      calls += 1;
+      return json(expected);
+    });
+    const actual = await client.searchProviderPage("tmdb", request());
+    assert.deepEqual(actual, expected);
+    assert.equal(
+      actual.next_page,
+      2,
+      "a filtered live page retains continuation",
+    );
+    assert.deepEqual(Object.keys(actual).sort(), [
+      "candidates",
+      "next_page",
+      "outcome",
+      "page",
+      "provider_id",
+    ]);
+    for (const entry of actual.candidates) {
+      assert.equal(Object.hasOwn(entry, "candidate_receipt_id"), false);
+      assert.equal(Object.hasOwn(entry, "lifetime"), false);
+      assert.equal(entry.provider, "tmdb");
+    }
+    assert.equal(calls, 1);
+  }
+});
+
+test("provider Search preserves newly observed evidence without relabeling it fresh", async () => {
+  for (const candidates of [[candidate()], []]) {
+    const expected = { ...observedResponse(), candidates };
+    assert.deepEqual(parseSearchProviderPageResponse(expected), expected);
+    const client = clientWith(async () => json(expected));
+    const actual = await client.searchProviderPage("tmdb", request());
+    assert.deepEqual(actual, expected);
+    assert.equal(actual.cache_state, "observed");
+    assert.equal(actual.lifetime.fresh_until, actual.lifetime.created_at);
+    assert.equal(actual.next_page, 2);
+  }
+});
+
+test("provider Search binds live results to the submitted provider and page", async (context) => {
+  for (const [name, mutate] of [
+    [
+      "outer provider",
+      (value) => {
+        value.provider_id = "google-books";
+      },
+    ],
+    [
+      "page",
+      (value) => {
+        value.page = 2;
+      },
+    ],
+    [
+      "candidate provider",
+      (value) => {
+        value.candidates[0].provider = "google-books";
+      },
+    ],
+  ]) {
+    await context.test(name, async () => {
+      const value = liveResponse();
+      mutate(value);
+      const client = clientWith(async () => json(value));
+      await assert.rejects(
+        client.searchProviderPage("tmdb", request()),
+        FastiProtocolError,
+      );
+    });
+  }
+});
+
+test("provider Search rejects live and observed results for offline requests but permits cached pages", async () => {
+  const offline = { ...request(), offline: true };
+  for (const value of [liveResponse(), observedResponse()]) {
+    const client = clientWith(async () => json(value));
+    await assert.rejects(
+      client.searchProviderPage("tmdb", offline),
+      FastiProtocolError,
+    );
+  }
+  for (const value of [
+    pageResponse(),
+    {
+      ...pageResponse(),
+      cache_state: "stale_on_error",
+      upstream_problem: "provider_unavailable",
+    },
+  ]) {
+    const client = clientWith(async () => json(value));
+    assert.deepEqual(await client.searchProviderPage("tmdb", offline), value);
+  }
+});
+
+test("provider Search live and observed validation uses submitted offline mode despite caller mutation", async (context) => {
+  for (const factory of [liveResponse, observedResponse]) {
+    for (const submittedOffline of [false, true]) {
+      await context.test(
+        `${factory.name} offline ${submittedOffline}`,
+        async () => {
+          const body = { ...request(), offline: submittedOffline };
+          const expected = factory();
+          let sentOffline;
+          const client = clientWith(async (_url, init) => {
+            sentOffline = JSON.parse(init.body).offline;
+            return json(expected);
+          });
+          const pending = client.searchProviderPage("tmdb", body);
+          body.offline = !submittedOffline;
+          if (submittedOffline) {
+            await assert.rejects(pending, FastiProtocolError);
+          } else {
+            assert.deepEqual(await pending, expected);
+          }
+          assert.equal(sentOffline, submittedOffline);
+        },
+      );
+    }
+  }
+});
+
+test("provider Search never presents an upstream failure as newly observed evidence", async () => {
+  const value = {
+    ...observedResponse(),
+    upstream_problem: "provider_unavailable",
+  };
+  const client = clientWith(async () => json(value));
+  await assert.rejects(
+    client.searchProviderPage("tmdb", request()),
+    FastiProtocolError,
+  );
+});
+
+test("provider Search accepts observed evidence with omitted optional upstream problem", async () => {
+  const expected = observedResponse();
+  delete expected.upstream_problem;
+  assert.deepEqual(parseSearchProviderPageResponse(expected), expected);
+  const client = clientWith(async () => json(expected));
+  assert.deepEqual(
+    await client.searchProviderPage("tmdb", request()),
+    expected,
+  );
+});
+
+test("provider Search live union rejects receipt wrappers, persistence fields and oversized candidates", () => {
+  const mutations = [
+    (value) => {
+      value.lifetime = pageResponse().lifetime;
+    },
+    (value) => {
+      value.cache_state = "observed";
+    },
+    (value) => {
+      value.candidate_receipt_id = candidate().candidate_receipt_id;
+    },
+    (value) => {
+      value.upstream_problem = null;
+    },
+    (value) => {
+      value.response_cache_policy = { reuse: "no_store" };
+    },
+    (value) => {
+      value.raw_headers = { "cache-control": "no-store" };
+    },
+    (value) => {
+      value.candidates = [candidate()];
+    },
+    (value) => {
+      value.candidates[0].candidate_receipt_id =
+        candidate().candidate_receipt_id;
+    },
+    (value) => {
+      value.candidates[0].lifetime = pageResponse().lifetime;
+    },
+    (value) => {
+      value.candidates[0].response_cache_policy = { reuse: "no_store" };
+    },
+    (value) => {
+      value.candidates[0].title = "t".repeat(513);
+    },
+    (value) => {
+      value.candidates[0].overview = "o".repeat(4097);
+    },
+    (value) => {
+      value.candidates = Array.from(
+        { length: 101 },
+        (_, index) => candidate(index + 1).candidate,
+      );
+    },
+  ];
+  for (const mutate of mutations) {
+    const value = liveResponse();
+    mutate(value);
+    assert.throws(
+      () => parseSearchProviderPageResponse(value),
+      FastiContractParseError,
+    );
+  }
 });
 
 test("provider Search rejects malformed outgoing bodies before any fetch", async (context) => {

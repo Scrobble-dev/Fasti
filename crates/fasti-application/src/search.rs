@@ -193,7 +193,60 @@ impl SearchPageContext {
         }
         Ok(value)
     }
+
+    pub fn validate_page(
+        &self,
+        candidates: &[SearchCandidate],
+        next_page: Option<u32>,
+    ) -> Result<(), SearchEvidenceError> {
+        if candidates.len() > MAX_SEARCH_PAGE_CANDIDATES
+            || next_page.is_some_and(|page| page <= self.page)
+        {
+            return Err(SearchEvidenceError::InvalidCandidate);
+        }
+        let mut coordinates = std::collections::HashSet::new();
+        if candidates.iter().any(|candidate| {
+            !self.accepts(candidate)
+                || !coordinates.insert((&candidate.data().kind, &candidate.data().provider_id))
+        }) {
+            return Err(SearchEvidenceError::InvalidCandidate);
+        }
+        Ok(())
+    }
+
     pub fn from_json(value: &str) -> Result<Self, SearchEvidenceError> {
+        let (context, policy) = Self::from_response_json(value)?;
+        if policy.is_some() {
+            return Err(SearchEvidenceError::InvalidPartition);
+        }
+        Ok(context)
+    }
+
+    pub fn to_response_json(
+        &self,
+        policy: &crate::ProviderResponseCachePolicy,
+    ) -> Result<String, SearchEvidenceError> {
+        #[derive(Serialize)]
+        struct ResponseContext<'a> {
+            #[serde(flatten)]
+            context: &'a SearchPageContext,
+            response_policy: &'a crate::ProviderResponseCachePolicy,
+        }
+        let value = serde_json::to_string(&ResponseContext {
+            context: self,
+            response_policy: policy,
+        })
+        .map_err(|_| SearchEvidenceError::InvalidPartition)?;
+        if value.len() > MAX_SEARCH_CONTEXT_BYTES {
+            return Err(SearchEvidenceError::InvalidPartition);
+        }
+        Ok(value)
+    }
+
+    /// Legacy absence is explicit: it is not permission to reuse a response.
+    pub fn from_response_json(
+        value: &str,
+    ) -> Result<(Self, Option<crate::ProviderResponseCachePolicy>), SearchEvidenceError> {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Stored {
@@ -203,6 +256,7 @@ impl SearchPageContext {
             locale: Option<String>,
             region: Option<String>,
             grains: Vec<Grain>,
+            response_policy: Option<crate::ProviderResponseCachePolicy>,
         }
         if value.len() > MAX_SEARCH_CONTEXT_BYTES {
             return Err(SearchEvidenceError::InvalidPartition);
@@ -236,10 +290,14 @@ impl SearchPageContext {
             grains: stored.grains,
         };
         // Only our exact normalized persisted representation is accepted.
-        if context.to_json()? != value {
+        let canonical = match stored.response_policy {
+            Some(policy) => context.to_response_json(&policy)?,
+            None => context.to_json()?,
+        };
+        if canonical != value {
             return Err(SearchEvidenceError::InvalidPartition);
         }
-        Ok(context)
+        Ok((context, stored.response_policy))
     }
 }
 
@@ -533,7 +591,15 @@ pub trait SearchPersistencePort: Send + Sync {
         candidates: &[SearchCandidate],
         response_digest: &Sha256Digest,
         next_page: Option<u32>,
+        response_policy: &crate::ProviderResponseCachePolicy,
     ) -> ApplicationResult<StoredSearchPage>;
+    /// A newly restrictive live response cannot resurrect older reusable rows.
+    /// This removes only ephemeral evidence in the reauthorized partition.
+    fn discard_cached_search_page(
+        &self,
+        request: &SearchPageRequest,
+        prepared: &PreparedSearchPage,
+    ) -> ApplicationResult<()>;
     fn read_cached_search_page(
         &self,
         request: &SearchPageRequest,
@@ -760,6 +826,8 @@ impl SearchReceiptPartition {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SearchCacheState {
+    /// A just-observed response, not permission for later cache reuse.
+    Observed,
     Fresh,
     StaleOnError,
 }
@@ -886,6 +954,7 @@ impl SearchCandidateReceipt {
 
 #[cfg(test)]
 mod tests {
+    include!("search_response_context_tests.rs");
     include!("search_metadata_tests.rs");
     include!("search_action_tests.rs");
     use super::*;

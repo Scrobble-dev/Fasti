@@ -49,11 +49,15 @@ reuse. It accounts for `Date`, `Age`, `Expires`, `max-age` and `stale-if-error`.
 Unproven `Vary` matches require validation. Malformed policy cannot grant a more
 permissive fallback. The parser reuses the existing locked HTTP-date dependency.
 
-This is observation support, not completed cache enforcement. Search persistence,
-offline candidate reads, Record actions and metadata refresh still need the
-policy-aware admission/reuse integration. A `no-store` response must use a real
-live-only result; zero TTL is not permission to write its payload to SQLite or
-the WAL. Do not claim end-to-end response-policy support from parser tests.
+Provider-page acquisition and reuse apply this policy. The original observation
+and deadlines survive persistence without renewal. Missing legacy policy cannot
+grant reuse; a newer restrictive page cannot fall back to an older permissive
+page. No-store page payloads do not enter SQLite or the WAL. After reauthorization,
+the store removes only older ephemeral pages in that same partition.
+
+Offline candidate reads, Record actions, metadata refresh and legacy Desktop
+conversion still need the same policy integration. Do not claim complete
+response-policy coverage across those separate consumers from page tests.
 
 ## Provider Search transport
 
@@ -70,7 +74,8 @@ Browser authority is accepted only on the exact direct Access listener. Generic
 local and remote listeners require bearer credentials. The SDK does not retry
 this POST automatically. Cancellation remains supported.
 
-A successful response contains either a page or a source-unavailable outcome.
+A successful response contains a durable page, live-only results, or a
+source-unavailable outcome.
 A page contains at most 100 candidates, durable receipt IDs, cache state,
 freshness and expiry times, and an optional next page. It does not contain grant
 IDs, credential references, configuration digests, or raw provider responses.
@@ -78,6 +83,16 @@ All HTTP results use `Cache-Control: private, no-store`; the governed server cac
 is separate from HTTP caching. Offline mode does not access the credential vault
 or fetch from providers. An eligible stale page remains distinguishable from a
 fresh page. No matching cache entry produces an explicit unavailable outcome.
+
+`outcome: live` contains normalized candidates and continuation only. It has no
+receipt IDs, cache lifetime or permission to save cached evidence. It represents
+an actual no-store response, not an unavailable placeholder. A newly acquired
+durable page whose freshness has already ended uses `cache_state: observed`;
+it does not claim to be fresh or eligible for later reuse. Neither Live nor
+Observed can answer an offline request. Cached pages remain Fresh or StaleOnError.
+The SDK binds all outcomes to the submitted source, page and offline mode.
+Live candidate details and Record actions remain part of active M4 integration;
+never place a provider ID into the durable receipt route.
 
 Acquiring a page does not create a Record or change Library state. Workbench
 Search composition remains a separate M4 integration gate.

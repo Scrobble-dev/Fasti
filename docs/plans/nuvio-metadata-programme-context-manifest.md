@@ -1677,3 +1677,74 @@ adds no visual/accessibility or packaged-host claim. Rollback is the matching
 application/runtime observation diff; no stored data needs deletion or downgrade.
 M4 remains local and unmerged, owns v16/archive v6 and all shared integration
 surfaces, and has not released v17 or C2 activation. Full programme scope remains.
+
+### 2026-09-05 — Provider-page admission, reuse and live-only results
+
+Preserved base `57f524181ccfeacae49e8479294178c3ade4e225`, tree
+`739cf0dcba5189918ce1c800c539cb54c24cfb20`, passed the complete canonical
+gate on that exact clean source: 27/27 contract and 11/11 portable checks.
+The new implementation below requires its own clean exact-head gate after commit.
+
+- **Page policy is now consumed:** the existing 2,048-byte context JSON envelope
+  carries normalized policy alongside unchanged query coordinates. Context and
+  partition digests remain stable; published v16 SQL provider/page guards remain
+  unchanged. Strict canonical decoding rejects duplicate, unknown and malformed
+  evidence. Legacy absence grants no reuse. Lookup validates the newest row in
+  the current authorized partition, not an older permissive fallback.
+- **Time and admission:** derive all deadlines from the original nanosecond
+  observation, then independently canonicalize them to SQLite microseconds.
+  Delayed body/queue time does not renew freshness. Compare row lifetimes with
+  the policy-derived projection; mismatch is an integrity failure. A newly
+  observed persisted response with no remaining fresh interval is Observed,
+  never relabeled Fresh. Future observations and expired receipt admission fail.
+  Successful cache misses still commit authorized browser activity.
+- **No-store pages remain real results:** runtime returns Live with normalized
+  candidates and continuation, without invented receipts, lifetimes or sequence.
+  The application page validator is shared by live and stored paths for bounds,
+  coordinates, grain and advancing continuation. The store rejects payload
+  admission. A separate existing-port operation reauthorizes and discards only
+  older ephemeral pages/candidates in the same partition before Live is returned.
+  It does not create a marker, claim, Record, durable receipt, table or service.
+  Revocation or a changed prepared partition prevents deletion and Live output.
+- **Contracts and SDK:** the existing provider-page response gains Live and the
+  cache-state enum gains Observed. OpenAPI/SDK are regenerated from the existing
+  owner. Source/page binding covers both candidate forms; submitted offline mode
+  is captured before awaits. Offline Live/Observed and Observed with an upstream
+  error are rejected. Optional upstream-problem omission remains valid. POST
+  mutation proof, CSRF, byte bounds, cancellation and retry-never are unchanged.
+- **Focused evidence:** six application envelope tests, 13 new store policy and
+  purge checks, eight runtime policy checks and 47 provider SDK tests passed.
+  The full store library passed 401 tests with five explicit ignored workers/perf
+  checks before the final shared-validator extraction; the latest runtime suite
+  passed 91, Search-related API checks passed 22 and strict all-target clippy
+  passed. Native review caught the optional-field mismatch and live admission
+  validation gap; both have regression coverage. The route-context tamper test
+  now expects an integrity failure from page lookup rather than treating corrupt
+  stored coordinates as a cache miss. No test was removed or weakened.
+  Two additional actual-purge regressions passed: browser read/wrong-CSRF
+  rejection and activity commit/rollback, plus populated Record/claim/action
+  preservation and exact completed replay after purge and Search-scope removal.
+- **Parallel allocation:** commander alone changed shared application/store,
+  runtime, contracts, generator, API and SDK owners. Agents wrote only their
+  named envelope, store-policy, runtime-policy and provider SDK test leaves, then
+  released them. Independent reviewers checked deletion boundaries and public
+  response binding; next candidate-policy preparation remains read-only. Existing
+  M5/M8 and later-lane preparation stays intact, with no second roadmap.
+
+This proves page operations, not complete provider-policy coverage. Candidate
+offline reads, cached/refetched actions, M2 refresh, legacy Desktop conversion
+and selected metadata projection remain the next required shared-policy work.
+The existing candidate reader still separates 24-hour retention from page reuse;
+that retention must not be mistaken for permission to expose restricted payloads.
+Live candidate routing/action origin and no-store user-save disposition must be
+resolved without fabricating historical receipt provenance or cutting the scope.
+Workbench composition and successful governed live-provider/packaged-host proof
+remain required. Headless fixtures establish no new visual or accessibility claim.
+
+Ponytail reused current context, lifetime, validation, transaction and provider
+owners. No migration, archive version or dependency was added. Rollback must keep
+policy-aware cache reading: an older binary does not understand these new ephemeral
+envelopes. Use a forward correction or remove only disposable Search cache rows
+through an authorized recovery path; do not downgrade the schema, rewrite durable
+action history or delete Records. No Codex Security was used. M4 remains local and
+unmerged with v16/archive v6 and shared ownership; no v17 or C2 release is granted.

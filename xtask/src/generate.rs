@@ -1987,7 +1987,7 @@ fn enrich_production_openapi(
             .insert("additionalProperties".to_owned(), Value::Bool(false));
     }
     for (name, count) in [
-        ("SearchProviderPageResponse", 2),
+        ("SearchProviderPageResponse", 3),
         ("SearchCandidateDetailsResponse", 4),
         ("SearchCandidateActionResponse", 2),
         ("SearchRecordActionDto", 2),

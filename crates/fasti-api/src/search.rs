@@ -172,7 +172,7 @@ fn query(
     security(("credential_bearer" = []), ("browser_session_cookie" = [], "csrf_cookie" = [], "csrf_header" = [])),
     request_body(content = SearchProviderPageRequest, content_type = "application/json"),
     responses(
-        (status = 200, description = "Provider page or explicit source-unavailable outcome; no Record was created", body = SearchProviderPageResponse),
+        (status = 200, description = "Durable page, live-only results or explicit source-unavailable outcome; no Record was created", body = SearchProviderPageResponse),
         (status = 400, description = "Malformed JSON", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "Authentication is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "Search authority or browser boundary denied", body = ProblemDetails, content_type = "application/problem+json"),
@@ -221,6 +221,15 @@ pub(crate) async fn search_provider_page(
         .await
         .map_err(application_problem)?;
     let response = match outcome {
+        ProviderSearchOutcome::Live {
+            candidates,
+            next_page,
+        } => SearchProviderPageResponse::Live {
+            provider_id: provider,
+            page: page_number,
+            candidates: candidates.iter().map(Into::into).collect(),
+            next_page,
+        },
         ProviderSearchOutcome::Page {
             page,
             upstream_problem,

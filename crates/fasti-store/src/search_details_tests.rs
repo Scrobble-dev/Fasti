@@ -104,12 +104,13 @@ mod candidate_details_tests {
         let search = node.kernel.prepare_search_page(&request).unwrap();
         let saved = node
             .kernel
-            .commit_search_page(
+.commit_search_page(
                 &request,
                 &search,
                 &[candidate("42")],
                 &Sha256Digest::from_bytes(&[7; 32]),
                 Some(4),
+                &crate::search::tests::response_policy(),
             )
             .unwrap();
         let read = details(&request, saved.candidates[0].id());
