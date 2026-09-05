@@ -381,6 +381,14 @@ def main() -> None:
                 evidence["m4SearchRestart"] = restarted
                 evidence["m4SearchDatabase"] = after
                 evidence["m4ProviderRequests"] = requests
+                evidence["m4ProviderInput"] = {
+                    "classification": "disposable_loopback_tmdb_tls_fixture",
+                    "public_provider_acceptance": False,
+                    "build_feature": "tmdb-smoke-fixture",
+                    "daemon_sha256": runtime.sha256_file(
+                        ROOT / "target/tmdb-smoke-fixture/debug/fastid"
+                    ),
+                }
             receipt = {
                 "schema_version": "fasti.access-ordinary-browser.v1",
                 "source": {
