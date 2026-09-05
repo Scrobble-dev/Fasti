@@ -2439,23 +2439,36 @@ fn reusable_metadata_evidence(
         .collect()
 }
 
+// A complete payload window already validates every policy. Probe one row beyond
+// its bound, once per scope, before ranking overflow history. Orphan provenance
+// only adds conservative overflow work; never filter this probe by policy.
 // Rank narrow keys across full history, then fetch policy evidence. Neither
 // field values nor policy JSON enter the key sort. The pinned SQLite coroutine
 // plan and monotonically ordered scope stream are checked independently.
 const SELECT_KNOWN_FIELD_POLICIES: &str = r#"
-    WITH ranked_keys AS (
+    WITH overflow_scopes AS MATERIALIZED (
+        SELECT records.value AS record_id, fields.value AS field_key
+        FROM json_each(?2) records
+        CROSS JOIN json_each(?3) fields
+        WHERE EXISTS (
+            SELECT 1 FROM metadata_claim_provenance recent
+                INDEXED BY metadata_claim_provenance_recent_idx
+            WHERE recent.workspace_id = ?1 AND recent.record_id = records.value
+              AND recent.field_key = fields.value
+            LIMIT 1 OFFSET ?4
+        )
+    ), ranked_keys AS (
         SELECT p.claim_id, p.record_id, p.field_key,
                DENSE_RANK() OVER (
                    PARTITION BY p.record_id, p.field_key, p.provider_id,
                                 p.source, p.source_record_id, lower(c.locale), upper(p.region)
                    ORDER BY p.fetched_at DESC
                ) AS observation_rank
-        FROM json_each(?2) records
-        CROSS JOIN json_each(?3) fields
+        FROM overflow_scopes scope
         CROSS JOIN metadata_claim_provenance p
             INDEXED BY metadata_claim_provenance_recent_idx
-          ON p.workspace_id = ?1 AND p.record_id = records.value
-         AND p.field_key = fields.value
+          ON p.workspace_id = ?1 AND p.record_id = scope.record_id
+         AND p.field_key = scope.field_key
         CROSS JOIN metadata_claims registered
           ON registered.claim_id = p.claim_id AND registered.workspace_id = ?1
          AND registered.record_id = p.record_id AND registered.claim_kind = 'field'
@@ -2766,7 +2779,12 @@ pub(crate) fn load_field_claims(
         .map_err(|_| receipt_integrity(capability, correlation_id))?;
     let mut known = known_metadata_policies(
         &mut policies,
-        params![workspace_id.to_string(), records, fields],
+        params![
+            workspace_id.to_string(),
+            records,
+            fields,
+            MAX_EFFECTIVE_FIELD_CLAIMS
+        ],
         capability,
         correlation_id,
     )?
@@ -3093,7 +3111,12 @@ pub(crate) fn load_record_metadata_batch(
             .map_err(|_| receipt_integrity(capability, correlation_id))?;
     let mut known = known_metadata_policies(
         &mut policy_statement,
-        params![workspace_id.to_string(), record_ids_json, policy_fields],
+        params![
+            workspace_id.to_string(),
+            record_ids_json,
+            policy_fields,
+            MAX_EFFECTIVE_FIELD_CLAIMS
+        ],
         capability,
         correlation_id,
     )?
