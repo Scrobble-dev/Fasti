@@ -13,14 +13,13 @@ use fasti_application::{
     RegisterNamespaceDefinitionCommand, Violation,
 };
 use fasti_contracts::{
-    AttachIdentifierRequest, AttachIdentifierResponse, ClaimedPrecisionDto, ClaimedTrustDto,
-    CreateRecordRequest, CreateRecordResponse, ListRecordsQueryParameters, ListRecordsResponse,
-    OccurredTimeDto, ProblemDetails, RecordActivityDto, RecordIdentifierDto, RecordSummaryDto,
-    RegisterNamespaceRequest, RegisterNamespaceResponse, ResolvedFieldDto,
+    AttachIdentifierRequest, AttachIdentifierResponse, CreateRecordRequest, CreateRecordResponse,
+    ListRecordsQueryParameters, ListRecordsResponse, ProblemDetails, RegisterNamespaceRequest,
+    RegisterNamespaceResponse,
 };
 use fasti_domain::{
-    ClaimedPrecision, ClaimedTime, ClaimedTrust, ExternalIdentifierClaim, Grain,
-    NamespaceDefinition, NamespaceLicencePosture, RequestCorrelationId, ResolvedField,
+    ExternalIdentifierClaim, Grain, NamespaceDefinition, NamespaceLicencePosture,
+    RequestCorrelationId,
 };
 use std::str::FromStr;
 
@@ -54,37 +53,6 @@ fn invalid_namespace_definition(
     let problem = FastiProblem::validation_failed(capability, correlation_id, vec![violation])
         .expect("one namespace violation is within bounds");
     application_problem(Box::new(problem))
-}
-
-fn occurred_time_dto(claim: &ClaimedTime) -> OccurredTimeDto {
-    OccurredTimeDto {
-        original: claim.original().to_owned(),
-        precision: match claim.precision() {
-            ClaimedPrecision::Date => ClaimedPrecisionDto::Date,
-            ClaimedPrecision::Second => ClaimedPrecisionDto::Second,
-            ClaimedPrecision::Millisecond => ClaimedPrecisionDto::Millisecond,
-            ClaimedPrecision::Microsecond => ClaimedPrecisionDto::Microsecond,
-            ClaimedPrecision::Nanosecond => ClaimedPrecisionDto::Nanosecond,
-        },
-        trust: match claim.trust() {
-            ClaimedTrust::SourceClaim => ClaimedTrustDto::SourceClaim,
-            ClaimedTrust::DeviceObserved => ClaimedTrustDto::DeviceObserved,
-            ClaimedTrust::UserEntered => ClaimedTrustDto::UserEntered,
-            ClaimedTrust::Inferred => ClaimedTrustDto::Inferred,
-        },
-    }
-}
-
-fn resolved_field_dto(field: &ResolvedField) -> ResolvedFieldDto {
-    ResolvedFieldDto {
-        tier: serde_json::to_value(field.tier())
-            .ok()
-            .and_then(|value| value.as_str().map(str::to_owned))
-            .unwrap_or_default(),
-        value: field.value().map(ToOwned::to_owned),
-        source: field.source().map(ToString::to_string),
-        is_stale: field.is_stale(),
-    }
 }
 
 #[utoipa::path(
@@ -273,42 +241,8 @@ pub(crate) async fn list_records(
 
     Ok(Json(ListRecordsResponse {
         truncated,
-        records: summaries.into_iter().map(record_summary_dto).collect(),
+        records: summaries.into_iter().map(Into::into).collect(),
     }))
-}
-
-pub(crate) fn record_summary_dto(summary: fasti_application::RecordSummary) -> RecordSummaryDto {
-    RecordSummaryDto {
-        record_id: summary.record_id().to_string(),
-        grain: summary.grain().as_str().to_owned(),
-        status: serde_json::to_value(summary.status())
-            .ok()
-            .and_then(|value| value.as_str().map(str::to_owned))
-            .unwrap_or_else(|| "active".to_owned()),
-        title: resolved_field_dto(summary.title()),
-        poster: resolved_field_dto(summary.poster()),
-        original_title: Some(resolved_field_dto(summary.original_title())),
-        overview: Some(resolved_field_dto(summary.overview())),
-        release_year: Some(resolved_field_dto(summary.release_year())),
-        identifiers: summary
-            .identifiers()
-            .iter()
-            .map(|identifier| RecordIdentifierDto {
-                namespace: identifier.namespace().to_string(),
-                grain: identifier.grain().as_str().to_owned(),
-                value: identifier.value().to_owned(),
-            })
-            .collect(),
-        latest_activity: summary.latest_activity().map(|activity| RecordActivityDto {
-            occurred_at: activity
-                .occurred_at()
-                .map(|value| occurred_time_dto(value.claim())),
-            interpretation_state: serde_json::to_value(activity.interpretation_state())
-                .ok()
-                .and_then(|value| value.as_str().map(str::to_owned))
-                .unwrap_or_default(),
-        }),
-    }
 }
 
 #[utoipa::path(

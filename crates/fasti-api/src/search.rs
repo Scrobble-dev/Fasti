@@ -454,11 +454,7 @@ pub(crate) async fn search_local_records(
     let bytes = tokio::task::spawn_blocking(move || {
         let page = persistence.search_local_records(&request)?;
         let response = fasti_contracts::LocalSearchResponseDto {
-            records: page
-                .records
-                .into_iter()
-                .map(crate::records::record_summary_dto)
-                .collect(),
+            records: page.records.into_iter().map(Into::into).collect(),
             next: page.next.map(Into::into),
         };
         let mut buffer = vec![0; fasti_application::MAX_LOCAL_SEARCH_RESPONSE_BYTES];
