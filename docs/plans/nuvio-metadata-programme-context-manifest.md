@@ -3112,21 +3112,21 @@ without observed policy p50 was 2.401166 ms, p95 2.507276 ms and max 2.539316 ms
 with observed policy p50 was 3.263486 ms, p95 3.455985 ms and max 4.150184 ms.
 Formatting and strict workspace clippy passed.
 
-The canonical PR gate was rerun with the host's physical temporary directory so
-SQLite `NOFOLLOW` remained enforced. Registry, generation, contracts, examples,
-documentation, formatting, JavaScript, 299 mutation/SDK tests, strict locked and
-offline clippy, the full Rust workspace, HTTP conformance, workspace build and
-package-policy checks passed. The gate then stopped at the isolated Tauri release
-benchmark build because this host lacks the required GTK, Cairo, Pango, ATK,
-GDK Pixbuf, libsoup 3 and JavaScriptCoreGTK development packages. This is an
-unresolved host prerequisite, not a waived or passing performance gate. The first
-attempt with the symlinked default `TMPDIR` also failed four snapshot tests because
-SQLite correctly rejected the symlink; using its physical target resolved that
-separate host condition.
+The canonical PR gate passed at clean local checkpoint head
+`fcb700742a7c828eeb8bd8024284add5c373db4e`, tree
+`41dad97fc1e280c7600ee33ec53542cf20dd51cc`. Its receipts bind that exact source:
+27/27 contract gates and 11/11 portable gates passed. The host required the
+documented `PKG_CONFIG=/usr/bin/pkg-config` selection because Linuxbrew's default
+tool cannot see the already-installed GTK/WebKit package metadata. No package or
+host configuration changed. The first attempt with the symlinked default `TMPDIR`
+also failed four snapshot tests because SQLite correctly rejected the symlink;
+using its physical target kept `NOFOLLOW` enforced and resolved that separate
+host condition. The corrected exact command was
+`TMPDIR=/mnt/secondary-ssd/cache/home/tmp PKG_CONFIG=/usr/bin/pkg-config cargo xtask test pr`.
 
-M4 Search is implementation-complete locally. Full landing review, the isolated
-Tauri benchmark build, exact PR-head qualification and merged-head verification
-remain open. No push, PR, merge, v18 allocation or shared-file release occurred.
+M4 Search is implementation-complete locally. Full landing review, exact PR-head
+qualification and merged-head verification remain open. No push, PR, merge, v18
+allocation or shared-file release occurred.
 ~~Codex Security~~ remains permanently outside this programme; its plugin, skills,
 scans and findings are not permitted gates or blockers. Ordinary review, QA,
 dependency advisories and product safeguards remain active.
