@@ -3469,3 +3469,30 @@ required. Reuse existing `profile_state` owners and the prepared exact tracking
 selector; do not turn Search cursors/action receipts into Library state. Native
 Collection membership is still the required M7 prerequisite for the full M5
 Collection filter, not the raw Nuvio settings envelope.
+
+### 2026-09-05 — Tracking-warning review recommendation rejected
+
+Source revalidation supersedes the preceding stale-warning interpretation.
+`profile_state.rs` returns a global page capped at 500; a tracking mutation returns
+only one Record's state. A successful mutation cannot repair a failed global read
+or make a truncated page complete. Therefore `trackingRevision` must protect the
+newer per-Record choice, not suppress truthful global completeness warnings.
+The reviewer retracted its inverse-schedule finding. The commander is correcting
+the earlier suppression and its two test oracles: the newer Record choice and
+both global warnings must coexist. Do not cite the earlier green oracles as proof
+that hiding those warnings was correct.
+
+The full browser suite passed 138/138 on clean merge `fcf859ec` (tree
+`fba3c84b24e22aac70805b07897dfc4b9b42542c`), but that head still contains the
+incorrect suppression and is not accepted for publication. Its canonical gate
+stopped at one Workbench formatting line before emitting a receipt. The normal
+Access merge preserved the expected tree and all qualification additions.
+Corrected warning semantics and fresh final-head verification are required next.
+
+The corrected two oracles reproduced missing global warnings under the rejected
+implementation, then passed after restoring independent warning publication.
+The final affected run passed 24/24 in
+`.gstack/qa-reports/m4-review-global-warning-green`. It explicitly preserves the
+newer `on_hold` choice as well as global Record/tracking warnings. The formatting
+issue is removed with that correction. Full clean-head verification remains the
+next gate; the previous 138-case result is historical, not the final-head receipt.

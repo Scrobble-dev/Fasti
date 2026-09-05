@@ -1048,11 +1048,10 @@
           "Only the first 500 records are shown. Additional records remain stored.",
         );
       }
-      if (trackingReadRevision === trackingRevision && trackingProblem) {
+      // A one-Record mutation does not repair a failed or partial global read.
+      if (trackingProblem) {
         recordsNotices.push(trackingProblem);
-      } else if (
-        trackingReadRevision === trackingRevision && statePage.truncated
-      ) {
+      } else if (statePage.truncated) {
         recordsNotices.push(
           "Only the first 500 profile tracking states are shown. Additional states remain stored.",
         );

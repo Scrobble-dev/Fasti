@@ -243,7 +243,7 @@ test("simultaneous notices remain separate and accessible on narrow screens", as
 });
 
 for (const tracking of ["truncated", "failure"] as const) {
-  test(`a completed tracking mutation discards an older ${tracking} notice`, async ({
+  test(`a completed tracking mutation preserves a global ${tracking} warning`, async ({
     page,
   }) => {
     await installRecordNoticeHost(page, tracking, true);
@@ -269,6 +269,7 @@ for (const tracking of ["truncated", "failure"] as const) {
     await page.evaluate(() =>
       window.__RECORD_NOTICE_FIXTURE__?.releaseRecords?.(),
     );
+    await expect(selector).toHaveValue("on_hold");
     await selector.selectOption("dropped");
     await page.waitForFunction(
       () =>
@@ -283,17 +284,11 @@ for (const tracking of ["truncated", "failure"] as const) {
           { exact: true },
         ),
       ).toBeVisible();
-      await expect(
-        page.getByText(
-          "Only the first 500 profile tracking states are shown. Additional states remain stored.",
-          { exact: true },
-        ),
-      ).toHaveCount(0);
-      await expect(
-        page.getByText("Could not load profile tracking state.", {
-          exact: false,
-        }),
-      ).toHaveCount(0);
+      const warning =
+        tracking === "truncated"
+          ? "Only the first 500 profile tracking states are shown. Additional states remain stored."
+          : "Could not load profile tracking state. Records still use their activity fallback. Tracking fixture unavailable";
+      await expect(page.getByText(warning, { exact: true })).toBeVisible();
     } finally {
       await page.evaluate(() =>
         window.__RECORD_NOTICE_FIXTURE__?.releaseTrackingWrite?.(),
