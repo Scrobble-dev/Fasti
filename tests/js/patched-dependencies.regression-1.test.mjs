@@ -17,21 +17,67 @@ const mdxLoaderRequire = createRequire(
 );
 const imageSizeFromFilePath = mdxLoaderRequire.resolve("image-size/fromFile");
 
-function check(name, path) {
+function runParser(path, mode = "real") {
   const source = `
     const { imageSizeFromFile } = require(${JSON.stringify(imageSizeFromFilePath)});
-    imageSizeFromFile(process.argv[1]).then(
-      () => { throw new Error("parser accepted a zero-length record"); },
-      () => {},
+    const mode = process.argv[2];
+    const result = mode === "fulfilled"
+      ? Promise.resolve()
+      : mode === "rejected"
+        ? Promise.reject(new Error("expected parser rejection"))
+        : mode === "stalled"
+          ? new Promise(() => {})
+          : imageSizeFromFile(process.argv[1]);
+    let completed = false;
+    const watchdog = setTimeout(() => {
+      completed = true;
+      console.error("parser promise did not settle");
+      process.exitCode = 2;
+    }, 750);
+    result.then(
+      () => {
+        if (completed) return;
+        completed = true;
+        clearTimeout(watchdog);
+        console.error("parser accepted a zero-length record");
+        process.exitCode = 1;
+      },
+      () => {
+        if (completed) return;
+        completed = true;
+        clearTimeout(watchdog);
+      },
     );
   `;
-  const result = spawnSync(process.execPath, ["--eval", source, path], {
+  return spawnSync(process.execPath, ["--eval", source, path, mode], {
     encoding: "utf8",
-    timeout: 1_000,
+    timeout: 2_000,
   });
+}
+
+function check(name, path) {
+  const result = runParser(path);
   assert.notEqual(result.error?.code, "ETIMEDOUT", `${name} parser hung`);
   assert.equal(result.status, 0, result.stderr);
 }
+
+test("parser child distinguishes rejection, fulfillment, and stalled promises", () => {
+  const rejected = runParser(process.execPath, "rejected");
+  assert.equal(rejected.status, 0, rejected.stderr);
+
+  const fulfilled = runParser(process.execPath, "fulfilled");
+  assert.equal(fulfilled.status, 1, fulfilled.stderr);
+  assert.match(fulfilled.stderr, /parser accepted a zero-length record/u);
+
+  const stalled = runParser(process.execPath, "stalled");
+  assert.notEqual(
+    stalled.error?.code,
+    "ETIMEDOUT",
+    "stalled control hit outer timeout",
+  );
+  assert.equal(stalled.status, 2, stalled.stderr);
+  assert.match(stalled.stderr, /parser promise did not settle/u);
+});
 
 test("Docusaurus image-size/fromFile rejects zero-length records without hanging", () => {
   const directory = mkdtempSync(join(tmpdir(), "fasti-image-size-"));

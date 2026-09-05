@@ -208,21 +208,39 @@ credential remains masked in the active field so it can be corrected; it is not
 copied to the URL, page text, browser storage, logs, or screenshots. The field
 clears after successful storage. Revealed input returns to password mode before
 and after every save attempt. Credential operations are single-flight.
+Cancelling a trusted-host caller before gate admission starts no credential work;
+after admission, save or removal finishes its vault mutation and capability-state
+reconciliation under the gate. Refresh credential status before retrying an
+operation whose result was not observed.
 
-**Test search** performs an ordinary, non-mutating provider search with a fixed
-query. It can consume provider quota. There is no separate credential-test IPC.
-It remains available for a configured environment-managed credential even
-though Save and Remove remain unavailable for that read-only source.
-Discover uses only the trusted host's atomic `track_provider_candidate`
-operation to create a Record. The UI treats `provider:kind:provider_id` as the
-temporary candidate identity, then displays the exact returned Fasti Record ID.
-Repeating that operation with the same provider coordinate returns the existing
-Record and refreshes its verified claims atomically.
+Credential testing uses `test_provider_credential` in the trusted host and the
+generated provider credential-test route in the browser. It performs the
+provider's governed check and records the result for that capability; it can
+consume provider quota but does not create Records. Testing remains available
+for a configured environment-managed credential even though Save and Remove
+remain unavailable for that read-only source.
+Discover composes local Record Search and provider Search through the generated
+host contract in both the browser and trusted Desktop host. Searching does not
+create a Record. Retained candidates use `save_search_candidate`; candidates
+without a retained snapshot use `save_provider_identifier`, which reads exact
+provider details before writing. Both actions require an explicit Create or
+Attach intent. Attach names one selected local Record of the same grain. Retries
+retain an operation ID for the complete unchanged intent; changing the target
+requires a different operation ID. The returned receipt owns the Record identity.
+The legacy `track_provider_candidate` command remains a separate trusted-host
+adapter; it is not the Discover Search action owner.
 
-Search returns at most ten neutral candidates. Selecting a candidate does not
-trust the earlier search body: the host performs a bounded `metadata.read` for
-the exact provider ID. If that exact response contains artwork, the host then
-authorizes a separate `metadata.artwork` request to `image.tmdb.org`,
+Local Record Search stays offline and uses bounded keyset pages. Provider Search
+uses authorized providers online and reusable retained evidence offline. Cache
+restrictions and expiry remain authoritative: an offline action cannot silently
+switch to a no-store refetch or manufacture a result. Candidate details reads
+do not mutate Records; a retained snapshot and a refetched response remain
+distinct evidence.
+
+The legacy metadata picker returns at most ten neutral candidates. Applying
+its selection does not trust the earlier search body: the host performs a
+bounded `metadata.read` for the exact provider ID. If that exact response contains
+artwork, the host then authorizes a separate `metadata.artwork` request to `image.tmdb.org`,
 `books.google.com`, or `books.googleusercontent.com`. It resolves and
 authorizes every address, pins a proxy-free and redirect-free client, sends no
 provider credential, and accepts only JPEG, PNG, or WebP content up to 2 MB and
@@ -276,12 +294,12 @@ real authenticated profile context.
 
 ## Contract disposition
 
-Provider credentials, search, exact-item fetch, and metadata mutations use
-local Tauri IPC. They do not add a public Fasti HTTP route, event, domain
-entity, or linked-data term. The existing public Record read response gains
-additive resolved metadata fields and external identifiers, so production
-OpenAPI and the generated TypeScript SDK change. AsyncAPI and JSON-LD remain
-unchanged. The container exposure assertion changes only which existing
-production router is composed; it adds no route or payload. The Tauri command
-types and this document own the local mutation contract until a public
-capability is authorized.
+Provider management and Search now have governed HTTP routes and generated SDK
+methods as well as trusted-host IPC adapters. Search routes cover local Records,
+provider pages, retained candidate details and explicit retained/no-store Record
+actions under `/api/v1/search`. Provider management routes live under
+`/api/v1/providers`. The capability registry, generated OpenAPI and SDK own those
+public contracts; their authentication, listener and browser CSRF boundaries
+still apply. The legacy metadata picker and its artwork path above retain their
+local IPC contract. This document does not activate additional listeners,
+capabilities, events or linked-data terms.
