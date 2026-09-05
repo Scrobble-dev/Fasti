@@ -562,7 +562,9 @@
   {/if}
 
   <form class="search-form" onsubmit={search} role="search">
-    <label for="provider-search">Search your Library and providers</label>
+    <label for="provider-search">
+      Search {selectedProvider?.label ?? "your Library and providers"}
+    </label>
     <div class="search-row">
       <input
         id="provider-search"
