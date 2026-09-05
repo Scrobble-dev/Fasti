@@ -330,7 +330,10 @@ Retained source tests cover malformed lengths, counter bounds, authentication,
 unsupported tags, short/interrupted I/O, partial writes, poisoned states and
 terminal reuse. No instrumented branch-coverage percentage is claimed.
 Unforced native initialization/provider errors and complete custody/resource
-qualification remain explicit limits, not silently passing tests.
+qualification remain explicit limits, not silently passing tests. Independent
+source review also distinguished the tested ciphertext-body source error from
+an unforced source error during the final physical-EOF probe. No complete
+instrumented branch-coverage claim follows from the retained matrix.
 
 Performance: bounded frame and buffer behavior is tested; the 192-MiB integrated
 resource target is not qualified here. No new cache, concurrency abstraction,
@@ -348,6 +351,58 @@ programme planning remains the backlog. Optional duplicate-helper cleanup,
 production adoption, packaged distribution and full recovery approval are not
 bundled. No Codex Security, Tauri transport or E1 advisory work is authorized.
 
+### Current-toolchain reconciliation
+
+The byte-identical adapter passed the fresh debug and release 20+2 suites.
+Strict Rust 1.97.1 Clippy then rejected the remainder expression in
+`Limits::new` as `manual_is_multiple_of`; the original failure remains in
+`qualification/access-c3-framing/target/clippy-run-1.log`.
+The commander authorizes only `pmax % CHUNK as u64 != 0` becoming
+`!pmax.is_multiple_of(CHUNK as u64)`. CHUNK is the fixed nonzero value 65536;
+the quotient, checked additions, frame reserve and ciphertext cap are unchanged.
+This uses the [standard integer method](https://doc.rust-lang.org/std/primitive.u64.html#method.is_multiple_of),
+not a new arithmetic helper, dependency, allowance or crypto-profile decision.
+Retain initial source hashes and record the final adapter hash separately.
+Rerun the full debug/release suites and strict formatting/Clippy after this
+one-expression change. No assertion, test count, lock or error path may change.
+
+### Implementation checkpoint
+
+The remote freshness retry confirmed `dev` still at the recorded base; no
+rebase or shared-file change was needed. One worker completed the six named
+implementation paths. Root reviewed the complete workflow, manifest, README
+and one-expression adapter delta. Independent retained-source review found no
+concrete defect; no second independent manifest/workflow review is claimed.
+
+On the corrected working tree, full debug and release each passed 20 unit and
+two compile-fail checks, zero failed/ignored/filtered. Formatting, strict
+all-target Clippy, actionlint and whitespace checks passed. Clean-commit and
+hosted gates remain pending; these working-tree runs do not replace them.
+
+Evidence under `qualification/access-c3-framing/target/`:
+
+| Artifact | SHA-256 |
+| --- | --- |
+| `debug-run-2.log` | `49041a95d0b86695b66110efff51a3658e7f6891bf227a12bb859d01d6323034` |
+| `release-run-2.log` | `2dfd86f80180ef564e437835ce6f401e670ce11b2d68ce416fa73d0d7fe785b7` |
+| `clippy-run-2.log` | `d7a9cb80688bcf9ba0917e2c175f0c7f1e86642386f94bd506708dfc021a4d6b` |
+| `advisories-refreshed-run-1.log` | `64fccde8189332f7036fea2221d78ff3e5d5830183ce658c17e3fe0467c977ec` |
+
+Delivered adapter SHA-256:
+`16794e3fb1b5cf4288e2b0d0e5a30207fd458a75f18accc02728425d6e6491eb`.
+Tests and lock retain their original byte-identical hashes. The unchanged lock
+comparison gates the reused verifier: all 141 cached archives matched, none
+missing. Existing licence/source/bans policy passed with existing warnings and
+no allowance. Fresh unsuppressed advisory refresh scanned 146 dependencies and
+1239 advisories, with no matches; database commit
+`5a0ebedfe8bdd2e295b171f4162f8c977bcad9a5`. This is not a legal-clearance claim.
+
+Debug/release native outputs select static sodium under the package-local
+bundled-source build. The actual workflow guard accepted the clean environment
+and rejected each of the four empty-but-set native overrides without printing
+values. Initial host-wrapper target-selection failures and the original Clippy
+failure remain retained; neither was removed or relabelled as passing.
+
 ## GSTACK REVIEW REPORT
 
 | Review | Runs | Status | Findings |
@@ -364,4 +419,3 @@ recovery authority and native distribution remain outside this authorization.
 One finding incorporated; zero unresolved decisions within the seven-file scope.
 
 NO UNRESOLVED DECISIONS
-

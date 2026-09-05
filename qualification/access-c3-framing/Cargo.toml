@@ -1,0 +1,17 @@
+[package]
+name = "fasti-c3-frame-probe2"
+version = "0.0.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+publish = false
+
+# This qualification package cannot become a production workspace member.
+[workspace]
+
+[dependencies]
+libsodium-rs = { version = "=0.2.4", default-features = false }
+libsodium-sys-stable = { version = "=1.24.0", default-features = false }
+zeroize = { version = "=1.9.0", features = ["alloc"] }
+
+[dev-dependencies]
+fasti-store = { version = "=0.1.0", path = "../../crates/fasti-store" }
