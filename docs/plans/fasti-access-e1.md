@@ -249,6 +249,19 @@ Rollback of qualification is removal of its isolated harness only. Preserve
 evidence; do not reset another worktree. Production rollback must be specified
 with the actual migration and session invalidation design before I1 starts.
 
+## Qualification CI delivery segment
+
+The Commander also owns the new, isolated
+`.github/workflows/access-e1-qualification.yml`. Reuse the repository's pinned
+checkout/toolchain/install actions and Rust 1.97.1. Run the locked offline
+19-check suite, formatting and strict Clippy explicitly; root workspace tests
+do not include this package. Keep read-only permissions and no services or
+credentials. Run the isolated lockfile's advisory audit as a separate visible,
+fatal check with no ignore or continue-on-error. An unresolved advisory cannot
+be represented as a green delivery. Validate workflow syntax and execute the
+same local commands before commit. This adds no runtime integration or shared
+file release and leaves existing workflows unchanged.
+
 ## GSTACK REVIEW REPORT
 
 2026-09-05 developer-experience audit covers the isolated qualification package,

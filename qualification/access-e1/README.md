@@ -76,6 +76,12 @@ Rust `1.96.0 (ac68faa20 2026-05-25)`; Cargo `1.96.0 (30a34c682 2026-05-25)`.
 
 ## Dependency and delivery checks
 
+The dedicated [CI workflow](../../.github/workflows/access-e1-qualification.yml)
+runs this isolated suite, formatting and strict Clippy on relevant `dev` pull
+requests and pushes. A separate job audits this lockfile without suppression.
+Workflow syntax has been checked locally; live CI execution is not yet proven.
+The known RSA advisory therefore still prevents a green delivery claim.
+
 The 2026-09-05 independent full-diff review at `c09e2c5c` found no
 actionable test or evidence-consistency issue. Subsequent dependency checks
 found the harness's missing licence declaration. It now declares the same
