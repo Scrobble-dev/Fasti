@@ -11,7 +11,7 @@ use fasti_application::{
 };
 use fasti_domain::{Grain, RecordId, ORIGINAL_TITLE_FIELD_KEY, TITLE_FIELD_KEY};
 use rusqlite::{params, Connection, TransactionBehavior};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 const CAPABILITY: CapabilityKey = CapabilityKey::SearchMetadata;
 const PAGE_SIZE: usize = 100;
@@ -207,9 +207,8 @@ pub(crate) fn search(
     // The envelope/cursor has a fixed small shape. Each complete Record consumes
     // escaped-string budget with fixed field-shape headroom. The API additionally
     // enforces the serialized byte limit. No identifier evidence is truncated.
-    let mut remaining = MAX_LOCAL_SEARCH_RESPONSE_BYTES - 1024;
-    let mut complete: Vec<fasti_application::RecordSummary> = Vec::new();
-    for record in records {
+    let mut field_prefix_bytes = vec![0usize];
+    for record in &records {
         let field_bytes = [
             record.title(),
             record.poster(),
@@ -233,11 +232,30 @@ pub(crate) fn search(
                 .and_then(|activity| activity.occurred_at())
                 .map_or(0, |at| json_string_bytes(at.claim().original())),
         );
-        let identifiers = if let Some(budget) = remaining.checked_sub(field_bytes) {
+        field_prefix_bytes.push(
+            field_prefix_bytes
+                .last()
+                .copied()
+                .unwrap_or_default()
+                .saturating_add(field_bytes),
+        );
+    }
+    let record_ids: Vec<_> = records.iter().map(|record| record.record_id()).collect();
+    let mut identifiers = HashMap::new();
+    let mut admitted = 0;
+    let mut rejected = records.len() + 1;
+    let mut count = records.len();
+    // ponytail: one batch for a fitting page, at most eight bounded probes for
+    // 100 Records on overflow. Reuse the complete-list reader; do not introduce
+    // a payload sort or new streaming owner unless dense-page measurements demand it.
+    while count > admitted {
+        let batch = if let Some(budget) =
+            (MAX_LOCAL_SEARCH_RESPONSE_BYTES - 1024).checked_sub(field_prefix_bytes[count])
+        {
             load_record_identifiers_batch(
                 &transaction,
                 access.workspace_id(),
-                &[record.record_id()],
+                &record_ids[..count],
                 CAPABILITY,
                 id,
                 Some(budget),
@@ -245,27 +263,37 @@ pub(crate) fn search(
         } else {
             None
         };
-        let Some((mut identifiers, bytes)) = identifiers else {
-            let Some(last) = complete.last() else {
-                return Err(Box::new(FastiProblem::from_code(
-                    fasti_application::ProblemCode::CapacityExceeded,
-                    CAPABILITY,
-                    id,
-                )));
-            };
-            // Revisit any unmatched postings between this Record and the last
-            // returned match. Advancing to the old inspected boundary would skip
-            // the deferred matching Record, including on an originally final page.
-            next = Some(LocalSearchCursor {
-                last_record_id: last.record_id(),
-                context_digest: context,
-            });
-            break;
-        };
-        remaining -= field_bytes + bytes;
-        let values = identifiers.remove(&record.record_id()).unwrap_or_default();
-        complete.push(record.with_identifiers(values));
+        if let Some((values, _)) = batch {
+            admitted = count;
+            identifiers = values;
+        } else {
+            rejected = count;
+        }
+        count = admitted + (rejected - admitted) / 2;
     }
+    if admitted < records.len() {
+        if admitted == 0 {
+            return Err(Box::new(FastiProblem::from_code(
+                fasti_application::ProblemCode::CapacityExceeded,
+                CAPABILITY,
+                id,
+            )));
+        }
+        // Revisit unmatched postings after the last returned match; advancing
+        // to the inspected boundary would skip deferred Records on a final page.
+        next = Some(LocalSearchCursor {
+            last_record_id: record_ids[admitted - 1],
+            context_digest: context,
+        });
+    }
+    let complete = records
+        .into_iter()
+        .take(admitted)
+        .map(|record| {
+            let values = identifiers.remove(&record.record_id()).unwrap_or_default();
+            record.with_identifiers(values)
+        })
+        .collect();
     map_sql(transaction.commit(), CAPABILITY, id)?;
     Ok(LocalSearchPage {
         records: complete,

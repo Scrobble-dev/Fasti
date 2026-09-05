@@ -727,11 +727,30 @@ Search must:
 - let one governed action create or attach a Record;
 - expose unresolved and partial identity.
 
-Each result opens a real details route without first creating a Record:
+Each result opens a real details route without first creating a Record. Retained candidates use:
 
 ```text
 /explore/{source}/{grain}/{candidate_receipt_id}/{slug}
 ```
+
+M4 live-coordinate route decision (2026-09-06): true no-store candidates use a
+separate route, never a fabricated receipt:
+
+```text
+/explore/live/{source}/{grain}/{encoded_provider_record_id}/candidate
+```
+
+The final segment is the literal `candidate`, not a provider-derived title.
+Only the safe source coordinate and optional bounded, normalized request locale
+belong in this URL; provider payload, credentials and profile state do not.
+Decode the coordinate once, enforce generic byte/control bounds, and let the
+existing provider identity mapping validate its exact grammar. Distinguish this
+route from the retained route by its shape, including when a provider is named
+`live`. Reload re-authorizes and re-fetches through the existing governed provider
+owner. Details are transient: no snapshot, receipt, Record, claim or action write.
+Create/Attach remains a separate explicit action through its existing owner.
+This decision preserves canonical live details in M4 scope; implementation and
+negative navigation/authority tests remain required, not already complete.
 
 `candidate_receipt_id` is opaque and resolves to a durable, bounded provider-candidate receipt containing the exact governed re-fetch route and provenance. A receipt expires after 24 hours, carries at most 64 KiB of normalized candidate data plus bounded identifiers, and records the query digest, safe provider-configuration digest, grant digest, response digest, provider terms revision, and creating actor/profile. Replay re-authorizes the current actor, profile, provider capability, grant, and configuration; a digest or authorization mismatch fails closed and offers a fresh Search. Expired and unreferenced receipts are garbage-collected in bounded keyset pages; receipts attached to an operation or Record retain only the minimal provenance required by that durable owner. No credential, raw secret-bearing request, or unrestricted provider body enters a receipt. The slug is presentation-only. On Record creation or attachment, the stable route becomes:
 
@@ -2582,6 +2601,7 @@ Use Tabler primitives first: navbar/offcanvas, list groups, tables, forms, alert
 | `calendar` | `/library/calendar` | Library | Secondary Library action | Library action menu | Existing Calendar behavior remains; no new top-level destination. |
 | `detail` / Media Detail | `/records/{grain}/{record_id}/{slug}` | None | Deep-link from Search, Library, Discover, Collections | Same route and content order | M4/M5 own the route. Remove the sidebar item after redirect evidence passes. |
 | New candidate detail | `/explore/{source}/{grain}/{candidate_receipt_id}/{slug}` | None | Deep-link from Search/Discover | Same route in one column | M4 owns it. It never appears as a sidebar item. |
+| Live no-store candidate detail | `/explore/live/{source}/{grain}/{encoded_provider_record_id}/candidate` | None | Deep-link from live Search results | Same route in one column | M4 owns the transient coordinate read. No fabricated receipt or provider-title slug. |
 | `reconciliation` / Review Inbox | `/library?review=needs-review` | Library | Needs review preset | Needs review preset | Keep `/reconciliation` as a redirect/alias during the migration. |
 | New Collections | `/collections`, `/collections/packs`, `/collections/nuvio` | Collections | Top-level destination with local subnavigation | One Collections item and in-page select/tabs | M7 owns Collections. Tabs use real links or correct Tabler tab semantics. |
 | `connections` | `/connections` | Connections | Existing top-level destination | Existing offcanvas item | M9/M11/M13 own capability panels within the current page. |

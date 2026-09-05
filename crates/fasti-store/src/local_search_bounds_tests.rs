@@ -143,10 +143,72 @@ mod local_search_bounds_tests {
     #[test]
     fn local_search_bounds_identifier_plan_streams_record_index_without_payload_sort() {
         let node = node();
-        let records = seed(&node, 2, "needle present");
-        attach_many(&node, records[0], 3);
-        attach_many(&node, records[1], 3);
-        let connection = node.kernel.inner.connection.lock().unwrap();
+        let records = seed(&node, 100, "needle present");
+        let mut connection = node.kernel.inner.connection.lock().unwrap();
+        let transaction = connection.transaction().unwrap();
+        let definition = NamespaceDefinition::try_new(
+            "bounds",
+            "Bounded Search fixture",
+            [Grain::Film],
+            ".+",
+            "identity",
+            NamespaceLicencePosture::Unknown,
+        )
+        .unwrap();
+        register_namespace_tx(
+            &transaction,
+            node.access.workspace_id(),
+            &definition,
+            CapabilityKey::RegisterNamespace,
+            RequestCorrelationId::new_v7(),
+        )
+        .unwrap();
+        for record in &records {
+            let claim = ExternalIdentifierClaim::try_new(
+                "bounds",
+                Grain::Film,
+                format!("selected-{record}"),
+            )
+            .unwrap();
+            assert!(attach_identifier_tx(
+                &transaction,
+                node.access.workspace_id(),
+                *record,
+                &claim,
+                CapabilityKey::AttachIdentifier,
+                RequestCorrelationId::new_v7(),
+            )
+            .unwrap()
+            .created());
+        }
+        for ordinal in 0..10_000 {
+            let record = insert_record(
+                &transaction,
+                node.access.workspace_id(),
+                Grain::Film,
+                CapabilityKey::CreateRecord,
+                RequestCorrelationId::new_v7(),
+            )
+            .unwrap();
+            let claim = ExternalIdentifierClaim::try_new(
+                "bounds",
+                Grain::Film,
+                format!("unrelated-{ordinal:05}"),
+            )
+            .unwrap();
+            assert!(attach_identifier_tx(
+                &transaction,
+                node.access.workspace_id(),
+                record,
+                &claim,
+                CapabilityKey::AttachIdentifier,
+                RequestCorrelationId::new_v7(),
+            )
+            .unwrap()
+            .created());
+        }
+        transaction.commit().unwrap();
+        let selected = serde_json::to_string(&records).unwrap();
         let mut statement = connection
             .prepare(&format!(
                 "EXPLAIN QUERY PLAN {}",
@@ -155,10 +217,7 @@ mod local_search_bounds_tests {
             .unwrap();
         let steps = statement
             .query_map(
-                params![
-                    node.access.workspace_id().to_string(),
-                    serde_json::to_string(&[records[0]]).unwrap()
-                ],
+                params![node.access.workspace_id().to_string(), selected.clone()],
                 |row| row.get::<_, String>(3),
             )
             .unwrap()
@@ -176,6 +235,98 @@ mod local_search_bounds_tests {
                 .any(|step| step.contains("TEMP B-TREE") || step.contains("SCAN identifier")),
             "no eager identifier payload sort or table scan: {steps:?}"
         );
+        drop(statement);
+
+        let mut statement = connection
+            .prepare(crate::identity::SELECT_RECORD_IDENTIFIERS)
+            .unwrap();
+        let hydrated = statement
+            .query_map(
+                params![node.access.workspace_id().to_string(), selected],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(hydrated.len(), records.len());
+        assert_eq!(
+            statement.get_status(rusqlite::StatementStatus::FullscanStep),
+            0,
+            "10,000 unrelated identifiers must not be scanned"
+        );
+        assert_eq!(
+            statement.get_status(rusqlite::StatementStatus::Sort),
+            0,
+            "bounded identifier hydration must not sort payload in SQLite"
+        );
+    }
+
+    #[test]
+    fn local_search_bounds_non_power_of_two_prefix_is_complete_and_resumable() {
+        let node = node();
+        let mut expected = seed(&node, 100, "needle present");
+        expected.sort_by_key(ToString::to_string);
+        // Thirty-seven Records fit the 4 MiB response budget. The thirty-eighth
+        // crosses it, exercising a non-power-of-two prefix for the bounded
+        // whole-page identifier search.
+        for record in &expected[..38] {
+            attach_many(&node, *record, 360);
+        }
+
+        let mut query = request(node.access, "needle present");
+        let first = node.kernel.search_local_records(&query).unwrap();
+        assert_eq!(
+            first
+                .records
+                .iter()
+                .map(|record| record.record_id())
+                .collect::<Vec<_>>(),
+            expected[..37]
+        );
+        assert_eq!(
+            first.next.as_ref().map(|cursor| cursor.last_record_id),
+            Some(expected[36])
+        );
+        for record in &first.records {
+            let actual = record
+                .identifiers()
+                .iter()
+                .map(|identifier| identifier.value().to_owned())
+                .collect::<Vec<_>>();
+            let complete = (0..360)
+                .map(|ordinal| identifier_value(record.record_id(), ordinal))
+                .collect::<Vec<_>>();
+            assert_eq!(actual, complete, "no identifier list may be truncated");
+        }
+
+        query.after = first.next;
+        let second = node.kernel.search_local_records(&query).unwrap();
+        assert_eq!(
+            second
+                .records
+                .iter()
+                .map(|record| record.record_id())
+                .collect::<Vec<_>>(),
+            expected[37..]
+        );
+        assert!(second.next.is_none());
+        let resumed = &second.records[0];
+        assert_eq!(resumed.record_id(), expected[37]);
+        assert_eq!(resumed.identifiers().len(), 360);
+        assert_eq!(
+            resumed
+                .identifiers()
+                .iter()
+                .map(|identifier| identifier.value().to_owned())
+                .collect::<Vec<_>>(),
+            (0..360)
+                .map(|ordinal| identifier_value(resumed.record_id(), ordinal))
+                .collect::<Vec<_>>()
+        );
+        assert!(second.records[1..]
+            .iter()
+            .all(|record| record.identifiers().is_empty()));
+        assert_eq!(identifier_count(&node), 38 * 360);
     }
 
     #[test]

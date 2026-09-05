@@ -472,6 +472,7 @@ pub(crate) fn load_record_identifiers_batch(
         correlation_id,
     )?;
     let mut identifiers: HashMap<RecordId, Vec<RecordIdentifier>> = HashMap::new();
+    let mut selected_ids: Option<HashMap<String, RecordId>> = None;
     let mut bytes = 0usize;
     while let Some(row) = map_sql(rows.next(), capability, correlation_id)? {
         // Borrow SQLite text before allocating, charging actual escaped strings
@@ -488,14 +489,30 @@ pub(crate) fn load_record_identifiers_batch(
         if budget.is_some_and(|budget| bytes > budget) {
             return Ok(None);
         }
-        let (record_id, namespace, grain, value): (String, String, String, String) = map_sql(
-            (|| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))(),
-            capability,
-            correlation_id,
-        )?;
+        // Reuse the bounded typed selection rather than allocating and decoding
+        // the same Record ID for every identifier. Allocate only after a row
+        // passes the byte-budget check.
+        let selected_ids = selected_ids.get_or_insert_with(|| {
+            record_ids
+                .iter()
+                .map(|record| (record.to_string(), *record))
+                .collect()
+        });
+        let (record_id, namespace, grain, value): (Option<RecordId>, String, String, String) =
+            map_sql(
+                (|| {
+                    Ok((
+                        selected_ids.get(row.get_ref(0)?.as_str()?).copied(),
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                    ))
+                })(),
+                capability,
+                correlation_id,
+            )?;
         let record_id = record_id
-            .parse::<RecordId>()
-            .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
+            .ok_or_else(|| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
         let namespace = NamespaceKey::try_new(namespace)
             .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
         let grain = grain

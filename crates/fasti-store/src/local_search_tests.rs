@@ -1,5 +1,7 @@
 use super::*;
 include!("local_search_bounds_tests.rs");
+#[path = "local_search_query_count_tests.rs"]
+mod query_count_tests;
 use crate::{
     identity::insert_record,
     metadata::{write_field_claim, write_profile_field_override},
@@ -456,10 +458,16 @@ fn local_search_10000_records_release_latency() {
     panic!("run this evidence fixture with --release");
     #[cfg(not(debug_assertions))]
     {
+        use crate::identity::{attach_identifier_tx, register_namespace_tx};
+        use fasti_domain::{ExternalIdentifierClaim, NamespaceDefinition, NamespaceLicencePosture};
+
         for observed_policy in [false, true] {
             let node = node();
             let mut records = seed(&node, 10_000, "Common title 東京 %_");
             records.sort_by_key(ToString::to_string);
+            let full_fit_records = &records[100..200];
+            let dense_overflow_records = &records[200..300];
+            let unrelated_record = records[9_999];
             let mut connection = node.kernel.inner.connection.lock().unwrap();
             let transaction = connection.transaction().unwrap();
             let observed = ReceivedAt::from_application_clock(
@@ -508,6 +516,86 @@ fn local_search_10000_records_release_latency() {
                     )
                     .unwrap();
                 }
+            }
+            let search_key = FieldKey::try_new(ORIGINAL_TITLE_FIELD_KEY).unwrap();
+            for (selected, value) in [
+                (full_fit_records, "Full fit identifiers"),
+                (dense_overflow_records, "Overflow identifiers"),
+            ] {
+                for record in selected {
+                    let claim = FieldClaim::try_new(
+                        NamespaceKey::try_new("tmdb").unwrap(),
+                        value,
+                        None,
+                        observed,
+                        None,
+                    )
+                    .unwrap();
+                    write_field_claim(
+                        &transaction,
+                        node.access.workspace_id(),
+                        *record,
+                        &search_key,
+                        &claim,
+                        CAPABILITY,
+                        RequestCorrelationId::new_v7(),
+                        None,
+                    )
+                    .unwrap();
+                }
+            }
+            let definition = NamespaceDefinition::try_new(
+                "latency",
+                "Local Search latency fixture",
+                [Grain::Film],
+                ".+",
+                "identity",
+                NamespaceLicencePosture::Unknown,
+            )
+            .unwrap();
+            register_namespace_tx(
+                &transaction,
+                node.access.workspace_id(),
+                &definition,
+                CapabilityKey::RegisterNamespace,
+                RequestCorrelationId::new_v7(),
+            )
+            .unwrap();
+            let attach = |record: RecordId, ordinal: usize, dense: bool| {
+                let prefix = format!(
+                    "{}:{record}:{ordinal:08}:",
+                    if dense { "dense" } else { "fit" }
+                );
+                let value = if dense {
+                    format!("{prefix}{}", "x".repeat(256 - prefix.len()))
+                } else {
+                    prefix
+                };
+                let identifier =
+                    ExternalIdentifierClaim::try_new("latency", Grain::Film, value).unwrap();
+                assert!(attach_identifier_tx(
+                    &transaction,
+                    node.access.workspace_id(),
+                    record,
+                    &identifier,
+                    CapabilityKey::AttachIdentifier,
+                    RequestCorrelationId::new_v7(),
+                )
+                .unwrap()
+                .created());
+            };
+            for record in full_fit_records {
+                for ordinal in 0..8 {
+                    attach(*record, ordinal, false);
+                }
+            }
+            for record in &dense_overflow_records[..2] {
+                for ordinal in 0..8_000 {
+                    attach(*record, ordinal, true);
+                }
+            }
+            for ordinal in 0..8_000 {
+                attach(unrelated_record, ordinal, true);
             }
             let history_key = FieldKey::try_new(fasti_domain::OVERVIEW_FIELD_KEY).unwrap();
             for (record_index, depth) in [255, 256, 257, 4096].into_iter().enumerate() {
@@ -581,8 +669,63 @@ fn local_search_10000_records_release_latency() {
             eprintln!(
             "local_search dataset=10000 observed_policy={observed_policy} samples=100 p50={:?} p95={:?} max={:?}",
             samples[49], p95, samples[99]
-        );
+            );
             assert!(p95 < std::time::Duration::from_millis(250), "p95={p95:?}");
+
+            let measure_identifier_path =
+                |scenario: &str,
+                 query_text: &str,
+                 expected_records: &[RecordId],
+                 expected_identifiers: usize,
+                 expect_next: bool| {
+                    let mut samples = Vec::new();
+                    for iteration in 0..105 {
+                        let query = request(node.access, query_text);
+                        let start = std::time::Instant::now();
+                        let page = node.kernel.search_local_records(&query).unwrap();
+                        let elapsed = start.elapsed();
+                        let actual_records = page
+                            .records
+                            .iter()
+                            .map(|record| record.record_id())
+                            .collect::<Vec<_>>();
+                        assert_eq!(actual_records, expected_records, "{scenario}");
+                        assert!(
+                            page.records
+                                .iter()
+                                .all(|record| record.identifiers().len() == expected_identifiers),
+                            "{scenario} must return complete identifier vectors"
+                        );
+                        assert_eq!(page.next.is_some(), expect_next, "{scenario}");
+                        if iteration >= 5 {
+                            samples.push(elapsed);
+                        }
+                    }
+                    samples.sort();
+                    let p95 = samples[94];
+                    eprintln!(
+                    "local_search dataset=10000 observed_policy={observed_policy} scenario={scenario} samples=100 p50={:?} p95={:?} max={:?}",
+                    samples[49], p95, samples[99]
+                );
+                    assert!(
+                        p95 < std::time::Duration::from_millis(250),
+                        "scenario={scenario} p95={p95:?}"
+                    );
+                };
+            measure_identifier_path(
+                "identifier_full_fit",
+                "Full fit identifiers",
+                full_fit_records,
+                8,
+                false,
+            );
+            measure_identifier_path(
+                "identifier_dense_overflow",
+                "Overflow identifiers",
+                &dense_overflow_records[..1],
+                8_000,
+                true,
+            );
         }
     }
 }
