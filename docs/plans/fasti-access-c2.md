@@ -52,6 +52,26 @@ below. Historical test results, migration proposals and failed gates remain
 preserved. C3 qualification does not complete C2; packaged Tauri authentication
 remains deferred. No shared production file changes in this reconciliation.
 
+### Parallel pure-test follow-up — 2026-09-05
+
+Independent PAT/consent review identified two missing direct boundary checks,
+not product defects: unused-token revocation exactly at creation (and one
+nanosecond before), and replacement exactly at the predecessor's last-use time.
+The bounded writer owns only `crates/fasti-domain/tests/c2_personal_tokens.rs`.
+Reuse existing public methods and fixture helpers; preserve all model fields
+except the expected terminal transition. Add no production method, mock store,
+dependency or runtime authority. Run the focused PAT/consent domain and
+application suites, formatting and strict Clippy; independently review the
+test-only diff before committing it. M4 ownership and C2 runtime gates remain
+unchanged. No failing-before-fix claim follows from new tests of existing code.
+
+Completed locally: both tests passed on first execution. The focused domain
+and application suites passed 33 tests with zero failed, ignored or filtered
+cases. Workspace formatting and strict all-target/all-feature domain and
+application Clippy passed. Independent source review found no concrete defect
+in the two-test delta. These checks do not implement persistence or runtime
+authority; those gates and the shared-file handoff remain open.
+
 Historical foundation checkpoint (2026-09-05): implementation commit `5eb3def0` passes 319
 all-feature domain/application tests and strict all-target Clippy. Independent
 reconciliation confirms that sections 5.4 and 9 cover all 22 merged-M3 scopes
