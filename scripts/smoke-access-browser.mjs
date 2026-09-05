@@ -140,8 +140,10 @@ async function runM4SearchJourney() {
     await page.getByRole("heading", { name: "Discover", level: 1 }).waitFor();
     await searchFixtureFilm();
     await page
-      .getByText("These results were observed from the provider now.", {
-        exact: true,
+      .getByRole("region", { name: "Search results" })
+      .getByRole("status")
+      .filter({
+        hasText: "These results were observed from the provider now.",
       })
       .waitFor();
     await requireNoAccessibilityViolations("live provider Search results");
@@ -207,8 +209,10 @@ async function runM4SearchJourney() {
     await page.goto(`${FASTI_ORIGIN}/discover`);
     await searchFixtureFilm({ cachedOnly: true });
     await page
-      .getByText("These results came from fresh cache evidence.", {
-        exact: true,
+      .getByRole("region", { name: "Search results" })
+      .getByRole("status")
+      .filter({
+        hasText: "These results came from fresh cache evidence.",
       })
       .waitFor();
     const cachedOnly = await page

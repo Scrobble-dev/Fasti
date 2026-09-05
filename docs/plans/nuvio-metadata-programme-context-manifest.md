@@ -4043,3 +4043,23 @@ The commander remains the sole integration writer; one independent reviewer and
 one test-leaf writer cover this slice, while another agent prepares no-store
 details and Live pagination read-only. Full M4 and later programme scope remain
 open. Codex Security remains permanently excluded from every lane.
+
+The first clean real-process attempt at `f404ce30cc6510b83f73e442c5c356d9132a383c`
+was terminal failure, not acceptance: provider setup and the browser Search
+reached the two expected candidates, then an exact-text locator incorrectly
+expected a standalone freshness sentence. The existing UI renders that sentence
+inside the result-count status paragraph. Scope the assertion to that region's
+status paragraph without changing its expected freshness meaning. No receipt
+was emitted. Managed listeners 4000/4001/8420 were confirmed stopped afterward.
+
+After that terminal result, the material Access PR130 handoff was fetched and
+integrated by normal merge. `origin/dev` is
+`ee0d537d7bc8b7ed7ff7fdc90fad8613fe1b4ab0`, tree
+`e2a3180bed0748863cb3e829a06a677a0561a6b8`. Local merge
+`af08f1b1d184adf045cc9559c9ccac3ea3791fc7`, tree
+`751d3470728f139f48b23d704719f6cb0171b46c`, exactly matches the prior merge-tree
+preview. Preserve explicit lock release in final `LockedDataRoot::drop` and
+preconstruction identity failure, last-field kernel lock lifetime, and no live
+kernel/guard use or drop in a fork child. The handoff also includes isolated C3
+framing qualification, not production crypto activation. Schema17/archive7 and
+the shared writer remain M4-owned; no migration18 allocation is implied.
