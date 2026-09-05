@@ -8,6 +8,8 @@ import type {
   CompleteTrailBaseContinuationRequest,
   ConfigureMetadataProjectionRequest,
   ListRecordsQueryParameters,
+  LocalSearchRequestDto,
+  LocalSearchResponseDto,
   MetadataProjectionConfigurationResponse,
   MetadataProjectionResponse,
   PreviewAnimeGroupingPolicyChangeRequest,
@@ -33,6 +35,9 @@ export type {
   ConfigureMetadataProjectionRequest,
   EnrichmentPolicyDto,
   ListRecordsQueryParameters,
+  LocalSearchCursorDto,
+  LocalSearchRequestDto,
+  LocalSearchResponseDto,
   MetadataAttributionDto,
   MetadataCacheEntryDto,
   MetadataFieldGroupDto,
@@ -380,6 +385,9 @@ export interface WorkbenchHost {
     provider: string,
     query: string,
   ): Promise<ProviderSearchCandidate[]>;
+  searchRecords?(
+    request: LocalSearchRequestDto,
+  ): Promise<LocalSearchResponseDto>;
   trackProviderCandidate?(
     selection: ProviderSelection,
   ): Promise<CreateRecordResult>;

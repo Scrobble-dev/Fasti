@@ -1,6 +1,8 @@
 <script lang="ts">
   import type {
     CreateRecordResult,
+    LocalSearchCursorDto,
+    LocalSearchResponseDto,
     ProviderCredentialStatus,
     ProviderSearchCandidate,
   } from "./types.js";
@@ -16,8 +18,13 @@
       provider: string,
       query: string,
     ) => Promise<ProviderSearchCandidate[]>;
+    onSearchLocal?: (
+      query: string,
+      after?: LocalSearchCursorDto,
+    ) => Promise<LocalSearchResponseDto>;
     onOpenSettings: () => void;
     onRetry: () => void;
+    onOpenRecord?: (recordId: string) => void;
     onCandidateAction?: (
       candidate: ProviderSearchCandidate,
     ) => Promise<CreateRecordResult | void>;
@@ -37,8 +44,10 @@
     loading = false,
     hostProblem,
     onSearch,
+    onSearchLocal,
     onOpenSettings,
     onRetry,
+    onOpenRecord,
     onCandidateAction,
     embedded = false,
     actionLabel = "Create Record",
@@ -52,6 +61,9 @@
   }: Props = $props();
   let query = $state("");
   let results: ProviderSearchCandidate[] = $state([]);
+  let localResults: LocalSearchResponseDto["records"] = $state([]);
+  let localNext: LocalSearchCursorDto | undefined = $state();
+  let localProblem = $state("");
   let searching = $state(false);
   let problem = $state("");
   let searched = $state(false);
@@ -107,6 +119,10 @@
       (provider) => provider.provider === selectedProviderId,
     ),
   );
+  const searchAvailable = $derived(
+    Boolean(onSearchLocal) ||
+      Boolean(selectedProvider && providerAvailable(selectedProvider)),
+  );
 
   $effect(() => {
     if (supportedProviders.length === 0) return;
@@ -131,6 +147,9 @@
     searchRevision += 1;
     searching = false;
     results = [];
+    localResults = [];
+    localNext = undefined;
+    localProblem = "";
     problem = "";
     actionProblem = "";
     actionProblemKey = "";
@@ -145,41 +164,79 @@
   async function search(event: SubmitEvent): Promise<void> {
     event.preventDefault();
     const value = query.trim();
-    if (
-      !value ||
-      !selectedProvider ||
-      !providerAvailable(selectedProvider) ||
-      searching
-    )
-      return;
+    if (!value || searching) return;
     if (
       /[\u0000-\u001f\u007f]/u.test(value) ||
       new TextEncoder().encode(value).byteLength > 256
     ) {
       problem = "Use 1 to 256 UTF-8 bytes and no control characters.";
       results = [];
+      localResults = [];
+      localNext = undefined;
       searched = false;
       return;
     }
-    const provider = selectedProvider;
+    const provider =
+      selectedProvider && providerAvailable(selectedProvider)
+        ? selectedProvider
+        : undefined;
     const revision = ++searchRevision;
     searching = true;
     problem = "";
+    localProblem = "";
     actionProblem = "";
     actionProblemKey = "";
     searched = false;
     try {
-      const nextResults = await onSearch(provider.provider, value);
+      const [localOutcome, providerOutcome] = await Promise.allSettled([
+        onSearchLocal?.(value),
+        provider ? onSearch(provider.provider, value) : undefined,
+      ]);
       if (revision !== searchRevision) return;
-      results = nextResults;
+      if (localOutcome.status === "fulfilled" && localOutcome.value) {
+        localResults = [...localOutcome.value.records];
+        localNext = localOutcome.value.next ?? undefined;
+      } else {
+        localResults = [];
+        localNext = undefined;
+        if (localOutcome.status === "rejected") {
+          localProblem = hostProblemText(
+            localOutcome.reason,
+            "Fasti could not search the local Library.",
+          );
+        }
+      }
+      if (providerOutcome.status === "fulfilled") {
+        results = providerOutcome.value ?? [];
+      } else {
+        results = [];
+        problem = hostProblemText(
+          providerOutcome.reason,
+          `${provider?.label ?? "Provider"} search failed. Local results are still available.`,
+        );
+      }
       completedQuery = value;
       searched = true;
+    } finally {
+      if (revision === searchRevision) searching = false;
+    }
+  }
+
+  async function loadMoreLocal(): Promise<void> {
+    if (!onSearchLocal || !localNext || searching) return;
+    const revision = ++searchRevision;
+    searching = true;
+    localProblem = "";
+    try {
+      const page = await onSearchLocal(completedQuery, localNext);
+      if (revision !== searchRevision) return;
+      localResults = [...localResults, ...page.records];
+      localNext = page.next ?? undefined;
     } catch (error) {
       if (revision !== searchRevision) return;
-      results = [];
-      problem = hostProblemText(
+      localProblem = hostProblemText(
         error,
-        `${provider.label} search failed. Check the provider credential and network policy.`,
+        "Fasti could not load the next local Search page.",
       );
     } finally {
       if (revision === searchRevision) searching = false;
@@ -195,10 +252,103 @@
         <h1 id="discover-title" class="view-title" tabindex="-1">Discover</h1>
       </div>
       <p class="view-subtitle">
-        Search configured metadata providers through the trusted Fasti host.
+        Search local Records first, then a configured metadata provider.
       </p>
     </header>
   {/if}
+
+  <form class="search-form" onsubmit={search} role="search">
+    <label for="provider-search">Search your Library and providers</label>
+    <div class="search-row">
+      <input
+        id="provider-search"
+        type="search"
+        class="form-control"
+        required
+        maxlength="256"
+        bind:value={query}
+        disabled={searching || !searchAvailable}
+        placeholder="Title or provider identifier"
+        autocomplete="off"
+      />
+      <button
+        type="submit"
+        class="btn btn-primary"
+        disabled={searching || !searchAvailable || !query.trim()}
+      >
+        <IconSearch size={18} aria-hidden="true" />
+        {searching ? "Searching…" : "Search"}
+      </button>
+    </div>
+  </form>
+
+  <section
+    class="results"
+    aria-labelledby="local-search-results-title"
+    aria-busy={searching}
+  >
+    <svelte:element
+      this={embedded ? "h4" : "h2"}
+      id="local-search-results-title"
+    >
+      Your Library
+    </svelte:element>
+    {#if localProblem}
+      <p class="problem" role="alert">{localProblem}</p>
+    {/if}
+    {#if searched && localResults.length === 0 && !localProblem}
+      <p role="status">No local Records found for {completedQuery}.</p>
+    {:else if localResults.length > 0}
+      <p role="status">
+        {localResults.length}
+        {localResults.length === 1 ? "local Record" : "local Records"} for
+        {completedQuery}.
+      </p>
+      <ol>
+        {#each localResults as record (record.record_id)}
+          <li>
+            <svelte:element this={embedded ? "h5" : "h3"} class="result-title">
+              {record.title.value ?? "Untitled Record"}
+            </svelte:element>
+            <dl>
+              <div>
+                <dt>Source</dt>
+                <dd>Local Library</dd>
+              </div>
+              <div>
+                <dt>Type</dt>
+                <dd>{record.grain}</dd>
+              </div>
+              {#if record.release_year?.value}
+                <div>
+                  <dt>Year</dt>
+                  <dd>{record.release_year.value}</dd>
+                </div>
+              {/if}
+            </dl>
+            {#if onOpenRecord}
+              <button
+                type="button"
+                class="track-btn"
+                onclick={() => onOpenRecord(record.record_id)}
+                >Open Record</button
+              >
+            {/if}
+          </li>
+        {/each}
+      </ol>
+      {#if localNext}
+        <button
+          type="button"
+          class="btn btn-outline-secondary"
+          disabled={searching}
+          onclick={loadMoreLocal}>Load more local Records</button
+        >
+      {/if}
+    {:else if !searched}
+      <p>Local Records remain searchable without a network connection.</p>
+    {/if}
+  </section>
 
   {#if loading}
     <p role="status">Loading provider status…</p>
@@ -256,33 +406,6 @@
         >
       </section>
     {:else}
-      <form class="search-form" onsubmit={search} role="search">
-        <label for="provider-search">Search {selectedProvider.label}</label>
-        <div class="search-row">
-          <input
-            id="provider-search"
-            type="search"
-            class="form-control"
-            required
-            maxlength="256"
-            bind:value={query}
-            disabled={searching}
-            placeholder={selectedProvider.provider === "google-books"
-              ? "Title, author, or ISBN"
-              : "Movie or series title"}
-            autocomplete="off"
-          />
-          <button
-            type="submit"
-            class="btn btn-primary"
-            disabled={searching || !query.trim()}
-          >
-            <IconSearch size={18} aria-hidden="true" />
-            {searching ? "Searching…" : "Search"}
-          </button>
-        </div>
-      </form>
-
       <section
         class="results"
         aria-labelledby="search-results-title"
@@ -383,7 +506,9 @@
             {/each}
           </ol>
         {:else}
-          <p>Enter a title or provider identifier.</p>
+          <p>
+            Provider results appear here when a configured source is available.
+          </p>
         {/if}
       </section>
     {/if}

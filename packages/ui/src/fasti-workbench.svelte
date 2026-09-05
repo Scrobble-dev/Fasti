@@ -41,6 +41,8 @@
     AccessProjectionResponse,
     CreateRecordResult,
     MediaRecord,
+    LocalSearchCursorDto,
+    LocalSearchResponseDto,
     MetadataFieldGroupDto,
     MetadataProjectionResponse,
     ProviderCredentialStatus,
@@ -1118,6 +1120,25 @@
     return results;
   }
 
+  async function searchRecords(
+    query: string,
+    after?: LocalSearchCursorDto,
+  ): Promise<LocalSearchResponseDto> {
+    if (!canAccessProfileData || !host.searchRecords) {
+      throw new Error("Sign in before searching your Library.");
+    }
+    const authorityIdentity = profileAuthorityIdentity;
+    const results = await host.searchRecords({
+      query,
+      grains: [],
+      after,
+    });
+    if (authorityIdentity !== profileAuthorityIdentity) {
+      throw new Error("Account access changed before search completed.");
+    }
+    return results;
+  }
+
   function resetClientEndpoint(): void {
     clearProfileOwnedWorkbenchState();
   }
@@ -1664,6 +1685,10 @@
             bind:selectedProviderId={discoverSelectedProviderId}
             bind:selectionExplicit={discoverSelectionExplicit}
             onSearch={searchProvider}
+            onSearchLocal={canAccessProfileData && host.searchRecords
+              ? searchRecords
+              : undefined}
+            onOpenRecord={(recordId) => openRecord(recordId)}
             onOpenSettings={openProviderSettings}
             onRetry={() => loadDiscover()}
             onCandidateAction={canAccessProfileData &&
