@@ -10,6 +10,7 @@
     SearchCandidateReceiptDto,
     SearchProviderPageResponse,
   } from "./types.js";
+  import { routeSlug, type SearchCandidateRoute } from "./route-slug.js";
   import { hostProblemText } from "./host-problem.js";
   import IconCompass from "@tabler/icons-svelte/icons/compass";
   import IconSearch from "@tabler/icons-svelte/icons/search";
@@ -55,6 +56,14 @@
     actionUnavailableText?: string;
     selectedProviderId?: string;
     selectionExplicit?: boolean;
+    candidateRoute?: SearchCandidateRoute;
+    candidateRouteProblem?: string;
+    onOpenCandidate?: (receipt: SearchCandidateReceiptDto) => void;
+    onCloseCandidateRoute?: () => void;
+    onReadCandidateRoute?: (
+      route: SearchCandidateRoute,
+      offline: boolean,
+    ) => Promise<SearchCandidateDetailsResponse>;
   }
 
   let {
@@ -79,6 +88,11 @@
     actionUnavailableText = "Search does not create a Record. Record creation is unavailable until the host can save the Record, identifier, and metadata together.",
     selectedProviderId = $bindable(""),
     selectionExplicit = $bindable(false),
+    candidateRoute,
+    candidateRouteProblem,
+    onOpenCandidate,
+    onCloseCandidateRoute,
+    onReadCandidateRoute,
   }: Props = $props();
   let query = $state("");
   interface ProviderResult {
@@ -119,7 +133,108 @@
   let actionProblemKey = $state("");
   let searchRevision = 0;
   let searchProviderId = "";
+  let routeCandidate = $state<ProviderSearchCandidate>();
+  let routeReceipt = $state<SearchCandidateReceiptDto>();
+  let routeLoading = $state(false);
+  let routeProblem = $state("");
+  let routeGeneration = 0;
   const ALL_PROVIDERS = "all";
+
+  function canonicalCandidatePath(
+    providerId: string,
+    grain: string,
+    receiptId: string,
+    title: string,
+  ): string {
+    return `/explore/${encodeURIComponent(providerId)}/${encodeURIComponent(grain)}/${receiptId}/${routeSlug(title)}`;
+  }
+
+  function routeSnapshot(
+    response: SearchCandidateDetailsResponse,
+  ): SearchCandidateReceiptDto | undefined {
+    return response.outcome === "snapshot" ||
+      response.outcome === "refetched" ||
+      response.outcome === "unavailable"
+      ? response.snapshot.receipt
+      : undefined;
+  }
+
+  function routeDetails(
+    response: SearchCandidateDetailsResponse,
+  ): ProviderSearchCandidate | undefined {
+    if (
+      response.outcome === "refetched" ||
+      response.outcome === "refetched_without_snapshot"
+    )
+      return providerCandidate(response.details);
+    const receipt = routeSnapshot(response);
+    return receipt ? providerCandidate(receipt.candidate) : undefined;
+  }
+
+  async function loadCandidateRoute(
+    route: SearchCandidateRoute,
+    generation: number,
+    offline: boolean,
+  ): Promise<void> {
+    if (!onReadCandidateRoute) {
+      routeProblem = "Sign in to read this provider candidate.";
+      return;
+    }
+    routeLoading = true;
+    routeProblem = "";
+    try {
+      const response = await onReadCandidateRoute(route, offline);
+      if (generation !== routeGeneration) return;
+      routeCandidate = routeDetails(response);
+      routeReceipt = routeSnapshot(response);
+      if (response.outcome === "missing") {
+        routeProblem =
+          "This candidate is no longer available. Start a new Search.";
+      } else if (
+        response.outcome === "unavailable" ||
+        response.outcome === "unavailable_without_snapshot"
+      ) {
+        routeProblem = `Provider details are unavailable (${response.problem_code}).`;
+      }
+      if (routeCandidate) {
+        const receiptId =
+          routeReceipt?.candidate_receipt_id ?? route.candidateReceiptId;
+        const providerId = routeReceipt?.candidate.provider ?? route.providerId;
+        const grain = routeReceipt?.grain ?? route.grain;
+        const path = canonicalCandidatePath(
+          providerId,
+          grain,
+          receiptId,
+          routeCandidate.title,
+        );
+        if (window.location.pathname !== path)
+          window.history.replaceState(window.history.state, "", path);
+      }
+    } catch (error) {
+      if (generation !== routeGeneration) return;
+      routeProblem = hostProblemText(
+        error,
+        "Fasti could not read the candidate details.",
+      );
+    } finally {
+      if (generation === routeGeneration) routeLoading = false;
+    }
+  }
+
+  $effect(() => {
+    const route = candidateRoute;
+    const offline = providerOffline();
+    const generation = ++routeGeneration;
+    routeCandidate = undefined;
+    routeReceipt = undefined;
+    routeLoading = false;
+    routeProblem = candidateRouteProblem ?? "";
+    if (route && !candidateRouteProblem)
+      void loadCandidateRoute(route, generation, offline);
+    return () => {
+      routeGeneration += 1;
+    };
+  });
 
   function candidateKey(result: ProviderResult, index: number): string {
     return (
@@ -138,7 +253,7 @@
         ? () =>
             onCandidateReceiptAction(
               result.receipt!,
-              result.cacheState === "stale_on_error" ? "refetch" : "cached",
+              providerOffline() ? "cached" : "refetch",
             )
         : undefined
       : onCandidateAction
@@ -171,6 +286,15 @@
     } finally {
       if (revision === searchRevision && actionKey === key) actionKey = "";
     }
+  }
+
+  async function runRoutedCandidateAction(): Promise<void> {
+    const candidate = routeCandidate;
+    const receipt = routeReceipt;
+    if (!candidate || !receipt) return;
+    await runCandidateAction({ candidate, receipt }, 0);
+    const recordId = createdRecordIds[receipt.candidate_receipt_id];
+    if (recordId) onOpenRecord?.(recordId);
   }
 
   async function readCandidateDetails(
@@ -550,7 +674,76 @@
   }
 </script>
 
-<div class="discover-container" class:embedded>
+<div
+  class="discover-container"
+  class:embedded
+  class:candidate-active={Boolean(candidateRoute || candidateRouteProblem)}
+>
+  {#if candidateRoute || candidateRouteProblem}
+    <section class="candidate-detail" aria-busy={routeLoading}>
+      <button
+        type="button"
+        class="btn btn-outline-secondary"
+        onclick={onCloseCandidateRoute}
+        disabled={!onCloseCandidateRoute || Boolean(actionKey)}
+        >Back to Search</button
+      >
+      <h1 id="candidate-detail-title" tabindex="-1">
+        {routeCandidate?.title ?? "Candidate details"}
+      </h1>
+      {#if routeLoading}
+        <p class="alert alert-info" role="status">Loading candidate…</p>
+      {/if}
+      {#if routeProblem}
+        <p class="problem" role="alert">{routeProblem}</p>
+      {/if}
+      {#if routeCandidate}
+        {#if routeCandidate.original_title}
+          <p>Original title: {routeCandidate.original_title}</p>
+        {/if}
+        {#if routeCandidate.authors.length > 0}
+          <p>By {routeCandidate.authors.join(", ")}</p>
+        {/if}
+        {#if routeCandidate.overview}
+          <p class="result-overview">{routeCandidate.overview}</p>
+        {/if}
+        <dl>
+          <div>
+            <dt>Provider</dt>
+            <dd>{routeCandidate.provider}</dd>
+          </div>
+          <div>
+            <dt>Type</dt>
+            <dd>{routeCandidate.kind}</dd>
+          </div>
+          {#if routeCandidate.release_year}
+            <div>
+              <dt>Year</dt>
+              <dd>{routeCandidate.release_year}</dd>
+            </div>
+          {/if}
+          <div>
+            <dt>Provider ID</dt>
+            <dd><code>{routeCandidate.provider_id}</code></dd>
+          </div>
+        </dl>
+        {#if routeReceipt && onCandidateReceiptAction}
+          <button
+            type="button"
+            class="btn btn-primary"
+            aria-disabled={Boolean(actionKey) || routeLoading}
+            onclick={runRoutedCandidateAction}
+            >{actionKey ? pendingLabel : actionLabel}</button
+          >
+        {/if}
+        {#if actionProblem}
+          <p class="problem" role="alert">{actionProblem}</p>
+        {/if}
+      {:else if !routeLoading && !routeProblem}
+        <p>Candidate details are unavailable.</p>
+      {/if}
+    </section>
+  {/if}
   {#if !embedded}
     <header class="discover-header">
       <div class="heading-row">
@@ -749,7 +942,9 @@
         {:else if problem && results.length === 0}
           <p class="problem" role="alert">{problem}</p>
         {:else if searched && results.length === 0}
-          <p role="status">No compatible titles found for {completedQuery}.</p>
+          <p role="status">
+            No compatible titles found for {completedQuery}.
+          </p>
         {:else if results.length > 0}
           {#if problem}
             <p class="problem" role="alert">{problem}</p>
@@ -812,7 +1007,21 @@
                     <dd><code>{candidate.provider_id}</code></dd>
                   </div>
                 </dl>
-                {#if result.receipt && onReadCandidate}
+                {#if result.receipt && onOpenCandidate}
+                  <a
+                    class="btn btn-outline-secondary"
+                    href={canonicalCandidatePath(
+                      result.receipt.candidate.provider,
+                      result.receipt.grain,
+                      result.receipt.candidate_receipt_id,
+                      result.receipt.candidate.title,
+                    )}
+                    onclick={(event) => {
+                      event.preventDefault();
+                      onOpenCandidate?.(result.receipt!);
+                    }}>View details</a
+                  >
+                {:else if result.receipt && onReadCandidate}
                   <button
                     type="button"
                     class="btn btn-outline-secondary"
@@ -921,6 +1130,10 @@
     gap: 16px;
   }
 
+  .discover-container.candidate-active > :not(.candidate-detail) {
+    display: none;
+  }
+
   .discover-header {
     padding-bottom: 16px;
     border-bottom: 2px solid
@@ -1026,7 +1239,7 @@
     opacity: 0.68;
   }
 
-  :is(button, input, select):focus-visible {
+  :is(button, input, select, a):focus-visible {
     outline: 3px solid var(--fasti-focus);
     outline-offset: 2px;
   }
