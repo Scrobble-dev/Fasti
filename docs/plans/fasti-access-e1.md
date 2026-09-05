@@ -213,7 +213,7 @@ The 2026-09-05 parallel preparation review mapped existing owners on base
 | Leave versus cancel | Existing preserve-versus-cancel test and completion notice focus | Real ceremony cancellation and expired/lost callback behavior, not fixture DELETE alone. |
 | Failure and recovery | Persistent problem/next-action UI and stale-result tests | Denied linking, provider outage and expired recent authentication preserve safe state. |
 | Named Authentik management | Existing visible external-identity region | Implement the planned states/actions through real management authority; its current unavailable control is not management support. |
-| Remove management credential | Canonical section 14's separate OIDC and management ownership | `Manual management` preserves OIDC/public discovery; repair is unavailable, not falsely reported complete. Removal is not disconnect or account deletion. |
+| Remove management credential | Canonical section 12.2's separate OIDC and management ownership | `Manual management` preserves OIDC/public discovery; repair is unavailable, not falsely reported complete. Removal is not disconnect or account deletion. |
 | Keyboard and accessibility | Existing focus/target helpers, theme/reflow/Axe matrix and shell skip-link | Extend to new controls; real accessible-authentication journeys and clause evidence remain required. Fixture/Axe passes alone do not establish conformance. |
 
 Intake performed: official sparse-index identity matched archive SHA-256; nine
