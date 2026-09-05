@@ -194,7 +194,18 @@ const PRODUCTION_BOOTSTRAP_OPERATIONS: [ConformanceOperation; 2] = [
 /// surface. Kept separate from `PRODUCTION_BOOTSTRAP_OPERATIONS` because that
 /// array also drives the bootstrap-only SDK slice in
 /// `render_production_bootstrap_contract`, which must not grow to include them.
-const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 43] = [
+const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 44] = [
+    ConformanceOperation {
+        alias: "searchRecords",
+        operation_id: "search_local_records",
+        method: "post",
+        path: "/api/v1/search/records",
+        capability_id: "metadata.search",
+        authenticated: true,
+        request: Some("LocalSearchRequestDto"),
+        response: Some("LocalSearchResponseDto"),
+        retry: "safe",
+    },
     ConformanceOperation {
         alias: "saveSearchCandidate",
         operation_id: "save_search_candidate",
@@ -2043,6 +2054,12 @@ fn enrich_production_openapi(
             ),
         );
         let problems = production_problem_codes(expected, capability)?;
+        if expected.operation_id == "search_local_records" {
+            operation.insert(
+                "x-fasti-max-response-bytes".to_owned(),
+                serde_json::json!(fasti_application::MAX_LOCAL_SEARCH_RESPONSE_BYTES),
+            );
+        }
         operation.insert(
             "x-fasti-problem-codes".to_owned(),
             Value::Array(problems.clone()),
@@ -2426,6 +2443,7 @@ fn validate_production_operation_security(
         "initialize_node" => vec!["bootstrap_bearer"],
         "list_records"
         | "read_search_candidate"
+        | "search_local_records"
         | "list_tracking_dispositions"
         | "get_nuvio_collections"
         | "resolve_identity_route"
@@ -3663,6 +3681,9 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         "ProviderHealthResponse",
         "RefreshMetadataClaimsRequest",
         "SearchProviderPageRequest",
+        "LocalSearchRequestDto",
+        "LocalSearchResponseDto",
+        "LocalSearchCursorDto",
         "SearchProviderPageResponse",
         "SearchCandidateDetailsQueryParameters",
         "SearchCandidateDetailsResponse",
@@ -3837,8 +3858,21 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
     }
     output.push_str("} as const;\n\n");
 
+    writeln!(
+        output,
+        "export const LOCAL_SEARCH_MAX_RESPONSE_BYTES = {} as const;\n",
+        value_at(
+            openapi,
+            "/paths/~1api~1v1~1search~1records/post/x-fasti-max-response-bytes"
+        )?
+        .as_u64()
+        .context("local Search must publish its response byte limit")?
+    )?;
+
     for (alias, dto) in [
         ("parseSubmitObservationRequest", "SubmitObservationRequest"),
+        ("parseLocalSearchRequestDto", "LocalSearchRequestDto"),
+        ("parseLocalSearchResponseDto", "LocalSearchResponseDto"),
         (
             "parseSubmitObservationResponse",
             "SubmitObservationResponse",
@@ -5639,7 +5673,7 @@ mod tests {
     }
 
     #[test]
-    fn generated_openapi_keeps_browser_auth_on_the_hybrid_ten_only() {
+    fn generated_openapi_keeps_browser_auth_on_governed_hybrid_routes() {
         let artifacts = build(workspace_root()).expect("contract generation succeeds");
         let openapi: Value = serde_json::from_slice(
             artifacts
@@ -5651,6 +5685,8 @@ mod tests {
             "/paths/~1api~1v1~1records/get/security",
             "/paths/~1api~1v1~1profile~1record-tracking-dispositions/get/security",
             "/paths/~1api~1v1~1profile~1nuvio-collections/get/security",
+            "/paths/~1api~1v1~1search~1records/post/security",
+            "/paths/~1api~1v1~1search~1candidates~1{provider_id}~1{grain}~1{candidate_receipt_id}/get/security",
         ] {
             assert_eq!(
                 value_at(&openapi, pointer).expect("hybrid operation security"),
@@ -5669,6 +5705,8 @@ mod tests {
             "/paths/~1api~1v1~1profile~1record-tracking-dispositions~1{record_id}/put/security",
             "/paths/~1api~1v1~1profile~1nuvio-collections/put/security",
             "/paths/~1api~1v1~1profile~1nuvio-collections/delete/security",
+            "/paths/~1api~1v1~1search~1providers~1{provider_id}/post/security",
+            "/paths/~1api~1v1~1search~1candidates~1{provider_id}~1{grain}~1{candidate_receipt_id}~1actions/post/security",
         ] {
             assert_eq!(
                 value_at(&openapi, pointer).expect("hybrid mutation security"),

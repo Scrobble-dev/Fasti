@@ -273,41 +273,42 @@ pub(crate) async fn list_records(
 
     Ok(Json(ListRecordsResponse {
         truncated,
-        records: summaries
-            .into_iter()
-            .map(|summary| RecordSummaryDto {
-                record_id: summary.record_id().to_string(),
-                grain: summary.grain().as_str().to_owned(),
-                status: serde_json::to_value(summary.status())
-                    .ok()
-                    .and_then(|value| value.as_str().map(str::to_owned))
-                    .unwrap_or_else(|| "active".to_owned()),
-                title: resolved_field_dto(summary.title()),
-                poster: resolved_field_dto(summary.poster()),
-                original_title: Some(resolved_field_dto(summary.original_title())),
-                overview: Some(resolved_field_dto(summary.overview())),
-                release_year: Some(resolved_field_dto(summary.release_year())),
-                identifiers: summary
-                    .identifiers()
-                    .iter()
-                    .map(|identifier| RecordIdentifierDto {
-                        namespace: identifier.namespace().to_string(),
-                        grain: identifier.grain().as_str().to_owned(),
-                        value: identifier.value().to_owned(),
-                    })
-                    .collect(),
-                latest_activity: summary.latest_activity().map(|activity| RecordActivityDto {
-                    occurred_at: activity
-                        .occurred_at()
-                        .map(|value| occurred_time_dto(value.claim())),
-                    interpretation_state: serde_json::to_value(activity.interpretation_state())
-                        .ok()
-                        .and_then(|value| value.as_str().map(str::to_owned))
-                        .unwrap_or_default(),
-                }),
+        records: summaries.into_iter().map(record_summary_dto).collect(),
+    }))
+}
+
+pub(crate) fn record_summary_dto(summary: fasti_application::RecordSummary) -> RecordSummaryDto {
+    RecordSummaryDto {
+        record_id: summary.record_id().to_string(),
+        grain: summary.grain().as_str().to_owned(),
+        status: serde_json::to_value(summary.status())
+            .ok()
+            .and_then(|value| value.as_str().map(str::to_owned))
+            .unwrap_or_else(|| "active".to_owned()),
+        title: resolved_field_dto(summary.title()),
+        poster: resolved_field_dto(summary.poster()),
+        original_title: Some(resolved_field_dto(summary.original_title())),
+        overview: Some(resolved_field_dto(summary.overview())),
+        release_year: Some(resolved_field_dto(summary.release_year())),
+        identifiers: summary
+            .identifiers()
+            .iter()
+            .map(|identifier| RecordIdentifierDto {
+                namespace: identifier.namespace().to_string(),
+                grain: identifier.grain().as_str().to_owned(),
+                value: identifier.value().to_owned(),
             })
             .collect(),
-    }))
+        latest_activity: summary.latest_activity().map(|activity| RecordActivityDto {
+            occurred_at: activity
+                .occurred_at()
+                .map(|value| occurred_time_dto(value.claim())),
+            interpretation_state: serde_json::to_value(activity.interpretation_state())
+                .ok()
+                .and_then(|value| value.as_str().map(str::to_owned))
+                .unwrap_or_default(),
+        }),
+    }
 }
 
 #[utoipa::path(

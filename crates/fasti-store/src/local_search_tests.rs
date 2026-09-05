@@ -1,4 +1,5 @@
 use super::*;
+include!("local_search_bounds_tests.rs");
 use crate::{
     identity::insert_record,
     metadata::{write_field_claim, write_profile_field_override},

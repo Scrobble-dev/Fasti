@@ -1568,6 +1568,86 @@ const PRODUCTION_SCHEMAS = {
     ],
     "type": "object"
   },
+  "LocalSearchCursorDto": {
+    "additionalProperties": false,
+    "properties": {
+      "context_digest": {
+        "maxLength": 71,
+        "minLength": 71,
+        "pattern": "^sha256:[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "last_record_id": {
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "last_record_id",
+      "context_digest"
+    ],
+    "type": "object"
+  },
+  "LocalSearchRequestDto": {
+    "additionalProperties": false,
+    "properties": {
+      "after": {
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "$ref": "#/components/schemas/LocalSearchCursorDto"
+          }
+        ]
+      },
+      "grains": {
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 16,
+        "type": "array"
+      },
+      "query": {
+        "maxLength": 256,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "query",
+      "grains"
+    ],
+    "type": "object"
+  },
+  "LocalSearchResponseDto": {
+    "additionalProperties": false,
+    "properties": {
+      "next": {
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "$ref": "#/components/schemas/LocalSearchCursorDto"
+          }
+        ]
+      },
+      "records": {
+        "items": {
+          "$ref": "#/components/schemas/RecordSummaryDto"
+        },
+        "maxItems": 100,
+        "type": "array"
+      }
+    },
+    "required": [
+      "records"
+    ],
+    "type": "object"
+  },
   "MetadataAttributionDto": {
     "additionalProperties": false,
     "properties": {
@@ -4661,6 +4741,22 @@ export interface SearchProviderPageRequest {
   readonly region?: null | string;
 }
 
+export interface LocalSearchRequestDto {
+  readonly after?: LocalSearchCursorDto | null;
+  readonly grains: ReadonlyArray<string>;
+  readonly query: string;
+}
+
+export interface LocalSearchResponseDto {
+  readonly next?: LocalSearchCursorDto | null;
+  readonly records: ReadonlyArray<RecordSummaryDto>;
+}
+
+export interface LocalSearchCursorDto {
+  readonly context_digest: string;
+  readonly last_record_id: string;
+}
+
 // prettier-ignore
 export type SearchProviderPageResponse = { readonly cache_state: SearchCacheStateDto; readonly candidates: ReadonlyArray<SearchCandidateReceiptDto>; readonly lifetime: SearchReceiptLifetimeDto; readonly next_page?: null | number; readonly outcome: "page"; readonly page: number; readonly provider_id: string; readonly upstream_problem?: null | string } | { readonly outcome: "unavailable"; readonly problem_code: string; readonly provider_id: string };
 
@@ -5120,6 +5216,7 @@ export interface AccessProjectionResponse {
 
 // prettier-ignore
 export const LOCAL_RUNTIME_OPERATIONS = {
+  searchRecords: { operationId: "search_local_records", method: "POST", path: "/api/v1/search/records", capabilityId: "metadata.search", authorization: "scoped_or_browser_session", requiredScopes: ["metadata_search"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: "LocalSearchRequestDto", responseSchema: "LocalSearchResponseDto" },
   saveSearchCandidate: { operationId: "save_search_candidate", method: "POST", path: "/api/v1/search/candidates/{provider_id}/{grain}/{candidate_receipt_id}/actions", capabilityId: "identity.identifier.attach", authorization: "scoped_or_browser_session", requiredScopes: ["identity_write"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","idempotency_conflict","identity_conflict","integrity_failed","invalid_identifier","malformed_json","payload_too_large","record_not_found","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["identity.identifier.attach.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: "SearchCandidateActionRequest", responseSchema: "SearchCandidateActionResponse" },
   readSearchCandidate: { operationId: "read_search_candidate", method: "GET", path: "/api/v1/search/candidates/{provider_id}/{grain}/{candidate_receipt_id}", capabilityId: "metadata.search", authorization: "scoped_or_browser_session", requiredScopes: ["metadata_search"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "SearchCandidateDetailsResponse" },
   searchProviderPage: { operationId: "search_provider_page", method: "POST", path: "/api/v1/search/providers/{provider_id}", capabilityId: "metadata.search", authorization: "scoped_or_browser_session", requiredScopes: ["metadata_search"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "SearchProviderPageRequest", responseSchema: "SearchProviderPageResponse" },
@@ -5165,9 +5262,21 @@ export const LOCAL_RUNTIME_OPERATIONS = {
   selectBrowserSessionProfile: { operationId: "select_browser_session_profile", method: "PUT", path: "/api/access/v1/browser-session/profile", capabilityId: "browser.session.profile.select", authorization: "browser_session", requiredScopes: [], problemCodes: ["browser_session_expired","browser_session_revoked","forbidden","integrity_failed","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: false, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "SelectBrowserSessionProfileRequest", responseSchema: "SelectBrowserSessionProfileResponse" },
 } as const;
 
+export const LOCAL_SEARCH_MAX_RESPONSE_BYTES = 4194304 as const;
+
 // prettier-ignore
 export function parseSubmitObservationRequest(value: unknown): SubmitObservationRequest {
   return parseProductionDto("SubmitObservationRequest", value);
+}
+
+// prettier-ignore
+export function parseLocalSearchRequestDto(value: unknown): LocalSearchRequestDto {
+  return parseProductionDto("LocalSearchRequestDto", value);
+}
+
+// prettier-ignore
+export function parseLocalSearchResponseDto(value: unknown): LocalSearchResponseDto {
+  return parseProductionDto("LocalSearchResponseDto", value);
 }
 
 // prettier-ignore

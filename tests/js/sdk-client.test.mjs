@@ -976,6 +976,7 @@ test("credentials are header-only on authenticated surfaces and no offline queue
           "rotateCredential",
           "saveSearchCandidate",
           "searchProviderPage",
+          "searchRecords",
           "selectBrowserSessionProfile",
           "selectProfile",
           "setTrackingDisposition",

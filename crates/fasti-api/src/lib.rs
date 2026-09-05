@@ -214,6 +214,7 @@ impl Modify for ProductionSecurityAddon {
         search::search_provider_page,
         search::read_search_candidate,
         search::save_search_candidate,
+        search::search_local_records,
         records::register_namespace,
         integrations::integration_status,
         integrations::nuvio_webhook,
@@ -243,6 +244,9 @@ impl Modify for ProductionSecurityAddon {
         fasti_contracts::SearchCandidateEvidenceModeDto,
         fasti_contracts::SearchRecordActionDispositionDto,
         fasti_contracts::SearchEvidenceStatusDto,
+        fasti_contracts::LocalSearchRequestDto,
+        fasti_contracts::LocalSearchResponseDto,
+        fasti_contracts::LocalSearchCursorDto,
         fasti_contracts::SearchCandidateReceiptDto,
         fasti_contracts::SearchCandidateDto,
         fasti_contracts::SearchReceiptLifetimeDto,
@@ -1150,7 +1154,7 @@ mod tests {
         ] {
             assert!(document.paths.paths.contains_key(path), "missing {path}");
         }
-        assert_eq!(document.paths.paths.len(), 39);
+        assert_eq!(document.paths.paths.len(), 40);
 
         let serialized = serde_json::to_string(&document).expect("serializable OpenAPI document");
         assert!(serialized.contains("#/components/schemas/HealthResponse"));
