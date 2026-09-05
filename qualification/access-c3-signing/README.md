@@ -40,6 +40,19 @@ Build outputs stay in the package's ignored `target/`; no accounts, services,
 keyring entries or data roots are created. Cleanup needs no product reset.
 Offline Cargo resolution alone does not prove network-isolated build scripts.
 
+The [dedicated workflow](../../.github/workflows/access-c3-signing-qualification.yml)
+runs these checks and an unsuppressed dependency audit for matching PRs into
+`dev` and pushes on `dev`. A topic-branch push alone does not trigger it.
+The root workspace tests do not include this isolated package; run its commands
+above as well as the required `cargo xtask test pr` gate. To refresh and inspect
+advisories for its separate lock from the repository root, run:
+
+```sh
+cargo audit --file qualification/access-c3-signing/Cargo.lock
+```
+
+This last command requires `cargo-audit` and network access for the refresh.
+
 ## What the checks establish
 
 - RFC 8032 section 7.1 vectors 1–3 match exact public keys and signatures.

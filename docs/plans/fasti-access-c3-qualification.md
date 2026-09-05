@@ -1,13 +1,14 @@
 # C3 signing qualification: reproducible delivery slice
 
-Status: `IMPLEMENTED_WITH_FOCUSED_EVIDENCE; DELIVERY_GATES_PENDING`, 2026-09-05.
+Status: `IMPLEMENTED_WITH_EXACT_LOCAL_EVIDENCE; DELIVERY_GATES_PENDING`, 2026-09-05.
 Base: `62e10d2e9bd738ed5da425c008eb839f89cdbea5`.
 
 ## Outcome and ownership
 
 Preserve the completed `c3-sign-probe-1` as a repository-local, independently
-locked test package. The prior probe requires `/tmp` artifacts and an absolute
-path into an older worktree. It cannot be reproduced from a Fasti checkout
+locked [test package](../../qualification/access-c3-signing/README.md). The prior
+probe requires `/tmp` artifacts and an absolute path into an older worktree.
+It cannot be reproduced from a Fasti checkout
 alone. This slice fixes that delivery gap; it does not repeat framework selection
 or approve a C3 cryptographic profile.
 
@@ -118,6 +119,20 @@ values. Both the clean and rejection paths were executed. Correctness review
 found no other source/assertion defect. The separate delivery preflight found no
 workflow/scope defect; Ponytail found no unnecessary abstraction.
 
-Next: commit the coherent slice, obtain exact final-head canonical receipts and
-the remaining applicable review/ship/live-CI gates. No push, PR, merge, production
-profile approval, C3 completion or shared-file release is claimed here.
+The sole implementation commit was amended only to add its required DCO sign-off:
+`5b5f3c2f12ffcdbbe55fb21e43d6d07297a1ac7b` became
+`4eae91f762ee41990d9ccfe91b43903112791ffa`, with unchanged tree
+`2be0a6117aa365379a5557eef90d02e57f63d52e`. Fresh local receipts on that clean
+signed-off commit pass all 27 contract and 11 portable gates. Debug and release
+each pass nine unit and three compile-fail tests; formatting and strict Clippy
+also pass. A separate unsuppressed advisory refresh loaded 1239 advisories and
+scanned 121 dependencies with exit zero. Its database resolved to
+`5a0ebedfe8bdd2e295b171f4162f8c977bcad9a5`; it does not replace the historical
+cached-only result above. Earlier reviews retain their original commit identity.
+
+Next: complete documentation and final review disposition, publish the isolated
+PR into `dev`, then verify hosted checks and the integrated commit. Later
+documentation commits do not inherit an exact-commit canonical receipt from
+`4eae91f7`. Existing Fasti version conventions apply; no generic VERSION file or
+version bump is required for this slice. No push, PR, merge, production profile
+approval, C3 completion or shared-file release is claimed here.

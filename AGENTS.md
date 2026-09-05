@@ -144,6 +144,8 @@ kernel. It must not start `fastid`, Vite, or a browser credential fallback.
 
 Also run focused checks for changed surfaces. Add regression tests for fixed defects.
 
+- For the isolated [C3 signing qualification](qualification/access-c3-signing/README.md), follow its native-override isolation steps and run `cargo +1.97.1 test --offline --locked --manifest-path qualification/access-c3-signing/Cargo.toml`, plus the documented release, formatting, Clippy and advisory checks. Root workspace tests do not include this package. Qualification does not approve a production crypto profile or recovery capability.
+
 UI changes require design review. Headless changes should state when visual evidence is not applicable.
 
 The local browser QA harness may expose only generated capabilities that are
