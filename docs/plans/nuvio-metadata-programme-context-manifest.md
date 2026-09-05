@@ -3913,3 +3913,21 @@ Hosted JavaScript recovery is now proven for published documentation head
 `33992970208` completed successfully, including both the new locked SDK fixture
 prebuild and `pnpm test`. This is evidence for that published increment, not
 the later local provider-inventory implementation.
+
+The clean `d2312124d1535d6ec04402be4060f83e4818bc0b` canonical run is
+terminal, not waiting: workspace tests found one further frozen-list omission
+in `xtask::registry::tests::hybrid_authorization_is_limited_to_the_frozen_capabilities`.
+The authored registry and application policy correctly include `ListProviders`;
+the independent exact expected list did not. A focused rerun reproduced the
+same failure. Add only that member to the expected list, preserving exact
+equality and the negative `ReplayReceipt` broadening check. No production
+authorization or validation rule changes, and no successful canonical receipt
+was emitted for this failed attempt. The corrected clean head requires a new
+canonical run before delivery.
+
+Parallel work remains bounded and read-only during exact verification: one
+agent checks remaining provider-inventory contract freeze points, one traces
+the full real-process Search/Create/Attach/offline/restart browser journey in
+the existing Access smoke harness, and one checks the isolated TMDB TLS fixture
+transport seam. The commander retains sole integration ownership. No future
+migration, capability, shared-file release or reduced acceptance scope is implied.
