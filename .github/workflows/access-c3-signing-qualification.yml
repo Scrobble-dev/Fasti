@@ -1,0 +1,78 @@
+name: Access C3 signing qualification
+
+on:
+  push:
+    branches: ["dev"]
+    paths:
+      - ".github/workflows/access-c3-signing-qualification.yml"
+      - "qualification/access-c3-signing/**"
+      - "crates/fasti-domain/**"
+      - "crates/fasti-application/**"
+      - "crates/fasti-contracts/**"
+      - "contracts/portability/v1/workspace-manifest.example.json"
+      - "Cargo.toml"
+  pull_request:
+    branches: ["dev"]
+    paths:
+      - ".github/workflows/access-c3-signing-qualification.yml"
+      - "qualification/access-c3-signing/**"
+      - "crates/fasti-domain/**"
+      - "crates/fasti-application/**"
+      - "crates/fasti-contracts/**"
+      - "contracts/portability/v1/workspace-manifest.example.json"
+      - "Cargo.toml"
+
+permissions:
+  contents: read
+
+jobs:
+  qualification:
+    name: Detached-signature qualification (not runtime)
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CC: /usr/bin/cc
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@032958afbdc797a9164d3bc0b56325c1308924a5 # 1.97.1
+        with:
+          components: rustfmt, clippy
+      - name: Reject native source and library overrides
+        shell: bash
+        run: |
+          for variable in SODIUM_LIB_DIR SODIUM_USE_PKG_CONFIG SODIUM_SHARED SODIUM_DIST_DIR; do
+            if [[ -v "$variable" ]]; then
+              echo "::error::Unset $variable before running C3 qualification."
+              exit 1
+            fi
+          done
+      - name: Fetch the isolated locked graph
+        run: cargo fetch --locked --manifest-path qualification/access-c3-signing/Cargo.toml
+      - name: Check formatting
+        run: cargo fmt --manifest-path qualification/access-c3-signing/Cargo.toml -- --check
+      - name: Run all debug checks
+        run: cargo test --offline --locked --manifest-path qualification/access-c3-signing/Cargo.toml
+      - name: Run all release checks
+        run: cargo test --release --offline --locked --manifest-path qualification/access-c3-signing/Cargo.toml
+      - name: Deny compiler warnings
+        run: cargo clippy --offline --locked --manifest-path qualification/access-c3-signing/Cargo.toml --all-targets -- -D warnings
+
+  advisories:
+    name: Signing qualification dependency advisories
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@f347db2dee5edb1a4bddcbed2220c6e7828a0fad # cargo-audit
+        with:
+          tool: cargo-audit
+      - name: Audit the isolated lockfile without suppression
+        run: cargo audit --file qualification/access-c3-signing/Cargo.lock
