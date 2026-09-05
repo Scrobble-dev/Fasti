@@ -8,21 +8,32 @@ The [written E1 gate](../../docs/plans/fasti-access-e1.md) controls integration.
 
 ## Run
 
+Use the repository's contributor toolchain, Rust `1.97.1`, with Cargo,
+Clippy and rustfmt available. See the [repository setup](../../README.md#quick-start).
+The explicit toolchain below does not change the machine's default. No TrailBase
+service, account, browser, database or provider credential is needed.
+
 From the repository root:
 
 ```sh
-cargo fetch --locked --manifest-path qualification/access-e1/Cargo.toml
-cargo test --offline --locked --manifest-path qualification/access-e1/Cargo.toml
-cargo clippy --offline --locked --manifest-path qualification/access-e1/Cargo.toml --all-targets -- -D warnings
-cargo fmt --manifest-path qualification/access-e1/Cargo.toml -- --check
+cargo +1.97.1 fetch --locked --manifest-path qualification/access-e1/Cargo.toml
+cargo +1.97.1 test --offline --locked --manifest-path qualification/access-e1/Cargo.toml
+cargo +1.97.1 clippy --offline --locked --manifest-path qualification/access-e1/Cargo.toml --all-targets -- -D warnings
+cargo +1.97.1 fmt --manifest-path qualification/access-e1/Cargo.toml -- --check
 ```
 
 The first command downloads only the locked qualification graph. The checks
 are offline. On Linux with unprivileged network namespaces, also run:
 
 ```sh
-unshare --user --map-root-user --net cargo test --offline --locked --manifest-path qualification/access-e1/Cargo.toml
+unshare --user --map-root-user --net cargo +1.97.1 test --offline --locked --manifest-path qualification/access-e1/Cargo.toml
 ```
+
+Expected full-suite result: **19 passed, 0 failed, 0 ignored, 0 filtered out**.
+If an offline check reports a missing package, run the locked fetch with network
+access, then retry the offline check. Do not remove `--locked` or regenerate the
+lock to bypass that error. If this host forbids network namespaces, the ordinary
+offline command remains useful, but does not prove network isolation.
 
 Both PEM files are synthetic test-only RSA keys generated for this harness.
 They are intentionally public fixtures, not installation or person credentials.
@@ -105,10 +116,25 @@ tests: SQLite refused the symlinked `/home/ryan/.cache/tmp` path with `CannotOpe
 (extended code 1550). The unchanged store suite passed with the physical path:
 `TMPDIR=/mnt/secondary-ssd/cache/home/tmp cargo test --locked --offline -p fasti-store --lib --quiet`
 (291 passed, zero failed, three ignored). No SQLite flag or source changed.
-On rerun, the contract subprocesses passed, but the receipt writer correctly
-refused the uncommitted licence/documentation changes. Commit the coherent slice
-and rerun on clean source. The complete canonical gate remains pending; focused
-results do not replace it. No PR, merge or production support follows from this record.
+On the next run, the contract subprocesses passed, but the receipt writer correctly
+refused the uncommitted licence/documentation changes. After committing them,
+the canonical gate passed on clean `b94776219676e246d20557c4a67a478dff841acb`,
+tree `04a2bcb552b1962070d237cd7455964c01ac2b5a`: 27 contract gates and 11 portable
+gates, all with exit 0. This is historical exact-source evidence, not proof for a
+later edit. Rerun on the final clean delivery head:
+
+```sh
+# On this prepared host, TMPDIR is the existing physical temporary directory.
+TMPDIR=/mnt/secondary-ssd/cache/home/tmp PKG_CONFIG=/usr/bin/pkg-config cargo +1.97.1 xtask test pr
+```
+
+On another host, use its prepared physical temporary directory and repository
+prerequisites; do not create this machine-specific path. Inspect
+`target/fasti-receipts/b1-contract-verification.json` and `b1-portable.json` for
+the exact commit, tree, clean-source status and individual results. These
+canonical receipts do not run the separate E1 workspace; the explicit 19-check
+command above is also required. No PR, merge or production support follows from
+this record. Packaged Tauri authentication is not covered by these checks.
 
 ## What these checks establish
 

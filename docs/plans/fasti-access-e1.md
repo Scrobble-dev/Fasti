@@ -248,3 +248,36 @@ ordinary source/security reviews remain required. AGY is optional and additive.
 Rollback of qualification is removal of its isolated harness only. Preserve
 evidence; do not reset another worktree. Production rollback must be specified
 with the actual migration and session invalidation design before I1 starts.
+
+## GSTACK REVIEW REPORT
+
+2026-09-05 developer-experience audit covers the isolated qualification package,
+not Fasti's user onboarding or deployed documentation. Root README and CI select
+Rust 1.97.1; the run instructions now select it explicitly. The prepared host ran
+all 19 checks in a fresh network namespace, strict Clippy and rustfmt successfully.
+The first 1.97.1 test build plus execution took 9.44 seconds with cached dependency
+archives. This is not clean-machine setup time or a runtime performance result.
+The earlier warm 1.96.0 run took 0.41 seconds. Neither is a cold-install benchmark.
+
+| DX dimension | Score | Evidence and remaining gap |
+| --- | --- | --- |
+| Getting started | 8/10, tested | Explicit toolchain and commands work on the prepared host; pristine-machine installation is untested. |
+| CLI ergonomics | 8/10, tested | Reuses Cargo help and test listing; no custom command wrapper. |
+| Errors | 8/10, tested/partial | Invalid flags give usage/help. An unknown test filter exits 0 with 19 filtered tests; README requires 19 passed and none filtered. Missing-cache recovery is documented from the earlier observed failure. |
+| Documentation | 8/10, source-reviewed | Setup, expected output, public fixtures and runtime exclusions are explicit; no new web surface to browse. |
+| Upgrade path | Not applicable | No runtime adoption or database upgrade in this package; version changes must repeat qualification. |
+| Environment | 8/10, tested/partial | Offline and namespace checks pass; root canonical checks do not run this isolated workspace. CI still needs explicit package coverage before delivery. |
+| Community and DX measurement | Not applicable | No new community or telemetry surface. Existing repository contribution paths remain unchanged. |
+
+No comparable E1 plan-DX score was present in the branch review log. Independent
+read-only onboarding review found no additional wording issue after corrections.
+Ponytail review retained standard Cargo commands; no wrapper or new dependency.
+
+**VERDICT:** DX `DONE_WITH_CONCERNS` for qualification only. Existing source review
+predates these documentation edits and needs final-tree reconciliation. The
+historical clean `b9477621` canonical receipts passed 27 contract and 11 portable
+gates; a new delivery head needs fresh receipts and PR evidence.
+
+**UNRESOLVED DECISIONS:**
+- The RSA advisory remains unsuppressed and the advisory gate is not green; no runtime adoption is approved.
+- Production E1-Q1/Q2 completion and E1-I1/I2/I3 remain open, with shared integration subject to M4's exact handoff.
