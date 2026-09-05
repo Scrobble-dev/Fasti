@@ -69,6 +69,12 @@ mod candidate_details_tests {
     }
 
     impl SearchPersistencePort for DetailsPersistence {
+        fn prepare_search_candidate_action(&self, _: &fasti_application::SearchCandidateActionCommand) -> ApplicationResult<fasti_application::SearchCandidateActionPreparation> {
+            panic!("detail reads must not prepare actions")
+        }
+        fn commit_search_candidate_action(&self, _: &fasti_application::SearchCandidateActionCommand, _: &fasti_application::SearchCandidateActionPreparation, _: Option<&[fasti_application::ProviderMetadataField]>) -> ApplicationResult<fasti_application::SearchCandidateActionReceipt> {
+            panic!("detail reads must not commit actions")
+        }
         fn search_local_records(
             &self,
             _: &LocalSearchRequest,

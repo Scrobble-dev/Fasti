@@ -578,6 +578,7 @@ define_capabilities!(
             BrowserSessionRevoked,
             CapabilityUnavailable,
             Forbidden,
+            IdempotencyConflict,
             IdentityConflict,
             IntegrityFailed,
             InvalidIdentifier,

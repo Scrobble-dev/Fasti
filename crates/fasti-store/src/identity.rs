@@ -22,6 +22,99 @@ use std::collections::{BTreeSet, HashMap};
 /// ponytail: no cursor pagination. Add one if a real library exceeds this.
 pub(crate) const MAX_RECORDS_PAGE: i64 = 500;
 
+pub(crate) fn register_namespace_tx(
+    transaction: &Transaction<'_>,
+    workspace_id: WorkspaceId,
+    definition: &fasti_domain::NamespaceDefinition,
+    capability: CapabilityKey,
+    correlation_id: fasti_domain::RequestCorrelationId,
+) -> ApplicationResult<bool> {
+    let workspace_id = workspace_id.to_string();
+    let namespace = definition.namespace().as_str();
+    let supported_grains = definition
+        .grains()
+        .iter()
+        .map(|grain| grain.as_str())
+        .collect::<Vec<_>>()
+        .join(",");
+    let existing = map_sql(
+        transaction
+            .query_row(
+                r#"
+                SELECT label, supported_grains, id_pattern, normalization, licence_posture
+                FROM namespace_definitions
+                WHERE workspace_id = ?1 AND namespace = ?2
+                "#,
+                params![workspace_id, namespace],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                    ))
+                },
+            )
+            .optional(),
+        capability,
+        correlation_id,
+    )?;
+    let expected = (
+        definition.label(),
+        supported_grains.as_str(),
+        definition.id_pattern(),
+        definition.normalization(),
+        definition.licence_posture().as_str(),
+    );
+    let created = match existing {
+        Some(existing)
+            if (
+                existing.0.as_str(),
+                existing.1.as_str(),
+                existing.2.as_str(),
+                existing.3.as_str(),
+                existing.4.as_str(),
+            ) == expected =>
+        {
+            false
+        }
+        Some(_) => {
+            return Err(Box::new(FastiProblem::from_code(
+                ProblemCode::ValidationFailed,
+                capability,
+                correlation_id,
+            )))
+        }
+        None => {
+            map_sql(
+                transaction.execute(
+                    r#"
+                    INSERT INTO namespace_definitions(
+                        workspace_id, namespace, label, supported_grains, id_pattern,
+                        normalization, licence_posture, created_at
+                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                    "#,
+                    params![
+                        workspace_id,
+                        namespace,
+                        definition.label(),
+                        supported_grains,
+                        definition.id_pattern(),
+                        definition.normalization(),
+                        definition.licence_posture().as_str(),
+                        timestamp(now())
+                    ],
+                ),
+                capability,
+                correlation_id,
+            )?;
+            true
+        }
+    };
+    Ok(created)
+}
+
 impl IdentityPort for SqliteKernel {
     fn register_namespace_definition(
         &self,
@@ -42,89 +135,13 @@ impl IdentityPort for SqliteKernel {
             correlation_id,
         )?;
         let definition = command.definition();
-        let workspace_id = authorized.workspace_id().to_string();
-        let namespace = definition.namespace().as_str();
-        let supported_grains = definition
-            .grains()
-            .iter()
-            .map(|grain| grain.as_str())
-            .collect::<Vec<_>>()
-            .join(",");
-        let existing = map_sql(
-            transaction
-                .query_row(
-                    r#"
-                    SELECT label, supported_grains, id_pattern, normalization, licence_posture
-                    FROM namespace_definitions
-                    WHERE workspace_id = ?1 AND namespace = ?2
-                    "#,
-                    params![workspace_id, namespace],
-                    |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, String>(1)?,
-                            row.get::<_, String>(2)?,
-                            row.get::<_, String>(3)?,
-                            row.get::<_, String>(4)?,
-                        ))
-                    },
-                )
-                .optional(),
+        let created = register_namespace_tx(
+            &transaction,
+            authorized.workspace_id(),
+            definition,
             capability,
             correlation_id,
         )?;
-        let expected = (
-            definition.label(),
-            supported_grains.as_str(),
-            definition.id_pattern(),
-            definition.normalization(),
-            definition.licence_posture().as_str(),
-        );
-        let created = match existing {
-            Some(existing)
-                if (
-                    existing.0.as_str(),
-                    existing.1.as_str(),
-                    existing.2.as_str(),
-                    existing.3.as_str(),
-                    existing.4.as_str(),
-                ) == expected =>
-            {
-                false
-            }
-            Some(_) => {
-                return Err(Box::new(FastiProblem::from_code(
-                    ProblemCode::ValidationFailed,
-                    capability,
-                    correlation_id,
-                )))
-            }
-            None => {
-                map_sql(
-                    transaction.execute(
-                        r#"
-                        INSERT INTO namespace_definitions(
-                            workspace_id, namespace, label, supported_grains, id_pattern,
-                            normalization, licence_posture, created_at
-                        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-                        "#,
-                        params![
-                            workspace_id,
-                            namespace,
-                            definition.label(),
-                            supported_grains,
-                            definition.id_pattern(),
-                            definition.normalization(),
-                            definition.licence_posture().as_str(),
-                            timestamp(now())
-                        ],
-                    ),
-                    capability,
-                    correlation_id,
-                )?;
-                true
-            }
-        };
         map_sql(transaction.commit(), capability, correlation_id)?;
         Ok(RegisterNamespaceDefinitionOutcome::new(
             definition.namespace().clone(),

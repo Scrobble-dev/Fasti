@@ -82,6 +82,7 @@ pub enum WorkspaceExportEntityDto {
     ProfileAnimeGroupingPolicies,
     ClientAnimeGroupingPolicies,
     AnimeGroupingPolicyReceipts,
+    SearchActionReceipts,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -111,7 +112,7 @@ pub struct WorkspaceBlobDescriptorDto {
 #[serde(deny_unknown_fields)]
 pub struct WorkspaceManifestDto {
     pub format: WorkspaceManifestFormatDto,
-    #[schemars(range(min = 1, max = 5))]
+    #[schemars(range(min = 1, max = 6))]
     pub format_version: u32,
     #[schemars(length(equal = 36), regex(pattern = r"^wsp_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"), extend("format" = "fasti-workspace-id"))]
     pub workspace_id: String,
@@ -127,7 +128,7 @@ pub struct WorkspaceManifestDto {
     pub migration_version: u32,
     #[schemars(length(equal = 71), regex(pattern = r"^sha256:[0-9a-f]{64}$"), extend("format" = "sha256"))]
     pub migration_digest: String,
-    #[schemars(length(min = 16, max = 34))]
+    #[schemars(length(min = 16, max = 35))]
     pub streams: Vec<WorkspaceStreamDescriptorDto>,
     pub blobs: Vec<WorkspaceBlobDescriptorDto>,
 }
@@ -274,6 +275,7 @@ impl From<WorkspaceExportEntityDto> for WorkspaceExportEntity {
             WorkspaceExportEntityDto::AnimeGroupingPolicyReceipts => {
                 Self::AnimeGroupingPolicyReceipts
             }
+            WorkspaceExportEntityDto::SearchActionReceipts => Self::SearchActionReceipts,
         }
     }
 }
@@ -329,6 +331,7 @@ impl From<WorkspaceExportEntity> for WorkspaceExportEntityDto {
             }
             WorkspaceExportEntity::ClientAnimeGroupingPolicies => Self::ClientAnimeGroupingPolicies,
             WorkspaceExportEntity::AnimeGroupingPolicyReceipts => Self::AnimeGroupingPolicyReceipts,
+            WorkspaceExportEntity::SearchActionReceipts => Self::SearchActionReceipts,
         }
     }
 }
@@ -563,7 +566,7 @@ mod tests {
     use fasti_application::{
         WORKSPACE_ARCHIVE_FORMAT_VERSION, WORKSPACE_ARCHIVE_V1_FORMAT_VERSION,
         WORKSPACE_ARCHIVE_V2_FORMAT_VERSION, WORKSPACE_ARCHIVE_V3_FORMAT_VERSION,
-        WORKSPACE_ARCHIVE_V4_FORMAT_VERSION,
+        WORKSPACE_ARCHIVE_V4_FORMAT_VERSION, WORKSPACE_ARCHIVE_V5_FORMAT_VERSION,
     };
     use schemars::generate::SchemaSettings;
     use std::num::NonZeroU64;
@@ -792,12 +795,13 @@ mod tests {
         let mut streams = v4.manifest().streams().to_vec();
         let empty_digest = Sha256Digest::from_bytes(&Sha256::digest([]).into());
         streams.extend(
-            WorkspaceExportEntity::ALL[WorkspaceExportEntity::V4.len()..]
+            WorkspaceExportEntity::V5[WorkspaceExportEntity::V4.len()..]
                 .iter()
                 .copied()
                 .map(|entity| WorkspaceStreamDescriptor::new(entity, 0, 0, empty_digest.clone())),
         );
-        let manifest = WorkspaceManifest::try_new(
+        let manifest = WorkspaceManifest::try_new_for_format(
+            WORKSPACE_ARCHIVE_V5_FORMAT_VERSION,
             v4.manifest().workspace_id(),
             v4.manifest().workspace_revision(),
             v4.manifest().contract_version().to_owned(),
@@ -812,7 +816,7 @@ mod tests {
 
         assert_eq!(
             projected.dto().manifest.format_version,
-            WORKSPACE_ARCHIVE_FORMAT_VERSION
+            WORKSPACE_ARCHIVE_V5_FORMAT_VERSION
         );
         assert_eq!(
             projected.dto().manifest.streams[..WorkspaceExportEntity::V4.len()],
@@ -837,6 +841,50 @@ mod tests {
             .try_into_application(limits())
             .expect("strict archive-v5 hostile-boundary conversion");
         assert_eq!(inbound.manifest(), projected.application_manifest());
+    }
+
+    #[test]
+    fn archive_v6_appends_only_durable_search_actions_to_frozen_v5() {
+        let previous: ChecksummedWorkspaceManifestDto = serde_json::from_str(include_str!(
+            "../../../contracts/portability/v5/workspace-manifest.example.json"
+        ))
+        .unwrap();
+        let current: ChecksummedWorkspaceManifestDto = serde_json::from_str(include_str!(
+            "../../../contracts/portability/v6/workspace-manifest.example.json"
+        ))
+        .unwrap();
+        assert_eq!(
+            previous.manifest.format_version,
+            WORKSPACE_ARCHIVE_V5_FORMAT_VERSION
+        );
+        assert_eq!(
+            current.manifest.format_version,
+            WORKSPACE_ARCHIVE_FORMAT_VERSION
+        );
+        assert_eq!(current.manifest.streams.len(), 35);
+        assert_eq!(current.manifest.streams[..34], previous.manifest.streams);
+        assert_eq!(
+            current.manifest.streams[34].entity,
+            WorkspaceExportEntityDto::SearchActionReceipts
+        );
+        let inbound = current.clone().try_into_application(limits()).unwrap();
+        assert_eq!(
+            CanonicalWorkspaceManifestProjection::try_from_application(inbound.manifest().clone())
+                .unwrap()
+                .dto(),
+            &current
+        );
+        for mut invalid in [current.clone(), previous.clone()] {
+            invalid.manifest.format_version = if invalid.manifest.format_version == 6 {
+                5
+            } else {
+                6
+            };
+            let bytes = serde_json_canonicalizer::to_vec(&invalid.manifest).unwrap();
+            invalid.manifest_digest =
+                Sha256Digest::from_bytes(&Sha256::digest(bytes).into()).to_string();
+            assert!(invalid.try_into_application(limits()).is_err());
+        }
     }
 
     #[test]

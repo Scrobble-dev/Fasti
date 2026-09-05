@@ -938,3 +938,78 @@ canonical and strict rustdoc passes; those were not rerun by this review. Its
 bounded factual C1 merge-status documentation pass remains separately owned and
 must receive final exact-head reconciliation. No runtime activation or M4 scope
 release follows from that review. Codex Security remains prohibited.
+
+### M4 atomic Search actions and archive v6 — 2026-09-05
+
+Predecessor `3b8dd98f5c73c7de783e6e952717814c42005611`, tree
+`e649e476e49d684e840b7a54fd55ad6cae21df5d`, passed all 27 canonical gates
+with a clean exact-source receipt. This slice implements the previously frozen
+Create/Attach action disposition through existing application, provider-runtime,
+identity and metadata owners. No new dependency, capability or parallel writer
+was introduced. AttachIdentifier now permits its required IdempotencyConflict;
+generated problem/SDK projections are regenerated from that policy.
+
+First save reauthorizes IdentityWrite, real browser mutation proof when applicable,
+and the original scoped Search receipt. Cached evidence is explicit and never a
+fallback after failed refetch. Online evidence uses exact stored coordinates and
+effective provider locale, then rechecks authority after I/O. One immediate
+transaction commits namespace registration, exact identity reuse/attachment,
+metadata claims, local Search postings and the durable result. Later-field or
+receipt failure rolls everything back. No Library, progress, rating, override or
+Collection state changes implicitly. Shared provider-field and namespace writers
+remain the sole owners.
+
+Completed replay requires current write authorization and stable actor/profile/
+client/operation intent, but not an expired candidate or current provider state.
+Real browser tests prove rotation, revocation, read-proof denial and different
+subject isolation. Their fixture grants write authority before Search: changing
+the grant afterward correctly invalidates the original Search partition. Runtime
+checks cover zero fetch on cached/replay paths, exact response provenance,
+post-fetch denial, concurrent replay and lease retention during canceled blocking
+work. A separate real-SQLite contention regression prepares both commands before
+two threads commit: identical operations return one receipt, while distinct
+operations reuse one Record without duplicate identifiers or claims. Receipt
+decoding reuses canonical provider mappings and bounded typed data;
+legacy cached TMDB locale-None remains valid, while actual refetch locales are
+enforced for both TMDB and Google Books.
+
+Archive v6 appends only durable action receipts as stream 35. Historical v1–v5
+schemas/examples remain byte-identical. The published schema-v15/archive-v5
+fingerprint still restores; schema v16 pairs only with v6. The import owner checks
+canonical nested receipt bytes, every redundant column, recomputed intent digest,
+portable scope and Record grain. Historical subject IDs are audit values without
+auth foreign keys. Four archive tests prove populated roundtrip and exact stream
+re-export, hostile receipt rejection, missing/wrong portable relationships, and
+real recovery bootstrap: a freshly authenticated replacement client cannot replay
+either prior credential or historical-browser operations. Temporary Search state,
+credentials, grants and sessions stay excluded. Recovery does not confer old
+actors' replay rights.
+
+Validation before commit: 141 application tests, 55 provider-runtime tests,
+361 store unit tests and 3 store integration tests pass, followed by the added
+real-SQLite contention test passing independently; 5 declared store unit
+cases and 1 documentation case remain ignored. The 13 portability contract tests
+and 18 generator tests pass. Strict all-target Clippy for application, contracts,
+provider runtime, store and xtask passes, as do formatting and diff checks. Native
+independent review found no concrete remaining defect. Clean exact-head canonical
+verification follows the commit; the predecessor receipt is not evidence for
+this new diff. Visual accessibility is not claimed by this headless slice.
+
+Parallel allocation: commander retains v16, archive v6 and all shared integration
+surfaces. Separate agents owned only explicit application/runtime/store test
+leaves, releasing them before integration. Independent readers reviewed current
+code, prepared host/API/SDK/Workbench wiring, and traced dense-history performance.
+Next measured optimization is the domain resolver's quadratic duplicate-ID scan;
+do not introduce a cache before measuring the standard-library improvement.
+Dense cold latency remains an open M4 gate. Search host/wire/Workbench activation
+and canonical direct-link details remain unfinished M4 work, not removed scope.
+No v17 allocation, M4 merge or shared-file release has occurred.
+
+C2 PR #125 separately reports pushed head
+`0d085fcb57dbe70d7640815da199f75370452e62`, tree
+`90b9ab4eb555f88367a1d2008ec2d02dc720d54a`. Native reconciliation verified
+the exact released dependency fix and physical-docs-path blobs plus a bounded
+Playwright route-availability race correction. C2 reported its clean local
+canonical, docs and built-site gates green; remote exact-head CI is pending,
+with no merge or M4 ownership release. Refresh merge analysis only on a material
+handoff. Codex Security remains prohibited; reviews and gates use native tools.

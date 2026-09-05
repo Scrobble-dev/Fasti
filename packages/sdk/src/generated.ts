@@ -4439,7 +4439,7 @@ export const LOCAL_RUNTIME_OPERATIONS = {
   plexWebhook: { operationId: "plex_webhook", method: "POST", path: "/api/v1/integrations/plex/webhook", capabilityId: "observation.accept", authorization: "scoped", requiredScopes: ["observation_accept"], problemCodes: ["authentication_failed","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","invalid_observation","malformed_json","payload_too_large","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["observation.accept.capacity_exceeded","observation.accept.receipt","observation.accept.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: null, responseSchema: "SubmitObservationResponse" },
   createRecord: { operationId: "create_record", method: "POST", path: "/api/v1/records", capabilityId: "identity.record.create", authorization: "scoped_or_browser_session", requiredScopes: ["identity_write"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","integrity_failed","invalid_identifier","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["identity.record.create.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "CreateRecordRequest", responseSchema: "CreateRecordResponse" },
   listRecords: { operationId: "list_records", method: "GET", path: "/api/v1/records", capabilityId: "identity.record.list", authorization: "scoped_or_browser_session", requiredScopes: ["identity_read"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","integrity_failed","session_policy_changed","storage_unavailable"], exampleIds: ["identity.record.list.forbidden"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ListRecordsResponse" },
-  attachIdentifier: { operationId: "attach_identifier", method: "POST", path: "/api/v1/records/identifiers", capabilityId: "identity.identifier.attach", authorization: "scoped_or_browser_session", requiredScopes: ["identity_write"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","identity_conflict","integrity_failed","invalid_identifier","malformed_json","payload_too_large","record_not_found","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["identity.identifier.attach.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: "AttachIdentifierRequest", responseSchema: "AttachIdentifierResponse" },
+  attachIdentifier: { operationId: "attach_identifier", method: "POST", path: "/api/v1/records/identifiers", capabilityId: "identity.identifier.attach", authorization: "scoped_or_browser_session", requiredScopes: ["identity_write"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","idempotency_conflict","identity_conflict","integrity_failed","invalid_identifier","malformed_json","payload_too_large","record_not_found","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["identity.identifier.attach.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: "AttachIdentifierRequest", responseSchema: "AttachIdentifierResponse" },
   registerNamespace: { operationId: "register_namespace", method: "POST", path: "/api/v1/namespaces", capabilityId: "identity.namespace.register", authorization: "scoped_or_browser_session", requiredScopes: ["identity_write"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","integrity_failed","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["identity.namespace.register.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: "RegisterNamespaceRequest", responseSchema: "RegisterNamespaceResponse" },
   listTrackingDispositions: { operationId: "list_tracking_dispositions", method: "GET", path: "/api/v1/profile/record-tracking-dispositions", capabilityId: "profile.record.tracking_disposition.list", authorization: "scoped_or_browser_session", requiredScopes: ["profile_state_read"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","integrity_failed","session_policy_changed","storage_unavailable"], exampleIds: ["profile.record.tracking_disposition.list.forbidden"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ListTrackingDispositionsResponse" },
   setTrackingDisposition: { operationId: "set_tracking_disposition", method: "PUT", path: "/api/v1/profile/record-tracking-dispositions/{record_id}", capabilityId: "profile.record.tracking_disposition.set", authorization: "scoped_or_browser_session", requiredScopes: ["profile_state_write"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","integrity_failed","malformed_json","payload_too_large","record_not_found","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["profile.record.tracking_disposition.set.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: "SetTrackingDispositionRequest", responseSchema: "TrackingDispositionStateDto" },
@@ -6625,6 +6625,7 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "browser_session_revoked",
         "capability_unavailable",
         "forbidden",
+        "idempotency_conflict",
         "identity_conflict",
         "integrity_failed",
         "invalid_identifier",
@@ -10838,6 +10839,24 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "status": 403,
       "title": "Forbidden",
       "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "identity.identifier.attach",
+      "code": "idempotency_conflict",
+      "detail": "operation ID was already used with different request semantics",
+      "next_actions": [
+        {
+          "id": "use_new_operation_id",
+          "label": "Use a new operation ID for a distinct observation"
+        }
+      ],
+      "param": "/operation_id",
+      "param_policy": "fixed",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 409,
+      "title": "Idempotency conflict",
+      "type": "https://fasti.scrobble.dev/v1/problems/idempotency-conflict"
     },
     {
       "capability_id": "identity.identifier.attach",

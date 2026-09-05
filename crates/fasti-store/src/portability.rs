@@ -1777,6 +1777,16 @@ const EXPORT_SECTIONS: &[ExportSection] = &[
         count_sql: "SELECT COUNT(*) FROM anime_grouping_policy_receipts WHERE workspace_id = ?1",
         cursor_columns: &[CursorColumn::Text(2), CursorColumn::Text(5)],
     },
+    ExportSection {
+        entity: WorkspaceExportEntity::SearchActionReceipts,
+        sql: "SELECT workspace_id, operation_id, profile_id, actor_client_id, actor_subject_id, \
+                     record_id, semantic_digest, receipt_json \
+              FROM search_action_receipts \
+              WHERE workspace_id = ?1 AND operation_id > ?2 \
+              ORDER BY operation_id LIMIT ?3",
+        count_sql: "SELECT COUNT(*) FROM search_action_receipts WHERE workspace_id = ?1",
+        cursor_columns: &[CursorColumn::Text(1)],
+    },
 ];
 
 /// The migration version and a digest of the actual SQLite schema in a frozen

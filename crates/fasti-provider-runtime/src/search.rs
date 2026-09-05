@@ -39,6 +39,12 @@ pub enum ProviderCandidateDetailsOutcome {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProviderSearchActionOutcome {
+    Saved(Box<fasti_application::SearchCandidateActionReceipt>),
+    Unavailable { problem: ProblemCode },
+}
+
 /// Governed provider-page orchestration. Hosts acquire their existing provider
 /// gate before calling; this service neither creates locks nor owns user state.
 pub struct ProviderSearchService {
@@ -52,6 +58,112 @@ impl ProviderSearchService {
             runtime,
             persistence,
         }
+    }
+
+    pub async fn save_candidate(
+        &self,
+        command: fasti_application::SearchCandidateActionCommand,
+        lease: ProviderOperationLease,
+    ) -> ApplicationResult<ProviderSearchActionOutcome> {
+        let runtime = Arc::clone(&self.runtime);
+        let policy = command.request.outbound_policy.clone();
+        self.save_candidate_with(command, lease, move |selection, state| async move {
+            runtime.fetch_selection(selection, &policy, &state).await
+        })
+        .await
+    }
+
+    async fn save_candidate_with<F, Fut>(
+        &self,
+        mut command: fasti_application::SearchCandidateActionCommand,
+        lease: ProviderOperationLease,
+        fetch: F,
+    ) -> ApplicationResult<ProviderSearchActionOutcome>
+    where
+        F: FnOnce(ProviderSelectionInput, ProviderCapabilityState) -> Fut,
+        Fut: Future<Output = Result<ProviderCandidate, ProviderRuntimeError>>,
+    {
+        use fasti_application::SearchCandidateActionPreparation as Preparation;
+        let capability = CapabilityKey::AttachIdentifier;
+        let id = command.request.correlation_id;
+        command.request.terms_revision = self
+            .cache_policy_revision(command.request.provider.as_str(), id)
+            .map_err(|_| {
+                Box::new(fasti_application::FastiProblem::from_code(
+                    ProblemCode::ValidationFailed,
+                    capability,
+                    id,
+                ))
+            })?;
+        let persistence = Arc::clone(&self.persistence);
+        let request = command.clone();
+        let prepared = run_blocking(&lease, capability, id, move || {
+            persistence.prepare_search_candidate_action(&request)
+        })
+        .await?;
+        let fetched = match &prepared {
+            Preparation::Replay(receipt) => {
+                return Ok(ProviderSearchActionOutcome::Saved(receipt.clone()))
+            }
+            Preparation::Cached(_) => None,
+            Preparation::Refetch(details) => {
+                let candidate = details.candidate.receipt.candidate();
+                let source = candidate.data();
+                let locale = fasti_application::provider_metadata_response_locale(
+                    &source.provider,
+                    details.candidate.context.locale(),
+                );
+                let selection = ProviderSelectionInput {
+                    provider: source.provider.clone(),
+                    provider_id: source.provider_id.clone(),
+                    kind: source.kind.clone(),
+                    locale: locale.as_ref().map(|value| value.as_str().to_owned()),
+                    region: None,
+                };
+                Some(fetch(selection, details.provider_state.clone()).await.and_then(|fresh| {
+                    if fresh.search_evidence()?.identifier() != candidate.identifier() {
+                        return Err(ProviderRuntimeError::response_invalid("The provider detail identity does not match the selected candidate."));
+                    }
+                    fresh.metadata_fields(locale, None)
+                }))
+            }
+        };
+        let fields = match fetched {
+            None => None,
+            Some(Ok(fields)) => Some(fields),
+            Some(Err(error)) => {
+                let persistence = Arc::clone(&self.persistence);
+                let current = run_blocking(&lease, capability, id, move || {
+                    persistence.prepare_search_candidate_action(&command)
+                })
+                .await?;
+                match (&prepared, current) {
+                    (_, Preparation::Replay(receipt)) => {
+                        return Ok(ProviderSearchActionOutcome::Saved(receipt))
+                    }
+                    (Preparation::Refetch(original), Preparation::Refetch(current))
+                        if original.candidate == current.candidate
+                            && original.provider_authority_fingerprint
+                                == current.provider_authority_fingerprint =>
+                    {
+                        return Ok(ProviderSearchActionOutcome::Unavailable {
+                            problem: error.problem_code(),
+                        });
+                    }
+                    _ => {
+                        return Err(Box::new(fasti_application::FastiProblem::forbidden(
+                            capability, id,
+                        )))
+                    }
+                }
+            }
+        };
+        let persistence = Arc::clone(&self.persistence);
+        let receipt = run_blocking(&lease, capability, id, move || {
+            persistence.commit_search_candidate_action(&command, &prepared, fields.as_deref())
+        })
+        .await?;
+        Ok(ProviderSearchActionOutcome::Saved(Box::new(receipt)))
     }
 
     pub async fn search_page(
@@ -373,6 +485,7 @@ fn effective_query(
 
 #[cfg(test)]
 mod tests {
+    include!("search_action_tests.rs");
     use super::*;
     include!("search_details_tests.rs");
     use fasti_application::*;
@@ -502,6 +615,20 @@ mod tests {
     }
 
     impl SearchPersistencePort for Persistence {
+        fn prepare_search_candidate_action(
+            &self,
+            _: &fasti_application::SearchCandidateActionCommand,
+        ) -> ApplicationResult<fasti_application::SearchCandidateActionPreparation> {
+            panic!("page orchestration must not prepare actions")
+        }
+        fn commit_search_candidate_action(
+            &self,
+            _: &fasti_application::SearchCandidateActionCommand,
+            _: &fasti_application::SearchCandidateActionPreparation,
+            _: Option<&[fasti_application::ProviderMetadataField]>,
+        ) -> ApplicationResult<fasti_application::SearchCandidateActionReceipt> {
+            panic!("page orchestration must not commit actions")
+        }
         fn search_local_records(
             &self,
             _: &LocalSearchRequest,

@@ -425,20 +425,12 @@ fn cache_entries(
 pub(crate) fn provider_response_locale(
     provider: &str,
     requested: Option<&fasti_domain::MetadataLocale>,
-    capability: CapabilityKey,
-    correlation_id: fasti_domain::RequestCorrelationId,
+    _capability: CapabilityKey,
+    _correlation_id: fasti_domain::RequestCorrelationId,
 ) -> fasti_application::ApplicationResult<Option<fasti_domain::MetadataLocale>> {
-    match provider {
-        crate::TMDB_PROVIDER => requested
-            .cloned()
-            .map_or_else(
-                || fasti_domain::MetadataLocale::try_new("en-US").map(Some),
-                |locale| Ok(Some(locale)),
-            )
-            .map_err(|_| problem(ProblemCode::IntegrityFailed, capability, correlation_id)),
-        crate::GOOGLE_BOOKS_PROVIDER => Ok(None),
-        _ => Ok(None),
-    }
+    Ok(fasti_application::provider_metadata_response_locale(
+        provider, requested,
+    ))
 }
 
 fn provider_response_region(

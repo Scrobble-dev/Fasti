@@ -53,7 +53,7 @@ fn prepare(
     )
 }
 
-fn provider_snapshot(
+pub(crate) fn provider_snapshot(
     transaction: &Transaction<'_>,
     workspace_id: fasti_domain::WorkspaceId,
     provider: &str,
@@ -189,6 +189,21 @@ fn prepare_partition(
 }
 
 impl SearchPersistencePort for SqliteKernel {
+    fn prepare_search_candidate_action(
+        &self,
+        command: &fasti_application::SearchCandidateActionCommand,
+    ) -> ApplicationResult<fasti_application::SearchCandidateActionPreparation> {
+        crate::search_actions::prepare(self, command)
+    }
+
+    fn commit_search_candidate_action(
+        &self,
+        command: &fasti_application::SearchCandidateActionCommand,
+        prepared: &fasti_application::SearchCandidateActionPreparation,
+        refetched_fields: Option<&[fasti_application::ProviderMetadataField]>,
+    ) -> ApplicationResult<fasti_application::SearchCandidateActionReceipt> {
+        crate::search_actions::commit(self, command, prepared, refetched_fields)
+    }
     fn search_local_records(
         &self,
         request: &fasti_application::LocalSearchRequest,
@@ -451,7 +466,7 @@ impl SearchPersistencePort for SqliteKernel {
     }
 }
 
-fn read_search_candidate(
+pub(crate) fn read_search_candidate(
     transaction: &Transaction<'_>,
     request: &ReadSearchCandidateRequest,
     access: AuthorizedApplicationAccess,
@@ -632,6 +647,7 @@ fn read_candidates(
 pub(crate) mod tests {
     include!("search_details_tests.rs");
     include!("search_metadata_tests.rs");
+    include!("search_action_tests.rs");
     use super::*;
     use crate::test_support::TestNode;
     use fasti_application::{

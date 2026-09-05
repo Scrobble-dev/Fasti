@@ -221,7 +221,53 @@ fn migrate_v16(connection: &Connection) -> Result<()> {
         BEGIN SELECT RAISE(ABORT, 'search pages are immutable'); END;
         CREATE TRIGGER search_candidates_immutable_update BEFORE UPDATE ON search_candidate_receipts
         BEGIN SELECT RAISE(ABORT, 'search candidate receipts are immutable'); END;
+        CREATE TABLE search_action_receipts (
+            workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id),
+            operation_id TEXT NOT NULL,
+            profile_id TEXT NOT NULL REFERENCES profiles(profile_id),
+            actor_client_id TEXT NOT NULL REFERENCES clients(client_id),
+            actor_subject_id TEXT CHECK (actor_subject_id IS NULL OR (
+                length(actor_subject_id) = 36 AND substr(actor_subject_id, 1, 4) = 'sub_'
+                AND substr(actor_subject_id, 5) NOT GLOB '*[^0-9a-f]*'
+                AND substr(actor_subject_id, 17, 1) = '7' AND substr(actor_subject_id, 21, 1) GLOB '[89ab]'
+            )),
+            record_id TEXT NOT NULL REFERENCES records(record_id),
+            semantic_digest TEXT NOT NULL CHECK (
+                length(semantic_digest) = 71 AND substr(semantic_digest, 1, 7) = 'sha256:'
+                AND substr(semantic_digest, 8) NOT GLOB '*[^0-9a-f]*'
+            ),
+            receipt_json TEXT NOT NULL CHECK (
+                length(CAST(receipt_json AS BLOB)) <= 16384
+                AND json_valid(receipt_json) AND json_type(receipt_json) = 'object'
+            ),
+            PRIMARY KEY (workspace_id, operation_id)
+        ) STRICT, WITHOUT ROWID;
+        CREATE TRIGGER search_actions_scope_insert BEFORE INSERT ON search_action_receipts
+        WHEN NOT EXISTS (SELECT 1 FROM profiles WHERE profile_id = NEW.profile_id AND workspace_id = NEW.workspace_id)
+          OR NOT EXISTS (SELECT 1 FROM clients WHERE client_id = NEW.actor_client_id AND workspace_id = NEW.workspace_id)
+          OR NOT EXISTS (SELECT 1 FROM records WHERE record_id = NEW.record_id AND workspace_id = NEW.workspace_id)
+          OR json_extract(NEW.receipt_json, '$.workspace_id') IS NOT NEW.workspace_id
+          OR json_extract(NEW.receipt_json, '$.operation_id') IS NOT NEW.operation_id
+          OR json_extract(NEW.receipt_json, '$.profile_id') IS NOT NEW.profile_id
+          OR json_extract(NEW.receipt_json, '$.actor_client_id') IS NOT NEW.actor_client_id
+          OR json_extract(NEW.receipt_json, '$.actor_subject_id') IS NOT NEW.actor_subject_id
+          OR json_extract(NEW.receipt_json, '$.record_id') IS NOT NEW.record_id
+        BEGIN SELECT RAISE(ABORT, 'invalid search action scope'); END;
+        CREATE TRIGGER search_actions_immutable_update BEFORE UPDATE ON search_action_receipts
+        BEGIN SELECT RAISE(ABORT, 'search action receipts are immutable'); END;
+        CREATE TRIGGER search_actions_immutable_delete BEFORE DELETE ON search_action_receipts
+        BEGIN SELECT RAISE(ABORT, 'search action receipts are immutable'); END;
     "#)?;
+    let mut revision_sql = String::new();
+    append_revision_triggers(
+        &mut revision_sql,
+        &RevisionSource {
+            table: "search_action_receipts",
+            new_workspace: "NEW.workspace_id",
+            old_workspace: "OLD.workspace_id",
+        },
+    );
+    transaction.execute_batch(&revision_sql)?;
     crate::local_search::rebuild(&transaction)?;
     transaction.pragma_update(None, "user_version", 16)?;
     transaction.commit()
@@ -4125,13 +4171,14 @@ mod tests {
         // +3 for provider capability state (migrate_v11), +27 for the nine
         // authoritative metadata tables (migrate_v12), and +3 for immutable
         // metadata refresh receipts (migrate_v13), plus +15 for the five M3
-        // identity and anime-policy tables (migrate_v15). Disposable
+        // identity and anime-policy tables (migrate_v15), +3 for durable
+        // Search action receipts (migrate_v16). Disposable
         // projection and cache tables do not advance the workspace revision,
         // none of which are in the
         // original REVISION_SOURCES list built for the v3 schema snapshot.
         assert_eq!(
             trigger_count,
-            (REVISION_SOURCES.len() * 3 + 3 + 6 + 3 + 3 + 3 + 27 + 3 + 15) as i64
+            (REVISION_SOURCES.len() * 3 + 3 + 6 + 3 + 3 + 3 + 27 + 3 + 15 + 3) as i64
         );
     }
 
@@ -5654,6 +5701,7 @@ mod tests {
                 "local_search_grams".to_owned(),
                 "search_pages".to_owned(),
                 "search_candidate_receipts".to_owned(),
+                "search_action_receipts".to_owned(),
                 "trailbase_installation".to_owned(),
                 "trailbase_auth_anchors".to_owned(),
                 "workspace_memberships".to_owned(),
