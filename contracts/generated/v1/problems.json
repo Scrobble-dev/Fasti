@@ -3461,11 +3461,11 @@
     {
       "capability_id": "metadata.claim.refresh",
       "code": "metadata_claim_stale",
-      "detail": "the provider refresh did not produce a fresh claim; the last-known-good claim remains active",
+      "detail": "the provider metadata is unavailable or cannot be reused; existing claims are retained",
       "next_actions": [
         {
           "id": "retry_metadata_refresh",
-          "label": "Retry the metadata refresh or use the labelled last-known-good value"
+          "label": "Start a new metadata refresh or use an available local value"
         }
       ],
       "param": null,

@@ -101,6 +101,7 @@ fn mixed_claim_range(
             &claim,
             CAP,
             RequestCorrelationId::new_v7(),
+            None,
         )
         .unwrap();
         if ordinal % 7 == 0 {
@@ -157,6 +158,7 @@ fn assert_matches_single_record_owner(node: &TestNode, selected: &[RecordId]) {
                 field,
                 CAP,
                 id,
+                crate::kernel::now(),
             )
             .unwrap();
             let override_ = load_profile_field_override(
@@ -233,7 +235,8 @@ fn metadata_batch_matches_single_record_resolution_at_claim_cap_and_sparse_selec
                     records[600],
                     field,
                     CAP,
-                    RequestCorrelationId::new_v7()
+                    RequestCorrelationId::new_v7(),
+                    crate::kernel::now()
                 )
                 .unwrap()
                 .len(),
@@ -295,7 +298,8 @@ fn metadata_batch_rejects_malformed_selected_claim_even_when_override_wins() {
         records[0],
         &field,
         CAP,
-        id
+        id,
+        crate::kernel::now()
     )
     .is_err());
     assert!(
@@ -351,6 +355,7 @@ fn metadata_batch_matches_source_tiebreak_at_the_256_claim_boundary() {
                 &claim,
                 CAP,
                 RequestCorrelationId::new_v7(),
+                None,
             )
             .unwrap();
         }
@@ -361,6 +366,7 @@ fn metadata_batch_matches_source_tiebreak_at_the_256_claim_boundary() {
             &field,
             CAP,
             RequestCorrelationId::new_v7(),
+            crate::kernel::now(),
         )
         .unwrap();
         assert_eq!(selected.len(), 256);
@@ -431,6 +437,7 @@ fn metadata_batch_missing_newest_provenance_does_not_consume_the_claim_cap() {
             &field,
             CAP,
             RequestCorrelationId::new_v7(),
+            crate::kernel::now(),
         )
         .unwrap();
         assert_eq!(expected.len(), 256);
@@ -503,6 +510,7 @@ fn metadata_batch_duplicate_requested_fields_preserve_in_set_semantics() {
             field,
             CAP,
             id,
+            crate::kernel::now(),
         )
         .unwrap();
         assert_eq!(
@@ -684,6 +692,250 @@ fn bounded_query_metrics(node: &TestNode, selected: &[RecordId]) -> (usize, i32,
     )
 }
 
+fn known_policy_history(
+    node: &TestNode,
+    record: RecordId,
+    field: &FieldKey,
+    range: std::ops::Range<i64>,
+) {
+    let mut connection = node.kernel.inner.connection.lock().unwrap();
+    let transaction = connection.transaction().unwrap();
+    for ordinal in range {
+        let fetched = received_at(ordinal);
+        let provenance = FieldClaimProvenance::try_new(
+            MetadataProviderId::try_new("tmdb").unwrap(),
+            NamespaceKey::try_new("tmdb.movie").unwrap(),
+            "same-response-variant",
+            Some(MetadataLocale::try_new("en-US").unwrap()),
+            None,
+            None,
+            Sha256Digest::from_bytes(&[7; 32]),
+        )
+        .unwrap();
+        let policy = (ordinal <= 0).then(|| {
+            ProviderResponseCachePolicy::new(
+                if ordinal == 0 {
+                    fasti_application::ProviderResponseReuse::ValidateEveryReuse
+                } else {
+                    fasti_application::ProviderResponseReuse::Reusable
+                },
+                fetched.value(),
+                std::time::Duration::ZERO,
+                Some(std::time::Duration::from_secs(120)),
+                None,
+            )
+            .to_canonical_json()
+        });
+        let restricted = ordinal == 0;
+        let claim = FieldClaim::try_new_provider(
+            MetadataClaimId::new_v7(),
+            record,
+            field.clone(),
+            "x".repeat(4096),
+            provenance,
+            fetched,
+            (!restricted).then(|| fetched.value() + chrono::Duration::seconds(120)),
+            if restricted {
+                FieldClaimStatus::Stale
+            } else {
+                FieldClaimStatus::Fresh
+            },
+        )
+        .unwrap();
+        write_field_claim(
+            &transaction,
+            node.access.workspace_id(),
+            record,
+            field,
+            &claim,
+            CAP,
+            RequestCorrelationId::new_v7(),
+            policy.as_deref(),
+        )
+        .unwrap();
+    }
+    transaction.commit().unwrap();
+}
+
+fn known_policy_query_metrics(
+    node: &TestNode,
+    record: RecordId,
+    field: &FieldKey,
+) -> (usize, i32, i32) {
+    let connection = node.kernel.inner.connection.lock().unwrap();
+    let record_json = serde_json::to_string(&[record]).unwrap();
+    let field_json = serde_json::to_string(&[field.as_str()]).unwrap();
+    let mut plan = connection
+        .prepare(&format!("EXPLAIN QUERY PLAN {SELECT_KNOWN_FIELD_POLICIES}"))
+        .unwrap();
+    let plan_rows = plan
+        .query_map(
+            params![
+                node.access.workspace_id().to_string(),
+                record_json,
+                field_json
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(3)?,
+                ))
+            },
+        )
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    let key_node = plan_rows
+        .iter()
+        .find(|(_, _, detail)| detail == "CO-ROUTINE k")
+        .expect("policy key coroutine")
+        .0;
+    let inside_keys = |mut ancestor: i64| {
+        while ancestor != 0 && ancestor != key_node {
+            ancestor = plan_rows
+                .iter()
+                .find(|(id, _, _)| *id == ancestor)
+                .expect("plan parent")
+                .1;
+        }
+        ancestor == key_node
+    };
+    for (_, parent, detail) in &plan_rows {
+        if detail.contains("TEMP B-TREE") {
+            assert!(
+                inside_keys(*parent),
+                "no policy JSON/payload sort after k: {plan_rows:?}"
+            );
+        }
+    }
+    assert!(
+        plan_rows
+            .iter()
+            .any(|(_, parent, detail)| inside_keys(*parent)
+                && detail.contains("metadata_claim_provenance_recent_idx")
+                && ["workspace_id=?", "record_id=?", "field_key=?"]
+                    .iter()
+                    .all(|part| detail.contains(part))),
+        "history scan must retain exact indexed scope: {plan_rows:?}"
+    );
+    for alias in ["p", "registered", "c"] {
+        assert!(
+            plan_rows
+                .iter()
+                .any(|(_, parent, detail)| !inside_keys(*parent)
+                    && detail.contains(&format!("SEARCH {alias} USING PRIMARY KEY"))),
+            "selected policy payload lookup must be outside k: alias={alias}, {plan_rows:?}"
+        );
+    }
+    // Inspect the actual SQL's key projections as well as the plan: EQP alone
+    // does not enumerate the values carried through temporary sort records.
+    let ranked = SELECT_KNOWN_FIELD_POLICIES
+        .split("FROM json_each")
+        .next()
+        .unwrap();
+    assert!(!ranked.contains("response_policy_json"));
+    assert!(!ranked.contains("c.value"));
+    assert!(SELECT_KNOWN_FIELD_POLICIES
+        .contains("SELECT claim_id, record_id, field_key FROM ranked_keys"));
+    let mut statement = connection.prepare(SELECT_KNOWN_FIELD_POLICIES).unwrap();
+    let values = known_metadata_policies(
+        &mut statement,
+        params![
+            node.access.workspace_id().to_string(),
+            record_json,
+            field_json
+        ],
+        CAP,
+        RequestCorrelationId::new_v7(),
+    )
+    .unwrap()
+    .collect::<ApplicationResult<Vec<_>>>()
+    .unwrap();
+    assert_eq!(
+        values.len(),
+        1,
+        "latest known observation per complete variant"
+    );
+    assert_eq!(
+        values[0].fetched_at,
+        received_at(0).value(),
+        "NULL rows cannot bury the restriction"
+    );
+    assert_eq!(
+        values[0].policy,
+        ProviderResponseCachePolicy::new(
+            fasti_application::ProviderResponseReuse::ValidateEveryReuse,
+            received_at(0).value(),
+            std::time::Duration::ZERO,
+            Some(std::time::Duration::from_secs(120)),
+            None
+        )
+    );
+    (
+        values.len(),
+        statement.get_status(rusqlite::StatementStatus::FullscanStep),
+        statement.get_status(rusqlite::StatementStatus::VmStep),
+    )
+}
+
+#[test]
+fn metadata_known_policy_companion_indexes_full_history_and_sorts_only_keys() {
+    let node = TestNode::new();
+    let record = records(&node, 1)[0];
+    let field = fields()[0].clone();
+    known_policy_history(&node, record, &field, -1..257);
+    let shallow = known_policy_query_metrics(&node, record, &field);
+    known_policy_history(&node, record, &field, 257..4097);
+    let deep = known_policy_query_metrics(&node, record, &field);
+    assert_eq!((shallow.0, deep.0), (1, 1));
+    assert!(
+        deep.2 > shallow.2,
+        "full-history policy discovery must actually inspect deeper indexed history"
+    );
+    eprintln!("metadata_known_policy sqlite={} null_history=256/4096 rows={}/{} fullscan_steps={}/{} vm_steps={}/{}",
+        rusqlite::version(), shallow.0, deep.0, shallow.1, deep.1, shallow.2, deep.2);
+}
+
+#[test]
+fn metadata_known_policy_stream_rejects_descending_scope_order() {
+    let node = TestNode::new();
+    let record = records(&node, 1)[0];
+    let fields = fields();
+    for field in &fields[..2] {
+        known_policy_history(&node, record, field, 0..1);
+    }
+    let connection = node.kernel.inner.connection.lock().unwrap();
+    let mut statement = connection
+        .prepare(&format!(
+            "SELECT * FROM ({SELECT_KNOWN_FIELD_POLICIES}) ORDER BY record_id DESC, field_key DESC"
+        ))
+        .unwrap();
+    let mut stream = known_metadata_policies(
+        &mut statement,
+        params![
+            node.access.workspace_id().to_string(),
+            serde_json::to_string(&[record]).unwrap(),
+            serde_json::to_string(&fields[..2].iter().map(FieldKey::as_str).collect::<Vec<_>>())
+                .unwrap()
+        ],
+        CAP,
+        RequestCorrelationId::new_v7(),
+    )
+    .unwrap();
+    assert!(stream.next().unwrap().is_ok());
+    let problem = stream
+        .next()
+        .unwrap()
+        .err()
+        .expect("descending scope must fail closed");
+    assert_eq!(
+        problem.code(),
+        fasti_application::ProblemCode::IntegrityFailed
+    );
+    assert!(stream.next().is_none());
+}
+
 #[test]
 fn metadata_batch_narrow_query_limits_history_and_sorts_only_selected_keys() {
     let node = TestNode::new();
@@ -711,20 +963,48 @@ fn metadata_batch_narrow_query_limits_history_and_sorts_only_selected_keys() {
 /// Historical source fixture: insert the same validated table shape as restore,
 /// omitting unrelated substring-posting rebuild work from this metadata benchmark.
 #[cfg(all(target_os = "linux", not(debug_assertions)))]
-fn seed_dense_history(node: &TestNode, selected: &[RecordId]) {
+fn seed_dense_history(node: &TestNode, selected: &[RecordId], mixed_known: bool) {
     let workspace = node.access.workspace_id().to_string();
     let wide_value = "x".repeat(4096);
+    let observed = now() - chrono::Duration::seconds(30);
+    let digest = Sha256Digest::from_bytes(&[7; 32]);
+    let observations = (0..256)
+        .map(|ordinal| {
+            let fetched = if mixed_known {
+                observed + chrono::Duration::microseconds(ordinal)
+            } else {
+                received_at(ordinal).value()
+            };
+            let expires = mixed_known.then(|| timestamp(fetched + chrono::Duration::seconds(120)));
+            let policy = (mixed_known && ordinal < 255).then(|| {
+                ProviderResponseCachePolicy::new(
+                    ProviderResponseReuse::Reusable,
+                    fetched,
+                    std::time::Duration::ZERO,
+                    Some(std::time::Duration::from_secs(120)),
+                    None,
+                )
+                .to_canonical_json()
+            });
+            (
+                timestamp(fetched),
+                expires,
+                policy,
+                // Exercise the maximum source-identifier width in key sorting.
+                format!("{ordinal:0512}"),
+            )
+        })
+        .collect::<Vec<_>>();
     let mut connection = node.kernel.inner.connection.lock().unwrap();
     let transaction = connection.transaction().unwrap();
     {
-        let mut field_insert = transaction.prepare("INSERT INTO metadata_field_claims(workspace_id, record_id, field_key, source, value, locale, fetched_at, expires_at, created_at) VALUES (?1, ?2, ?3, 'tmdb.movie', ?4, NULL, ?5, NULL, ?5)").unwrap();
-        let mut registered_insert = transaction.prepare("INSERT INTO metadata_claims(claim_id, workspace_id, record_id, claim_kind, created_at) VALUES (?1, ?2, ?3, 'field', ?4)").unwrap();
-        let mut provenance_insert = transaction.prepare("INSERT INTO metadata_claim_provenance(claim_id, workspace_id, record_id, field_key, source, fetched_at, provenance_state, initial_status, created_at) VALUES (?1, ?2, ?3, ?4, 'tmdb.movie', ?5, 'legacy_incomplete', 'fresh', ?5)").unwrap();
+        let mut field_insert = transaction.prepare("INSERT INTO metadata_field_claims(workspace_id, record_id, field_key, source, value, locale, fetched_at, expires_at, created_at) VALUES (?1, ?2, ?3, 'tmdb.movie', ?4, NULL, ?5, ?6, ?5)").unwrap();
+        let mut registered_insert = transaction.prepare("INSERT INTO metadata_claims(claim_id, workspace_id, record_id, claim_kind, created_at, response_policy_json) VALUES (?1, ?2, ?3, 'field', ?4, ?5)").unwrap();
+        let mut provenance_insert = transaction.prepare("INSERT INTO metadata_claim_provenance(claim_id, workspace_id, record_id, field_key, source, fetched_at, provenance_state, initial_status, created_at, provider_id, source_record_id, evidence_digest) VALUES (?1, ?2, ?3, ?4, 'tmdb.movie', ?5, ?6, 'fresh', ?5, ?7, ?8, ?9)").unwrap();
         for record in selected {
             let record = record.to_string();
             for field in fields() {
-                for ordinal in 0..256 {
-                    let fetched = timestamp(received_at(ordinal).value());
+                for (fetched, expires, policy, variant) in &observations {
                     let claim = MetadataClaimId::new_v7().to_string();
                     field_insert
                         .execute(params![
@@ -732,14 +1012,29 @@ fn seed_dense_history(node: &TestNode, selected: &[RecordId]) {
                             record,
                             field.as_str(),
                             wide_value,
-                            fetched
+                            fetched,
+                            expires
                         ])
                         .unwrap();
                     registered_insert
-                        .execute(params![claim, workspace, record, fetched])
+                        .execute(params![claim, workspace, record, fetched, policy])
                         .unwrap();
                     provenance_insert
-                        .execute(params![claim, workspace, record, field.as_str(), fetched])
+                        .execute(params![
+                            claim,
+                            workspace,
+                            record,
+                            field.as_str(),
+                            fetched,
+                            if mixed_known {
+                                "complete"
+                            } else {
+                                "legacy_incomplete"
+                            },
+                            mixed_known.then_some("tmdb"),
+                            mixed_known.then_some(variant.as_str()),
+                            mixed_known.then_some(digest.as_str())
+                        ])
                         .unwrap();
                 }
             }
@@ -779,11 +1074,35 @@ fn metadata_batch_dense_release_memory_and_latency() {
             Ok(value) if value == "500" => 500,
             other => panic!("FASTI_METADATA_BATCH_RECORDS accepts only 100 or 500: {other:?}"),
         };
+        let mixed_known = match std::env::var("FASTI_METADATA_BATCH_MIXED_KNOWN") {
+            Err(std::env::VarError::NotPresent) => false,
+            Ok(value) if value == "0" => false,
+            Ok(value) if value == "1" => true,
+            other => panic!("FASTI_METADATA_BATCH_MIXED_KNOWN accepts only 0 or 1: {other:?}"),
+        };
         let node = TestNode::new();
         let selected = records(&node, count);
-        seed_dense_history(&node, &selected);
+        seed_dense_history(&node, &selected, mixed_known);
         let (rss_before, hwm_before) = resident_memory_bytes();
         let connection = node.kernel.inner.connection.lock().unwrap();
+        if mixed_known {
+            // Count admission without adding a separate GROUP BY/DISTINCT sorter
+            // to the process high-water mark measured for the real reader.
+            let counts = connection
+                .query_row("SELECT SUM(response_policy_json IS NOT NULL),SUM(response_policy_json IS NULL) FROM metadata_claims", [], |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, i64>(1)?,
+                    ))
+                })
+                .unwrap();
+            let groups = i64::try_from(count * 5).unwrap();
+            assert_eq!(
+                counts,
+                (groups * 255, groups),
+                "each generated field retains known policies plus its newest NULL row"
+            );
+        }
         let fields = fields();
         let mut elapsed = Vec::new();
         for _ in 0..5 {
@@ -816,7 +1135,7 @@ fn metadata_batch_dense_release_memory_and_latency() {
         }
         let (rss_after, hwm_after) = resident_memory_bytes();
         elapsed.sort();
-        eprintln!("metadata_batch records={count} fields=5 claims_per_field=256 value_bytes=4096 samples=5 median={:?} max={:?} rss_before={rss_before} rss_after={rss_after} hwm_before={hwm_before} hwm_after={hwm_after}", elapsed[2], elapsed[4]);
+        eprintln!("metadata_batch records={count} mixed_known={mixed_known} fields=5 claims_per_field=256 value_bytes=4096 samples=5 median={:?} max={:?} rss_before={rss_before} rss_after={rss_after} hwm_before={hwm_before} hwm_after={hwm_after}", elapsed[2], elapsed[4]);
         assert!(
             hwm_after <= 192 * 1024 * 1024,
             "dense metadata process exceeded192MiB absolute ceiling: {hwm_after}"

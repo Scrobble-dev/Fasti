@@ -2123,3 +2123,503 @@ Access reported independent E0/E1 qualification at its merged dev
 not a new M4 rebase or handoff. Its isolated plans/harnesses leave all M4 shared
 surfaces and v17/v7 ownership intact. Access v18 still requires M4's exact merged
 commit/tree and explicit release. No Codex Security, push, PR or merge occurred.
+
+### 2026-09-05 — Response-policy writer integration and native verification
+
+Continuation made production and test progress from committed checkpoint
+`4d3ba2bcd48af546d247c3474c09c2f04a30ab7a`, tree
+`e8e9c19b2cc0ba3ecffce4d6191ea9a8508913cd`. The following work remains dirty;
+the earlier 27/11 exact-head receipts do not cover it.
+
+Create, Apply, refresh and Search Refetch now carry the original required
+response policy through existing application/runtime/store owners. Cached Save
+uses its receipt's policy. Whole-response checks precede payload statements:
+NoStore, mixed provenance or coordinates, duplicate keys, observation mismatch
+and policy-exceeding claim/cache deadlines fail without payload DML. Field and
+rating registry rows store canonical policy; identical retries compare it,
+including historical NULL collisions. Published schema/archive versions do not
+change. Original observation and zero-freshness Stale/null survive conversion,
+Search action receipt decoding and SDK validation. Microsecond storage precision
+is applied to a sub-microsecond zero-window save without manufacturing freshness.
+
+Native tests exposed a real refresh-replay defect: runtime supplies unbound
+provider fields, but saved response receipts require Record and field bindings.
+The shared refresh writer now binds the returned claims and decodes its encoded
+historical response before committing. First response and replay use that same
+snapshot; an unreadable response cannot become a durable receipt. The existing
+complete provider fixture also correctly participates in provider-unavailability
+transitions, alongside all 513 title claims.
+
+Dirty-tree checks passed with physical SSD TMPDIR and system pkg-config:
+
+- `cargo check --workspace --all-targets`.
+- `cargo clippy --workspace --all-targets -- -D warnings`.
+- `cargo test -p fasti-store --lib --quiet`: 438 passed, 6 explicit ignores.
+- `cargo test -p fasti-provider-runtime --lib`: 96 passed.
+- SDK build and candidate-action JavaScript leaf: 35 passed.
+- Desktop `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets`.
+- Core and changed-leaf formatting plus whitespace checks. Whole Desktop
+  formatting also reports pre-existing drift in unchanged `lib.rs` and
+  `metadata.rs`; those files were not reformatted in this slice.
+  Desktop lockfile gained only the already
+  used provider-runtime `httpdate` dependency edge, not a package upgrade.
+
+These are focused integration checks, not canonical exact-head, browser,
+accessibility, packaged-host or merge evidence. Do not commit/activate this as a
+completed policy slice before single/batch projections, rating reads, raw cached
+refresh views and payload-bearing refresh replay share policy-aware disclosure.
+All receipt claim references, including selected projection provenance, require
+that check inside the current authorization transaction. Preserve immutable
+receipts; denied historical payload is MetadataClaimStale, not a missing receipt
+that re-executes an operation. Search action audit-only replay remains distinct.
+Legacy unknown overlap disposition above remains unresolved. Desktop's early
+NoStore artwork guard is not full image-response cache governance or proof that
+all artwork side effects follow current mutation admission. These remain active
+integration work, not scope removal or a delivery claim.
+
+Commander retained all shared production writes. Parallel agents edited only
+allocated test leaves; those leaves are released. Native review identified the
+precision edge and complete-provenance fixtures. One agent reached a usage limit;
+the commander completed validation locally without an API key. No Codex Security
+tools, skills or plugin ran. No packaged authentication investigation, push, PR,
+merge, v18 allocation or shared-file release occurred. M4 retains v17/v7 ownership.
+
+### 2026-09-05 — Reader evidence integrity and legacy-overlap disposition
+
+Further dirty-tree progress keeps the preceding writer integration intact.
+Single-field, bounded batch and rating loaders now join the existing immutable
+claim registry and decode canonical response-policy evidence before returning
+payloads or resolving overrides. Known policy requires complete provenance and
+the same original observation at SQLite microsecond precision. A nullable join
+sentinel distinguishes a missing/wrong-scope/wrong-kind registry row from valid
+historical NULL policy; the former is IntegrityFailed, not StorageUnavailable.
+No registry row or policy is synthesized on read.
+
+Payload-bearing refresh receipts now validate every field, rating and selected
+projection claim reference against the scoped registry in one bounded ID query.
+Cache references must be represented by their claim evidence. Validation stays
+inside the current authorization transaction, including both concurrent replay
+branches and cache-hit receipt insertion. Duplicate references preserve original
+microsecond timestamp semantics. This checks evidence integrity, not yet reuse
+eligibility: valid no-cache or expired policy still needs the filtering step
+below. Search audit-only action replay is unchanged.
+
+Native review found the nullable-sentinel error classification; the commander
+fixed it and the agent added an isolated test leaf regression. Tests cover
+missing/wrong-workspace/wrong-Record/wrong-kind registry evidence through single,
+batch, rating and authorized projection reads; user overrides survive and reads
+write no payload. Additional tests cover canonical-policy corruption hidden by
+an override and rating/projection-only refresh receipt corruption, including
+rejection of a new cache-hit receipt without altering old receipt bytes.
+
+Final dirty-tree validation for this evidence-integrity step: full store library
+441 passed, 6 explicit ignores; workspace all-target strict clippy passed; core
+and allocated-leaf formatting and whitespace checks passed. These do not replace
+the exact clean-head canonical gates after complete policy integration.
+
+The 10,000-Record release benchmark now runs both the legacy-only dataset and a
+dataset with complete provider claims and canonical stored policy. Each measures
+100 requests after warm-up. Dirty-tree p50/p95/max were 1.778409/1.836839/1.966089 ms
+for legacy and 2.460878/2.609098/2.643987 ms with observed policy. Both satisfy the
+existing 250 ms p95 gate. These synthetic local results are not live-provider,
+merged-head or future complete-filtering evidence.
+
+Under the user's existing authorization to select recommended implementation
+decisions, adopt the conservative historical overlap rule identified by native
+review: preserve historical local display and overrides absent contradictory
+known restrictions. Complete provenance uses exact provider/namespace/source-ID/
+locale/region variants. Incomplete legacy provenance cannot prove independence:
+within the same Record/field/namespace, missing locale/region/provider/source-ID
+coordinates potentially overlap a known restriction. A newer NULL-policy row
+does not cancel known restrictive evidence. Preserve all rows and independent
+complete variants; do not call unknown policy upstream permission. This resolves
+the former wildcard-versus-exact-None ambiguity conservatively, with the explicit
+tradeoff that ambiguous historical regional data may need refresh or a user
+override before display. The user-facing continuation stated this disposition.
+
+Next integration must retain typed policy alongside each decoded claim, suppress
+same-variant history before eligibility, and use one captured read time. Original
+claim expiry bounds freshness: Saved Search's 120 seconds must not become 24 hours;
+zero-freshness Stale/null gives zero fresh duration. The plan's metadata stale
+ceiling remains separate from Search-page retention. Existing lifecycle,
+profile LastKnownGood and override selection remain the resolution owners; a
+local LastKnownGood display is not proof of a provider outage. General projection
+and stale-on-error cache contexts must not silently be conflated. Raw cached
+refresh views and receipt replay require the same policy-aware disclosure rule,
+including denial through a newer overlapping restriction. Eligibility remains
+unimplemented here, not a closed gate or scope removal.
+
+No Codex Security, external AI key, packaged authentication investigation,
+production migration, archive change, commit, push, PR, merge or shared-file
+release occurred. Commander remains the sole shared production writer; agents
+provided bounded native review/preparation and one allocated test-leaf change.
+
+### 2026-09-05 — Policy-aware disclosure and full-history restriction barrier
+
+Further uncommitted integration supersedes the preceding “eligibility remains
+unimplemented” checkpoint. Single-field, bounded batch and rating readers retain
+typed policy through selection. Reuse uses the original observation and expiry,
+including zero-freshness, exclusive expiry, backward-clock rejection and the
+metadata-specific seven-day ceiling. Known restrictions suppress overlapping
+historical values without deleting claims or user overrides. All-NULL histories
+preserve the existing resolver's Fresh-over-Stale behavior.
+
+Native investigation reproduced a restriction buried below 256 newer NULL-policy
+observations. Payload limits remain 256. A companion query now ranks narrow
+policy keys across full scoped history and joins policy evidence after sorting.
+Batch readers stream this companion once, retaining one field history rather
+than a page-wide map of variants. All-known groups retain their existing fast
+path. Locale/region ranking follows domain case normalization. The pinned SQLite
+coroutine plan is checked; the entire checked batch stream must pass monotonic
+scope validation before returning projections. History scans are not constant
+work and have no silent truncation-as-permission fallback.
+
+Refresh receipt disclosure now distinguishes the first live response from later
+reuse. A real no-cache response can be returned once with its Stale/null state;
+later receipt reads and same-operation commits return MetadataClaimStale when
+their evidence is ineligible. They do not erase the receipt or rerun its operation.
+A still-fresh cache entry whose references are no longer reusable is a cache
+miss. Existing authorization and evidence-integrity checks precede disclosure.
+The shared problem text no longer promises a visible LastKnownGood value when
+none is eligible. Its code/status/safe-state/retry contract is unchanged; the
+canonical example and generated API/SDK projections were updated together.
+
+Native agents owned only allocated test leaves and read-only review. Regressions
+cover 256/4,096 newer NULL histories, independent source/locale variants,
+incomplete legacy overlap, normalization, single/batch/Search/rating parity,
+zero-write replay/cache denial and real stop/reopen. The existing v7 archive
+round-trip owner now also proves the buried restriction survives actual staged
+restore, all 35 stream byte/descriptor checks and the user override. No production
+schema or archive code changed. The final native filtering review found no
+remaining concrete disclosure or cross-scope defect in this slice; this is not
+the programme-wide or exact committed-diff review gate.
+
+Final focused dirty-tree checks: full store 458 passed/6 explicit ignores,
+including the added replay and actual-restore regressions. Application
+167 and provider runtime 96 passed; strict workspace all-target clippy passed;
+SDK build and 35 candidate-action tests passed; generation emitted 22 artifacts.
+Desktop all-target `cargo check` also passed with system pkg-config; its lockfile
+still differs only by the existing provider-runtime httpdate dependency edge.
+This is compile evidence, not packaged-host or authentication runtime evidence.
+Core formatting and whitespace checks passed. Exact committed-head canonical
+gates remain open; these focused checks do not substitute for them. The
+500-Record mixed-history measurement passed as below.
+
+Synthetic release Search (10,000 Records, 100 requests after warm-up): legacy
+p50/p95/max 2.350035/2.437285/3.140173 ms; observed policy
+3.973752/4.032642/4.150821 ms. Both meet the existing 250 ms p95 gate. SQLite
+3.53.2 companion evidence retained one latest policy at both 256/4,096 NULL
+depths; fullscan steps 0/0 and VM steps 2,384/33,104 explicitly show deeper work.
+Dense 100-Record, five-field, 256-claim, 4,096-byte-value measurements passed the
+192 MiB ceiling: legacy HWM 22,745,088 bytes, median/max 3.109834024/3.160449357 s;
+mixed known policies with maximum-width source identifiers HWM 38,866,944 bytes,
+median/max 8.828862065/9.351858484 s. Dense-history latency is not a replacement
+for the critical Search p95 gate. At 500 Records with mixed known policies and
+maximum-width source identifiers, HWM was 56,770,560 bytes and median/max
+46.836099338/47.084398340 s across five samples. This remains below 192 MiB but
+is deliberately dense stress evidence, not a claim of sub-second dense pages.
+The latency remains visible for continued optimization. These are local
+synthetic dirty-tree results,
+not live-provider, packaged-host, exact merged-head or hardware qualification.
+
+The next proven integration work remains Desktop mutation/artwork ordering and
+the distinct image-response policy: current Create/Apply callers can fetch,
+store and prune artwork before Store authorization/admission; image responses do
+not yet carry their own reuse evidence. Preserve successful Record mutation when
+optional artwork fails and reuse the existing response-policy parser. This is
+active work, not scope removal. Workbench/runtime/live-provider and exact-head
+delivery gates remain open. No Codex Security, AI key, packaged authentication
+investigation, commit, push, PR, merge, v18 allocation or shared-file release.
+M4 retains v17/archive v7; Access's separate qualification lanes remain disjoint.
+
+### 2026-09-05 — Desktop Save ordering and provider-keyed posters
+
+Continuation revalidated the dirty M4 worktree at committed HEAD
+`4d3ba2bcd48af546d247c3474c09c2f04a30ab7a`; no prior committed result was
+replaced. The pending Desktop test process was terminal with two failed
+projection assertions. The fixture had not enabled BasicInfo after setup;
+enabling it through the existing authorized configuration owner fixed the
+fixture without weakening Record, identifier, title or claim-ID assertions.
+
+Both real Desktop Create/Apply callers now pass their completed Store result
+and the unpolled artwork future through `records::finish_provider_save`.
+Authorization/admission failure returns before artwork is polled. Successful
+mutation remains successful if optional artwork fails. Dropping the pending
+artwork future does not undo or repeat the committed mutation. The new test
+leaf uses real Store commands and the shared helper; it does not claim live
+image-transport or packaged-UI evidence. Independent native review found no
+new issue in this ordering change.
+
+The selected poster lookup now uses the claim's actual provider ID rather
+than its external identifier namespace. A regression exercises real stored
+TMDB and Google Books poster claims plus the existing artwork cache. Replacing
+the lookup temporarily with the old namespace lookup reproduced a null asset
+path; restoring the fix passed. The wire `poster.source` remains the namespace,
+so no public DTO meaning or identifier mapping changed.
+
+Dirty-tree checks: all 43 no-default-feature Desktop library tests passed;
+all 51 default-feature Desktop library tests passed; all-target Desktop check
+and strict clippy passed. Clippy first caught an `err().expect()` test idiom;
+the test now uses `expect_err` with the same assertion. Desktop formatting
+also normalized pre-existing formatting in the metadata refresh adapter and
+one provider-lease expression, without semantic changes. These checks are
+not a canonical exact-commit receipt, live-provider result or packaged-host
+qualification. No commit, push, PR, merge or migration handoff occurred.
+
+The image-response policy remains separate active work: image headers are not
+yet observed before storage, and returning a validated local path alone cannot
+govern later asset-protocol reads. Read-only preparation identified the pinned
+Tauri custom `asset` protocol hook as a candidate for enforcing the serving
+boundary while retaining `convertFileSrc` and current CSP; it is not yet
+implemented or verified. Preserve live no-cache image display and authorized
+offline cache reuse, rather than hiding those cases to make tests pass.
+
+Parallel allocation remains compact: commander owns all production integration;
+Mendel prepares the native asset-serving boundary; Anscombe prepares independent
+filesystem/policy publication and negative-test evidence. Both lanes are
+read-only. Access may own its new isolated
+`tests/e2e/access-parallel-regressions.spec.ts` in its separate worktree, with
+no changes to shared helpers or production surfaces. M4 retains v17/archive v7;
+no v18 allocation or shared-file release. Codex Security remains excluded.
+
+Serving preparation subsequently confirmed pinned Tauri 2.11.5 registers custom
+protocols before its fallback `asset` implementation. The applicable hook is
+`register_asynchronous_uri_scheme_protocol("asset", ...)`, not
+`on_web_resource_request` (which covers only `tauri`). The implementation must
+validate an explicitly issued locator and current metadata authority, then
+return bounded bytes with `Cache-Control: no-store` to prevent WebView reuse
+from bypassing later image-policy checks. For upstream image no-cache/no-store,
+fetch at delivery and return the live body, rather than replaying an earlier
+Save-time fetch. Eligible persisted images must remain available offline with
+zero network/vault access. The current existing-file-only path issuance needs
+to mature accordingly. Finite image deadlines, locator authority/lifetime,
+wrong-WebView/path traversal, repeated requests and packaged reload evidence
+remain implementation requirements, not completed checks.
+
+Independent persistence inspection also found that the current app-cache root
+is shared between Fasti data roots while its mutex is instance-local. Existing
+file staging syncs the image but not the parent directory; local-path checking
+and path opening are separate operations. The upcoming image policy integration
+must resolve node scoping, publication ordering, restrictive replacement,
+restart integrity and descriptor-safe file access together. Do not claim that
+an unsigned sidecar or path-issuance check alone closes these boundaries.
+
+### 2026-09-05 — Physical-node artwork isolation and dirty-tree PR checks
+
+`ArtworkCache::new` now requires the opened kernel's `DataRootIdentity` and
+uses the existing stable node-scope hash beneath the platform artwork-cache
+directory. Every production and test caller supplies its associated kernel
+identity. No new hash implementation, dependency, schema, API or authentication
+owner was introduced. The regression uses real kernels: rename and reopen keep
+the original image; replacing the configured data path selects a separate cache.
+Temporarily restoring the old unscoped constructor reproduced the same-root
+failure. The fixed test also seeds a legacy parent-level image, proves it is
+not adopted, and proves new writes/pruning leave it unchanged. Legacy cache
+bytes were not deleted or attributed to an arbitrary node.
+
+The full Desktop library suite passed all 52 tests after the legacy-isolation
+assertions. Desktop strict all-target clippy and formatting passed before that
+test-only extension and were rerun afterward. Native read-only review found no
+new constructor/caller regression. This fixes node separation, not the remaining
+image-response admission or per-request delivery policy.
+
+`cargo xtask test pr` was run with the physical TMPDIR and system pkg-config.
+All executed checks before receipt publication passed, including deterministic
+generation, authored/generated contracts, JavaScript formatting/typecheck,
+299 JavaScript tests, workspace formatting/clippy/tests, HTTP conformance,
+workspace build and repository/package guards. The command then correctly
+exited 1 because source was dirty. No verification receipt was emitted; the
+command removes its previous contract receipt when starting. Documentation
+verification and the portable suite follow successful contract verification
+and were not reached in this run. Do not label this a passing canonical PR
+gate or reuse the old portable receipt as proof of the dirty source.
+
+The next image integration will use one bounded envelope file containing the
+canonical policy and validated image bytes, rather than two independently
+published files. The private native handler can decode that file, so one atomic
+replacement removes the paired-publication problem. It still needs bounded
+header/body parsing, original deadlines, key/digest/length binding, no-follow
+descriptor safety, ordered restrictive observations and directory sync. A
+Record-scoped internal locator can reuse exact `ListRecordsQuery` authorization
+and current selected poster on each request, without a provider/URL map. Preserve
+the existing Desktop scoped credential authority; do not silently substitute
+the browser-selected profile. Recheck authority and poster selection after
+asynchronous I/O. These are implementation decisions, not completed capabilities.
+
+Review correction: `DirEntry::metadata` does not traverse symlinks, per the
+[Rust standard-library contract](https://doc.rust-lang.org/std/fs/struct.DirEntry.html#method.metadata).
+The earlier read-only claim that this call itself follows links was false.
+The separately identified pathname-replacement and check/open races remain.
+
+Scoped Access ownership exception: after confirming no M4 changes in the file,
+Access may exclusively edit `packages/ui/src/account-security-view.svelte` in
+its isolated regression worktree for the reproduced first-run pending-confirmation
+header-exit defect. M4 stays read-only on that file during this allocation.
+Access must return its exact commit/file hash, review and seven-regression
+evidence before integration. No other Workbench file, helper, API, SDK, registry,
+schema, portability or migration ownership was released. M4 retains v17/archive
+v7; no full handoff, commit, push, PR or merge occurred here. Codex Security stays
+excluded.
+
+### 2026-09-05 — Same-handle artwork validation and private staging
+
+The cache reader now opens an image once, checks regular-file type and size on
+that descriptor, and reads its bounded prefix from the same file. Unix uses
+the already-locked `rustix 1.1.4` filesystem dependency with `NOFOLLOW`,
+`NONBLOCK` and `CLOEXEC`; Windows opens the reparse point itself before checking
+the handle's file type. No new dependency family or cache framework was added.
+Temporary-file permissions now apply to the open staging handle before bytes
+are written and synced; post-rename pathname chmod was removed.
+
+The native Unix regression rejects symlinks, directories and a FIFO without
+blocking, then proves a held file descriptor continues reading the original
+inode after its pathname is replaced. Temporarily removing `NOFOLLOW` made the
+symlink assertion fail; restoring it passed. All 53 default-feature Desktop
+library tests passed; formatting and whitespace checks passed. Strict all-target
+Desktop clippy was rerun on the restored source. Independent native review found
+no introduced regression. Windows remains source-reviewed, not native-qualified.
+
+This is a bounded I/O improvement, not completed image delivery: root ancestors
+are still pathname-resolved, and `local_path` still returns a path which the
+built-in asset handler subsequently reopens. The prepared native asset handler,
+single-file policy envelope, root descriptor lifetime and image-response
+admission remain the active implementation front. Keep cached offline images,
+live no-cache/no-store images, request authorization, original deadlines and
+bounded resource use in the required final behavior. Do not substitute these
+focused tests for those unimplemented boundaries.
+
+No source commit, PR, merge, new migration or shared-file release occurred.
+Access's one-file busy-state allocation remains exclusive; its reported local
+commit `bf8526ad4ecbfc270a475428d9120708c7ac60cc` is not an M4 integration or
+handoff. M4 remains read-only on `packages/ui/src/account-security-view.svelte`.
+Codex Security remains excluded.
+
+### 2026-09-05 — Native artwork delivery and response-policy envelope
+
+The dirty Desktop slice now registers a bounded private native asset handler
+instead of granting the built-in handler directory access. Record-scoped locators
+contain neither upstream URLs nor filesystem paths. Existing scoped credentials,
+exact Record selection and selected poster provenance authorize each request;
+selection and the actual main WebView origin are rechecked after asynchronous
+work. GET-only requests, exact authority/origin matching and bounded URI/header
+input precede task admission. Responses are non-cacheable, image-only, nosniff;
+failures carry no private detail. This does not change browser profile authority.
+
+Image cache entries now contain a bounded canonical policy header and image
+body in one atomically published file. Key, digest, length, version, image bounds
+and original policy are checked on the same opened file. Image freshness is
+capped at 24 hours and total stale eligibility at seven days, shortened by the
+observed image response policy and age. No-cache requires another observation;
+NoStore live bytes are never persisted. The old entry is durably invalidated
+before requesting a replacement. Only a pre-representation failure can reuse
+eligible old evidence, without renewing its deadlines. Legacy raw image files
+are misses, not implicitly adopted evidence. No migration/archive change.
+
+Linux/Android cache operations use the retained directory descriptor for reads,
+writes, invalidation, sync and pruning. A real rename/replacement regression
+proves the opened directory remains the target and the replacement's same-key
+sentinel and inventory are unchanged. Other platforms are not qualified by this
+test. Initial root discovery still resolves its configured ancestors.
+
+Independent native review identified an unbounded task queue behind the existing
+provider gate. Admission now uses the existing Tokio semaphore before spawning:
+64 requests maximum, immediate 503/Retry-After on overload, permit released with
+the task. A regression proves the 65th admission fails and capacity recovers.
+The global provider gate is an explicit throughput ceiling, not a claimed
+performance optimization. Request disconnect cancellation, burst rendering and
+image transport behavior still require direct end-to-end evidence.
+
+Verification on this dirty source: all 71 default-feature Desktop library tests
+passed, including seven envelope/policy tests, eight protocol/admission tests,
+real scoped Record selection and Store-first Save regressions. The shared runtime
+cache-policy parser's 22 focused tests passed. Strict Desktop all-target clippy,
+formatting and whitespace checks passed after the final two test additions.
+The full canonical clean-source receipt remains absent as
+recorded above; these checks do not replace it or prove live WebView delivery.
+
+Commander remains sole production writer. Parallel agents owned only the two
+test leaves and released them. Final read-only native review found no concrete
+introduced defect in descriptor routing or admission lifetime; it explicitly
+retained the non-Linux/Android pathname limitation. No commit,
+push, PR, merge, migration allocation or shared-surface release occurred.
+Access's latest reported local documentation checkpoint is
+`f60c3da0278a2458dceae9883315cacba11b0c19`, tree
+`9f5b0866e7df1b11dc4b039415454e1c608d0477`; its narrow UI allocation remains
+exclusive and is not an M4 handoff. All Codex Security tools, skills and scans
+remain excluded by the user's explicit instruction.
+
+### 2026-09-05 — Real image response lifecycle and live CDN qualification
+
+Previous goal turn classification: progress. It added executed directory and
+admission regressions, strict checks and an updated checkpoint. This turn
+continues the same M4 scope, not a replacement completion definition.
+
+The private artwork lifecycle now accepts the unpolled governed response future.
+Fresh cache hits never poll it. The actual authorized client is carried through
+body consumption/publication so its existing request permit is not released at
+headers. No transport trait, provider stub, runtime command or dependency was
+added. This removes the mutable representation-seen flag: only request/status
+failures can reach stale fallback; once HTTP 200 is observed, validation failures
+cannot restore prior bytes. Native review caught an intermediate refactor that
+lost eligible fallback on local invalidation failure. It was corrected before
+verification: no response is observed and the request stays unpolled on that
+failure, so eligible original bytes remain usable without renewing policy.
+
+Eight response-lifecycle tests now exercise actual reqwest response/body values,
+policy parsing and cache I/O. They prove fresh-hit laziness, invalidation before
+request polling, eligible original-policy outage fallback, denied stale reuse,
+live-only NoStore, no-cache revalidation, invalid/oversized HTTP-200 rejection,
+read-only-directory behavior, delayed-body observation time, guard lifetime and
+cancelled-reader non-resurrection. Fixtures are explicit; these are not proof of
+native WebView cancellation or live DNS/TLS.
+
+The separate opt-in live test uses TMDB's public
+[documented image example](https://developer.themoviedb.org/docs/image-basics)
+without any credential. It found two real distinctions: negotiated bytes were
+WebP despite a `.png` URL; a later lookup returned four IPv4 plus eight IPv6
+addresses, exceeding the shared resolver's historical eight-answer cap.
+
+Debug report, investigation workflow:
+
+- Symptom: governed artwork failed with "The host name returned too many addresses."
+- Root cause: `system_resolve` rejected a legitimate complete dual-stack CDN
+  result before application authorization. The cap originated in the existing
+  provider runtime; this was not introduced by the artwork refactor.
+- Fix: keep the existing shared resolver and bounded deduplication, raise its
+  complete-result cap to 16, reject overflow rather than truncate, and continue
+  authorizing every retained address before the pinned request. Both provider
+  requests and Desktop node connection checks reuse this owner.
+- Regression: the actual collector failed with the old cap on 12 addresses;
+  the fixed test accepts complete deduplicated dual-stack results and the exact
+  16 boundary, rejects 17/empty, and rejects a public result containing a late
+  loopback address through the existing application policy.
+- Evidence: all 97 provider-runtime tests and strict all-target clippy passed.
+  The original live governed request then passed, returning 8,310 WebP bytes at
+  `2026-09-05T12:34:19.846490612Z`, SHA-256
+  `b168986ce4b29065c3295eaf41c2b31c4a2f2a0eb751fc88dc8d3d85d8fef86e`.
+  Its original reusable policy survived cache reopen; a deliberately unpolled
+  replacement future proved the eligible cache path made no second request.
+- Status: DONE_WITH_CONCERNS for this bounded resolver bug, not M4 completion.
+  More than 16 unique answers still fail closed. The live image test remains
+  opt-in because it requires public network availability, and was explicitly run.
+
+After the final lifecycle test, Desktop library verification passed 79 tests
+with one network test ignored in the default suite (separately passed above).
+Strict Desktop all-target clippy passed. The canonical clean-source receipt
+is still required for the integrated slice; no old receipt may be reused.
+
+Read-only native preparation identified installed `tauri-driver`/WebKitWebDriver
+and the reusable W3C client in `scripts/smoke-desktop-access-webdriver.py`.
+Do not run that script's authentication gate. The product-image scenario needs
+disposable Store/artwork fixture seeding, actual native image decoding under the
+existing CSP, exact source/binary identities and offline network evidence. The
+B1 benchmark shell must stay inert and is not product-image proof. No packaged
+authentication investigation, new provider-health override, Codex Security,
+schema/archive change or Access shared-file release occurred.
+
+Final read-only native review found no concrete defect in the current complete
+DNS answer handling or artwork lifecycle, including governed permit lifetime
+and invalidation-failure fallback. The commander is saving this verified logical
+unit as a local integration checkpoint before the clean-source canonical gate.
+This is not PR delivery, native rendering qualification, or M4 completion; all
+remaining programme scope and the current v17/archive-v7 ownership remain intact.

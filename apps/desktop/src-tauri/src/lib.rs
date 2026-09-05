@@ -4,6 +4,8 @@
 
 mod api_clients;
 mod artwork;
+#[cfg(feature = "desktop-runtime")]
+mod artwork_protocol;
 mod endpoint;
 mod metadata;
 mod network_config;
@@ -520,15 +522,15 @@ async fn track_provider_candidate(
         configuration.outbound_policy(),
     )
     .await?;
-    state
-        .artwork
-        .cache_candidate(
+    records::finish_provider_save(
+        records::create_provider_record(&kernel, access, &candidate),
+        state.artwork.cache_candidate(
             &candidate,
             configuration.outbound_policy(),
             runtime.transport(),
-        )
-        .await?;
-    records::create_provider_record(&kernel, access, candidate)
+        ),
+    )
+    .await
 }
 
 #[cfg(feature = "desktop-runtime")]
@@ -563,15 +565,15 @@ async fn apply_provider_metadata(
         configuration.outbound_policy(),
     )
     .await?;
-    state
-        .artwork
-        .cache_candidate(
+    records::finish_provider_save(
+        records::apply_provider_metadata(&kernel, access, record_id, &candidate),
+        state.artwork.cache_candidate(
             &candidate,
             configuration.outbound_policy(),
             runtime.transport(),
-        )
-        .await?;
-    records::apply_provider_metadata(&kernel, access, record_id, candidate)
+        ),
+    )
+    .await
 }
 
 #[cfg(feature = "desktop-runtime")]
@@ -581,7 +583,9 @@ async fn refresh_metadata_claims(
     input: fasti_contracts::RefreshMetadataClaimsRequest,
 ) -> Result<fasti_contracts::RefreshMetadataClaimsResponse, DesktopProblem> {
     let lease = fasti_application::ProviderOperationLease::new(
-        Arc::clone(&state.provider_operation_gate).lock_owned().await,
+        Arc::clone(&state.provider_operation_gate)
+            .lock_owned()
+            .await,
     );
     let kernel = state.kernel()?;
     let access = records::require_access(
@@ -856,6 +860,7 @@ pub fn run() {
     #[cfg(not(target_os = "android"))]
     let setup_access_server_owner = Arc::clone(&access_server_owner);
     let app = tauri::Builder::default()
+        .register_asynchronous_uri_scheme_protocol("asset", artwork_protocol::handle)
         .setup(move |app| {
             secure_storage::initialize().map_err(|()| {
                 io::Error::other("Fasti could not initialize the platform credential store")
@@ -867,12 +872,10 @@ pub fn run() {
                 SqliteKernel::open(&data_root)
                     .map_err(|_| io::Error::other("Fasti could not open its local data root"))?,
             );
-            let artwork = artwork::ArtworkCache::new(artwork_root);
+            let artwork = artwork::ArtworkCache::new(artwork_root, kernel.data_root_identity());
             artwork.prepare().map_err(|_| {
                 io::Error::other("Fasti could not prepare its private artwork cache")
             })?;
-            app.asset_protocol_scope()
-                .allow_directory(artwork.root(), false)?;
             #[cfg(not(target_os = "android"))]
             let (access_runtime, access_server) = {
                 let listener = bind_access_listener()?;

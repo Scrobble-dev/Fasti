@@ -9,7 +9,9 @@ use std::time::Duration;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::Instant;
 
-const DNS_ANSWER_LIMIT: usize = 8;
+// TMDB's dual-stack image CDN returns four IPv4 plus eight IPv6 addresses.
+// Bound the complete answer set; never truncate before authorizing every address.
+const DNS_ANSWER_LIMIT: usize = 16;
 const DNS_LOOKUP_TIMEOUT: Duration = Duration::from_secs(5);
 const REQUEST_CONCURRENCY_LIMIT: usize = 4;
 // ponytail: one system lookup at a time; use a bounded pool if provider throughput requires it.
@@ -34,11 +36,18 @@ pub async fn resolve_once(host: &str, port: u16) -> Result<Vec<SocketAddr>, &'st
 }
 
 fn system_resolve(host: &str, port: u16) -> Result<Vec<SocketAddr>, &'static str> {
+    collect_addresses(
+        (host, port)
+            .to_socket_addrs()
+            .map_err(|_| "The host name could not be resolved.")?,
+    )
+}
+
+fn collect_addresses(
+    addresses: impl IntoIterator<Item = SocketAddr>,
+) -> Result<Vec<SocketAddr>, &'static str> {
     let mut unique = BTreeSet::new();
-    for address in (host, port)
-        .to_socket_addrs()
-        .map_err(|_| "The host name could not be resolved.")?
-    {
+    for address in addresses {
         unique.insert(address);
         if unique.len() > DNS_ANSWER_LIMIT {
             return Err("The host name returned too many addresses.");
@@ -284,6 +293,48 @@ pub fn configuration_digest(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dual_stack_cdn_answers_are_complete_bounded_and_all_authorized() {
+        use fasti_application::NetworkClass;
+        let answers = (1..=4)
+            .map(|n| format!("18.238.49.{n}:443").parse::<SocketAddr>().unwrap())
+            .chain((1..=8).map(|n| format!("[2600:9000:261f:{n:x}::1]:443").parse().unwrap()))
+            .collect::<Vec<_>>();
+        let collected = collect_addresses(answers.iter().chain(&answers).copied()).unwrap();
+        assert_eq!(collected.len(), 12, "retain every unique dual-stack answer");
+        let declaration = OutboundAccessDeclaration {
+            provider: "tmdb",
+            capabilities: &["metadata.artwork"],
+            hosts: &["image.tmdb.org"],
+            networks: &[NetworkClass::Public],
+        };
+        let ips = collected.iter().map(SocketAddr::ip).collect::<Vec<_>>();
+        assert!(authorize_outbound(
+            declaration,
+            &OutboundAccessPolicy::default(),
+            "metadata.artwork",
+            "image.tmdb.org",
+            &ips
+        )
+        .is_ok());
+        let mut mixed = answers;
+        mixed.push("127.0.0.1:443".parse().unwrap());
+        let all = collect_addresses(mixed).unwrap();
+        assert_eq!(all.len(), 13, "never truncate away an unsafe answer");
+        assert!(authorize_outbound(
+            declaration,
+            &OutboundAccessPolicy::default(),
+            "metadata.artwork",
+            "image.tmdb.org",
+            &all.iter().map(SocketAddr::ip).collect::<Vec<_>>()
+        )
+        .is_err());
+        let boundary = (1..=16).map(|n| SocketAddr::from(([18, 238, 49, n], 443)));
+        assert_eq!(collect_addresses(boundary.clone()).unwrap().len(), 16);
+        assert!(collect_addresses(boundary.chain(["18.238.49.17:443".parse().unwrap()])).is_err());
+        assert!(collect_addresses([]).is_err());
+    }
 
     #[test]
     fn pinned_client_disables_ambient_routing() {

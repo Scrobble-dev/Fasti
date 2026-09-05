@@ -1,5 +1,6 @@
 mod candidate_action_tests {
     use super::*;
+    use fasti_application::{ProviderResponseCachePolicy, ProviderResponseReuse};
     use std::sync::atomic::AtomicU8;
 
     const CURRENT: u8 = 0;
@@ -14,6 +15,7 @@ mod candidate_action_tests {
         disposition: AtomicU8,
         calls: Mutex<Vec<&'static str>>,
         fields: Mutex<Option<Vec<ProviderMetadataField>>>,
+        response_policy: Mutex<Option<ProviderResponseCachePolicy>>,
         pause_commit: Mutex<
             Option<(
                 tokio::sync::oneshot::Sender<()>,
@@ -73,13 +75,25 @@ mod candidate_action_tests {
     }
 
     impl SearchPersistencePort for ActionPersistence {
-        fn authorize_search_candidate_read_request(&self, _: RequestCorrelationId, _: &ApplicationAccessContext) -> ApplicationResult<()> {
+        fn authorize_search_candidate_read_request(
+            &self,
+            _: RequestCorrelationId,
+            _: &ApplicationAccessContext,
+        ) -> ApplicationResult<()> {
             unreachable!("runtime tests enter after transport authorization")
         }
-        fn authorize_search_candidate_action_request(&self, _: RequestCorrelationId, _: &ApplicationAccessContext) -> ApplicationResult<()> {
+        fn authorize_search_candidate_action_request(
+            &self,
+            _: RequestCorrelationId,
+            _: &ApplicationAccessContext,
+        ) -> ApplicationResult<()> {
             unreachable!("runtime tests enter after transport authorization")
         }
-        fn authorize_search_page_request(&self, _: RequestCorrelationId, _: &ApplicationAccessContext) -> ApplicationResult<()> {
+        fn authorize_search_page_request(
+            &self,
+            _: RequestCorrelationId,
+            _: &ApplicationAccessContext,
+        ) -> ApplicationResult<()> {
             unreachable!("action tests do not acquire pages through HTTP")
         }
         fn prepare_search_candidate_action(
@@ -94,7 +108,7 @@ mod candidate_action_tests {
             &self,
             command: &SearchCandidateActionCommand,
             prepared: &SearchCandidateActionPreparation,
-            fields: Option<&[ProviderMetadataField]>,
+            refetched: Option<(&[ProviderMetadataField], &ProviderResponseCachePolicy)>,
         ) -> ApplicationResult<SearchCandidateActionReceipt> {
             self.calls.lock().unwrap().push("commit-action");
             let pause = self.pause_commit.lock().unwrap().take();
@@ -116,6 +130,7 @@ mod candidate_action_tests {
                     command.request.correlation_id,
                 )));
             }
+            let fields = refetched.map(|(fields, _)| fields);
             match prepared {
                 SearchCandidateActionPreparation::Cached(_) => assert!(fields.is_none()),
                 SearchCandidateActionPreparation::Refetch(_) => {
@@ -126,6 +141,7 @@ mod candidate_action_tests {
                 }
             }
             *self.fields.lock().unwrap() = fields.map(<[ProviderMetadataField]>::to_vec);
+            *self.response_policy.lock().unwrap() = refetched.map(|(_, policy)| *policy);
             let mut receipt = self.receipt.clone();
             if let Some(field) = fields.and_then(|value| value.first()) {
                 receipt.provenance = field.claim().provenance().clone();
@@ -148,7 +164,13 @@ mod candidate_action_tests {
         ) -> ApplicationResult<PreparedSearchPage> {
             panic!("actions must not create a Search page")
         }
-        fn discard_cached_search_page(&self, _: &SearchPageRequest, _: &PreparedSearchPage) -> ApplicationResult<()> { panic!("actions must not discard Search pages") }
+        fn discard_cached_search_page(
+            &self,
+            _: &SearchPageRequest,
+            _: &PreparedSearchPage,
+        ) -> ApplicationResult<()> {
+            panic!("actions must not discard Search pages")
+        }
         fn commit_search_page(
             &self,
             _: &SearchPageRequest,
@@ -300,6 +322,7 @@ mod candidate_action_tests {
             disposition: AtomicU8::new(CURRENT),
             calls: Mutex::new(vec![]),
             fields: Mutex::new(None),
+            response_policy: Mutex::new(None),
             pause_commit: Mutex::new(None),
         });
         (
@@ -330,6 +353,7 @@ mod candidate_action_tests {
                     outcome,
                     ProviderSearchActionOutcome::Saved(Box::new(persistence.receipt.clone()))
                 );
+                assert_eq!(*persistence.response_policy.lock().unwrap(), None);
                 assert_eq!(
                     *persistence.calls.lock().unwrap(),
                     if replay {
@@ -347,12 +371,25 @@ mod candidate_action_tests {
     async fn save_refetch_uses_exact_stored_coordinates_and_actual_response_provenance() {
         let (service, persistence, command) = fixture(SearchCandidateEvidenceMode::Refetch);
         let expected_state = persistence.details.provider_state.clone();
-        let mut fresh = candidate();
+        let expected_policy = ProviderResponseCachePolicy::new(
+            ProviderResponseReuse::Reusable,
+            chrono::Utc::now(),
+            std::time::Duration::from_secs(3),
+            Some(std::time::Duration::from_secs(47)),
+            Some(std::time::Duration::from_secs(19)),
+        );
+        assert_ne!(
+            expected_policy,
+            persistence.details.candidate.response_policy
+        );
+        let mut fresh = crate::providers::search_page_fixture()
+            .with_response_cache_policy(expected_policy)
+            .candidates
+            .remove(0);
         fresh.title = "Fresh detail title".into();
         fresh.overview = Some("Fresh detail overview".into());
         let expected_digest = crate::providers::search_page_fixture().evidence_digest;
         assert_ne!(expected_digest, persistence.receipt.search_response_digest);
-        let before = chrono::Utc::now();
         let outcome = service
             .save_candidate_with(command, lease().await, move |selection, state| async move {
                 assert_eq!(
@@ -370,7 +407,6 @@ mod candidate_action_tests {
             })
             .await
             .unwrap();
-        let after = chrono::Utc::now();
         assert!(
             matches!(outcome, ProviderSearchActionOutcome::Saved(receipt) if receipt.record_id == persistence.receipt.record_id && receipt.provenance.evidence_digest() == Some(&expected_digest))
         );
@@ -380,16 +416,20 @@ mod candidate_action_tests {
         assert_eq!(fields.len(), 2);
         for field in fields {
             let claim = field.claim();
-            assert!((before..=after).contains(&claim.fetched_at()));
+            assert_eq!(claim.fetched_at(), expected_policy.received_at());
             assert_eq!(
                 claim.expires_at(),
-                Some(claim.fetched_at() + chrono::Duration::seconds(METADATA_FRESH_SECONDS))
+                Some(expected_policy.received_at() + chrono::Duration::seconds(44))
             );
             assert_eq!(claim.provenance().locale().unwrap().as_str(), "fr-fr");
             assert_eq!(claim.provenance().region(), None);
             assert_eq!(claim.provenance().source_identifier(), Some("42"));
             assert_eq!(claim.provenance().evidence_digest(), Some(&expected_digest));
         }
+        assert_eq!(
+            *persistence.response_policy.lock().unwrap(),
+            Some(expected_policy)
+        );
         assert_eq!(
             *persistence.calls.lock().unwrap(),
             ["prepare-action", "commit-action"]
@@ -404,6 +444,52 @@ mod candidate_action_tests {
                 .title,
             "Fixture film"
         );
+    }
+
+    #[tokio::test]
+    async fn save_refetch_preserves_zero_freshness_and_the_actual_detail_policy() {
+        for reuse in [
+            ProviderResponseReuse::ValidateEveryReuse,
+            ProviderResponseReuse::Reusable,
+        ] {
+            let (service, persistence, command) = fixture(SearchCandidateEvidenceMode::Refetch);
+            let policy = ProviderResponseCachePolicy::new(
+                reuse,
+                chrono::Utc::now(),
+                std::time::Duration::from_secs(90),
+                Some(std::time::Duration::from_secs(30)),
+                Some(std::time::Duration::from_secs(60)),
+            );
+            assert_ne!(policy, persistence.details.candidate.response_policy);
+            let fresh = crate::providers::search_page_fixture()
+                .with_response_cache_policy(policy)
+                .candidates
+                .remove(0);
+            let outcome = service
+                .save_candidate_with(command, lease().await, move |_, _| async move { Ok(fresh) })
+                .await
+                .unwrap();
+            assert!(
+                matches!(outcome, ProviderSearchActionOutcome::Saved(ref receipt)
+                if receipt.initial_status == fasti_domain::FieldClaimStatus::Stale
+                    && receipt.expires_at.is_none()
+                    && receipt.fetched_at == policy.received_at())
+            );
+            assert_eq!(*persistence.response_policy.lock().unwrap(), Some(policy));
+            let fields = persistence.fields.lock().unwrap();
+            for field in fields.as_ref().unwrap() {
+                assert_eq!(field.claim().fetched_at(), policy.received_at());
+                assert_eq!(field.claim().expires_at(), None);
+                assert_eq!(
+                    field.claim().initial_status(),
+                    fasti_domain::FieldClaimStatus::Stale
+                );
+            }
+            assert_eq!(
+                *persistence.calls.lock().unwrap(),
+                ["prepare-action", "commit-action"]
+            );
+        }
     }
 
     #[tokio::test]

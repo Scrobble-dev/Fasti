@@ -5,7 +5,7 @@
 //! Fasti Record; it never becomes the Record identity.
 
 use crate::{ApplicationResult, RequestAccessContext};
-use crate::{ProviderCapabilityState, ProviderId};
+use crate::{ProviderCapabilityState, ProviderId, ProviderResponseCachePolicy};
 use fasti_domain::{
     AnimeGroupingPreference, EnrichmentPolicy, ExternalIdentifierClaim, ExternalIdentifierError,
     FieldClaim, FieldClaimStatus, FieldKey, Grain, IdentityAssertion,
@@ -944,6 +944,7 @@ pub struct CreateProviderRecordCommand {
     grain: Grain,
     identifier: ExternalIdentifierClaim,
     fields: Vec<ProviderMetadataField>,
+    response_policy: ProviderResponseCachePolicy,
 }
 
 impl CreateProviderRecordCommand {
@@ -953,6 +954,7 @@ impl CreateProviderRecordCommand {
         grain: Grain,
         identifier: ExternalIdentifierClaim,
         fields: Vec<ProviderMetadataField>,
+        response_policy: ProviderResponseCachePolicy,
     ) -> Self {
         Self {
             correlation_id,
@@ -960,6 +962,7 @@ impl CreateProviderRecordCommand {
             grain,
             identifier,
             fields,
+            response_policy,
         }
     }
 
@@ -982,6 +985,10 @@ impl CreateProviderRecordCommand {
     pub fn fields(&self) -> &[ProviderMetadataField] {
         &self.fields
     }
+
+    pub const fn response_policy(&self) -> &ProviderResponseCachePolicy {
+        &self.response_policy
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -991,6 +998,7 @@ pub struct ApplyProviderMetadataCommand {
     record_id: RecordId,
     identifier: ExternalIdentifierClaim,
     fields: Vec<ProviderMetadataField>,
+    response_policy: ProviderResponseCachePolicy,
 }
 
 impl ApplyProviderMetadataCommand {
@@ -1000,6 +1008,7 @@ impl ApplyProviderMetadataCommand {
         record_id: RecordId,
         identifier: ExternalIdentifierClaim,
         fields: Vec<ProviderMetadataField>,
+        response_policy: ProviderResponseCachePolicy,
     ) -> Self {
         Self {
             correlation_id,
@@ -1007,6 +1016,7 @@ impl ApplyProviderMetadataCommand {
             record_id,
             identifier,
             fields,
+            response_policy,
         }
     }
 
@@ -1028,6 +1038,10 @@ impl ApplyProviderMetadataCommand {
 
     pub fn fields(&self) -> &[ProviderMetadataField] {
         &self.fields
+    }
+
+    pub const fn response_policy(&self) -> &ProviderResponseCachePolicy {
+        &self.response_policy
     }
 }
 
@@ -1395,6 +1409,7 @@ pub struct CommitMetadataRefreshCommand {
     ratings: Vec<RatingClaim>,
     cache_entries: Vec<MetadataCacheEntry>,
     attribution: MetadataAttribution,
+    response_policy: ProviderResponseCachePolicy,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1590,6 +1605,7 @@ impl CommitMetadataRefreshCommand {
         ratings: Vec<RatingClaim>,
         cache_entries: Vec<MetadataCacheEntry>,
         attribution: MetadataAttribution,
+        response_policy: ProviderResponseCachePolicy,
     ) -> Self {
         Self {
             correlation_id,
@@ -1603,6 +1619,7 @@ impl CommitMetadataRefreshCommand {
             ratings,
             cache_entries,
             attribution,
+            response_policy,
         }
     }
 
@@ -1638,6 +1655,10 @@ impl CommitMetadataRefreshCommand {
     }
     pub const fn attribution(&self) -> &MetadataAttribution {
         &self.attribution
+    }
+
+    pub const fn response_policy(&self) -> &ProviderResponseCachePolicy {
+        &self.response_policy
     }
 }
 

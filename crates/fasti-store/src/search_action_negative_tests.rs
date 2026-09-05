@@ -2,7 +2,7 @@ mod negative_tests {
     use super::*;
     use fasti_application::{
         provider_candidate_metadata_fields, provider_metadata_response_locale,
-        ProviderMetadataField,
+        ProviderMetadataField, ProviderResponseCachePolicy, ProviderResponseReuse,
     };
     use fasti_domain::{
         FieldClaim, FieldClaimProvenance, FieldClaimStatus, FieldKey, MetadataClaimId,
@@ -14,6 +14,7 @@ mod negative_tests {
         SearchCandidateActionCommand,
         SearchCandidateActionPreparation,
         Vec<ProviderMetadataField>,
+        ProviderResponseCachePolicy,
     ) {
         let (node, _, mut command, _) = fixture();
         node.kernel
@@ -41,7 +42,14 @@ mod negative_tests {
             FieldClaimStatus::Fresh,
         )
         .unwrap();
-        (node, command, prepared, fields)
+        let policy = ProviderResponseCachePolicy::new(
+            ProviderResponseReuse::Reusable,
+            fetched,
+            std::time::Duration::ZERO,
+            None,
+            None,
+        );
+        (node, command, prepared, fields, policy)
     }
 
     fn replace_claim(
@@ -88,14 +96,14 @@ mod negative_tests {
 
     #[test]
     fn refetch_action_uses_effective_locale_and_new_response_without_rewriting_search_evidence() {
-        let (node, command, prepared, fields) = refetch_fixture();
+        let (node, command, prepared, fields, policy) = refetch_fixture();
         let SearchCandidateActionPreparation::Refetch(details) = &prepared else {
             unreachable!()
         };
         assert_eq!(details.candidate.context.locale(), None);
         let result = node
             .kernel
-            .commit_search_candidate_action(&command, &prepared, Some(&fields))
+            .commit_search_candidate_action(&command, &prepared, Some((&fields, &policy)))
             .unwrap();
         assert_eq!(result.evidence_mode, SearchCandidateEvidenceMode::Refetch);
         assert_eq!(result.provenance.locale().unwrap().as_str(), "en-us");
@@ -118,7 +126,7 @@ mod negative_tests {
 
     #[test]
     fn refetch_action_rejects_authority_away_and_back_then_accepts_current_preparation() {
-        let (node, command, prepared, fields) = refetch_fixture();
+        let (node, command, prepared, fields, policy) = refetch_fixture();
         let changed = ProviderCapabilityState::try_new(
             ProviderId::try_new("tmdb").unwrap(),
             ProviderCapabilityId::try_new("metadata.read").unwrap(),
@@ -144,7 +152,7 @@ mod negative_tests {
         let before = rows(&node, MUTATION_TABLES);
         let error = node
             .kernel
-            .commit_search_candidate_action(&command, &prepared, Some(&fields))
+            .commit_search_candidate_action(&command, &prepared, Some((&fields, &policy)))
             .unwrap_err();
         assert_eq!(error.code(), ProblemCode::Forbidden);
         assert_eq!(rows(&node, MUTATION_TABLES), before);
@@ -153,8 +161,75 @@ mod negative_tests {
             .prepare_search_candidate_action(&command)
             .unwrap();
         node.kernel
-            .commit_search_candidate_action(&command, &current, Some(&fields))
+            .commit_search_candidate_action(&command, &current, Some((&fields, &policy)))
             .unwrap();
+    }
+
+    #[test]
+    fn zero_freshness_refetch_saves_original_policy_and_replays_audit_without_new_search_authority()
+    {
+        for reuse in [
+            ProviderResponseReuse::ValidateEveryReuse,
+            ProviderResponseReuse::Reusable,
+        ] {
+            let (node, command, prepared, fields, original_policy) = refetch_fixture();
+            let policy = ProviderResponseCachePolicy::new(
+                reuse,
+                original_policy.received_at(),
+                std::time::Duration::from_secs(90),
+                Some(std::time::Duration::from_secs(30)),
+                Some(std::time::Duration::from_secs(60)),
+            );
+            let fields: Vec<_> = fields
+                .iter()
+                .map(|field| {
+                    replace_claim(
+                        field,
+                        field.claim().value(),
+                        field.claim().provenance().clone(),
+                        original_policy.received_at(),
+                        None,
+                        FieldClaimStatus::Stale,
+                    )
+                })
+                .collect();
+            let receipt = node
+                .kernel
+                .commit_search_candidate_action(&command, &prepared, Some((&fields, &policy)))
+                .expect("zero-freshness refetch persists accurate historical claim status");
+            assert_eq!(receipt.initial_status, FieldClaimStatus::Stale);
+            assert_eq!(receipt.expires_at, None);
+            assert_eq!(receipt.fetched_at, policy.received_at());
+            {
+                let connection = node.kernel.inner.connection.lock().unwrap();
+                for field in &fields {
+                    let stored: String = connection
+                        .query_row(
+                            "SELECT response_policy_json FROM metadata_claims WHERE claim_id = ?1",
+                            [field.claim().claim_id().to_string()],
+                            |row| row.get(0),
+                        )
+                        .unwrap();
+                    assert_eq!(stored, policy.to_canonical_json());
+                }
+            }
+            remove_scope(&node, "metadata_search");
+            let before = rows(&node, MUTATION_TABLES);
+            let replay = node
+                .kernel
+                .prepare_search_candidate_action(&command)
+                .unwrap();
+            assert!(
+                matches!(&replay, SearchCandidateActionPreparation::Replay(saved) if **saved == receipt)
+            );
+            assert_eq!(
+                node.kernel
+                    .commit_search_candidate_action(&command, &replay, None)
+                    .unwrap(),
+                receipt
+            );
+            assert_eq!(rows(&node, MUTATION_TABLES), before);
+        }
     }
 
     #[test]
@@ -185,7 +260,7 @@ mod negative_tests {
             "invalid_year",
             "unknown_field",
         ] {
-            let (node, command, prepared, mut fields) = refetch_fixture();
+            let (node, command, prepared, mut fields, policy) = refetch_fixture();
             let first = fields[0].claim();
             let mut source = first.provenance().clone();
             let mut fetched = first.fetched_at();
@@ -316,9 +391,11 @@ mod negative_tests {
                 _ => {}
             }
             let before = rows(&node, MUTATION_TABLES);
-            let error =
-                node.kernel
-                    .commit_search_candidate_action(&command, &prepared, Some(&fields));
+            let error = node.kernel.commit_search_candidate_action(
+                &command,
+                &prepared,
+                Some((&fields, &policy)),
+            );
             assert!(error.is_err(), "accepted hostile case {case}");
             assert_eq!(
                 rows(&node, MUTATION_TABLES),
@@ -330,7 +407,7 @@ mod negative_tests {
 
     #[test]
     fn actions_reject_wrong_preparation_branch_snapshot_and_forged_replay() {
-        let (node, command, prepared, fields) = refetch_fixture();
+        let (node, command, prepared, fields, policy) = refetch_fixture();
         let SearchCandidateActionPreparation::Refetch(details) = &prepared else {
             unreachable!()
         };
@@ -338,7 +415,7 @@ mod negative_tests {
         let cached = SearchCandidateActionPreparation::Cached(details.candidate.clone());
         assert_eq!(
             node.kernel
-                .commit_search_candidate_action(&command, &cached, Some(&fields))
+                .commit_search_candidate_action(&command, &cached, Some((&fields, &policy)))
                 .unwrap_err()
                 .code(),
             ProblemCode::Forbidden
@@ -354,7 +431,7 @@ mod negative_tests {
                 .commit_search_candidate_action(
                     &command,
                     &SearchCandidateActionPreparation::Refetch(altered),
-                    Some(&fields)
+                    Some((&fields, &policy))
                 )
                 .unwrap_err()
                 .code(),
@@ -374,7 +451,7 @@ mod negative_tests {
                 .commit_search_candidate_action(
                     &command,
                     &SearchCandidateActionPreparation::Refetch(altered),
-                    Some(&fields),
+                    Some((&fields, &policy)),
                 )
                 .unwrap_err()
                 .code(),
@@ -384,13 +461,13 @@ mod negative_tests {
         other_command.evidence_mode = SearchCandidateEvidenceMode::Cached;
         assert!(node
             .kernel
-            .commit_search_candidate_action(&other_command, &cached, Some(&fields))
+            .commit_search_candidate_action(&other_command, &cached, Some((&fields, &policy)))
             .is_err());
         assert_eq!(rows(&node, MUTATION_TABLES), before);
 
         let receipt = node
             .kernel
-            .commit_search_candidate_action(&command, &prepared, Some(&fields))
+            .commit_search_candidate_action(&command, &prepared, Some((&fields, &policy)))
             .unwrap();
         let mut new_command = command.clone();
         new_command.operation_id = OperationId::new_v7();
@@ -425,7 +502,10 @@ mod negative_tests {
         google.provider = "google-books".into();
         google.grain = Grain::Edition;
         google.provenance = provenance("google-books", "googlebooks.volume", "42", None, None, 7);
-        assert_eq!(decode(&serde_json::to_string(&google).unwrap()).unwrap(), google);
+        assert_eq!(
+            decode(&serde_json::to_string(&google).unwrap()).unwrap(),
+            google
+        );
         for hostile in [
             format!("{canonical}{}", " ".repeat(16 * 1024)),
             serde_json::to_string_pretty(&receipt).unwrap(),
@@ -495,7 +575,14 @@ mod negative_tests {
                     hostile.evidence_mode = SearchCandidateEvidenceMode::Refetch;
                     hostile.provider = "google-books".into();
                     hostile.grain = Grain::Edition;
-                    hostile.provenance = provenance("google-books", "googlebooks.volume", "42", Some("en-US"), None, 7);
+                    hostile.provenance = provenance(
+                        "google-books",
+                        "googlebooks.volume",
+                        "42",
+                        Some("en-US"),
+                        None,
+                        7,
+                    );
                 }
                 _ => unreachable!(),
             }

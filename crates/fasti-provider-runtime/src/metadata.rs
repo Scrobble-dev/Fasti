@@ -216,6 +216,9 @@ impl ProviderMetadataRefreshService {
             ));
         }
 
+        let response_policy = *candidate
+            .recorded_response_policy()
+            .map_err(|error| runtime_problem(error, capability, correlation_id))?;
         let fields = candidate
             .metadata_fields(effective_locale.clone(), effective_region.clone())
             .map_err(|error| runtime_problem(error, capability, correlation_id))?
@@ -225,14 +228,7 @@ impl ProviderMetadataRefreshService {
                     .is_some_and(|group| prepared.field_groups().contains(&group))
             })
             .collect::<Vec<_>>();
-        let now = chrono::Utc::now();
-        if !fields.iter().any(|field| {
-            field.claim().initial_status() == fasti_domain::FieldClaimStatus::Fresh
-                && field
-                    .claim()
-                    .expires_at()
-                    .is_none_or(|expires_at| expires_at > now)
-        }) {
+        if fields.is_empty() {
             return Err(stale_problem(capability, correlation_id));
         }
         let attribution = MetadataAttribution::try_new(
@@ -245,6 +241,7 @@ impl ProviderMetadataRefreshService {
             enrichment_keys.into_iter().chain(offline_keys),
             &fields,
             correlation_id,
+            &response_policy,
         )?;
 
         let persistence = Arc::clone(&self.persistence);
@@ -260,6 +257,7 @@ impl ProviderMetadataRefreshService {
             Vec::new(),
             cache_entries,
             attribution,
+            response_policy,
         );
         run_blocking(&lease, capability, correlation_id, move || {
             persistence.authorize_and_commit_refresh(commit)
@@ -396,13 +394,22 @@ fn cache_entries(
     keys: impl Iterator<Item = MetadataCacheKey>,
     fields: &[ProviderMetadataField],
     correlation_id: fasti_domain::RequestCorrelationId,
+    response_policy: &fasti_application::ProviderResponseCachePolicy,
 ) -> fasti_application::ApplicationResult<Vec<MetadataCacheEntry>> {
     let capability = CapabilityKey::RefreshMetadataClaims;
-    let created = fields
-        .first()
-        .map(|field| ReceivedAt::from_application_clock(field.claim().fetched_at()))
-        .expect("a successful refresh has at least one fresh claim");
-    let fresh_until = created.value() + chrono::Duration::seconds(METADATA_FRESH_SECONDS);
+    let created = ReceivedAt::from_application_clock(response_policy.received_at());
+    let (fresh_until, stale_until) = response_policy
+        .deadlines(
+            std::time::Duration::from_secs(METADATA_FRESH_SECONDS as u64),
+            std::time::Duration::from_secs(METADATA_STALE_ON_ERROR_SECONDS as u64),
+        )
+        .ok_or_else(|| problem(ProblemCode::ValidationFailed, capability, correlation_id))?;
+    let refreshing_until = fresh_until
+        .checked_add_signed(chrono::Duration::seconds(
+            METADATA_STALE_WHILE_REFRESHING_SECONDS,
+        ))
+        .unwrap_or(fresh_until)
+        .min(stale_until);
     keys.map(|key| {
         let claim_ids = fields
             .iter()
@@ -414,8 +421,8 @@ fn cache_entries(
             claim_ids,
             created,
             fresh_until,
-            fresh_until + chrono::Duration::seconds(METADATA_STALE_WHILE_REFRESHING_SECONDS),
-            created.value() + chrono::Duration::seconds(METADATA_STALE_ON_ERROR_SECONDS),
+            refreshing_until,
+            stale_until,
         )
         .map_err(|_| problem(ProblemCode::IntegrityFailed, capability, correlation_id))
     })
@@ -596,6 +603,13 @@ mod tests {
             .into_iter(),
             &[test_field(at)],
             fasti_domain::RequestCorrelationId::new_v7(),
+            &fasti_application::ProviderResponseCachePolicy::new(
+                fasti_application::ProviderResponseReuse::Reusable,
+                at,
+                std::time::Duration::ZERO,
+                None,
+                None,
+            ),
         )
         .expect("entries");
 

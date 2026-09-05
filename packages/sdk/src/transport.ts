@@ -1132,7 +1132,7 @@ export class FastiClient {
         const historicalStatusValid =
           receipt.initial_status === "fresh"
             ? typeof receipt.expires_at === "string"
-            : receipt.evidence_mode === "cached" && receipt.expires_at == null;
+            : receipt.initial_status === "stale" && receipt.expires_at == null;
         if (
           !historicalStatusValid ||
           receipt.operation_id !== operationId ||

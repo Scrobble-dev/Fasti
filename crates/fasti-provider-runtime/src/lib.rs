@@ -7,6 +7,7 @@ mod providers;
 mod search;
 mod transport;
 
+pub use cache_policy::observe as observe_response_cache_policy;
 use fasti_application::ProblemCode;
 pub use metadata::*;
 pub use platform_vault::*;

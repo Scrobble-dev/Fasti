@@ -2017,6 +2017,19 @@ mod tests {
                     panic!("the action must remain uncommitted before the profile switch")
                 }
             };
+            let response_policy = fields.as_ref().map(|fields| {
+                fasti_application::ProviderResponseCachePolicy::new(
+                    fasti_application::ProviderResponseReuse::Reusable,
+                    fields
+                        .first()
+                        .expect("refetch fixture has fields")
+                        .claim()
+                        .fetched_at(),
+                    std::time::Duration::ZERO,
+                    None,
+                    None,
+                )
+            });
             let selected = fixture
                 .kernel
                 .select_browser_session_profile(SelectBrowserSessionProfileCommand::new(
@@ -2039,7 +2052,7 @@ mod tests {
                 fixture.kernel.commit_search_candidate_action(
                     &command,
                     &prepared,
-                    fields.as_deref(),
+                    fields.as_deref().zip(response_policy.as_ref()),
                 ),
                 ProblemCode::BrowserSessionRevoked,
             );
@@ -2052,7 +2065,7 @@ mod tests {
                 fixture.kernel.commit_search_candidate_action(
                     &switched,
                     &prepared,
-                    fields.as_deref(),
+                    fields.as_deref().zip(response_policy.as_ref()),
                 ),
                 ProblemCode::ValidationFailed,
             );

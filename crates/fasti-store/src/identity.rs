@@ -1035,6 +1035,7 @@ mod tests {
                     .unwrap(),
                 CapabilityKey::ListRecords,
                 RequestCorrelationId::new_v7(),
+                None,
             )
             .unwrap();
             let override_ = fasti_domain::ProfileFieldOverride::try_new(
@@ -1416,6 +1417,7 @@ mod tests {
                     claim,
                     CapabilityKey::ListRecords,
                     RequestCorrelationId::new_v7(),
+                    None,
                 )
                 .expect("write claim");
             }
@@ -1692,14 +1694,35 @@ mod tests {
                 ))
                 .expect("register provider namespace");
             let source = NamespaceKey::try_new(mapping.namespace()).expect("provider source");
+            let fetched = received(100);
+            let policy = fasti_application::ProviderResponseCachePolicy::new(
+                fasti_application::ProviderResponseReuse::Reusable,
+                fetched.value(),
+                std::time::Duration::ZERO,
+                None,
+                None,
+            );
             let field = ProviderMetadataField::new(
                 FieldKey::try_new(TITLE_FIELD_KEY).expect("title field"),
-                FieldClaim::try_new(
-                    source,
+                FieldClaim::try_new_unbound_provider(
+                    fasti_domain::MetadataClaimId::new_v7(),
                     format!("{provider} {kind}"),
-                    None,
-                    received(100),
-                    None,
+                    fasti_domain::FieldClaimProvenance::try_new(
+                        fasti_domain::MetadataProviderId::try_new(provider).unwrap(),
+                        source,
+                        mapping.identifier(value).unwrap().value(),
+                        None,
+                        None,
+                        None,
+                        fasti_domain::Sha256Digest::from_bytes(&[7; 32]),
+                    )
+                    .unwrap(),
+                    fetched,
+                    Some(
+                        fetched.value()
+                            + chrono::Duration::seconds(fasti_domain::METADATA_FRESH_SECONDS),
+                    ),
+                    fasti_domain::FieldClaimStatus::Fresh,
                 )
                 .expect("provider field"),
             );
@@ -1711,6 +1734,7 @@ mod tests {
                     mapping.grain(),
                     mapping.identifier(value).expect("provider identifier"),
                     vec![field],
+                    policy,
                 ))
                 .expect("create provider record");
             let evidence = node.upload(format!("{provider}:{kind}:{value}").as_bytes());

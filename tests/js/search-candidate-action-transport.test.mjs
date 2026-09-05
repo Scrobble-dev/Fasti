@@ -280,7 +280,8 @@ test("candidate action binds every saved receipt to immutable submitted intent",
 
 test("candidate action rejects impossible historical status combinations without recomputing age", async (context) => {
   for (const [name, mode, status, expiry] of [
-    ["refetch stale", "refetch", "stale", null],
+    ["refetch fresh without expiry", "refetch", "fresh", null],
+    ["refetch stale with expiry", "refetch", "stale", "2025-01-01T08:02:00Z"],
     ["fresh without expiry", "cached", "fresh", null],
     ["fresh with omitted expiry", "cached", "fresh", undefined],
     ["refetch with omitted expiry", "refetch", "fresh", undefined],
@@ -299,6 +300,20 @@ test("candidate action rejects impossible historical status combinations without
         FastiProtocolError,
       );
     });
+});
+
+test("candidate action accepts historical zero-freshness refetch receipt without renewing timestamps", async () => {
+  const body = request("create", "refetch");
+  const response = saved(body);
+  response.receipt.initial_status = "stale";
+  response.receipt.expires_at = null;
+  assert.deepEqual(
+    await save(
+      clientWith(async () => json(response)),
+      body,
+    ),
+    response,
+  );
 });
 
 test("caller mutation during response wait cannot rewrite candidate action intent", async (context) => {

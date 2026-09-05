@@ -3627,6 +3627,7 @@ mod tests {
                 .expect("field claim"),
                 CapabilityKey::ExportWorkspace,
                 RequestCorrelationId::new_v7(),
+                None,
             )
             .expect("persist field claim");
             crate::metadata::write_field_override(
@@ -4073,6 +4074,7 @@ mod tests {
                 &field_claim,
                 CapabilityKey::ExportWorkspace,
                 RequestCorrelationId::new_v7(),
+                None,
             )
             .expect("provider field claim");
             crate::metadata::write_rating_claim(
@@ -4081,6 +4083,7 @@ mod tests {
                 &rating_claim,
                 CapabilityKey::ExportWorkspace,
                 RequestCorrelationId::new_v7(),
+                None,
             )
             .expect("rating claim");
             connection
@@ -4257,6 +4260,7 @@ mod tests {
                 .expect("legacy provider claim"),
                 CapabilityKey::ExportWorkspace,
                 RequestCorrelationId::new_v7(),
+                None,
             )
             .expect("persist legacy provider claim");
         }

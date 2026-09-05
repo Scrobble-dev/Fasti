@@ -67,6 +67,7 @@ fn seed_kind(node: &TestNode, count: usize, title: &str, grain: Grain) -> Vec<Re
                 &claim,
                 CAPABILITY,
                 RequestCorrelationId::new_v7(),
+                None,
             )
             .unwrap();
             id
@@ -434,29 +435,79 @@ fn local_search_10000_records_release_latency() {
     panic!("run this evidence fixture with --release");
     #[cfg(not(debug_assertions))]
     {
-        let node = node();
-        seed(&node, 10_000, "Common title 東京 %_");
-        let mut samples = Vec::new();
-        for iteration in 0..105 {
-            let query = request(
-                node.access,
-                ["c", "co", "Common", "東京", "%_", "missing"][iteration % 6],
-            );
-            let start = std::time::Instant::now();
-            let page = node.kernel.search_local_records(&query).unwrap();
-            let elapsed = start.elapsed();
-            assert!(page.records.len() <= 100);
-            if iteration >= 5 {
-                samples.push(elapsed);
+        for observed_policy in [false, true] {
+            let node = node();
+            let records = seed(&node, 10_000, "Common title 東京 %_");
+            if observed_policy {
+                let mut connection = node.kernel.inner.connection.lock().unwrap();
+                let transaction = connection.transaction().unwrap();
+                let observed = ReceivedAt::from_application_clock(crate::kernel::now());
+                let policy = fasti_application::ProviderResponseCachePolicy::new(
+                    fasti_application::ProviderResponseReuse::Reusable,
+                    observed.value(),
+                    std::time::Duration::ZERO,
+                    None,
+                    None,
+                )
+                .to_canonical_json();
+                let key = FieldKey::try_new(TITLE_FIELD_KEY).unwrap();
+                for (index, record) in records.iter().enumerate() {
+                    let claim = FieldClaim::try_new_provider(
+                        fasti_domain::MetadataClaimId::new_v7(),
+                        *record,
+                        key.clone(),
+                        "Common title 東京 %_",
+                        fasti_domain::FieldClaimProvenance::try_new(
+                            fasti_domain::MetadataProviderId::try_new("tmdb").unwrap(),
+                            NamespaceKey::try_new("tmdb.movie").unwrap(),
+                            (index + 1).to_string(),
+                            None,
+                            None,
+                            None,
+                            fasti_domain::Sha256Digest::from_bytes(&[7; 32]),
+                        )
+                        .unwrap(),
+                        observed,
+                        Some(observed.value() + chrono::Duration::hours(24)),
+                        fasti_domain::FieldClaimStatus::Fresh,
+                    )
+                    .unwrap();
+                    write_field_claim(
+                        &transaction,
+                        node.access.workspace_id(),
+                        *record,
+                        &key,
+                        &claim,
+                        CAPABILITY,
+                        RequestCorrelationId::new_v7(),
+                        Some(&policy),
+                    )
+                    .unwrap();
+                }
+                transaction.commit().unwrap();
             }
-        }
-        samples.sort();
-        let p95 = samples[94];
-        eprintln!(
-            "local_search dataset=10000 samples=100 p50={:?} p95={:?} max={:?}",
+            let mut samples = Vec::new();
+            for iteration in 0..105 {
+                let query = request(
+                    node.access,
+                    ["c", "co", "Common", "東京", "%_", "missing"][iteration % 6],
+                );
+                let start = std::time::Instant::now();
+                let page = node.kernel.search_local_records(&query).unwrap();
+                let elapsed = start.elapsed();
+                assert!(page.records.len() <= 100);
+                if iteration >= 5 {
+                    samples.push(elapsed);
+                }
+            }
+            samples.sort();
+            let p95 = samples[94];
+            eprintln!(
+            "local_search dataset=10000 observed_policy={observed_policy} samples=100 p50={:?} p95={:?} max={:?}",
             samples[49], p95, samples[99]
         );
-        assert!(p95 < std::time::Duration::from_millis(250), "p95={p95:?}");
+            assert!(p95 < std::time::Duration::from_millis(250), "p95={p95:?}");
+        }
     }
 }
 
@@ -519,7 +570,8 @@ fn local_search_direct_metadata_writers_roll_back_source_and_index_without_outer
         &key,
         &claim,
         CAPABILITY,
-        RequestCorrelationId::new_v7()
+        RequestCorrelationId::new_v7(),
+        None
     )
     .is_err());
     assert!(
