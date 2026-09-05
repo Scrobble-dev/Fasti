@@ -29,6 +29,13 @@ The canonical plan carries the same execution override. The M0 hashes below
 remain historical approval evidence, not current-file checksums for this later
 user-authorized amendment.
 
+The user reaffirmed this as a permanent exclusion for the entire programme,
+not a temporary skip or a per-stage choice. `AGENTS.md` now carries the same
+rule for future tasks and delegated agents, including Access and every later
+metadata/Search stage. Do not rediscover, retry or propose Codex Security from
+an older prompt or during idle work. Only an explicit new user reversal can
+change this instruction; no such reversal has occurred.
+
 ## Controlling artifacts
 
 | Artifact                                                       | SHA-256                                                            | Purpose                                                                                 |
@@ -3733,3 +3740,52 @@ changed. All 53 focused authored-contract/parser/CI regression checks pass
 without skips, and documentation verification passes. The existing network
 guide's stale claim that credential-test IPC did not exist was also corrected
 against `test_provider_credential` and the generated browser method.
+
+The review-correction commit `269ea4dc405258d5b226a9d70b36381e9f3be403`, tree
+`aec051223f8c705de42e7e59b108526311d6e94f`, then passed clean-head canonical
+27+11 and a repeated clean-head Desktop library (85 passed, two existing
+ignores) plus strict Clippy. Independent review found one further P2 evidence
+gap, not a production defect: Desktop queued cancellation was documented but
+only admitted cancellation had a regression. The commander added a deterministic
+held-gate test that cancels and awaits the caller before release, then proves
+zero vault writes/removals and exact unchanged provider state. Independent
+source review confirms that this closes the gap; the added test still needs
+execution and final-head verification. Access received the requested short CPU
+measurement slot after every M4 build/browser handle was terminal; no tests or
+builds are launched during that reservation.
+
+Provider-continuation preparation traced the actual public page-number contract
+through SDK, HTTP/native, runtime, per-page receipt storage and UI append. Page
+digests currently include upstream page, and duplicate suppression stops at one
+page. The approved persisted-order continuation is therefore not complete.
+Existing `search_pages.sequence` and bounded context JSON may support retained
+parent/child replay and exact-coordinate suppression without a new migration;
+that remains subject to query-plan and latency proof, not an allocated schema.
+
+The commander rejected terminal-only no-store Search because it would remove
+existing live pagination. Current runtime policy tests already require a Live
+result with continuation and no persisted candidate payload. The supported
+direction preserves two explicit guarantees: replayable observed ordering for
+retained pages, and a fresh request-only continuation for Live pages with only
+current-screen duplicate suppression. A Live traversal cannot claim an offline
+snapshot or silently become one after a later cacheable response. This is
+consistent with the application-use distinction in
+[RFC 9111 sections 5.2.2.5 and 6](https://www.rfc-editor.org/rfc/rfc9111.html#section-6);
+it does not relax the existing no-store discard rule. Cursor representation,
+traversal bounds, expiry enforcement and memory limits must be frozen at the
+existing Search owner before integration. Do not invent a signing-key owner or
+reuse Access secrets. No production cursor API or migration was added by this
+preparation, and no full-source snapshot/no-skips guarantee is claimed for a
+changing upstream catalogue.
+
+Access's measurement slot is terminal and released. The added queued-cancellation
+case passes: the focused module is now 3/3, full Desktop library 86 passed with
+the same two intentional ignores, and strict all-target Clippy passes. Independent
+source review reports no remaining P0/P1/P2 finding in the correction diff.
+The repeated explicit tooling exclusion is committed separately as `6de50943`
+in repository instructions and the canonical plan. Final combined-head canonical,
+all-JavaScript, ordinary browser and isolated performance checks follow before
+publication; do not reuse the earlier 151-case browser run as proof of the later
+Access integration. The commander stays the sole shared-surface writer while
+three read-only lanes prepare the domain-filter budget decision, real-process
+Search harness composition and isolated M8 field-group gaps.

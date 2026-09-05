@@ -202,6 +202,61 @@ fn assert_tmdb_states(
 }
 
 #[tokio::test]
+async fn cancelled_desktop_credential_waiter_never_starts_after_gate_release() {
+    let (_root, kernel) = new_kernel();
+    let store = MemoryStore::default();
+    complete_setup(&kernel, &store).expect("complete setup");
+    let workspace_id = require_access(&kernel, &store)
+        .expect("authenticated access")
+        .workspace_id();
+    let before = kernel
+        .list_provider_capability_states(workspace_id)
+        .expect("initial provider states");
+    let kernel = Arc::new(kernel);
+    let vault = Arc::new(PausedMemoryVault::default());
+    let runtime = ProviderRuntime::new(vault.clone());
+    let gate = Arc::new(tokio::sync::Mutex::new(()));
+    let held = gate.lock().await;
+    let operation_gate = Arc::clone(&gate);
+    let operation_kernel = Arc::clone(&kernel);
+    let (started, entered) = tokio::sync::oneshot::channel();
+    let caller = tokio::spawn(async move {
+        let _ = started.send(());
+        crate::run_blocking_provider_operation(&operation_gate, move || {
+            save_credential(
+                &runtime,
+                &operation_kernel,
+                workspace_id,
+                save_input("cancelled-waiter-fixture"),
+            )
+        })
+        .await
+    });
+    let reached_gate = tokio::time::timeout(Duration::from_secs(5), entered).await;
+    caller.abort();
+    let cancelled = caller.await;
+    drop(held);
+    let released = tokio::time::timeout(Duration::from_secs(5), gate.lock())
+        .await
+        .expect("cancelled waiter leaves the gate available");
+    drop(released);
+
+    assert!(matches!(reached_gate, Ok(Ok(()))));
+    assert!(cancelled
+        .expect_err("queued caller cancelled")
+        .is_cancelled());
+    assert!(vault.values.lock().expect("memory vault").is_empty());
+    assert_eq!(vault.write_count.load(Ordering::SeqCst), 0);
+    assert_eq!(vault.revoke_count.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        kernel
+            .list_provider_capability_states(workspace_id)
+            .expect("unchanged provider states"),
+        before
+    );
+}
+
+#[tokio::test]
 async fn cancelled_desktop_credential_save_finishes_and_retry_converges() {
     const CREDENTIAL: &str = "cancelled-write-fixture";
 
