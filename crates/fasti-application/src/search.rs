@@ -248,6 +248,7 @@ pub struct SearchPageRequest {
     pub access: ApplicationAccessContext,
     pub query: SearchProviderQuery,
     pub outbound_policy: OutboundAccessPolicy,
+    /// Trusted provider-runtime cache policy; never a browser-selected revision.
     pub terms_revision: String,
 }
 
@@ -277,6 +278,7 @@ pub struct ReadSearchCandidateRequest {
     pub provider: ProviderId,
     pub grain: Grain,
     pub outbound_policy: OutboundAccessPolicy,
+    /// Derive from the current provider descriptor, not the stored receipt.
     pub terms_revision: String,
 }
 
