@@ -1013,3 +1013,27 @@ Playwright route-availability race correction. C2 reported its clean local
 canonical, docs and built-site gates green; remote exact-head CI is pending,
 with no merge or M4 ownership release. Refresh merge analysis only on a material
 handoff. Codex Security remains prohibited; reviews and gates use native tools.
+
+### M4 archive verification follow-up — 2026-09-05
+
+Atomic actions are preserved in commit
+`bf69caf1517b36871d13038b8fd8fe6687af56e5`, tree
+`744a67f6dd5433ff075772ad7216b55607faaba8`. Its first exact-head canonical
+run stopped at JavaScript formatting: the existing generator-owned exclusions
+covered archive v2–v5 but omitted the newly generated v6 schema. No success
+receipt was emitted. The follow-up extends that exact generated-file ownership
+rule to v6; reproducible generation and checked-in byte comparison remain gates.
+
+Inspection also found that the existing offline JSON Schema validator compiled
+only archive v1/v2. It now checks v3–v6 through the same strict Ajv owner, including
+format/stream count, local-only references, actual example validation, canonical
+manifest checksum and frozen preceding stream bytes. Regression tests mutate the
+versioned inputs, so missing files or generic failures cannot masquerade as schema
+proof. No archive bytes, application/runtime code, capability or migration changes
+are part of this verification correction. The next clean exact-head run must pass
+before this follow-up is reported verified.
+
+Focused authored-contract checks pass: 45 tests, including 23 new archive
+regressions for v3–v6 versions, missing/reordered streams, stale checksums,
+correctly rechecksummed changed prefixes, external references and malformed
+schema compilation. Scoped formatting and the full formatting gate pass.
