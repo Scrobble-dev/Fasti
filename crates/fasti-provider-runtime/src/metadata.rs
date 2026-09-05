@@ -126,7 +126,7 @@ impl ProviderMetadataRefreshService {
             &prepared,
             &state,
             mapping.kind(),
-            descriptor.licence_and_terms,
+            descriptor,
             MetadataCachePurpose::MetadataEnrichment,
             (effective_locale.clone(), effective_region.clone()),
         )?;
@@ -135,7 +135,7 @@ impl ProviderMetadataRefreshService {
             &prepared,
             &state,
             mapping.kind(),
-            descriptor.licence_and_terms,
+            descriptor,
             MetadataCachePurpose::OfflineRead,
             (effective_locale.clone(), effective_region.clone()),
         )?;
@@ -347,7 +347,7 @@ fn cache_keys(
     prepared: &fasti_application::PreparedMetadataRefresh,
     state: &ProviderCapabilityState,
     kind: &str,
-    terms_revision: &str,
+    descriptor: &crate::ProviderSpec,
     purpose: MetadataCachePurpose,
     response_coordinates: (
         Option<fasti_domain::MetadataLocale>,
@@ -383,7 +383,7 @@ fn cache_keys(
                 configuration_digest.clone(),
                 CACHE_SCHEMA_VERSION,
                 purpose,
-                terms_revision,
+                descriptor.cache_policy,
                 MetadataDataClassification::Public,
             )
             .map_err(|_| problem(ProblemCode::IntegrityFailed, capability, correlation_id))?,
@@ -697,20 +697,39 @@ mod tests {
         )
         .expect("provider state");
 
-        let keys = cache_keys(
-            &command,
-            &prepared,
-            &state,
-            "movie",
-            "terms-v1",
+        let descriptor = crate::registry()
+            .iter()
+            .find(|entry| entry.provider == "tmdb")
+            .unwrap();
+        for purpose in [
             MetadataCachePurpose::MetadataEnrichment,
-            (Some(locale), Some(region)),
-        )
-        .expect("cache keys");
-        assert!(keys.iter().all(|key| {
-            key.locale().map(MetadataLocale::as_str) == Some("fr-fr")
-                && key.region().map(MetadataRegion::as_str) == Some("FR")
-        }));
+            MetadataCachePurpose::OfflineRead,
+        ] {
+            let keys_for = |descriptor| {
+                cache_keys(
+                    &command,
+                    &prepared,
+                    &state,
+                    "movie",
+                    descriptor,
+                    purpose,
+                    (Some(locale.clone()), Some(region.clone())),
+                )
+                .expect("cache keys")
+            };
+            let keys = keys_for(descriptor);
+            assert!(keys.iter().all(|key| {
+                key.locale().map(MetadataLocale::as_str) == Some("fr-fr")
+                    && key.region().map(MetadataRegion::as_str) == Some("FR")
+                    && key.purpose() == purpose
+                    && key.terms_revision() == "fasti.public-metadata-cache.v1"
+            }));
+            let historical = crate::ProviderSpec {
+                cache_policy: descriptor.licence_and_terms,
+                ..*descriptor
+            };
+            assert_ne!(keys, keys_for(&historical));
+        }
     }
 
     #[test]

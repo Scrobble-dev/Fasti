@@ -178,6 +178,10 @@ unavailable_capabilities!(
     CredentialRequirement::CustomHeader
 );
 
+// Fasti's implementation policy revision, not a vendor legal-terms version or
+// permission to redistribute metadata or share profile-bound Search receipts.
+const PUBLIC_METADATA_CACHE_POLICY: &str = "fasti.public-metadata-cache.v1";
+
 const GOOGLE_BOOKS_SPEC: ProviderSpec = ProviderSpec {
     provider: GOOGLE_BOOKS_PROVIDER,
     label: GOOGLE_BOOKS_LABEL,
@@ -193,7 +197,7 @@ const GOOGLE_BOOKS_SPEC: ProviderSpec = ProviderSpec {
     locale_support: "provider_default",
     region_support: "not_supported",
     rate_limit_policy: "respect_provider_responses",
-    cache_policy: "no_runtime_cache",
+    cache_policy: PUBLIC_METADATA_CACHE_POLICY,
     offline_behavior: "fail_without_mutating_local_state",
     licence_and_terms: "operator_review_required_before_activation",
     request_limits: REQUEST_LIMITS,
@@ -215,7 +219,7 @@ const TMDB_SPEC: ProviderSpec = ProviderSpec {
     locale_support: "en-US",
     region_support: "not_configured_in_m1",
     rate_limit_policy: "respect_provider_responses",
-    cache_policy: "no_runtime_cache",
+    cache_policy: PUBLIC_METADATA_CACHE_POLICY,
     offline_behavior: "fail_without_mutating_local_state",
     licence_and_terms: "tmdb_attribution_required",
     request_limits: ProviderRequestLimits {
@@ -1819,6 +1823,17 @@ mod tests {
     #[test]
     fn registry_includes_active_and_honest_unavailable_providers() {
         assert_eq!(registry().len(), 12);
+        for entry in registry() {
+            assert_eq!(
+                entry.cache_policy,
+                if entry.runtime_available {
+                    PUBLIC_METADATA_CACHE_POLICY
+                } else {
+                    "no_runtime_cache"
+                }
+            );
+            assert_ne!(entry.cache_policy, entry.licence_and_terms);
+        }
         assert!(registry()
             .iter()
             .find(|entry| entry.provider == TMDB_PROVIDER)

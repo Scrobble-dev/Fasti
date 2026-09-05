@@ -68,7 +68,7 @@ impl ProviderSearchService {
     // The private closure also exercises sequencing without replacing governed egress.
     async fn search_page_with<F, Fut>(
         &self,
-        request: SearchPageRequest,
+        mut request: SearchPageRequest,
         offline: bool,
         lease: ProviderOperationLease,
         fetch: F,
@@ -79,6 +79,20 @@ impl ProviderSearchService {
     {
         let capability = CapabilityKey::SearchMetadata;
         let id = request.correlation_id;
+        // The legacy partition slot holds trusted Fasti cache policy, never a
+        // caller-selected revision or the provider's legal-posture label.
+        request.terms_revision = self
+            .runtime
+            .descriptor(request.query.provider().as_str())
+            .map_err(|_| {
+                Box::new(fasti_application::FastiProblem::from_code(
+                    ProblemCode::ValidationFailed,
+                    capability,
+                    id,
+                ))
+            })?
+            .cache_policy
+            .to_owned();
         let persistence = Arc::clone(&self.persistence);
         let prepare_request = request.clone();
         let prepared = run_blocking(&lease, capability, id, move || {
@@ -318,7 +332,7 @@ mod tests {
                 request.query.receipt_context().digest(),
                 Sha256Digest::from_bytes(&[1; 32]),
                 Sha256Digest::from_bytes(&[2; 32]),
-                request.terms_revision.clone(),
+                "fasti.public-metadata-cache.v1".into(),
             )
             .unwrap(),
             provider_state: ProviderCapabilityState::try_new(
@@ -366,6 +380,7 @@ mod tests {
             &self,
             request: &SearchPageRequest,
         ) -> ApplicationResult<PreparedSearchPage> {
+            assert_eq!(request.terms_revision, "fasti.public-metadata-cache.v1");
             assert_eq!(
                 request.query,
                 effective_query(&request.query, request.correlation_id).unwrap()
@@ -381,9 +396,10 @@ mod tests {
         }
         fn read_cached_search_page(
             &self,
-            _: &SearchPageRequest,
+            request: &SearchPageRequest,
             stale: bool,
         ) -> ApplicationResult<Option<StoredSearchPage>> {
+            assert_eq!(request.terms_revision, "fasti.public-metadata-cache.v1");
             self.calls
                 .lock()
                 .unwrap()
@@ -402,6 +418,7 @@ mod tests {
             digest: &Sha256Digest,
             next_page: Option<u32>,
         ) -> ApplicationResult<StoredSearchPage> {
+            assert_eq!(request.terms_revision, "fasti.public-metadata-cache.v1");
             self.calls.lock().unwrap().push("commit");
             let pause = self.pause_commit.lock().unwrap().take();
             if let Some((entered, release)) = pause {
@@ -485,27 +502,52 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn public_search_normalizes_before_empty_cache_and_offline_reads() {
+    async fn public_search_uses_trusted_policy_and_coordinates_before_cache_reads() {
         for offline in [false, true] {
-            let (service, persistence, mut request) = setup(Some(page()), None);
-            request.query = SearchProviderQuery::try_new(
-                request.query.query().clone(),
-                request.query.provider().clone(),
-                1,
-                None,
-                Some(MetadataRegion::try_new("FR").unwrap()),
-                vec![],
-            )
-            .unwrap();
-            let outcome = service
-                .search_page(request, offline, lease().await)
-                .await
+            for revision in ["", "caller-chosen", "tmdb_attribution_required"] {
+                let (service, persistence, mut request) = setup(Some(page()), None);
+                request.terms_revision = revision.into();
+                request.query = SearchProviderQuery::try_new(
+                    request.query.query().clone(),
+                    request.query.provider().clone(),
+                    1,
+                    None,
+                    Some(MetadataRegion::try_new("FR").unwrap()),
+                    vec![],
+                )
                 .unwrap();
-            assert!(
-                matches!(outcome, ProviderSearchOutcome::Page { page, upstream_problem: None } if page.candidates.is_empty())
-            );
-            assert_eq!(*persistence.calls.lock().unwrap(), ["prepare", "fresh"]);
+                let outcome = service
+                    .search_page(request, offline, lease().await)
+                    .await
+                    .unwrap();
+                assert!(
+                    matches!(outcome, ProviderSearchOutcome::Page { page, upstream_problem: None } if page.candidates.is_empty())
+                );
+                assert_eq!(*persistence.calls.lock().unwrap(), ["prepare", "fresh"]);
+            }
         }
+    }
+
+    #[tokio::test]
+    async fn unknown_provider_never_reaches_search_persistence_or_fetch() {
+        let (service, persistence, mut request) = setup(Some(page()), Some(page()));
+        request.query = SearchProviderQuery::try_new(
+            request.query.query().clone(),
+            ProviderId::try_new("unknown-provider").unwrap(),
+            1,
+            None,
+            None,
+            vec![],
+        )
+        .unwrap();
+        let error = service
+            .search_page_with(request, false, lease().await, |_| async {
+                panic!("unknown provider fetched")
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), ProblemCode::ValidationFailed);
+        assert!(persistence.calls.lock().unwrap().is_empty());
     }
 
     #[tokio::test]

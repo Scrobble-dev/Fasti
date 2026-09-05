@@ -5546,25 +5546,28 @@ mod tests {
             correlation_id,
         )
         .expect("claim");
-        let cache_key = MetadataCacheKey::try_new(
-            MetadataProviderId::try_new("tmdb").expect("provider"),
-            Some(3),
-            record_id,
-            "metadata/movie",
-            Grain::Film,
-            ns("tmdb"),
-            "movie-cache",
-            Some(MetadataLocale::try_new("en-IE").expect("locale")),
-            Some(MetadataRegion::try_new("IE").expect("region")),
-            MetadataFieldGroup::BasicInfo,
-            digest("b"),
-            digest("c"),
-            1,
-            MetadataCachePurpose::OfflineRead,
-            "terms-v1",
-            MetadataDataClassification::Internal,
-        )
-        .expect("cache key");
+        let cache_key_for = |revision| {
+            MetadataCacheKey::try_new(
+                MetadataProviderId::try_new("tmdb").expect("provider"),
+                Some(3),
+                record_id,
+                "metadata/movie",
+                Grain::Film,
+                ns("tmdb"),
+                "movie-cache",
+                Some(MetadataLocale::try_new("en-IE").expect("locale")),
+                Some(MetadataRegion::try_new("IE").expect("region")),
+                MetadataFieldGroup::BasicInfo,
+                digest("b"),
+                digest("c"),
+                1,
+                MetadataCachePurpose::OfflineRead,
+                revision,
+                MetadataDataClassification::Internal,
+            )
+            .expect("cache key")
+        };
+        let cache_key = cache_key_for("tmdb_attribution_required");
         let created = received(300);
         let created_at = created.value();
         let entry = MetadataCacheEntry::try_new(
@@ -5594,6 +5597,27 @@ mod tests {
         .expect("load cache")
         .expect("entry");
         assert_eq!(loaded, entry);
+        let current_policy_key = cache_key_for("fasti.public-metadata-cache.v1");
+        assert!(load_metadata_cache_entry(
+            &connection,
+            node.access.workspace_id(),
+            &current_policy_key,
+            capability,
+            correlation_id,
+        )
+        .expect("new policy cache lookup")
+        .is_none());
+        assert_eq!(
+            load_metadata_cache_entry(
+                &connection,
+                node.access.workspace_id(),
+                &cache_key,
+                capability,
+                correlation_id,
+            )
+            .expect("historical cache remains readable"),
+            Some(entry.clone())
+        );
         assert_eq!(
             loaded.read_state(
                 created_at + Duration::hours(3),

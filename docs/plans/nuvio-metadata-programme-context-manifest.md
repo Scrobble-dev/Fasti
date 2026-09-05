@@ -297,8 +297,10 @@ Preserve browser rotation without binding cache identity to its session ID.
 
 TMDB Search currently sends locale but no region; Google Books Search sends
 neither. Record actual upstream coordinates without claiming detail-specific
-region semantics. A candidate detail fetch must separately authorize metadata
-read; Record actions retain their existing mutation scopes. No new grant
+region semantics. A candidate detail fetch retains Fasti `SearchMetadata` /
+`metadata_search` authority and separately checks the provider `metadata.read`
+capability state; this is not a new human permission. Record actions retain
+their existing mutation scopes. No new grant
 revision or restore-generation API is allocated by this preparation. Existing
 revocation is terminal; future in-place regrant needs its owner's explicit
 generation contract. Also verified: all 29 contract unit tests passed after
@@ -759,3 +761,56 @@ C2 may prepare that bounded delivery, excluding later C3 work, subject to exact
 tests/review/merged-tree proof and corrected stale M3 ownership text. This is not
 approval to activate C2 or modify M4 schema, store, registry, API, SDK, host or
 Workbench. No v17 allocation or shared-file release has occurred.
+
+### M4 trusted cache-policy checkpoint — 2026-09-05
+
+The preceding dependency/docs checkpoint at
+`25f20b2a4c7a834d8530bc64b9158ae24d624387`, tree
+`dfab3cc1f1cb5ecbcd8126ab32417ce85d1b3540`, passed all 27 canonical contract
+gates with a clean exact-source receipt. Its full JS suite passed 145 tests;
+the two opt-in browser cases were separately exercised in the four-test docs
+browser run. That evidence does not complete M4's media Search integration.
+
+Active TMDB and Google Books descriptors now declare the implementation revision
+`fasti.public-metadata-cache.v1` in their existing `cache_policy` field. M2's
+enrichment and offline cache keys consume that descriptor, not `licence_and_terms`.
+Search replaces caller-selected revisions before any prepare/cache/network work;
+the same trusted request reaches stale reads, post-I/O authorization and commit.
+The existing `terms_revision` storage slot is retained. This is a Fasti policy
+revision, not evidence of an upstream legal-terms revision or permission to
+redistribute metadata or share profile-bound Search receipts. Provider legal
+posture and attribution remain separate and unchanged.
+
+Existing immutable operation receipts still replay their original result and
+semantic digest. New cache lookups use a distinct partition; old entries are not
+rewritten, alias-read or deleted. A real SQLite regression changes only the
+revision, proves the new partition misses, and proves the old entry remains.
+Runtime tests assert trusted policy at every persistence boundary, including
+empty/caller-selected/legal-label input online and offline. An unknown-provider
+negative test caught an invalid typed-error mapping: `provider_route_unavailable`
+is not allowed for SearchMetadata. Descriptor misses now return its existing
+`validation_failed` problem before persistence or fetch. No registry expansion
+or error-validation bypass was added.
+
+Focused evidence: all 39 provider-runtime tests pass; strict provider/store
+all-target Clippy passes. Store tests pass for revision isolation, exact refresh
+receipt replay, cache-hit receipt replay, Search partition separation, candidate
+authority rechecks, historical archive-v4 immutable receipts and archive-v5/v15
+restore into v16. Native independent review remains read-only. Clean exact-source
+contract verification follows the commit; Codex Security remains off.
+
+Next details preparation must atomically snapshot the existing Search receipt
+authority and separate provider `metadata.read` state inside the Search store
+transaction. Reuse `authorize_application_transaction` for browser or credential
+access; do not fabricate credential context from a browser session. Existing M2
+refresh is Record-bound and is not a pre-Record detail service. Recheck both
+authority and provider state before exposing post-fetch success or failure.
+Future details requests derive the same descriptor revision, never the stored
+receipt's old revision. No production details host constructor exists yet.
+
+Explicit Create/Attach actions must reuse the existing identity and metadata
+transaction helpers, preserve unrelated Library/progress/rating state, and commit
+durable retry outcomes atomically. Freeze those retry/archive semantics before
+adding durable action storage; published archive v5 must not silently acquire
+another stream. No action receipt, migration v17, archive-version change, API,
+shared-file release or M4 merge was introduced by this cache-policy slice.
