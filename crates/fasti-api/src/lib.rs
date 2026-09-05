@@ -344,6 +344,7 @@ impl Modify for ProductionSecurityAddon {
         fasti_contracts::RecordActivityDto,
         fasti_contracts::RecordIdentifierDto,
         fasti_contracts::RecordSummaryDto,
+        fasti_contracts::ListRecordsQueryParameters,
         fasti_contracts::RegisterNamespaceRequest,
         fasti_contracts::RegisterNamespaceResponse,
         fasti_contracts::ResolvedFieldDto,
@@ -2586,6 +2587,60 @@ mod tests {
         assert_eq!(populated_list.records[0].record_id, created.record_id);
         assert_eq!(populated_list.records[0].identifiers.len(), 1);
         assert_eq!(populated_list.records[0].identifiers[0].value, "abc123");
+        for (record_id, expected_count) in [
+            (created.record_id.clone(), 1),
+            (fasti_domain::RecordId::new_v7().to_string(), 0),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    auth(Request::get(format!(
+                        "/api/v1/records?record_id={record_id}"
+                    )))
+                    .body(Body::empty())
+                    .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let selected: fasti_contracts::ListRecordsResponse =
+                serde_json::from_slice(&to_bytes(response.into_body(), 16 * 1024).await.unwrap())
+                    .unwrap();
+            assert!(!selected.truncated);
+            assert_eq!(selected.records.len(), expected_count);
+            if expected_count == 1 {
+                assert_eq!(selected, populated_list);
+            }
+        }
+        for query in [
+            "record_id=invalid".to_owned(),
+            "record_id=".to_owned(),
+            "unknown=value".to_owned(),
+            format!("record_id={0}&record_id={0}", created.record_id),
+        ] {
+            let path = format!("/api/v1/records?{query}");
+            let unauthorized = app
+                .clone()
+                .oneshot(
+                    Request::get(&path)
+                        .header(header::AUTHORIZATION, "Bearer invalid")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+            let invalid = app
+                .clone()
+                .oneshot(auth(Request::get(&path)).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(invalid.status(), StatusCode::UNPROCESSABLE_ENTITY);
+            let problem: fasti_contracts::ProblemDetails =
+                serde_json::from_slice(&to_bytes(invalid.into_body(), 16 * 1024).await.unwrap())
+                    .unwrap();
+            assert_eq!(problem.code, "validation_failed");
+        }
         assert_eq!(
             populated_list.records[0]
                 .overview

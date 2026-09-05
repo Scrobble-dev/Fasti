@@ -1,6 +1,6 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(deny_unknown_fields)]
@@ -124,4 +124,29 @@ pub struct ListRecordsResponse {
     /// bounded page returned here (see `ListTrackingDispositionsResponse`
     /// for the same pattern on a sibling listing capability).
     pub truncated: bool,
+}
+
+#[derive(
+    Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema, IntoParams,
+)]
+#[serde(deny_unknown_fields)]
+#[into_params(parameter_in = Query)]
+pub struct ListRecordsQueryParameters {
+    /// Select one active Record; missing or inaccessible Records return an empty page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        length(equal = 36),
+        regex(pattern = r"^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$")
+    )]
+    #[schema(
+        min_length = 36,
+        max_length = 36,
+        pattern = r"^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+    )]
+    #[param(
+        min_length = 36,
+        max_length = 36,
+        pattern = r"^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+    )]
+    pub record_id: Option<String>,
 }

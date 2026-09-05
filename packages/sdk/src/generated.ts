@@ -1513,6 +1513,22 @@ const PRODUCTION_SCHEMAS = {
     ],
     "type": "object"
   },
+  "ListRecordsQueryParameters": {
+    "additionalProperties": false,
+    "properties": {
+      "record_id": {
+        "description": "Select one active Record; missing or inaccessible Records return an empty page.",
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "type": "object"
+  },
   "ListRecordsResponse": {
     "additionalProperties": false,
     "properties": {
@@ -3930,6 +3946,10 @@ export interface ListRecordsResponse {
   readonly truncated: boolean;
 }
 
+export interface ListRecordsQueryParameters {
+  readonly record_id?: null | string;
+}
+
 export interface AttachIdentifierRequest {
   readonly grain: string;
   readonly namespace: string;
@@ -4438,7 +4458,7 @@ export const LOCAL_RUNTIME_OPERATIONS = {
   embyWebhook: { operationId: "emby_webhook", method: "POST", path: "/api/v1/integrations/emby/webhook", capabilityId: "observation.accept", authorization: "scoped", requiredScopes: ["observation_accept"], problemCodes: ["authentication_failed","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","invalid_observation","malformed_json","payload_too_large","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["observation.accept.capacity_exceeded","observation.accept.receipt","observation.accept.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: null, responseSchema: "SubmitObservationResponse" },
   plexWebhook: { operationId: "plex_webhook", method: "POST", path: "/api/v1/integrations/plex/webhook", capabilityId: "observation.accept", authorization: "scoped", requiredScopes: ["observation_accept"], problemCodes: ["authentication_failed","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","invalid_observation","malformed_json","payload_too_large","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["observation.accept.capacity_exceeded","observation.accept.receipt","observation.accept.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: null, responseSchema: "SubmitObservationResponse" },
   createRecord: { operationId: "create_record", method: "POST", path: "/api/v1/records", capabilityId: "identity.record.create", authorization: "scoped_or_browser_session", requiredScopes: ["identity_write"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","integrity_failed","invalid_identifier","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["identity.record.create.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "CreateRecordRequest", responseSchema: "CreateRecordResponse" },
-  listRecords: { operationId: "list_records", method: "GET", path: "/api/v1/records", capabilityId: "identity.record.list", authorization: "scoped_or_browser_session", requiredScopes: ["identity_read"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","integrity_failed","session_policy_changed","storage_unavailable"], exampleIds: ["identity.record.list.forbidden"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ListRecordsResponse" },
+  listRecords: { operationId: "list_records", method: "GET", path: "/api/v1/records", capabilityId: "identity.record.list", authorization: "scoped_or_browser_session", requiredScopes: ["identity_read"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","integrity_failed","session_policy_changed","storage_unavailable","validation_failed"], exampleIds: ["identity.record.list.forbidden"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ListRecordsResponse" },
   attachIdentifier: { operationId: "attach_identifier", method: "POST", path: "/api/v1/records/identifiers", capabilityId: "identity.identifier.attach", authorization: "scoped_or_browser_session", requiredScopes: ["identity_write"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","idempotency_conflict","identity_conflict","integrity_failed","invalid_identifier","malformed_json","payload_too_large","record_not_found","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["identity.identifier.attach.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: "AttachIdentifierRequest", responseSchema: "AttachIdentifierResponse" },
   registerNamespace: { operationId: "register_namespace", method: "POST", path: "/api/v1/namespaces", capabilityId: "identity.namespace.register", authorization: "scoped_or_browser_session", requiredScopes: ["identity_write"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","integrity_failed","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["identity.namespace.register.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: "RegisterNamespaceRequest", responseSchema: "RegisterNamespaceResponse" },
   listTrackingDispositions: { operationId: "list_tracking_dispositions", method: "GET", path: "/api/v1/profile/record-tracking-dispositions", capabilityId: "profile.record.tracking_disposition.list", authorization: "scoped_or_browser_session", requiredScopes: ["profile_state_read"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","integrity_failed","session_policy_changed","storage_unavailable"], exampleIds: ["profile.record.tracking_disposition.list.forbidden"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ListTrackingDispositionsResponse" },
@@ -4496,6 +4516,11 @@ export function parseCreateRecordResponse(value: unknown): CreateRecordResponse 
 // prettier-ignore
 export function parseListRecordsResponse(value: unknown): ListRecordsResponse {
   return parseProductionDto("ListRecordsResponse", value);
+}
+
+// prettier-ignore
+export function parseListRecordsQueryParameters(value: unknown): ListRecordsQueryParameters {
+  return parseProductionDto("ListRecordsQueryParameters", value);
 }
 
 // prettier-ignore
@@ -6734,7 +6759,8 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "forbidden",
         "integrity_failed",
         "session_policy_changed",
-        "storage_unavailable"
+        "storage_unavailable",
+        "validation_failed"
       ],
       "runtime_body": "b2",
       "scopes": [
@@ -11631,6 +11657,24 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "status": 503,
       "title": "Storage unavailable",
       "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "identity.record.list",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
     },
     {
       "capability_id": "identity.review.defer",

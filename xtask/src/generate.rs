@@ -3583,6 +3583,7 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         "RecordIdentifierDto",
         "RecordSummaryDto",
         "ListRecordsResponse",
+        "ListRecordsQueryParameters",
         "AttachIdentifierRequest",
         "AttachIdentifierResponse",
         "RegisterNamespaceRequest",
@@ -3772,6 +3773,10 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         ("parseCreateRecordRequest", "CreateRecordRequest"),
         ("parseCreateRecordResponse", "CreateRecordResponse"),
         ("parseListRecordsResponse", "ListRecordsResponse"),
+        (
+            "parseListRecordsQueryParameters",
+            "ListRecordsQueryParameters",
+        ),
         ("parseAttachIdentifierRequest", "AttachIdentifierRequest"),
         ("parseAttachIdentifierResponse", "AttachIdentifierResponse"),
         ("parseRegisterNamespaceRequest", "RegisterNamespaceRequest"),

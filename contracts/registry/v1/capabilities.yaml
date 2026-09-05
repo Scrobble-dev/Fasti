@@ -1377,6 +1377,7 @@ capabilities:
         integrity_failed,
         session_policy_changed,
         storage_unavailable,
+        validation_failed,
       ]
     examples: [identity.record.list.forbidden]
     uat: []

@@ -608,7 +608,8 @@ define_capabilities!(
             Forbidden,
             IntegrityFailed,
             SessionPolicyChanged,
-            StorageUnavailable
+            StorageUnavailable,
+            ValidationFailed
         ],
         []
     ),

@@ -1149,6 +1149,69 @@ test("client.listRecords() surfaces the truncated flag through the transport", a
   });
 });
 
+test("Record selection preserves call options and binds the response identity", async () => {
+  let attempts = 0;
+  let response = { records: [], truncated: false };
+  const client = new FastiClient({
+    baseUrl: "http://127.0.0.1:8420",
+    credential: "records-secret",
+    fetch: async (url, init) => {
+      attempts += 1;
+      assert.equal(
+        new URL(url).searchParams.get("record_id"),
+        contractIds.record,
+      );
+      assert.equal(init.method, "GET");
+      assert.equal(init.body, undefined);
+      return new Response(JSON.stringify(response), {
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+  const select = () =>
+    client.listRecords({ timeoutMs: 1000 }, { record_id: contractIds.record });
+  assert.deepEqual(await select(), response);
+  assert.throws(
+    () => client.listRecords({}, { record_id: "../invalid" }),
+    FastiProtocolError,
+  );
+  assert.throws(
+    () => client.listRecords({}, { unknown: true }),
+    FastiProtocolError,
+  );
+  assert.equal(attempts, 1);
+  response = { records: [], truncated: true };
+  await assert.rejects(select(), FastiProtocolError);
+  const record = {
+    record_id: contractIds.record,
+    grain: "film",
+    status: "active",
+    title: { tier: "empty", value: null, source: null, is_stale: false },
+    poster: { tier: "empty", value: null, source: null, is_stale: false },
+    latest_activity: null,
+  };
+  response = { records: [record], truncated: false };
+  assert.deepEqual(await select(), response);
+  response = { records: [record, record], truncated: false };
+  await assert.rejects(select(), FastiProtocolError);
+  response = {
+    records: [{ ...record, record_id: v7("rec", "a") }],
+    truncated: false,
+  };
+  await assert.rejects(select(), FastiProtocolError);
+  const omitted = new FastiClient({
+    baseUrl: "http://127.0.0.1:8420",
+    credential: "records-secret",
+    fetch: async (url) => {
+      assert.equal(new URL(url).search, "");
+      return new Response(JSON.stringify({ records: [], truncated: false }), {
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+  await omitted.listRecords({}, { record_id: null });
+});
+
 test("provider SDK keeps reads retry-safe and credential mutations single-attempt", async (context) => {
   await context.test("provider list retries a transient response", async () => {
     let attempts = 0;

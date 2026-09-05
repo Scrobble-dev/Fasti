@@ -22,6 +22,11 @@ use std::collections::{BTreeSet, HashMap};
 /// ponytail: no cursor pagination. Add one if a real library exceeds this.
 pub(crate) const MAX_RECORDS_PAGE: i64 = 500;
 
+const SELECT_ACTIVE_RECORD_BY_ID: &str = r#"
+    SELECT record_id, grain FROM records
+    WHERE workspace_id = ?1 AND record_id = ?2 AND status = 'active'
+"#;
+
 pub(crate) fn register_namespace_tx(
     transaction: &Transaction<'_>,
     workspace_id: WorkspaceId,
@@ -230,23 +235,42 @@ impl IdentityPort for SqliteKernel {
 
         let workspace_id = authorized.workspace_id();
         let profile_id = authorized.profile_id();
-        let mut statement = map_sql(
-            transaction.prepare(
+        let selector = query.record_id().map_err(|_| {
+            Box::new(
+                FastiProblem::validation_failed(
+                    capability,
+                    correlation_id,
+                    vec![fasti_application::Violation::try_new(
+                        "invalid_record_selector",
+                        "/query/record_id",
+                        "Record selector is invalid",
+                        "an optional canonical rec_ UUIDv7",
+                    )
+                    .expect("store-owned violation")],
+                )
+                .expect("one bounded violation"),
+            )
+        })?;
+        let (sql, selector) = match selector {
+            Some(record_id) => (
+                SELECT_ACTIVE_RECORD_BY_ID,
+                rusqlite::types::Value::Text(record_id.to_string()),
+            ),
+            None => (
                 r#"
                 SELECT record_id, grain FROM records
                 WHERE workspace_id = ?1 AND status = 'active'
                 ORDER BY record_id
                 LIMIT ?2
                 "#,
+                rusqlite::types::Value::Integer(MAX_RECORDS_PAGE + 1),
             ),
-            capability,
-            correlation_id,
-        )?;
+        };
+        let mut statement = map_sql(transaction.prepare(sql), capability, correlation_id)?;
         let rows = map_sql(
-            statement.query_map(
-                params![workspace_id.to_string(), MAX_RECORDS_PAGE + 1],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-            ),
+            statement.query_map(params![workspace_id.to_string(), selector], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            }),
             capability,
             correlation_id,
         )?;
@@ -893,6 +917,296 @@ mod tests {
             ))
             .expect("list records")
             .into_records()
+    }
+
+    fn exact_record(
+        node: &TestNode,
+        access: fasti_application::RequestAccessContext,
+        record_id: RecordId,
+    ) -> ApplicationResult<RecordListView> {
+        node.kernel.list_records(
+            ListRecordsQuery::new(RequestCorrelationId::new_v7(), access).with_record_id(record_id),
+        )
+    }
+
+    #[test]
+    fn exact_record_selector_enriches_beyond_500_and_preserves_profile_projection() {
+        let node = TestNode::new();
+        {
+            let mut connection = node.kernel.inner.connection.lock().unwrap();
+            let tx = connection.transaction().unwrap();
+            for _ in 0..MAX_RECORDS_PAGE {
+                insert_record(
+                    &tx,
+                    node.access.workspace_id(),
+                    Grain::Film,
+                    CapabilityKey::CreateRecord,
+                    RequestCorrelationId::new_v7(),
+                )
+                .unwrap();
+            }
+            tx.commit().unwrap();
+        }
+        let (record_id, identifier) = observed_record(&node);
+        let other = node.add_profile_with_scopes(&[
+            fasti_application::ScopeKey::IdentityRead,
+            fasti_application::ScopeKey::ObservationAccept,
+        ]);
+        let first_time =
+            accept_record_activity(&node, node.access, &identifier, "2026-08-23T10:30:00Z");
+        let other_time = accept_record_activity(&node, other, &identifier, "2026-08-24T10:30:00Z");
+        {
+            let connection = node.kernel.inner.connection.lock().unwrap();
+            let title = FieldKey::try_new(TITLE_FIELD_KEY).unwrap();
+            write_field_claim(
+                &connection,
+                node.access.workspace_id(),
+                record_id,
+                &title,
+                &FieldClaim::try_new(ns("tmdb"), "Shared title", None, received(100), None)
+                    .unwrap(),
+                CapabilityKey::ListRecords,
+                RequestCorrelationId::new_v7(),
+            )
+            .unwrap();
+            let override_ = fasti_domain::ProfileFieldOverride::try_new(
+                other.profile_id(),
+                record_id,
+                title,
+                "Other profile title",
+                received(200),
+            )
+            .unwrap();
+            crate::metadata::write_profile_field_override(
+                &connection,
+                node.access.workspace_id(),
+                &override_,
+                CapabilityKey::ListRecords,
+                RequestCorrelationId::new_v7(),
+            )
+            .unwrap();
+        }
+        let default = node
+            .kernel
+            .list_records(ListRecordsQuery::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+            ))
+            .unwrap();
+        assert!(default.truncated());
+        let default = default.into_records();
+        assert_eq!(default.len(), MAX_RECORDS_PAGE as usize);
+        assert!(!default.iter().any(|record| record.record_id() == record_id));
+        for (access, title, time) in [
+            (node.access, "Shared title", first_time),
+            (other, "Other profile title", other_time),
+        ] {
+            let selected = exact_record(&node, access, record_id).unwrap();
+            assert!(!selected.truncated());
+            let selected = selected.into_records();
+            assert_eq!(selected.len(), 1);
+            let record = &selected[0];
+            assert_eq!(record.record_id(), record_id);
+            assert_eq!(record.grain(), Grain::Film);
+            assert_eq!(record.title().value(), Some(title));
+            assert_eq!(record.identifiers().len(), 1);
+            assert_eq!(record.identifiers()[0].value(), identifier.value());
+            assert_eq!(record.latest_activity().unwrap().occurred_at(), Some(&time));
+        }
+    }
+
+    #[test]
+    fn exact_record_selector_is_nonenumerating_and_keeps_identity_authorization() {
+        let node = TestNode::new();
+        let local = node
+            .kernel
+            .create_record(CreateRecordCommand::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+                Grain::Film,
+            ))
+            .unwrap()
+            .record_id();
+        let other_node = TestNode::new();
+        let foreign = other_node
+            .kernel
+            .create_record(CreateRecordCommand::new(
+                RequestCorrelationId::new_v7(),
+                other_node.access,
+                Grain::Film,
+            ))
+            .unwrap()
+            .record_id();
+        // Put a foreign workspace's existing Record in this database so this
+        // proves workspace isolation, not merely an unknown identifier.
+        {
+            let connection = node.kernel.inner.connection.lock().unwrap();
+            connection
+                .execute(
+                    "INSERT INTO workspaces(workspace_id, created_at) VALUES (?1, ?2)",
+                    params![
+                        other_node.access.workspace_id().to_string(),
+                        timestamp(now())
+                    ],
+                )
+                .unwrap();
+            connection.execute("INSERT INTO records(record_id, workspace_id, grain, status, created_at) VALUES (?1, ?2, 'film', 'active', ?3)",
+                params![foreign.to_string(), other_node.access.workspace_id().to_string(), timestamp(now())]).unwrap();
+        }
+        let selected = exact_record(&node, node.access, local).unwrap();
+        assert!(!selected.truncated());
+        let selected = selected.into_records();
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].title().tier(), FieldResolutionTier::Empty);
+        assert!(selected[0].identifiers().is_empty());
+        assert!(selected[0].latest_activity().is_none());
+        for id in [RecordId::new_v7(), foreign] {
+            let selected = exact_record(&node, node.access, id).unwrap();
+            assert!(!selected.truncated());
+            assert!(selected.into_records().is_empty());
+        }
+        {
+            let connection = node.kernel.inner.connection.lock().unwrap();
+            // Published Records admit only active status. Inject an invalid
+            // historical row solely to prove the selector's active predicate;
+            // this does not introduce a new Record lifecycle.
+            connection
+                .pragma_update(None, "ignore_check_constraints", true)
+                .unwrap();
+            connection
+                .execute(
+                    "UPDATE records SET status = 'inactive' WHERE record_id = ?1",
+                    [local.to_string()],
+                )
+                .unwrap();
+            connection
+                .pragma_update(None, "ignore_check_constraints", false)
+                .unwrap();
+        }
+        let selected = exact_record(&node, node.access, local).unwrap();
+        assert!(!selected.truncated());
+        assert!(selected.into_records().is_empty());
+        let denied = node.add_profile_with_scopes(&[]);
+        for (access, expected) in [
+            (node.access, ProblemCode::ValidationFailed),
+            (denied, ProblemCode::Forbidden),
+        ] {
+            let error = node
+                .kernel
+                .list_records(
+                    ListRecordsQuery::new(RequestCorrelationId::new_v7(), access)
+                        .with_record_selector(Err(fasti_application::InvalidRecordSelector)),
+                )
+                .err()
+                .expect("invalid selector requires authorization first");
+            assert_eq!(error.code(), expected);
+        }
+        for id in [local, foreign, RecordId::new_v7()] {
+            assert_eq!(
+                exact_record(&node, denied, id)
+                    .err()
+                    .expect("identity scope required")
+                    .code(),
+                ProblemCode::Forbidden
+            );
+        }
+    }
+
+    #[test]
+    fn exact_record_selector_uses_primary_key_and_constant_selects_at_10000_records() {
+        let node = TestNode::new();
+        let selected = RecordId::new_v7();
+        let selects = Arc::new(AtomicUsize::new(0));
+        {
+            let counter = Arc::clone(&selects);
+            node.kernel
+                .inner
+                .connection
+                .lock()
+                .unwrap()
+                .authorizer(Some(move |context: rusqlite::hooks::AuthContext<'_>| {
+                    if matches!(context.action, rusqlite::hooks::AuthAction::Select) {
+                        counter.fetch_add(1, Ordering::Relaxed);
+                    }
+                    rusqlite::hooks::Authorization::Allow
+                }))
+                .unwrap();
+        }
+        let mut previous = 0;
+        let mut counts = Vec::new();
+        for total in [0, 100, 10_000] {
+            {
+                let mut connection = node.kernel.inner.connection.lock().unwrap();
+                let tx = connection.transaction().unwrap();
+                {
+                    let mut insert = tx.prepare("INSERT INTO records(record_id, workspace_id, grain, status, created_at) VALUES (?1, ?2, 'film', 'active', ?3)").unwrap();
+                    for index in previous..total {
+                        let id = if index == 0 {
+                            selected
+                        } else {
+                            RecordId::new_v7()
+                        };
+                        insert
+                            .execute(params![
+                                id.to_string(),
+                                node.access.workspace_id().to_string(),
+                                timestamp(now())
+                            ])
+                            .unwrap();
+                    }
+                }
+                tx.commit().unwrap();
+            }
+            previous = total;
+            selects.store(0, Ordering::Relaxed);
+            let page = exact_record(&node, node.access, selected).unwrap();
+            assert!(!page.truncated());
+            assert_eq!(page.into_records().len(), usize::from(total != 0));
+            counts.push(selects.load(Ordering::Relaxed));
+        }
+        assert!(counts[0] > 0);
+        assert_eq!(
+            counts,
+            vec![counts[0]; 3],
+            "exact selection must not add per-record queries"
+        );
+        assert!(counts[0] <= 40, "same bounded enrichment owner: {counts:?}");
+        let connection = node.kernel.inner.connection.lock().unwrap();
+        let mut explain = connection
+            .prepare(&format!("EXPLAIN QUERY PLAN {SELECT_ACTIVE_RECORD_BY_ID}"))
+            .unwrap();
+        let plan = explain
+            .query_map(
+                params![node.access.workspace_id().to_string(), selected.to_string()],
+                |row| row.get::<_, String>(3),
+            )
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert!(
+            plan.iter()
+                .any(|step| step.contains("SEARCH records") && step.contains("record_id=?")),
+            "indexed exact lookup: {plan:?}"
+        );
+        assert!(
+            !plan
+                .iter()
+                .any(|step| step.contains("SCAN records") || step.contains("TEMP B-TREE")),
+            "no scan or sort: {plan:?}"
+        );
+        let mut query = connection.prepare(SELECT_ACTIVE_RECORD_BY_ID).unwrap();
+        {
+            let mut rows = query
+                .query(params![
+                    node.access.workspace_id().to_string(),
+                    selected.to_string()
+                ])
+                .unwrap();
+            assert!(rows.next().unwrap().is_some());
+            assert!(rows.next().unwrap().is_none());
+        }
+        assert_eq!(query.get_status(rusqlite::StatementStatus::FullscanStep), 0);
+        assert_eq!(query.get_status(rusqlite::StatementStatus::Sort), 0);
     }
 
     #[test]
