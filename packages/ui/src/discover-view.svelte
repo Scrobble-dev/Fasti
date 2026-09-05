@@ -273,7 +273,9 @@
       return;
     }
     selectionExplicit = false;
-    selectedProviderId = ALL_PROVIDERS;
+    selectedProviderId =
+      supportedProviders.find(providerAvailable)?.provider ??
+      supportedProviders[0].provider;
   });
 
   $effect(() => {
