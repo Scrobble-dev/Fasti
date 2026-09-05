@@ -279,7 +279,7 @@ The earlier warm 1.96.0 run took 0.41 seconds. Neither is a cold-install benchma
 | Errors | 8/10, tested/partial | Invalid flags give usage/help. An unknown test filter exits 0 with 19 filtered tests; README requires 19 passed and none filtered. Missing-cache recovery is documented from the earlier observed failure. |
 | Documentation | 8/10, source-reviewed | Setup, expected output, public fixtures and runtime exclusions are explicit; no new web surface to browse. |
 | Upgrade path | Not applicable | No runtime adoption or database upgrade in this package; version changes must repeat qualification. |
-| Environment | 8/10, tested/partial | Offline and namespace checks pass; root canonical checks do not run this isolated workspace. CI still needs explicit package coverage before delivery. |
+| Environment | 8/10, tested/partial | Offline and namespace checks pass; root canonical checks do not run this isolated workspace. At this audit CI coverage was absent. The dedicated workflow is now added; live execution remains unproven. |
 | Community and DX measurement | Not applicable | No new community or telemetry surface. Existing repository contribution paths remain unchanged. |
 
 No comparable E1 plan-DX score was present in the branch review log. Independent
