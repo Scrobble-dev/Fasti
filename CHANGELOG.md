@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Exact TrailBase `v0.33.5` native and OCI development packaging, private lifecycle operations, full-depot backup and restore, hermetic account/social/TOTP conformance, combined resource enforcement, and a test-only `v0.33.4` adjacent upgrade and rollback fixture.
 - Checked domain/application models for named clients, personal access tokens, consent revisions, bounded inventories, and one-time issuance results. These are an internal [C2 foundation](docs/plans/fasti-access-c2-foundation.md), not callable token or client-administration operations.
 - Contributor-only [C3 signing qualification](qualification/access-c3-signing/README.md) with a separate locked test package and dedicated CI, so its checks can run from a checkout without the prior temporary probe. This does not approve production signing or recovery.
+- Contributors can reproduce the retained [C3 framing qualification](qualification/access-c3-framing/README.md) from a separate locked package and CI matrix, including malformed-input and interrupted-I/O checks. This does not approve production encryption or recovery.
 
 ### Changed
 
