@@ -19,6 +19,8 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
 
 const ARTWORK_CAPABILITY: &str = "metadata.artwork";
+const ARTWORK_LOCATOR_PREFIX: &str = "fasti-artwork.";
+pub(crate) const CACHED_ARTWORK_LOCATOR_PREFIX: &str = "fasti-cached-artwork.";
 const TMDB_IMAGE_HOST: &str = "image.tmdb.org";
 const GOOGLE_IMAGE_HOSTS: &[&str] = &["books.google.com", "books.googleusercontent.com"];
 const ARTWORK_LIMIT: usize = 2_000_000;
@@ -187,12 +189,30 @@ impl ArtworkCache {
         record: RecordId,
     ) -> Option<String> {
         artwork_target(provider, url).ok()?;
-        self.record_locator(access, record)
+        self.record_locator(ARTWORK_LOCATOR_PREFIX, access, record)
     }
 
-    fn record_locator(&self, access: RequestAccessContext, record: RecordId) -> Option<String> {
+    pub(crate) fn cached_locator(
+        &self,
+        provider: &str,
+        url: &str,
+        access: RequestAccessContext,
+        record: RecordId,
+    ) -> Option<String> {
+        let entry = self.cached_entry(provider, url)?;
+        entry
+            .reusable_at(chrono::Utc::now(), false)
+            .then(|| self.record_locator(CACHED_ARTWORK_LOCATOR_PREFIX, access, record))?
+    }
+
+    fn record_locator(
+        &self,
+        prefix: &str,
+        access: RequestAccessContext,
+        record: RecordId,
+    ) -> Option<String> {
         Some(format!(
-            "fasti-artwork.{}.{}.{}.{}",
+            "{prefix}{}.{}.{}.{}",
             self.root.file_name()?.to_str()?,
             access.workspace_id(),
             access.profile_id(),
@@ -208,8 +228,19 @@ impl ArtworkCache {
         if locator.len() > 256 {
             return None;
         }
+        let prefix = [ARTWORK_LOCATOR_PREFIX, CACHED_ARTWORK_LOCATOR_PREFIX]
+            .into_iter()
+            .find(|prefix| locator.starts_with(prefix))?;
         let record = locator.rsplit('.').next()?.parse::<RecordId>().ok()?;
-        (self.record_locator(access, record)?.as_str() == locator).then_some(record)
+        (self.record_locator(prefix, access, record)?.as_str() == locator).then_some(record)
+    }
+
+    pub(crate) fn load_cached(&self, provider: &str, url: &str) -> Result<Vec<u8>, DesktopProblem> {
+        artwork_target(provider, url)?;
+        self.cached_entry(provider, url)
+            .filter(|entry| entry.reusable_at(chrono::Utc::now(), false))
+            .map(|entry| entry.bytes)
+            .ok_or_else(|| DesktopProblem::provider("The artwork is not available offline."))
     }
 
     pub(crate) async fn load(
@@ -1027,6 +1058,53 @@ mod tests {
         assert!(cache.local_path(GOOGLE_BOOKS_PROVIDER, url).is_none());
         png[16..20].copy_from_slice(&5000_u32.to_be_bytes());
         assert!(!has_safe_image_dimensions(&png));
+    }
+
+    #[test]
+    fn cache_only_locator_requires_fresh_bytes_and_preserves_scope() {
+        let root = tempfile::tempdir().expect("cache root");
+        let (_node, kernel) = crate::setup::test_support::new_kernel();
+        let cache = ArtworkCache::new(root.path(), kernel.data_root_identity());
+        let url = "https://image.tmdb.org/t/p/w500/poster.jpg";
+        let access = RequestAccessContext::new(
+            fasti_domain::WorkspaceId::new_v7(),
+            fasti_domain::ProfileId::new_v7(),
+            fasti_domain::ClientId::new_v7(),
+            fasti_domain::CredentialId::new_v7(),
+            fasti_domain::ProfileGrantId::new_v7(),
+            1,
+        );
+        let record = RecordId::new_v7();
+        assert!(cache
+            .cached_locator(TMDB_PROVIDER, url, access, record)
+            .is_none());
+
+        let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+        png.extend_from_slice(&500_u32.to_be_bytes());
+        png.extend_from_slice(&750_u32.to_be_bytes());
+        cache
+            .store(TMDB_PROVIDER, url, &png, &reusable_image_policy())
+            .expect("store reusable image");
+
+        let locator = cache
+            .cached_locator(TMDB_PROVIDER, url, access, record)
+            .expect("fresh cache-only locator");
+        assert!(locator.starts_with(CACHED_ARTWORK_LOCATOR_PREFIX));
+        assert_eq!(cache.locator_record(&locator, access), Some(record));
+        assert_eq!(cache.load_cached(TMDB_PROVIDER, url).unwrap(), png);
+        assert!(cache
+            .locator_record(
+                &locator,
+                RequestAccessContext::new(
+                    fasti_domain::WorkspaceId::new_v7(),
+                    access.profile_id(),
+                    access.client_id(),
+                    access.credential_id(),
+                    access.grant_id(),
+                    access.presented_credential_epoch(),
+                ),
+            )
+            .is_none());
     }
 
     #[test]

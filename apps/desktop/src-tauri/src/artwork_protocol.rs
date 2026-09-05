@@ -57,7 +57,8 @@ fn request_locator<'a>(request: &'a http::Request<Vec<u8>>, origin: &str) -> Opt
         return None;
     }
     let locator = request.uri().path().strip_prefix('/')?;
-    (locator.starts_with("fasti-artwork.")
+    ((locator.starts_with("fasti-artwork.")
+        || locator.starts_with(artwork::CACHED_ARTWORK_LOCATOR_PREFIX))
         && locator.len() <= 256
         && locator
             .bytes()
@@ -106,6 +107,7 @@ pub(crate) fn handle<R: Runtime>(
     tauri::async_runtime::spawn(async move {
         let _permit = permit;
         let bytes = async {
+            let cached_only = locator.starts_with(artwork::CACHED_ARTWORK_LOCATOR_PREFIX);
             let state = app.try_state::<DesktopState>()?;
             // ponytail: global provider gate serializes images and mutations; use keyed
             // ordering only if measured throughput requires it without weakening publication.
@@ -121,18 +123,22 @@ pub(crate) fn handle<R: Runtime>(
                 .provider_id()?
                 .as_str();
             let url = before.1.value()?;
-            let configuration = state.network.load().ok()?;
-            let runtime = state.provider_runtime(&kernel).ok()?;
-            let bytes = state
-                .artwork
-                .load(
-                    provider,
-                    url,
-                    configuration.outbound_policy(),
-                    runtime.transport(),
-                )
-                .await
-                .ok()?;
+            let bytes = if cached_only {
+                state.artwork.load_cached(provider, url).ok()?
+            } else {
+                let configuration = state.network.load().ok()?;
+                let runtime = state.provider_runtime(&kernel).ok()?;
+                state
+                    .artwork
+                    .load(
+                        provider,
+                        url,
+                        configuration.outbound_policy(),
+                        runtime.transport(),
+                    )
+                    .await
+                    .ok()?
+            };
             let after =
                 records::artwork_selection(&kernel, &store, &state.artwork, &locator).ok()?;
             if before != after || trusted_origin(&app, "main").as_deref() != Some(origin.as_str()) {

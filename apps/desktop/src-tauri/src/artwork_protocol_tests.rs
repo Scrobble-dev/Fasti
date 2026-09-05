@@ -27,14 +27,18 @@ mod protocol_tests {
         // No close/forget/global reset: RAII also releases permits on assertion failure.
     }
 
-    fn locator() -> String {
+    fn locator_with_prefix(prefix: &str) -> String {
         format!(
-            "fasti-artwork.{}.{}.{}.{}",
+            "{prefix}{}.{}.{}.{}",
             "ab".repeat(32),
             fasti_domain::WorkspaceId::new_v7(),
             fasti_domain::ProfileId::new_v7(),
             fasti_domain::RecordId::new_v7(),
         )
+    }
+
+    fn locator() -> String {
+        locator_with_prefix("fasti-artwork.")
     }
 
     fn request(uri: &str) -> http::Request<Vec<u8>> {
@@ -43,14 +47,18 @@ mod protocol_tests {
 
     #[test]
     fn native_artwork_request_accepts_both_asset_forms_and_optional_exact_origin() {
-        let locator = locator();
-        for base in ["asset://localhost", "http://asset.localhost"] {
-            let mut request = request(&format!("{base}/{locator}"));
-            assert_eq!(request_locator(&request, ORIGIN), Some(locator.as_str()));
-            request
-                .headers_mut()
-                .insert(http::header::ORIGIN, http::HeaderValue::from_static(ORIGIN));
-            assert_eq!(request_locator(&request, ORIGIN), Some(locator.as_str()));
+        for locator in [
+            locator(),
+            locator_with_prefix(artwork::CACHED_ARTWORK_LOCATOR_PREFIX),
+        ] {
+            for base in ["asset://localhost", "http://asset.localhost"] {
+                let mut request = request(&format!("{base}/{locator}"));
+                assert_eq!(request_locator(&request, ORIGIN), Some(locator.as_str()));
+                request
+                    .headers_mut()
+                    .insert(http::header::ORIGIN, http::HeaderValue::from_static(ORIGIN));
+                assert_eq!(request_locator(&request, ORIGIN), Some(locator.as_str()));
+            }
         }
     }
 

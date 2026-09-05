@@ -13,6 +13,7 @@ mod nuvio_collections;
 mod providers;
 mod records;
 mod reviews;
+mod search;
 mod secure_storage;
 mod setup;
 
@@ -642,6 +643,21 @@ fn list_records(
 
 #[cfg(feature = "desktop-runtime")]
 #[tauri::command(async)]
+fn search_records(
+    state: tauri::State<'_, DesktopState>,
+    input: fasti_contracts::LocalSearchRequestDto,
+) -> Result<search::LocalSearchResponse, DesktopProblem> {
+    let kernel = state.kernel()?;
+    search::local_records(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+        &state.artwork,
+        input,
+    )
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command(async)]
 fn create_record(
     state: tauri::State<'_, DesktopState>,
     grain: fasti_domain::Grain,
@@ -1005,6 +1021,7 @@ pub fn run() {
             read_metadata_projection,
             configure_metadata_projection,
             list_records,
+            search_records,
             create_record,
             attach_identifier,
             register_namespace,
