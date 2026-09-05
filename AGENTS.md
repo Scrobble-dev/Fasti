@@ -157,7 +157,7 @@ pnpm test:ui
 ```
 
 For ordinary cases, use `pnpm test:ui --grep-invert @performance`.
-Run Lighthouse separately with `pnpm test:ui --grep @performance --workers=1 --retries=0`.
+Run Lighthouse separately with `pnpm test:ui --grep @performance --workers=1 --retries=0 --output=test-results-performance`.
 The latter requires Node >=22.19 and an installed stable Chrome with the
 qualified interaction trace event; see the [Access performance guide](docs/plans/fasti-access-parallel-regressions.md#persistent-performance-sentinel-gate).
 CI refreshes Chrome only on its ephemeral runner, not on a contributor's host.

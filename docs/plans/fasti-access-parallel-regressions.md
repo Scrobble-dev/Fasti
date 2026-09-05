@@ -1,12 +1,40 @@
 # Access A+C parallel regressions
 
 Status: bounded header, mobile layout and notice fixes implemented and
-independently reviewed. Clean source `63f955c4` passed 142 ordinary browser
-cases, two Lighthouse cases, 27 contract and 11 portable gates. Its evidence
-retains that source identity. Remaining coverage assertions, screen-reader
-evidence and hosted delivery are in progress. Unshipped.
+independently reviewed. Clean source `a1c261ab` passed 144 ordinary browser
+cases, two Lighthouse cases, 27 contract and 11 portable gates. The six coverage
+gaps have passing focused and combined checks. Isolated Orca-generated speech
+evidence is recorded with its original source and limits. The branch is pushed;
+PR creation, exact hosted checks, merge and integrated-tree proof remain pending.
+No supported release or full accessibility conformance is claimed.
 Current base: `4bd84a562e60b04c278173529164f06cc41c7753` (merged C3
 qualification only). Clean rebase checkpoint: `211d3ee161285ef5cc6432e0f6e0cdc474718668`.
+
+## Final clean-source verification, 2026-09-05
+
+Verified source: `a1c261abe0f0997d70b7b2f00d5f9298b6308e2a`, tree
+`c9abd6bdfc9405b7a0aac59b76a6e1581f5bd89c`. Canonical contract and portable
+receipts each bind that source with `dirty:false` and record 27/27 and 11/11
+passing gates. The ordinary browser suite passed 144/144, with zero skipped,
+unexpected or flaky cases and no runner errors. Its JSON is
+`.gstack/qa-reports/access-browser-final-a1c261ab.json`, SHA-256
+`c4138518f3760b4e0e1bb20fbded7dab505b86d0eb99a15faa1c3e81f5c0187f`.
+
+Official Lighthouse timespans passed 2/2 at 320/1440px: CLS 0/0 and INP
+36.335/37.317 ms respectively. The report is
+`.gstack/qa-reports/access-performance-final-a1c261ab.json`, SHA-256
+`613a7050389c3ebd890ff10982a1db0edfeb4dc851b7585c3d930b10edba49f9`.
+Each case retains exact clean-source provenance, Lighthouse 13.4.1, Chrome
+152.0.7977.82, three observed interactions and one intercepted fixture POST.
+These are light-theme, unthrottled local Vite timespans, not initial-load,
+field, mobile-hardware or real-authentication performance claims.
+
+The component and sentinel bytes remain unchanged from `63f955c4`. The earlier
+142-case suite, metrics, failures, corrected-selector run and Orca source remain
+historical evidence below. This checkpoint closes their pending combined local
+execution, not their wider manual, packaged-host or conformance limits. This
+documentation-only follow-up does not relabel the receipts as evidence for a
+later commit. Existing Fasti versions and all hosted delivery gates are retained.
 
 ## Ownership and purpose
 
