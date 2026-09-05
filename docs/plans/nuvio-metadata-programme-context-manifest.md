@@ -2748,3 +2748,49 @@ deadlines, offline local reads, canonical navigation and bounded 10,000-Record
 evidence. M7 continues to own Collection bindings. Exact catalog admission and
 fixture implementation remain unresolved implementation work, not permission to
 invent contracts now. No M6 production files or shared surfaces are allocated.
+
+### 2026-09-05 — Dense-history duplicate-work optimization
+
+The previous turn made verified progress, not a wait: clean native artwork and
+canonical gates passed. This slice changes only the existing field-policy
+companion query, its parameter bindings and regression tests. No policy meaning,
+resolver, migration, archive, public contract, UI or Access-owned file changes.
+Ponytail reuses the current recent index and SQLite materialization; no cache,
+dependency or second metadata owner is introduced.
+
+The companion now probes for a 257th provenance row once per requested scope.
+Histories fitting the existing payload limit already have every applicable policy
+decoded and checked, so they skip duplicate ranking/decoding. Overflowing scopes
+retain the original full-history restriction query. The probe has no policy,
+provider, locale or lifecycle filter. Extra orphan provenance conservatively
+causes more work rather than falsely certifying a complete window.
+
+The new boundary test failed before the production change: it returned four
+companion groups instead of just the two overflowing groups. It now passes at
+255/256/257/4,096 rows, with unchanged single/batch suppression and stream order.
+The actual SQLite plan proves one materialized scope set, a narrow covering-index
+probe, and no policy/payload sort. Full Store checks passed 459 tests plus three
+integration tests, with six explicit unit-test ignores and one ignored doc test;
+strict all-target Store clippy passed. Existing malformed/misbound evidence,
+override, legacy wildcard, source/locale, archive restore and reopen gates passed.
+
+Two fixed SELECT clauses increased authorizer preparation counts by two, not by
+Record count. Exact-selection counts were `[41, 41, 41]` at 0/100/10,000 Records;
+the full 500-page count was 42. Two static test ceilings now allow 42 while retaining
+the constant-count comparisons and indexed query-plan gates. Independent native
+review found no concrete defect or weakened scale assertion in this disposition.
+
+Fresh baseline from clean `3de02a6dbe80367cf3190f18c178fc5909a8e201`, tree
+`d56019725ff395c1c4bfe7ee7383a8e6feffc8f8`, release Store test binary SHA-256
+`fd6286e5e5a7faf57d63424d42118ba9678b0b6458039407180e2a448f64cb85`:
+100 Records, five fields, 256 claims/field, 4,096-byte values, mixed policies,
+five samples; median 9.190270404 s, max 9.401818730 s, HWM 39,940,096 bytes.
+After-measurements and exact clean canonical qualification remain the next gate;
+no performance gain is claimed from source inspection alone.
+
+Read-only M5/M8 preparation preserves scope: M5 still needs independent saved
+intent and authoritative Library filter/continuation semantics, not Record
+creation or client-side filtering. M8's remaining field groups and locale fallback
+must use the existing identity, response-policy, override and attribution owners.
+No M8 isolated production leaf is allocated while these shared M4 surfaces remain
+active; no field group, episode/company/network route or alias execution is dropped.

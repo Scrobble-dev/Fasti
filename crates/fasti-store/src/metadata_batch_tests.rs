@@ -773,7 +773,8 @@ fn known_policy_query_metrics(
             params![
                 node.access.workspace_id().to_string(),
                 record_json,
-                field_json
+                field_json,
+                MAX_EFFECTIVE_FIELD_CLAIMS
             ],
             |row| {
                 Ok((
@@ -791,6 +792,39 @@ fn known_policy_query_metrics(
         .find(|(_, _, detail)| detail == "CO-ROUTINE k")
         .expect("policy key coroutine")
         .0;
+    let scopes = plan_rows
+        .iter()
+        .filter(|(_, _, detail)| detail == "MATERIALIZE overflow_scopes")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        scopes.len(),
+        1,
+        "probe scopes once before ranking: {plan_rows:?}"
+    );
+    let probe = plan_rows
+        .iter()
+        .find(|(_, parent, detail)| {
+            *parent == scopes[0].0 && detail.contains("CORRELATED SCALAR SUBQUERY")
+        })
+        .expect("one bounded overflow probe inside the materialized scopes")
+        .0;
+    assert!(
+        plan_rows.iter().any(|(_, parent, detail)| *parent == probe
+            && detail.contains(
+                "SEARCH recent USING COVERING INDEX metadata_claim_provenance_recent_idx"
+            )
+            && ["workspace_id=?", "record_id=?", "field_key=?"]
+                .iter()
+                .all(|part| detail.contains(part))),
+        "overflow probe must use only narrow indexed keys: {plan_rows:?}"
+    );
+    let probe_sql = SELECT_KNOWN_FIELD_POLICIES
+        .split("ranked_keys AS (")
+        .next()
+        .unwrap();
+    assert!(probe_sql.contains("LIMIT 1 OFFSET ?4"));
+    assert!(!probe_sql.contains("response_policy_json"));
+    assert!(!probe_sql.contains("metadata_field_claims"));
     let inside_keys = |mut ancestor: i64| {
         while ancestor != 0 && ancestor != key_node {
             ancestor = plan_rows
@@ -831,7 +865,10 @@ fn known_policy_query_metrics(
     // Inspect the actual SQL's key projections as well as the plan: EQP alone
     // does not enumerate the values carried through temporary sort records.
     let ranked = SELECT_KNOWN_FIELD_POLICIES
-        .split("FROM json_each")
+        .split("ranked_keys AS (")
+        .nth(1)
+        .unwrap()
+        .split("FROM overflow_scopes")
         .next()
         .unwrap();
     assert!(!ranked.contains("response_policy_json"));
@@ -844,7 +881,8 @@ fn known_policy_query_metrics(
         params![
             node.access.workspace_id().to_string(),
             record_json,
-            field_json
+            field_json,
+            MAX_EFFECTIVE_FIELD_CLAIMS
         ],
         CAP,
         RequestCorrelationId::new_v7(),
@@ -880,6 +918,65 @@ fn known_policy_query_metrics(
 }
 
 #[test]
+fn metadata_known_policy_companion_only_reads_overflowing_scopes() {
+    let node = TestNode::new();
+    let record = records(&node, 1)[0];
+    let fields = fields();
+    for (field, count) in fields.iter().zip([255, 256, 257, 4096]) {
+        known_policy_history(&node, record, field, 0..count);
+    }
+    let connection = node.kernel.inner.connection.lock().unwrap();
+    let mut statement = connection.prepare(SELECT_KNOWN_FIELD_POLICIES).unwrap();
+    let policies = known_metadata_policies(
+        &mut statement,
+        params![
+            node.access.workspace_id().to_string(),
+            serde_json::to_string(&[record]).unwrap(),
+            serde_json::to_string(&fields.iter().map(FieldKey::as_str).collect::<Vec<_>>())
+                .unwrap(),
+            MAX_EFFECTIVE_FIELD_CLAIMS
+        ],
+        CAP,
+        RequestCorrelationId::new_v7(),
+    )
+    .unwrap()
+    .collect::<ApplicationResult<Vec<_>>>()
+    .unwrap();
+    let mut expected = vec![
+        (record, fields[2].as_str().to_owned()),
+        (record, fields[3].as_str().to_owned()),
+    ];
+    expected.sort_by(|left, right| left.1.cmp(&right.1));
+    assert_eq!(
+        policies
+            .iter()
+            .map(|policy| policy.key.clone())
+            .collect::<Vec<_>>(),
+        expected,
+        "complete payload windows must not decode their known policies twice"
+    );
+    for field in &fields[..4] {
+        assert!(
+            load_field_claims(
+                &connection,
+                node.access.workspace_id(),
+                record,
+                field,
+                CAP,
+                RequestCorrelationId::new_v7(),
+                received_at(4096).value(),
+            )
+            .unwrap()
+            .is_empty(),
+            "complete and overflowing histories both retain the known restriction"
+        );
+    }
+    drop(statement);
+    drop(connection);
+    assert_matches_single_record_owner(&node, &[record]);
+}
+
+#[test]
 fn metadata_known_policy_companion_indexes_full_history_and_sorts_only_keys() {
     let node = TestNode::new();
     let record = records(&node, 1)[0];
@@ -903,7 +1000,7 @@ fn metadata_known_policy_stream_rejects_descending_scope_order() {
     let record = records(&node, 1)[0];
     let fields = fields();
     for field in &fields[..2] {
-        known_policy_history(&node, record, field, 0..1);
+        known_policy_history(&node, record, field, 0..257);
     }
     let connection = node.kernel.inner.connection.lock().unwrap();
     let mut statement = connection
@@ -917,7 +1014,8 @@ fn metadata_known_policy_stream_rejects_descending_scope_order() {
             node.access.workspace_id().to_string(),
             serde_json::to_string(&[record]).unwrap(),
             serde_json::to_string(&fields[..2].iter().map(FieldKey::as_str).collect::<Vec<_>>())
-                .unwrap()
+                .unwrap(),
+            MAX_EFFECTIVE_FIELD_CLAIMS
         ],
         CAP,
         RequestCorrelationId::new_v7(),

@@ -1248,7 +1248,9 @@ mod tests {
             vec![counts[0]; 3],
             "exact selection must not add cold per-record SELECT preparations"
         );
-        assert!(counts[0] <= 40, "same bounded enrichment owner: {counts:?}");
+        // Includes two fixed SELECT clauses for the materialized metadata
+        // overflow scope/probe; the equality above still rejects query growth.
+        assert!(counts[0] <= 42, "same bounded enrichment owner: {counts:?}");
         let connection = node.kernel.inner.connection.lock().unwrap();
         let mut explain = connection
             .prepare(&format!("EXPLAIN QUERY PLAN {SELECT_ACTIVE_RECORD_BY_ID}"))
@@ -1351,8 +1353,9 @@ mod tests {
         assert_eq!(list(&node).len(), MAX_RECORDS_PAGE as usize);
         let select_count = selects.load(Ordering::Relaxed);
         assert!(
-            select_count <= 40,
-            "record listing regressed to per-record queries: {select_count} SELECTs"
+            // Includes the two fixed metadata overflow scope/probe clauses.
+            select_count <= 42,
+            "record listing regressed to per-record preparations: {select_count} SELECTs"
         );
     }
 
