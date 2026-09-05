@@ -1,14 +1,12 @@
 <script lang="ts">
-  import {
-    IconAlertTriangle,
-    IconCheck,
-    IconDeviceTv,
-    IconInfoCircle,
-    IconPlug,
-    IconRefresh,
-    IconRadio,
-    IconSettings,
-  } from "@tabler/icons-svelte";
+  import IconAlertTriangle from "@tabler/icons-svelte/icons/alert-triangle";
+  import IconCheck from "@tabler/icons-svelte/icons/check";
+  import IconDeviceTv from "@tabler/icons-svelte/icons/device-tv";
+  import IconInfoCircle from "@tabler/icons-svelte/icons/info-circle";
+  import IconPlug from "@tabler/icons-svelte/icons/plug";
+  import IconRefresh from "@tabler/icons-svelte/icons/refresh";
+  import IconRadio from "@tabler/icons-svelte/icons/radio";
+  import IconSettings from "@tabler/icons-svelte/icons/settings";
   import { onMount } from "svelte";
   import ApiClientsPanel from "./api-clients-panel.svelte";
   import {

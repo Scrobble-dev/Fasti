@@ -1142,3 +1142,38 @@ and three integration tests, with five declared ignored unit fixtures and one
 ignored documentation example. Strict all-target domain/store Clippy, formatting
 and diff checks pass. Clean exact-source canonical verification follows commit;
 the preceding head's receipt is not evidence for this changed source.
+
+### M4 direct Tabler imports and material C2 handoff — 2026-09-05
+
+The resolver commit `3462f1fab9e5a22e43bebf77047092dd39ae1963`, tree
+`6d3780e892f8f3a60ffb321d4d32119602e98191`, passes all 27 canonical contract
+gates with a clean exact-source receipt. All earlier M4 results remain committed.
+
+The next mechanical UI change uses the already-installed Tabler package's
+supported direct icon subpaths, following status-panel's existing pattern.
+Across 24 files, 199 imports retain the same local identifiers and the same 96
+upstream icon implementations. Independent review confirms every non-import byte
+is unchanged: no component, prop, behavior, style, dependency or config change.
+The web build transforms 279 modules instead of 6,378 and takes 1.33 s rather
+than 3.84 s in this comparison. CSS retains identical bytes/hash; JS remains
+740.90 kB, while gzip grows from 146.57 to 148.36 kB. This is a build-work
+improvement, not a download-size saving. No CSS pruning or speculative lazy
+component framework was introduced.
+
+UI typecheck, Tabler boundary/policy, formatting and diff checks pass. Both
+existing navigation-semantics Playwright tests pass on the isolated health-stub
+fixture: eight routes retain one current navigation item, and empty Media Detail
+retains its named recovery surface with no axe violations. This is bounded UI
+regression evidence, not live provider or complete accessibility qualification.
+
+C2's material handoff now reports PR #125 merged into dev at
+`62e10d2e9bd738ed5da425c008eb839f89cdbea5`, tree
+`d6fcea1563b673f83cb4cabe1ef50d1c6dc5c087`, matching reviewed PR head
+`90374622ec5bad52beabf9405835bba51b56dda5`. All reported PR checks passed,
+including the hardware windows. Commander must independently fetch/verify before
+rebasing the clean committed M4 branch. Preserve scr_, the 27-ID inventory, both
+Search/access_credentials exports, MetadataSearch default-deny, and dev's actual
+physical-docs-path regression. This is not a new dev-push qualification claim.
+Merged v15/archive v5 remain frozen; M4 retains v16/archive v6 and every named
+shared surface. No v17 allocation or M4 shared-file release is authorized by
+this C2 foundation merge. Codex Security remains prohibited.

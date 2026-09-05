@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { MediaRecord, WatchStatus } from "./types.js";
-  import { IconX, IconCheck } from "@tabler/icons-svelte";
+  import IconX from "@tabler/icons-svelte/icons/x";
+  import IconCheck from "@tabler/icons-svelte/icons/check";
 
   interface Props {
     record: MediaRecord;

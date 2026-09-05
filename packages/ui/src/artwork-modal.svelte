@@ -1,6 +1,8 @@
 <script lang="ts">
   import type { MediaRecord } from "./types.js";
-  import { IconX, IconCheck, IconPhoto } from "@tabler/icons-svelte";
+  import IconX from "@tabler/icons-svelte/icons/x";
+  import IconCheck from "@tabler/icons-svelte/icons/check";
+  import IconPhoto from "@tabler/icons-svelte/icons/photo";
 
   export interface ArtworkCandidate {
     readonly id: string;

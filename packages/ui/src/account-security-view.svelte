@@ -4,19 +4,17 @@
     FastiProblemError,
     type ProblemDetails,
   } from "@fasti/sdk";
-  import {
-    IconAlertTriangle,
-    IconClock,
-    IconDevices,
-    IconKey,
-    IconLoader2,
-    IconLogout,
-    IconRefresh,
-    IconShieldCheck,
-    IconUserCheck,
-    IconWorld,
-    IconX,
-  } from "@tabler/icons-svelte";
+  import IconAlertTriangle from "@tabler/icons-svelte/icons/alert-triangle";
+  import IconClock from "@tabler/icons-svelte/icons/clock";
+  import IconDevices from "@tabler/icons-svelte/icons/devices";
+  import IconKey from "@tabler/icons-svelte/icons/key";
+  import IconLoader2 from "@tabler/icons-svelte/icons/loader-2";
+  import IconLogout from "@tabler/icons-svelte/icons/logout";
+  import IconRefresh from "@tabler/icons-svelte/icons/refresh";
+  import IconShieldCheck from "@tabler/icons-svelte/icons/shield-check";
+  import IconUserCheck from "@tabler/icons-svelte/icons/user-check";
+  import IconWorld from "@tabler/icons-svelte/icons/world";
+  import IconX from "@tabler/icons-svelte/icons/x";
   import { onMount, tick } from "svelte";
   import { hostProblemText } from "./host-problem.js";
   import type {

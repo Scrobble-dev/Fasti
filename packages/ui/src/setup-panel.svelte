@@ -1,5 +1,7 @@
 <script lang="ts">
-  import { IconArchive, IconLock, IconRefresh } from "@tabler/icons-svelte";
+  import IconArchive from "@tabler/icons-svelte/icons/archive";
+  import IconLock from "@tabler/icons-svelte/icons/lock";
+  import IconRefresh from "@tabler/icons-svelte/icons/refresh";
   import type { DesktopProblem, SetupViewState } from "./setup-types.js";
 
   let {
