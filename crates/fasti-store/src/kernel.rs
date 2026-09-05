@@ -88,6 +88,8 @@ impl DataRootIdentity {
 /// prove the daemon is stopped before it inspects staging or active data.
 /// On Linux and Android, the lock follows the opened physical root across a
 /// rename; a replacement at the configured pathname is a distinct root.
+/// A live Rust guard or kernel owner must not be used or dropped in a forked
+/// child. Child processes must exec or exit without running those destructors.
 #[derive(Debug)]
 pub struct LockedDataRoot {
     path: PathBuf,
@@ -111,7 +113,10 @@ impl LockedDataRoot {
         let root_directory = open_data_root_directory(&path)?;
         let path = fs::read_link(format!("/proc/self/fd/{}", root_directory.as_raw_fd()))?;
         let mut lock = acquire_data_root_lock(&path, &root_directory)?;
-        let identity = data_root_identity(&path, &root_directory, &mut lock)?;
+        let identity = data_root_identity(&path, &root_directory, &mut lock).inspect_err(|_| {
+            // No guard exists yet; release inherited lock ownership on error.
+            let _ = lock.unlock();
+        })?;
         Ok(Self {
             path,
             identity,
@@ -149,6 +154,16 @@ impl LockedDataRoot {
         {
             None
         }
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+impl Drop for LockedDataRoot {
+    fn drop(&mut self) {
+        // CLOEXEC does not close a child's inherited descriptor until exec.
+        // Release the shared lock now; ordinary close remains the fallback
+        // if the OS rejects unlock. Drop must not panic during other cleanup.
+        let _ = self._lock.unlock();
     }
 }
 
@@ -1241,6 +1256,52 @@ mod tests {
 
         drop(first);
         SqliteKernel::open(&root).expect("lock released with kernel");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn data_root_lock_release_does_not_wait_for_an_inherited_descriptor() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let root = temporary.path().join("fasti-data");
+        let guard = LockedDataRoot::acquire(&root).expect("offline data-root guard");
+        // dup and fork retain the same open file description on Linux.
+        let inherited = guard._lock.try_clone().expect("duplicate lock descriptor");
+        let kernel = SqliteKernel::open_locked(guard).expect("kernel from held guard");
+        let retained_kernel = kernel.clone();
+        drop(kernel);
+        assert!(matches!(
+            LockedDataRoot::acquire(&root),
+            Err(StoreOpenError::DataRootLocked)
+        ));
+        drop(retained_kernel);
+
+        let next = LockedDataRoot::acquire(&root)
+            .expect("final kernel drop releases its lock even while a descriptor survives");
+        drop(inherited);
+        assert!(matches!(
+            LockedDataRoot::acquire(&root),
+            Err(StoreOpenError::DataRootLocked)
+        ));
+        drop(next);
+        LockedDataRoot::acquire(&root).expect("new owner releases its own lock");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn data_root_identity_failure_preserves_error_and_releases_acquisition() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let root = temporary.path().join("fasti-data");
+        fs::create_dir(&root).expect("data root");
+        let lock_path = root.join("fasti.lock");
+        fs::write(&lock_path, [1_u8]).expect("malformed nonce");
+        for _ in 0..2 {
+            assert!(matches!(
+                LockedDataRoot::acquire(&root),
+                Err(StoreOpenError::UnsafePath { .. })
+            ));
+        }
+        fs::write(&lock_path, [7_u8; DATA_ROOT_NONCE_BYTES]).expect("corrected nonce");
+        LockedDataRoot::acquire(&root).expect("identity rejection did not retain the lock");
     }
 
     #[cfg(any(target_os = "linux", target_os = "android"))]
