@@ -2689,3 +2689,50 @@ seam: Tauri invoke has no AbortSignal support. Generation fencing alone must not
 be described as cancelling native provider work. Commander retains shared-file
 ownership; the next vertical slice must resolve this in the existing scoped
 command/runtime path rather than lose receipt or lifetime semantics.
+
+### 2026-09-05 — Clean native artwork and canonical evidence
+
+Commit `48dc0544f7535a863fc1333a2f89b38a5dacf18c`, tree
+`1fc828e67b92855441f3db8b43b32c480111c8b2`, rebuilt the actual release Desktop
+and passed 79 Desktop tests (two explicit opt-in ignores), the harness self-test,
+and the native fixture. The seeder ignore was then explicitly executed by the
+native harness. `target/native-artwork/run-snwlilpo/receipt.json` declares that
+exact clean source and passing exact-locator/decode/reload/rejection/restoration
+checks. Both network observations have zero external routes. Its screenshot is
+`target/native-artwork/run-snwlilpo/record.png`.
+
+Artifact SHA-256 identities:
+
+- Desktop: `06f06c7993d615528ef686e48247e9b21738e9faff392839597c36a638e1893d`
+- Seeder: `2f6e4e122027cde5c193b2c805dd1427f226223bc1c1055c3fdff6a30d79f74d`
+- Harness: `52a43d34ac7cde038efd1e3c86d97a03c231f17a8674230ef25dbfbf6f337c2e`
+
+The same clean commit/tree passed `cargo xtask test pr`: 27 contract gates,
+11 portable gates, and documentation verification. Both canonical receipt files
+declare the exact source and `dirty: false`. This following documentation-only
+checkpoint does not change tested code. No push, PR, merge or M4 completion.
+Codex Security remains prohibited; these were local native and repository gates.
+
+The read-only dense-history review found a bounded optimization candidate in
+`metadata.rs::SELECT_KNOWN_FIELD_POLICIES`: prove whether a 257th provenance row
+exists through the existing recent index, materialize those overflowing scopes
+once, and run the existing full-history companion only for them. Exactly 256
+selected claims already contain all their policy evidence. This is not implemented
+or benchmarked yet. Preserve full-history restrictions for overflowing groups,
+legacy wildcards, equal-time ties, selected-row validation and stream ordering.
+Require mixed complete/overflow page tests, indexed query-plan evidence, genuine
+archive/reopen regressions and measured latency/memory before claiming a gain.
+
+The next scoped Desktop Search adapter must reuse application preflights,
+`ProviderSearchService`, original action operation IDs and existing DTO conversion
+owners. Local Search must retain native scoped artwork rather than return raw
+provider poster URLs or issue a list query per Record. Browser adapters must select
+the current SDK client on each invocation. No speculative schema, public DTO or
+capability allocation follows from this preparation.
+
+Access reported local mobile-fix commit
+`3cbd52b65d26b12eb57f00b8a16d16e2a1bf4fd8`, tree
+`e6d31d26db96390d0b5c4127f48df44dcce33577`, component SHA-256
+`bbf38e6739e560a339663fb69228e0b0cd2c148450d4aa72cf6020a08046cf96`.
+This is a reported checkpoint, not an independently verified merge or handback.
+Its exclusive component ownership and M4's v17/archive-v7 ownership remain intact.
