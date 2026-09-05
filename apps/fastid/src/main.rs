@@ -5,7 +5,7 @@ use fasti_api::{
 };
 use fasti_application::{BrowserRequestBoundaryPolicy, OutboundAccessPolicy};
 use fasti_provider_runtime::{
-    PlatformCredentialVault, ProviderMetadataRefreshService, ProviderRuntime,
+    GovernedTransport, PlatformCredentialVault, ProviderMetadataRefreshService, ProviderRuntime,
     ProviderSearchService, PLATFORM_CREDENTIAL_SERVICE,
 };
 use fasti_store::SqliteKernel;
@@ -211,7 +211,53 @@ fn trailbase_root() -> Result<Option<PathBuf>> {
     Ok(value.map(PathBuf::from))
 }
 
-fn provider_runtime(kernel: &SqliteKernel) -> Result<Arc<ProviderRuntime>> {
+fn provider_transport_from_configuration(
+    fixture_address: Option<&str>,
+    fixture_ca_pem: Option<&str>,
+) -> Result<GovernedTransport> {
+    #[cfg(feature = "tmdb-smoke-fixture")]
+    {
+        let address = fixture_address
+            .context("the TMDB smoke fixture requires its loopback address")?
+            .parse::<SocketAddr>()
+            .context("the TMDB smoke fixture address is invalid")?;
+        let ca = fixture_ca_pem.context("the TMDB smoke fixture requires its private CA")?;
+        fasti_provider_runtime::tmdb_smoke_fixture_transport(address, ca.as_bytes())
+            .context("the TMDB smoke fixture transport is invalid")
+    }
+    #[cfg(not(feature = "tmdb-smoke-fixture"))]
+    {
+        anyhow::ensure!(
+            fixture_address.is_none() && fixture_ca_pem.is_none(),
+            "TMDB smoke fixture configuration requires the isolated fixture build"
+        );
+        Ok(GovernedTransport::default())
+    }
+}
+
+#[cfg(feature = "tmdb-smoke-fixture")]
+fn require_tmdb_smoke_listener(
+    requested: SocketAddr,
+    durable: bool,
+    fallback: PortFallback,
+    integration_configured: bool,
+    external_bind_configured: bool,
+) -> Result<()> {
+    anyhow::ensure!(
+        requested == DEFAULT_LISTEN.parse::<SocketAddr>()?
+            && durable
+            && fallback == PortFallback::Fail
+            && !integration_configured
+            && !external_bind_configured,
+        "the TMDB smoke fixture requires only the exact durable direct listener without fallback"
+    );
+    Ok(())
+}
+
+fn provider_runtime(
+    kernel: &SqliteKernel,
+    transport: GovernedTransport,
+) -> Result<Arc<ProviderRuntime>> {
     PlatformCredentialVault::initialize()
         .map_err(|error| anyhow::anyhow!("provider credential store is unavailable: {error}"))?;
     let digest = Sha256::digest(kernel.data_root_identity().as_bytes());
@@ -219,9 +265,13 @@ fn provider_runtime(kernel: &SqliteKernel) -> Result<Arc<ProviderRuntime>> {
     for byte in digest {
         write!(scope, "{byte:02x}").expect("writing to a String cannot fail");
     }
-    Ok(Arc::new(ProviderRuntime::new(Arc::new(
-        PlatformCredentialVault::new(PLATFORM_CREDENTIAL_SERVICE, scope),
-    ))))
+    Ok(Arc::new(ProviderRuntime::with_transport(
+        Arc::new(PlatformCredentialVault::new(
+            PLATFORM_CREDENTIAL_SERVICE,
+            scope,
+        )),
+        transport,
+    )))
 }
 
 fn metadata_and_provider_router(
@@ -313,6 +363,26 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
     let requested_addr = listen_addr()?;
+    let fixture_address = env::var_os("FASTI_TMDB_SMOKE_RESOLVE");
+    let fixture_ca = env::var_os("FASTI_TMDB_SMOKE_CA_PEM");
+    let provider_transport = provider_transport_from_configuration(
+        fixture_address
+            .as_deref()
+            .map(|value| value.to_str().context("TMDB smoke address must be UTF-8"))
+            .transpose()?,
+        fixture_ca
+            .as_deref()
+            .map(|value| value.to_str().context("TMDB smoke CA must be UTF-8"))
+            .transpose()?,
+    )?;
+    #[cfg(feature = "tmdb-smoke-fixture")]
+    require_tmdb_smoke_listener(
+        requested_addr,
+        data_root()?.is_some(),
+        port_fallback()?,
+        env::var_os("FASTI_INTEGRATION_LISTEN").is_some(),
+        env::var_os("FASTI_EXTERNAL_BIND_IP").is_some(),
+    )?;
     let local_api_addr = local_api_exposure_addr(
         requested_addr,
         external_bind_ip()?,
@@ -332,7 +402,10 @@ async fn main() -> Result<()> {
                 .map(Arc::new)
         })
         .transpose()?;
-    let providers = kernel.as_deref().map(provider_runtime).transpose()?;
+    let providers = kernel
+        .as_deref()
+        .map(|kernel| provider_runtime(kernel, provider_transport))
+        .transpose()?;
 
     let app = match (&configured_data_root, &kernel) {
         (Some(data_root), Some(kernel)) => {
@@ -466,6 +539,56 @@ async fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "tmdb-smoke-fixture")]
+    #[test]
+    fn tmdb_fixture_rejects_additional_or_alternate_listeners() {
+        let direct = DEFAULT_LISTEN.parse().unwrap();
+        assert!(
+            require_tmdb_smoke_listener(direct, true, PortFallback::Fail, false, false).is_ok()
+        );
+        for (address, durable, fallback, integration, external) in [
+            (direct, true, PortFallback::Fail, true, false),
+            (direct, true, PortFallback::Fail, false, true),
+            (direct, false, PortFallback::Fail, false, false),
+            (direct, true, PortFallback::Auto, false, false),
+            (
+                "0.0.0.0:8420".parse().unwrap(),
+                true,
+                PortFallback::Fail,
+                false,
+                false,
+            ),
+            (
+                "127.0.0.1:8421".parse().unwrap(),
+                true,
+                PortFallback::Fail,
+                false,
+                false,
+            ),
+        ] {
+            assert!(
+                require_tmdb_smoke_listener(address, durable, fallback, integration, external)
+                    .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn tmdb_fixture_configuration_is_explicit_and_never_activates_a_default_build() {
+        #[cfg(not(feature = "tmdb-smoke-fixture"))]
+        assert!(provider_transport_from_configuration(None, None).is_ok());
+        #[cfg(feature = "tmdb-smoke-fixture")]
+        assert!(provider_transport_from_configuration(None, None).is_err());
+        for (address, ca) in [
+            (Some("127.0.0.1:45678"), None),
+            (None, Some("invalid CA")),
+            (Some("not-an-address"), Some("invalid CA")),
+            (Some("127.0.0.1:45678"), Some("invalid CA")),
+        ] {
+            assert!(provider_transport_from_configuration(address, ca).is_err());
+        }
+    }
 
     #[test]
     fn accepts_explicit_socket_addresses() {
