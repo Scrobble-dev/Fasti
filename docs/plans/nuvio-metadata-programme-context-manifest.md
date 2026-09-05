@@ -1437,3 +1437,58 @@ browser mutation proof, candidate details/actions, local/provider result
 composition, and response-policy enforcement. The future maps allocate no new
 API, table, ID, migration, archive version or production writer. No M4 PR/merge
 or C2 activation handoff has occurred.
+
+### 2026-09-05 — Provider Search page transport
+
+Committed implementation `e5afb60817f5772998b014f443bbbda0849a5fe1`, tree
+`7aca9d8ba9776b05cae79e27bf41141483697ed3`, preserves every prior M3/M4
+commit. The canonical `cargo xtask test pr` gate passed on that clean commit,
+using physical `TMPDIR=/mnt/secondary-ssd/cache/home/tmp` and
+`PKG_CONFIG=/usr/bin/pkg-config`. The follow-on verification inventory includes
+the new Search SDK suite in the canonical gate, not just a focused manual run.
+No new dependency, external AI key or Codex Security tool was used.
+
+- **Implemented:** POST `/api/v1/search/providers/{provider_id}`, strict DTOs,
+  generated OpenAPI/SDK contracts and `searchProviderPage`, daemon composition
+  through existing provider runtime and shared operation gates. Query input stays
+  in the body. Browser page acquisition requires mutation proof even offline;
+  durable current authority is checked before malformed body/path disclosure.
+  Generic/remote routes remain bearer-only. Health/integration routers have no
+  Search route. Successful and error responses are private/no-store.
+- **Authority:** new enrollment/recovery receives `MetadataSearch` through the
+  existing full-owner scope set. Only the exact consumed, active node-owner grant
+  receives the unmerged v16 backfill; C1 links that same grant. Delegated grants,
+  subject/session epochs and ordinary reopen behavior remain unchanged. Published
+  v1–v15 migrations and archive v1–v5 contracts are unchanged. M4 retains v16 and
+  archive v6; older disposable unmerged-v16 databases do not rerun this migration.
+- **Evidence:** seven real SQLite HTTP regressions cover offline actor-partitioned
+  cache hits/misses, zero vault calls, typed input failures, direct/generic/remote
+  boundaries, cancellation and authority revocation while waiting for the provider
+  gate. Thirty-two SDK checks cover CSRF, no retries, request/response binding,
+  caller mutation races, strict unions and bounded large responses. Five migration
+  and three authorization regressions cover scope isolation, rollback and activity.
+  Focused store Search, broader Rust suites, strict clippy and docs checks passed.
+  These fixtures do not claim successful live-provider HTTP/network evidence or
+  new browser UI behavior. Prior 71-check canonical-detail browser evidence stays
+  attached to its original exact source.
+- **Native review:** resolved missing success cache headers, incorrect 501/507
+  documentation, schema-binding and typed-path issues, plus an SDK race where a
+  caller-mutated request page could change response validation. No remaining
+  actionable finding was reported for the reviewed slice. All subagent production
+  writes were prohibited; assigned test leaves were non-overlapping and integrated
+  by the commander.
+
+Parallel preparation remains bounded in this checkpoint. Candidate GET must use
+Search read proof, not the page-mutation extractor. Atomic action POST must preserve
+IdentityWrite authorization followed by durable replay before requiring Search
+for a new save; otherwise replay after ephemeral expiry would break. Reuse existing
+receipt/runtime owners and capture immutable response-binding primitives. M8's
+smallest proven locale-to-English acquisition gap touches the active provider and
+metadata response/provenance owners; no unused fallback helper or competing writer
+was allocated. Existing TMDB attribution is already implemented and was not invented
+as a gap. C2 was told that the scope prerequisite prevents a coherent early release.
+
+Next active work: candidate details/actions, local Search transport and Workbench
+multi-source composition, then the already mapped response-cache policy enforcement.
+These remain in-scope implementation work, not removed or deferred capabilities.
+No M4 PR, merge, v17 allocation or shared-file release has occurred.
