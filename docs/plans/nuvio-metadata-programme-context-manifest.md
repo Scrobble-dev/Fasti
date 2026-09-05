@@ -4072,3 +4072,19 @@ flag. The harness must expect the actual Fresh projection on first Search as
 well as cached Search. Keep the exact one-upstream-search request assertion to
 prove the initial provider exchange; do not change the application contract or
 weaken the zero-extra-requests/cache/restart checks to fit the test.
+
+At `6cbff695d62d4526ed82a226e886d192101b1b80`, the full first-session Search,
+two candidate details, Create, Attach, cached-only Search, exact provider request
+counts and pre-restart SQLite oracle all passed. The final browser assertion
+after restart failed because a `has` locator was incorrectly rooted at the
+outer identifiers region rather than relative to each row. Correct it to the
+exact identifier cell within the row, preserving both exact source IDs and
+namespace checks. The prior details assertion was likewise scoped to the
+active details section to avoid matching hidden Search rows; it now also checks
+year 2020. None of these partial attempts emitted acceptance receipts.
+
+The merged kernel lock regressions pass 3/3, including inherited-descriptor
+release. The strict free-port check correctly refused one immediate restart
+while sockets were still unavailable; no process takeover or port-check bypass
+occurred. Retry only after the prior process handle is terminal and the same
+free-port preflight succeeds.

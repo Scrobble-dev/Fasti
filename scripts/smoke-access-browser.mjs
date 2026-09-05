@@ -312,9 +312,12 @@ async function verifyRestartedRecord() {
   for (const providerId of FIXTURE_PROVIDER_IDS) {
     const row = identifiers
       .getByRole("row")
-      .filter({ has: identifiers.getByText(providerId, { exact: true }) });
+      .filter({
+        has: page.getByRole("cell", { name: providerId, exact: true }),
+      });
+    await row.waitFor();
     await requireCount(row, 1, `persisted TMDB identity ${providerId}`);
-    await row.getByText("tmdb.movie", { exact: true }).waitFor();
+    await row.getByRole("cell", { name: "tmdb.movie", exact: true }).waitFor();
   }
   await requireNoAccessibilityViolations("restarted canonical Record");
   return {
