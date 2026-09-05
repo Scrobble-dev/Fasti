@@ -1,14 +1,15 @@
 //! Private, non-activating pass-two import for verified B3 archives.
 //!
-//! Pass one and pass two consume the same already-open `Read + Seek` source.
+//! Pass one and pass two consume the same privately captured archive inode.
 //! This module creates only a fresh descriptor-relative staging attempt. It
 //! does not write an activation marker, rename `current`, dispatch recovery
 //! bootstrap, or implement an application port.
 
 use crate::archive::{
-    create_staging_attempt, open_existing_file_beneath, open_new_file_beneath,
-    open_or_create_private_directory, open_private_directory, sync_open_handle,
-    visit_archive_entries, ArchiveEntryReader, ArchiveError, ArchiveLimits,
+    create_staging_attempt, open_anonymous_private_file, open_existing_file_beneath,
+    open_new_file_beneath, open_or_create_private_directory, open_private_directory,
+    sync_open_handle, visit_archive_entries, ArchiveEntryReader, ArchiveError, ArchiveLimits,
+    MAX_IO_CHUNK_BYTES,
 };
 use crate::evidence::{canonical_digest_hex, path_to_storage_value, relative_evidence_path};
 use crate::kernel::{timestamp, LockedDataRoot};
@@ -99,6 +100,13 @@ fn admit_restore_capacity(
     preflight: &VerifiedArchivePreflight,
     limits: PortabilityLimits,
 ) -> Result<(), RestoreImportError> {
+    require_restore_space(root, remaining_restore_bytes(preflight, limits)?)
+}
+
+fn remaining_restore_bytes(
+    preflight: &VerifiedArchivePreflight,
+    limits: PortabilityLimits,
+) -> Result<u64, RestoreImportError> {
     let blob_bytes = preflight
         .manifest()
         .manifest()
@@ -111,8 +119,17 @@ fn admit_restore_capacity(
         .get()
         .checked_add(blob_bytes)
         .and_then(|bytes| bytes.checked_add(limits.cleanup_reserve_bytes.get()))
+        .ok_or(RestoreImportError::CapacityExceeded)?;
+    required
+        .checked_add(preflight.archive_bytes())
         .filter(|bytes| *bytes <= limits.scratch_ceiling_bytes.get())
         .ok_or(RestoreImportError::CapacityExceeded)?;
+    // The compressed capture already consumes disk space. Reserve only the
+    // database, blobs and cleanup still to be written, not the capture twice.
+    Ok(required)
+}
+
+fn require_restore_space(root: &File, required: u64) -> Result<(), RestoreImportError> {
     #[cfg(not(target_os = "linux"))]
     {
         let _ = (root, required);
@@ -139,7 +156,7 @@ pub(crate) enum RestoreImportError {
     Preflight(#[from] RestorePreflightError),
     #[error(transparent)]
     Archive(#[from] ArchiveError),
-    #[error("pass-two archive source could not be rewound")]
+    #[error("archive source could not be rewound")]
     Rewind(#[source] io::Error),
     #[error("staged SQLite could not be opened or migrated")]
     Sqlite(#[source] rusqlite::Error),
@@ -328,7 +345,7 @@ impl Drop for StagedWorkspaceImport {
     }
 }
 
-/// Verify pass one, rewind the same source, and import pass two into staging.
+/// Capture once, verify pass one, and import those same bytes into staging.
 ///
 /// This is deliberately private and has no `RestoreWorkspacePort`
 /// implementation. The returned attempt contains no COMPLETE marker and is
@@ -342,16 +359,101 @@ pub(crate) fn stage_workspace_archive_pass_two(
     limits: PortabilityLimits,
     cancellation: &CancellationSignal,
 ) -> Result<StagedWorkspaceImport, RestoreImportError> {
-    let preflight = preflight_restore_source(source, limits, cancellation)?;
+    let root = data_root
+        .anchored_directory()
+        .ok_or(RestoreImportError::UnsupportedPlatform)?;
+    let captured = capture_restore_source(root, source, limits, cancellation)?;
     stage_preflighted_workspace_archive_pass_two(
         data_root,
-        source,
+        captured,
         restore_attempt_id,
         correlation_id,
         limits,
         cancellation,
-        preflight,
     )
+}
+
+/// The only input accepted by pass two. No caller can substitute another source
+/// for the verified bytes, and dropping this value releases unnamed scratch.
+pub(crate) struct CapturedRestoreArchive {
+    file: File,
+    preflight: VerifiedArchivePreflight,
+}
+
+pub(crate) fn capture_restore_source(
+    root: &File,
+    source: &mut dyn ReadSeek,
+    limits: PortabilityLimits,
+    cancellation: &CancellationSignal,
+) -> Result<CapturedRestoreArchive, RestoreImportError> {
+    check_cancellation(cancellation)?;
+    let initial_seek = source.seek(SeekFrom::Start(0));
+    check_cancellation(cancellation)?;
+    initial_seek.map_err(RestorePreflightError::InitialSeek)?;
+    let captured = (|| {
+        let reserve = limits.cleanup_reserve_bytes.get();
+        let ceiling = limits
+            .scratch_ceiling_bytes
+            .get()
+            .checked_sub(reserve)
+            .ok_or(RestoreImportError::CapacityExceeded)?
+            .min(limits.max_archive_bytes.get());
+        require_restore_space(root, reserve)?;
+        let mut file = open_anonymous_private_file(root)?;
+        crash_test_point("capture", "created");
+        let mut bytes = 0_u64;
+        let mut buffer = [0_u8; MAX_IO_CHUNK_BYTES];
+        loop {
+            check_cancellation(cancellation)?;
+            let remaining = ceiling - bytes;
+            // At the ceiling, read one byte to distinguish EOF from truncation.
+            let requested = usize::try_from(remaining.max(1))
+                .unwrap_or(usize::MAX)
+                .min(buffer.len());
+            let read = source
+                .read(&mut buffer[..requested])
+                .map_err(ArchiveError::Io)?;
+            check_cancellation(cancellation)?;
+            if read > requested {
+                return Err(ArchiveError::Io(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "archive source returned an invalid read length",
+                ))
+                .into());
+            }
+            if read == 0 {
+                break;
+            }
+            let next = bytes
+                .checked_add(read as u64)
+                .filter(|next| *next <= ceiling)
+                .ok_or(RestoreImportError::CapacityExceeded)?;
+            require_restore_space(
+                root,
+                reserve
+                    .checked_add(read as u64)
+                    .ok_or(RestoreImportError::CapacityExceeded)?,
+            )?;
+            file.write_all(&buffer[..read]).map_err(ArchiveError::Io)?;
+            bytes = next;
+            crash_test_point("capture", "written");
+        }
+        file.seek(SeekFrom::Start(0))
+            .map_err(RestoreImportError::Rewind)?;
+        let preflight = preflight_restore_source(&mut file, limits, cancellation)?;
+        if preflight.archive_bytes() != bytes {
+            return Err(RestoreImportError::ArchiveChanged);
+        }
+        Ok(CapturedRestoreArchive { file, preflight })
+    })();
+    // Preserve the caller's rewind contract, but never read it again. Mutation
+    // during this seek cannot alter the private inode consumed by either pass.
+    let rewind = source
+        .seek(SeekFrom::Start(0))
+        .map_err(RestoreImportError::Rewind);
+    check_cancellation(cancellation)?;
+    rewind?;
+    captured
 }
 
 pub(crate) fn preflight_restore_source(
@@ -375,16 +477,19 @@ pub(crate) fn preflight_restore_source(
 
 pub(crate) fn stage_preflighted_workspace_archive_pass_two(
     data_root: &LockedDataRoot,
-    source: &mut dyn ReadSeek,
+    captured: CapturedRestoreArchive,
     restore_attempt_id: RestoreAttemptId,
     correlation_id: RequestCorrelationId,
     limits: PortabilityLimits,
     cancellation: &CancellationSignal,
-    preflight: VerifiedArchivePreflight,
 ) -> Result<StagedWorkspaceImport, RestoreImportError> {
     check_cancellation(cancellation)?;
+    let CapturedRestoreArchive {
+        mut file,
+        preflight,
+    } = captured;
     let mut guarded_source = CancellableSource {
-        source,
+        source: &mut file,
         cancellation,
     };
     let root = data_root
@@ -3311,6 +3416,8 @@ fn cleanup_attempt(
 
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
+    include!("restore_capture_tests.rs");
+    include!("restore_capture_capacity_tests.rs");
     include!("metadata_policy_archive_tests.rs");
     include!("search_action_archive_tests.rs");
     use super::*;
@@ -4477,12 +4584,15 @@ mod tests {
     fn full_restore_sigkill_matrix() {
         #[derive(Clone, Copy)]
         enum ExpectedState {
+            Capture,
             PreRename,
             RecoverableCurrent,
             Complete,
         }
 
         let cases = [
+            ("capture.created", ExpectedState::Capture),
+            ("capture.written", ExpectedState::Capture),
             ("received.created", ExpectedState::PreRename),
             ("received.written", ExpectedState::PreRename),
             ("received.file_synced", ExpectedState::PreRename),
@@ -4563,13 +4673,25 @@ mod tests {
                 .join(attempt.to_string());
             let current = root.path().join("current");
             match expected {
-                ExpectedState::PreRename => {
+                ExpectedState::Capture | ExpectedState::PreRename => {
                     assert!(!current.exists(), "{point} exposed current before rename");
-                    assert!(staged.exists(), "{point} lost interrupted staging");
-                    assert!(matches!(
-                        crate::SqliteKernel::open(root.path()),
-                        Err(StoreOpenError::RestoreActivation)
-                    ));
+                    if matches!(expected, ExpectedState::Capture) {
+                        let entries = std::fs::read_dir(root.path())
+                            .unwrap()
+                            .map(|entry| entry.unwrap().file_name())
+                            .collect::<Vec<_>>();
+                        assert_eq!(
+                            entries,
+                            vec![std::ffi::OsString::from("fasti.lock")],
+                            "{point} retained a named capture or staging artifact"
+                        );
+                    } else {
+                        assert!(staged.exists(), "{point} lost interrupted staging");
+                        assert!(matches!(
+                            crate::SqliteKernel::open(root.path()),
+                            Err(StoreOpenError::RestoreActivation)
+                        ));
+                    }
                     let retry_attempt = RestoreAttemptId::new_v7();
                     let adapter = crate::StoppedNodePortabilityAdapter::new(root.path());
                     WorkspaceRestorePort::restore_workspace(

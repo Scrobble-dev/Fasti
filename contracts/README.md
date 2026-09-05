@@ -37,10 +37,13 @@ Archive v7 accompanies append-only schema v17. It carries bounded canonical
 owners. NULL preserves unknown historical policy; it does not grant upstream
 reuse permission. The v1–v6 files remain unchanged. Restore uses the original
 version's row shape for both decoding and exact post-import stream verification.
-Its existing bounded preflight rejects malformed/no-store policy and crossed
-v6/v7 claim shapes before staging unchanged verified archive bytes. The same
-strict decoder runs again during import; between-pass source changes remain a
-separate digest-checked restore failure, not proof of immutable input.
+Restore captures bounded input once in an owner-only unnamed file under the
+locked data root. Both verification and import consume that private file, never
+rereading the caller's source. Its bounded preflight rejects malformed/no-store
+policy and crossed v6/v7 claim shapes before named staging or SQLite creation.
+The same strict decoder and digest checks run again during import. Capture
+bytes count toward scratch admission; this accounting is not a hard peak bound
+on SQLite journals or temporary files.
 
 The [archive-v1 schema](portability/v1/workspace-manifest.schema.json) and
 [example](portability/v1/workspace-manifest.example.json) keep the original 16

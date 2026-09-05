@@ -612,6 +612,26 @@ pub struct FilesystemArchiveDestination {
     hasher: Sha256,
 }
 
+/// Private descriptor-relative scratch with no pathname to recover after a crash.
+pub(crate) fn open_anonymous_private_file(parent: &File) -> Result<File, ArchiveError> {
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = parent;
+        Err(ArchiveError::UnsupportedPlatform)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        rustix::fs::openat(
+            parent,
+            ".",
+            rustix::fs::OFlags::RDWR | rustix::fs::OFlags::TMPFILE | rustix::fs::OFlags::CLOEXEC,
+            rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
+        )
+        .map(File::from)
+        .map_err(errno_to_archive_error)
+    }
+}
+
 impl FilesystemArchiveDestination {
     pub fn new(path: impl AsRef<Path>) -> Result<Self, ArchiveError> {
         #[cfg(not(target_os = "linux"))]
@@ -650,17 +670,7 @@ impl FilesystemArchiveDestination {
                 Err(rustix::io::Errno::NOENT) => {}
                 Err(error) => return Err(errno_to_archive_error(error)),
             }
-            let file = File::from(
-                rustix::fs::openat(
-                    &parent,
-                    ".",
-                    rustix::fs::OFlags::RDWR
-                        | rustix::fs::OFlags::TMPFILE
-                        | rustix::fs::OFlags::CLOEXEC,
-                    rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
-                )
-                .map_err(errno_to_archive_error)?,
-            );
+            let file = open_anonymous_private_file(&parent)?;
             destination_crash_test_point("created");
             Ok(Self {
                 parent,
