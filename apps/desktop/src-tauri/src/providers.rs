@@ -668,6 +668,10 @@ impl From<ProviderRuntimeError> for DesktopProblem {
     }
 }
 
+#[cfg(all(test, feature = "desktop-runtime"))]
+#[path = "provider_cancellation_tests.rs"]
+mod cancellation_tests;
+
 #[cfg(test)]
 mod tests {
     use super::*;

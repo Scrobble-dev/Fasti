@@ -3661,3 +3661,75 @@ and full acceptance. Do not close M5 after the core alone, derive membership fro
 the raw Nuvio envelope, or allocate its next migration before the explicit M4
 handoff. Saved intent, tracking, progress, completion, personal rating and personal
 note remain independent; activity cannot infer saved intent or tracking state.
+
+## M4 Attach verification and Access recovery integration — 2026-09-05
+
+The clean Attach commit `266b8d9b1087450643d63f99f0d0caaa223cf6c6`, tree
+`e322e02586051d77a477355f90669c717d6ace6f`, passed all 27 canonical contract
+gates and 11 portable gates. Independent exact-diff review against published
+`f5e0978f` was CLEAR with no reachable P0/P1/P2 finding in the bounded Attach,
+first-page cursor and JavaScript fixture-prebuild changes. The first full browser
+run passed 150/151: the Access text-spacing test lost its injected CSS during a
+second document navigation while the canonical build ran concurrently. The
+trace proves the reload, not its exact trigger. An unchanged-head full rerun
+without the concurrent build passed 151/151 in
+`.gstack/qa-reports/m4-attach-clean-isolated`. Keep future browser runs isolated
+from workspace builds; no Access assertion or production behavior was weakened.
+
+Access then released merged PR #129 at exact `origin/dev`
+`3d775bf7af2dd52fffafeaba24ceea22da1cfcc1`, tree
+`6ae3c90d9c5eb5ac29dfc6e48fa72ce45e4a498f`. Fetch verified both identities.
+The normal, conflict-free integration commit is
+`3615b010b8ffca1148b101587ba3e2c3b5fc6855`, tree
+`9c62d1bdc6e82c2ebc1e6c892daaab8513ccf026`, exactly the pre-merge prediction.
+It preserves the M4 JavaScript fixture-prebuild hunk and Access's Browser UI
+sentinel, confirmation/recovery guard and regression leaves. Frozen dependency
+installation passed. This is not an M4 merge or shared-file release; schema17
+and archive7 remain unchanged, and no migration18 is allocated. Framing PR #130
+retains its separate qualification package/workflow and agreed documentation
+regions until its own exact handoff.
+
+Two newer CodeRabbit comments were validated against actual source. The parser
+test could exit successfully with an unsettled Promise even though the current
+patched parser's filesystem requests do settle. Its child now has a watchdog
+that keeps the event loop alive, plus explicit rejection, fulfillment and stalled-Promise controls; the
+two focused tests pass, including all three actual malformed-image fixtures.
+The canonical plan's older archive roadmap also incorrectly reassigned v4–v7 to
+future Library/Collections/Nuvio/sharing state. It now records the implemented
+v3–v7 matrix and preserves future explicit allocations and public crypto
+activation as separate requirements. Neither finding changes production storage.
+
+The outside-diff Desktop credential finding revealed no production sequencing
+bug: cancelled queued callers never start, and admitted blocking work retains
+the gate through vault mutation and capability reconciliation. Public network
+documentation now states that boundary and corrects its older desktop-only
+Search description against current host and HTTP owners. A bounded regression
+leaf is allocated to the native test agent at
+`apps/desktop/src-tauri/src/provider_cancellation_tests.rs`; only the commander
+may wire its parent module or edit shared production files. It must exercise
+real save/delete routines and safe retries, without a platform vault or runtime
+change. Another agent prepares provider continuation read-only. No duplicate
+production owner or new orchestration framework is introduced.
+
+Post-integration focused/full gates and publication remain pending. The Attach
+evidence does not prove the separate real-process Search journey, complete media
+domain filters, stable provider continuation or navigation cancellation. Those
+remain M4 work, and the full later programme remains in scope. Codex Security
+remains crossed out for the commander and every delegated agent.
+
+The cancellation leaf is now wired through a test-only parent module. Main
+review rejected its initial single-cell fake vault because it aliased unrelated
+provider references. The corrected test vault keys every operation by exact
+credential reference, derives TMDB's reference from the existing runtime owner,
+and proves one matching entry after save/retry and none after removal/retry.
+The final focused module passes 2/2; the full Desktop library passes 85 with
+two pre-existing intentional ignores; strict all-target Clippy and formatting
+pass. These are dirty-tree regression results, not final-head delivery evidence.
+The prepared host requires `PKG_CONFIG=/usr/bin/pkg-config TMPDIR=/tmp`; the
+agent's first unprepared attempt failed before tests and is not counted. Clippy
+also caught a test guard's lexical lifetime across an await; the leaf now uses
+a lexical scope and all listed final checks were rerun. No runtime sequencing
+changed. All 53 focused authored-contract/parser/CI regression checks pass
+without skips, and documentation verification passes. The existing network
+guide's stale claim that credential-test IPC did not exist was also corrected
+against `test_provider_credential` and the generated browser method.
