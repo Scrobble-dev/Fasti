@@ -2085,3 +2085,41 @@ Commander retains shared production ownership; agent edits were confined to the
 assigned capacity-test leaf. No Codex Security, push, PR, merge or shared-file
 release occurred. M4 owns v17/v7; Access v18 remains conditional on exact merged
 commit/tree and explicit release.
+
+### 2026-09-05 — Allocation guard exact verification and writer entry points
+
+Allocation guard `956bd7d09d9e13feedbdeef4e6455664d7c52bda`, tree
+`ff8ccb55175fdc95d14a8061d73b91d1e4437fab`, passed the canonical PR gate.
+Both receipts were machine-checked for that exact commit/tree, dirty=false,
+27/11 gate counts, and every pass/exit 0. The JavaScript inventory passed all
+297 checks. This later checkpoint changes documentation only; it is not part of
+the tested tree. No production edits remain uncommitted.
+
+The next writer slice has three actual production command constructors:
+Desktop `records.rs` creates `CreateProviderRecordCommand` and
+`ApplyProviderMetadataCommand`; provider-runtime `metadata.rs` creates
+`CommitMetadataRefreshCommand`. Each must carry one required recorded response
+policy. Search Save has a separate existing path through runtime `search.rs`
+and store `search_actions.rs`: refetch must pair fields with its detail-response
+policy; Cached mode must retain receipt policy and original expiry. Desktop
+namespace/artwork side effects precede current store admission and must move
+behind admission. Do not infer protection from a later transaction rollback.
+
+Zero-freshness representation already has an owner and regression:
+`StoredSearchCandidate::metadata_fields` uses original observation, nullable
+expiry and initial Stale when no positive fresh interval exists. Field/rating
+domain constructors reject expiry equal to fetched time; metadata-cache entries
+permit equal deadlines. Reuse the existing representation without adding one
+second or changing published migrations, but do not treat Stale as HTTP reuse
+permission: LastKnownGood currently admits it. Runtime refresh's Fresh-field
+guard and Refetch receipt/SDK validation must be reconciled with the approved
+live-response behavior in the same integrated slice, not activated separately.
+Single/batch projection, raw cached-refresh claim views, ratings and replay
+must all respect the response-policy owner. Legacy unknown overlap remains the
+explicit disposition recorded above, not an implicit blanket permission.
+
+Access reported independent E0/E1 qualification at its merged dev
+`62e10d2e` / tree prefix `d6fcea15`; these are coordination-reported identities,
+not a new M4 rebase or handoff. Its isolated plans/harnesses leave all M4 shared
+surfaces and v17/v7 ownership intact. Access v18 still requires M4's exact merged
+commit/tree and explicit release. No Codex Security, push, PR or merge occurred.
