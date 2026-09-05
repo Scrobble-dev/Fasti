@@ -3993,3 +3993,53 @@ required. M4/PR #128 stays open and schema17/archive7 stay owned by M4.
 Access PR #130 is published at `cc701a47f55187199791b3acd2056b7f746ba511`,
 tree `e2a3180bed0748863cb3e829a06a677a0561a6b8`, but no merged-dev handoff
 has arrived. Do not integrate its unmerged branch or release migration18.
+
+### M4 real-process Search harness implementation and preflight
+
+The preserved base is `78449363e8326f191549220854ce88049f969297`.
+The next bounded increment implements the previously allocated ordinary-browser
+Search/Create/Attach/cached-only/restart journey, using the existing Access
+harness and real Fasti application, provider transport and SQLite owners.
+Only the upstream TMDB input is a disposable TLS fixture, with a per-run test
+credential and private CA; this is not public-provider or packaged-auth evidence.
+The default build cannot enable the fixture. Its explicit isolated build keeps
+fixed TMDB URLs/Host/SNI, one pinned loopback address, normal TLS validation,
+operator-deny policy, request bounds, and no proxy or redirect fallback.
+
+Independent native review found and the commander corrected additional-listener
+inheritance, incomplete request-count checks, startup-failure process cleanup,
+and incomplete candidate/action receipt associations. The harness now rejects
+extra provider calls; validates both candidate rows against their owning page,
+provider, kind and JSON coordinate; and requires exactly two total action
+receipts bound to the expected Create/Attach candidates and one Record.
+SQLite evidence readers explicitly close their connections. Existing managed
+termination cleanup and the setup `finally` also cover failed human registration.
+No schema, archive, registry, generated contract, SDK or product UI change is
+introduced by this test increment; no new dependency is added.
+
+Focused daemon fixture tests pass 2/2, the default daemon suite passes 14/14,
+and strict feature-enabled all-target Clippy passes. The provider TLS fixture
+tests pass 2/2. The existing web build passes with its existing large-chunk
+warning. Startup and evidence-oracle negative tests pass 6/6 with Python warnings
+treated as errors; the TLS fixture also passes 2/2 under that setting. Final
+independent review is clear with no remaining actionable P0/P1/P2 findings.
+The real-process run remains unverified. The previous exact-head 27+11 and 184-browser evidence above
+does not automatically cover these new changes.
+
+Fresh source preparation verified both locked TrailBase v0.33.5 archives and
+created a new private installation at
+`/tmp/fasti-m4-trailbase-source-35mNv8/root` through the existing native preparation,
+disposable administrator rotation, runtime-lock and installation owners.
+Its installation verification passes. Only the two release archives were copied
+from the retained Access cache; no retained database, secret, nonce, installation
+receipt or physical-root identity was copied or repaired.
+
+Run the committed clean increment with `PKG_CONFIG=/usr/bin/pkg-config TMPDIR=/tmp
+python3 -B scripts/smoke-access-browser.py --root
+/tmp/fasti-m4-trailbase-source-35mNv8/root --m4-search-journey --receipt
+target/fasti-receipts/m4-search-ordinary-browser.json` (one command). Require the
+real browser journey and post-restart data evidence before claiming it passes.
+The commander remains the sole integration writer; one independent reviewer and
+one test-leaf writer cover this slice, while another agent prepares no-store
+details and Live pagination read-only. Full M4 and later programme scope remain
+open. Codex Security remains permanently excluded from every lane.

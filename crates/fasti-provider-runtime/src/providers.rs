@@ -56,6 +56,23 @@ const TMDB_ACCESS: OutboundAccessDeclaration<'static> = OutboundAccessDeclaratio
     networks: &[NetworkClass::Public],
 };
 
+#[cfg(feature = "tmdb-smoke-fixture")]
+const TMDB_SMOKE_ACCESS: OutboundAccessDeclaration<'static> = OutboundAccessDeclaration {
+    provider: TMDB_PROVIDER,
+    capabilities: &[SEARCH_CAPABILITY, READ_CAPABILITY],
+    hosts: &[TMDB_HOST],
+    networks: &[NetworkClass::Loopback],
+};
+
+/// Builds the compile-time-only transport used by the real fastid TMDB smoke journey.
+#[cfg(feature = "tmdb-smoke-fixture")]
+pub fn tmdb_smoke_fixture_transport(
+    address: std::net::SocketAddr,
+    ca_pem: &[u8],
+) -> Result<GovernedTransport, ProviderRuntimeError> {
+    GovernedTransport::tmdb_smoke_fixture(TMDB_ACCESS, TMDB_SMOKE_ACCESS, address, ca_pem)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderKind {
@@ -1950,6 +1967,11 @@ mod tests {
             .iter()
             .filter(|entry| !entry.runtime_available)
             .all(|entry| entry.capabilities.len() == 2));
+    }
+
+    #[test]
+    fn tmdb_production_network_grant_remains_public_only() {
+        assert_eq!(TMDB_ACCESS.networks, &[NetworkClass::Public]);
     }
 
     #[derive(Default)]
