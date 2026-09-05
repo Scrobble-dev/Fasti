@@ -1,11 +1,12 @@
 use crate::metadata::{provider_response_locale, run_blocking};
 use crate::{
-    ProviderRuntime, ProviderRuntimeError, ProviderRuntimeErrorKind, ProviderSearchInput,
-    ProviderSearchPage,
+    ProviderCandidate, ProviderRuntime, ProviderRuntimeError, ProviderRuntimeErrorKind,
+    ProviderSearchInput, ProviderSearchPage, ProviderSelectionInput,
 };
 use fasti_application::{
     ApplicationResult, CapabilityKey, ProblemCode, ProviderCapabilityState, ProviderOperationLease,
-    SearchPageRequest, SearchPersistencePort, StoredSearchPage,
+    ReadSearchCandidateRequest, SearchPageRequest, SearchPersistencePort, StoredSearchCandidate,
+    StoredSearchPage,
 };
 use std::{future::Future, sync::Arc};
 
@@ -18,6 +19,22 @@ pub enum ProviderSearchOutcome {
         upstream_problem: Option<ProblemCode>,
     },
     Unavailable {
+        problem: ProblemCode,
+    },
+}
+
+/// Read-only observations. A refetch never replaces the immutable Search
+/// snapshot and is not authority to create or attach a Record.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProviderCandidateDetailsOutcome {
+    Snapshot(StoredSearchCandidate),
+    Refetched {
+        snapshot: StoredSearchCandidate,
+        details: Box<ProviderCandidate>,
+        locale: Option<fasti_domain::MetadataLocale>,
+    },
+    Unavailable {
+        snapshot: StoredSearchCandidate,
         problem: ProblemCode,
     },
 }
@@ -64,6 +81,131 @@ impl ProviderSearchService {
         .await
     }
 
+    pub async fn candidate_details(
+        &self,
+        request: ReadSearchCandidateRequest,
+        offline: bool,
+        lease: ProviderOperationLease,
+    ) -> ApplicationResult<Option<ProviderCandidateDetailsOutcome>> {
+        let runtime = Arc::clone(&self.runtime);
+        let policy = request.outbound_policy.clone();
+        self.candidate_details_with(
+            request,
+            offline,
+            lease,
+            move |selection, state| async move {
+                runtime.fetch_selection(selection, &policy, &state).await
+            },
+        )
+        .await
+    }
+
+    async fn candidate_details_with<F, Fut>(
+        &self,
+        mut request: ReadSearchCandidateRequest,
+        offline: bool,
+        lease: ProviderOperationLease,
+        fetch: F,
+    ) -> ApplicationResult<Option<ProviderCandidateDetailsOutcome>>
+    where
+        F: FnOnce(ProviderSelectionInput, ProviderCapabilityState) -> Fut,
+        Fut: Future<Output = Result<ProviderCandidate, ProviderRuntimeError>>,
+    {
+        let capability = CapabilityKey::SearchMetadata;
+        let id = request.correlation_id;
+        request.terms_revision = self.cache_policy_revision(request.provider.as_str(), id)?;
+        let persistence = Arc::clone(&self.persistence);
+        let read = request.clone();
+        if offline {
+            // An authorized original snapshot needs no provider-read capability,
+            // DNS, credential or network access. Its stored lifetime is unchanged.
+            return run_blocking(&lease, capability, id, move || {
+                persistence.read_search_candidate(&read)
+            })
+            .await
+            .map(|candidate| candidate.map(ProviderCandidateDetailsOutcome::Snapshot));
+        }
+        let Some(prepared) = run_blocking(&lease, capability, id, move || {
+            persistence.prepare_search_candidate_details(&read)
+        })
+        .await?
+        else {
+            return Ok(None);
+        };
+        let source = prepared.candidate.receipt.candidate().data();
+        let locale = provider_response_locale(
+            &source.provider,
+            prepared.candidate.context.locale(),
+            capability,
+            id,
+        )?;
+        let selection = ProviderSelectionInput {
+            provider: source.provider.clone(),
+            provider_id: source.provider_id.clone(),
+            kind: source.kind.clone(),
+            locale: locale.as_ref().map(|value| value.as_str().to_owned()),
+            // These movie/series/volume detail routes do not have a response-region
+            // contract. Do not promote old requested-region evidence into a claim.
+            region: None,
+        };
+        let fetched = fetch(selection, prepared.provider_state.clone()).await;
+        let persistence = Arc::clone(&self.persistence);
+        let Some(current) = run_blocking(&lease, capability, id, move || {
+            persistence.prepare_search_candidate_details(&request)
+        })
+        .await?
+        else {
+            return Ok(None);
+        };
+        if current.candidate != prepared.candidate
+            || current.provider_authority_fingerprint != prepared.provider_authority_fingerprint
+        {
+            return Err(Box::new(fasti_application::FastiProblem::forbidden(
+                capability, id,
+            )));
+        }
+        let snapshot = current.candidate;
+        Ok(Some(match fetched {
+            Ok(details) => {
+                if !details.search_evidence().is_ok_and(|candidate| {
+                    candidate.identifier() == snapshot.receipt.candidate().identifier()
+                }) {
+                    ProviderCandidateDetailsOutcome::Unavailable {
+                        snapshot,
+                        problem: ProblemCode::ProviderResponseInvalid,
+                    }
+                } else {
+                    ProviderCandidateDetailsOutcome::Refetched {
+                        snapshot,
+                        details: Box::new(details),
+                        locale,
+                    }
+                }
+            }
+            Err(error) => ProviderCandidateDetailsOutcome::Unavailable {
+                snapshot,
+                problem: error.problem_code(),
+            },
+        }))
+    }
+
+    fn cache_policy_revision(
+        &self,
+        provider: &str,
+        id: fasti_domain::RequestCorrelationId,
+    ) -> ApplicationResult<String> {
+        self.runtime
+            .descriptor(provider)
+            .map(|descriptor| descriptor.cache_policy.to_owned())
+            .map_err(|_| {
+                Box::new(fasti_application::FastiProblem::from_code(
+                    ProblemCode::ValidationFailed,
+                    CapabilityKey::SearchMetadata,
+                    id,
+                ))
+            })
+    }
+
     // Keep the fetch lazy: cache-only paths never resolve DNS or load credentials.
     // The private closure also exercises sequencing without replacing governed egress.
     async fn search_page_with<F, Fut>(
@@ -81,18 +223,8 @@ impl ProviderSearchService {
         let id = request.correlation_id;
         // The legacy partition slot holds trusted Fasti cache policy, never a
         // caller-selected revision or the provider's legal-posture label.
-        request.terms_revision = self
-            .runtime
-            .descriptor(request.query.provider().as_str())
-            .map_err(|_| {
-                Box::new(fasti_application::FastiProblem::from_code(
-                    ProblemCode::ValidationFailed,
-                    capability,
-                    id,
-                ))
-            })?
-            .cache_policy
-            .to_owned();
+        request.terms_revision =
+            self.cache_policy_revision(request.query.provider().as_str(), id)?;
         let persistence = Arc::clone(&self.persistence);
         let prepare_request = request.clone();
         let prepared = run_blocking(&lease, capability, id, move || {
@@ -242,6 +374,7 @@ fn effective_query(
 #[cfg(test)]
 mod tests {
     use super::*;
+    include!("search_details_tests.rs");
     use fasti_application::*;
     use fasti_domain::*;
     use std::sync::{
@@ -454,6 +587,12 @@ mod tests {
             _: &ReadSearchCandidateRequest,
         ) -> ApplicationResult<Option<StoredSearchCandidate>> {
             panic!("page orchestration must not reopen details");
+        }
+        fn prepare_search_candidate_details(
+            &self,
+            _: &ReadSearchCandidateRequest,
+        ) -> ApplicationResult<Option<PreparedSearchCandidateDetails>> {
+            panic!("page orchestration must not prepare details");
         }
     }
 

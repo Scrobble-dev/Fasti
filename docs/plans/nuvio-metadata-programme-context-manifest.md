@@ -814,3 +814,59 @@ durable retry outcomes atomically. Freeze those retry/archive semantics before
 adding durable action storage; published archive v5 must not silently acquire
 another stream. No action receipt, migration v17, archive-version change, API,
 shared-file release or M4 merge was introduced by this cache-policy slice.
+
+### M4 candidate-detail runtime checkpoint — 2026-09-05
+
+Trusted-policy commit `46431578a4818e307780261725735abcbff4ced0`, tree
+`49c34d401323d6f04038a80a1c558958e015b384`, passed all 27 canonical gates
+with a clean exact-source receipt. The next bounded slice implements read-only
+candidate details through the existing Search persistence and provider runtime
+owners. No public route, generated contract or Workbench activation is claimed.
+
+Online preparation authorizes the existing receipt and snapshots the separate
+`metadata.read` capability in one store transaction. Refetch coordinates come
+only from that validated receipt; the existing provider locale owner determines
+the effective locale. Current top-level movie, series and volume detail routes
+do not promote the original requested region into response provenance. Both
+success and provider failure require another atomic preparation; changed receipt
+or provider authority fails closed. Health-only state changes retain authority.
+Returned normalized identity and bounded public fields must match the original
+receipt. Fresh details do not overwrite the immutable receipt, extend its expiry,
+write a Record, or authorize an eventual Create/Attach action.
+
+Offline details read only the original authorized snapshot; they do not require
+`metadata.read`, resolve DNS, load credentials or access the network. Both paths
+derive the current descriptor-owned cache revision. Successful missing-receipt
+reads commit browser activity; authorization errors still roll back. Nested
+provider outcome codes are not transport-level SearchMetadata problems: future
+API wiring must preserve that distinction rather than bypass typed-error rules.
+
+Real SQLite checks cover missing/disabled/unavailable read state, independent
+Search partitions, configuration away-and-back authority changes, receipt
+coordinates and expiry, cross-profile and revoked-scope denial, and no Record,
+identifier or claim writes. Existing browser fixtures additionally prove session
+rotation, profile return, revocation, expiry, stable subject isolation and activity
+on an authorized miss. Full store tests pass: 338 unit tests and 3 integration
+tests, with 5 unit subprocess/performance cases and 1 documentation case ignored
+as declared by the suite. All 47 provider-runtime tests pass, including 8 detail
+tests for invalid upstream identities and fields, both post-fetch success/error
+rechecks and cancellation. Network cancellation releases the gate; cancellation
+during a blocking post-fetch read retains it until that worker finishes. Strict
+provider/store all-target Clippy and formatting pass. Native review
+found no concrete production defect; exact-source contract verification follows
+the commit. Codex Security remains prohibited.
+
+Parallel allocation remains compact: commander owns the active shared Search
+surfaces; one agent verifies the exact detail slice and negative cases; two
+read-only agents trace the existing atomic Record/metadata transaction owners
+and durable retry/archive disposition. Test leaf ownership is explicit and
+released before integration. No second roadmap or speculative API is added.
+Durable actions, host/SDK/Workbench integration and dense-history latency remain
+active M4 work, not completed or removed scope. Existing workspace-revision
+triggers cover metadata resolver inputs, but expiry, rollback revision reuse and
+restore identity require explicit proof before any validated-result cache.
+
+C2 separately owns only its bounded inherited licence correction and the two
+qualified rustdoc links in the Nuvio application module, subject to exact final
+reconciliation. M4 has not released v16, allocated v17, changed archive v5 or
+activated C2 runtime capabilities.

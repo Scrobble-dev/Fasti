@@ -288,6 +288,14 @@ pub struct StoredSearchCandidate {
     pub context: SearchPageContext,
 }
 
+/// Atomic receipt authorization and provider-read state for one detail fetch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreparedSearchCandidateDetails {
+    pub candidate: StoredSearchCandidate,
+    pub provider_state: ProviderCapabilityState,
+    pub provider_authority_fingerprint: Sha256Digest,
+}
+
 pub trait SearchPersistencePort: Send + Sync {
     fn search_local_records(
         &self,
@@ -314,6 +322,10 @@ pub trait SearchPersistencePort: Send + Sync {
         &self,
         request: &ReadSearchCandidateRequest,
     ) -> ApplicationResult<Option<StoredSearchCandidate>>;
+    fn prepare_search_candidate_details(
+        &self,
+        request: &ReadSearchCandidateRequest,
+    ) -> ApplicationResult<Option<PreparedSearchCandidateDetails>>;
 }
 
 /// The allowlist persisted from provider search. No raw body or request headers.
