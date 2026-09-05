@@ -118,9 +118,13 @@ async function openFixtureDetails(providerId) {
         url.pathname,
       ),
   );
-  await page.getByRole("heading", { name: FIXTURE_TITLE, level: 1 }).waitFor();
-  await page.getByText(FIXTURE_OVERVIEW, { exact: true }).waitFor();
-  await page.getByText(providerId, { exact: true }).waitFor();
+  const details = page.locator("section").filter({
+    has: page.getByRole("heading", { name: FIXTURE_TITLE, level: 1 }),
+  });
+  await details.getByText(FIXTURE_OVERVIEW, { exact: true }).waitFor();
+  await details.getByText(providerId, { exact: true }).waitFor();
+  await details.getByText("2020", { exact: true }).waitFor();
+  return details;
 }
 
 async function runM4SearchJourney() {
@@ -150,9 +154,9 @@ async function runM4SearchJourney() {
       .waitFor();
     await requireNoAccessibilityViolations("live provider Search results");
 
-    await openFixtureDetails(FIXTURE_PROVIDER_IDS[0]);
+    const firstDetails = await openFixtureDetails(FIXTURE_PROVIDER_IDS[0]);
     await requireNoAccessibilityViolations("provider candidate details");
-    await page.getByRole("button", { name: "Create Record" }).click();
+    await firstDetails.getByRole("button", { name: "Create Record" }).click();
     await page.waitForURL(
       (url) =>
         url.origin === FASTI_ORIGIN &&
@@ -174,8 +178,8 @@ async function runM4SearchJourney() {
 
     await page.goto(`${FASTI_ORIGIN}/discover`);
     await searchFixtureFilm();
-    await openFixtureDetails(FIXTURE_PROVIDER_IDS[1]);
-    await page
+    const secondDetails = await openFixtureDetails(FIXTURE_PROVIDER_IDS[1]);
+    await secondDetails
       .getByRole("button", {
         name: "Attach to existing Record",
         exact: true,
