@@ -3899,3 +3899,17 @@ passed at that head. Codacy's six fixture/process annotations did not establish
 a reachable injection path. Ten CodeRabbit threads are resolved with
 source-backed replies. The JavaScript job remains unproven until its existing
 queued/in-progress run completes; do not restart it simply for being queued.
+
+The correction is committed at `26b8848629d37e4df67766fca4071574f284ec2a`,
+tree `dbb7bc300f277e85b132e7930b02f173512c4d13`. Its first canonical attempt
+stopped at the unchanged golden problem count (389 versus the required 392):
+the three browser-session problems are newly projected for `provider.list`.
+Update that exact inventory expectation, not the validator or assertion, and
+retain a new explicit seven-code provider-list assertion with all three session
+errors at HTTP 401. No successful canonical receipt was emitted for that attempt.
+
+Hosted JavaScript recovery is now proven for published documentation head
+`a7f832bfeae3b852ab947048bcd50381deffffd7`: job `101378771492` in run
+`33992970208` completed successfully, including both the new locked SDK fixture
+prebuild and `pnpm test`. This is evidence for that published increment, not
+the later local provider-inventory implementation.
