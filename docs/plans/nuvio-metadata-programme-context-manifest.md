@@ -703,3 +703,59 @@ ranges do not permit 6.16.0; use the existing bounded override owner, preserve
 the parents, and verify their loopback docs-dev-server caller when updating.
 No M4 PR or hosted exact-M4-head review exists yet. No v17 allocation or shared-file release
 has occurred.
+
+### M4 dependency and documentation QA checkpoint — 2026-09-05
+
+The metadata-history slice at `12af3a2acbe12b0491bf9ce5008acf8a28dfa5f9`, tree
+`5029dabded8ce68de068498ff459d91ae01d6bbe`, passed all 27 canonical contract
+gates with clean exact-source evidence. Its dense-history latency limitation
+above remains open; the pass does not remove that M4 gate.
+
+Commit `06c5b698c2011051b72781dc3ee5e2b75b39b1e0` updates only fast-uri
+3.1.5 → 3.1.7 and qs 6.15.3 → 6.16.0, using the existing central override for
+the parents' qs tilde range. The newer fast-uri patch also fixes port injection
+and bracket-authority parsing. Native consumer-chain tests exercise the actual
+Ajv resolver and both Express/body-parser dependencies, plus valid controls.
+The existing image-size patch and Tauri/glib exception remain intact. Local
+audit has no unignored advisory entries; it still counts two tracked high
+image-size advisories. This is not a zero-vulnerability claim. No external AI
+credential or Codex Security service was used.
+
+Docs packaging exposed a separate physical-path mismatch in this worktree's
+symlinked target directory. A clean rebuild reproduced all 54 failed MDX renders;
+generated metadata was present, but webpack's physical resource paths missed
+the docs loader's lexical include. Commit `9f8a1182797e4908a4a539c9033d8b839f782f01`,
+tree `2ef5c57df49c18405be187d09d16cce2af721a4e`, resolves the existing docs path
+with the standard library. The exact-head canonical docs package passes all
+59 routes and builds its search index. Validation and webpack symlink handling
+remain enabled. No new dependency, API or infrastructure owner was introduced.
+
+The local JS suite passed 144 tests with two browser tests initially skipped;
+all four docs browser checks subsequently passed against the built site.
+Native browser QA covered six pages, docs search results, navigation, back/forward,
+invalid deployment input/reset, mobile menu Escape/focus and overflow. No browser
+defect was observed within that quick scope. This does not qualify provider media
+Search, full accessibility, dense latency or deployment. The local report is
+`.gstack/qa-reports/qa-report-local-docs-2026-09-05.md`, also retained in the
+existing project-scoped QA artifact directory. No public deployment occurred.
+
+Parallel allocation remains one shared-surface commander. Native agents supplied
+an independent dependency review, exact consumer regressions and the next trusted
+cache-policy map. The next minimal cache-policy change reuses provider descriptors
+and existing cache partition keys; legal posture must not masquerade as a cache
+revision. Preserve old immutable refresh receipts and exact command replay.
+Workbench bundle preparation remains read-only: shared generated catalogues are
+retained, and any route splitting must prove offline navigation, focus and chunk
+failure recovery before implementation. No speculative projections were added.
+
+C2 proposed a foundation-only delivery from source
+`5eb3def007f712f62038f4f1bd8c64f76c47098e`, tree
+`2c15dd499281dc91fcbc3bb8325eb8878f1c04fe`. Read-only reconciliation against
+observed dev `df09101028a988a92f4546313c5eed6dd20d238a` is clean; against M4
+`9f8a1182` it finds only the typed-ID registry-count assertion (27 versus 26).
+Preserve M4's 27 and reserved `scr_`. The three shared ID/secret patches are
+equivalent; module merging must preserve both access credentials and Search.
+C2 may prepare that bounded delivery, excluding later C3 work, subject to exact
+tests/review/merged-tree proof and corrected stale M3 ownership text. This is not
+approval to activate C2 or modify M4 schema, store, registry, API, SDK, host or
+Workbench. No v17 allocation or shared-file release has occurred.
