@@ -285,3 +285,10 @@ Rerun debug/release, strict Clippy, formatting, authored workflow and its
 synthetic guards, then canonical delivery checks and independent review.
 This test-only addition does not require another native measurement. Retry
 branches are not all fault-injected; do not claim instrumented coverage.
+
+PR132 review requested explicit safety explanations around native resource
+usage calls. Add comments documenting writable storage, initialization after
+success and short-circuit protection; change no statement, dependency or
+measurement parameter. The historical measured source and hashes remain
+82a9e21a, not a new measurement of this comment-only revision. Recheck focused
+suites, formatting, Clippy and canonical gates before publishing the final head.

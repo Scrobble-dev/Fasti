@@ -40,9 +40,11 @@ fn derive(kdf: &Argon2<'_>, out: &mut [u8]) -> Result<()> {
 
 fn rss() -> Result<u64> {
     let mut usage = std::mem::MaybeUninit::<libc::rusage>::uninit();
+    // SAFETY: usage supplies aligned, writable storage for one rusage value.
     if unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) } != 0 {
         return Err(io::Error::last_os_error().into());
     }
+    // SAFETY: successful getrusage initialized usage; the failure path returned.
     Ok(unsafe { usage.assume_init() }.ru_maxrss as u64 * 1024)
 }
 
@@ -97,9 +99,11 @@ fn child(mode: &str) -> Result<()> {
 
 fn diagnostics(mode: &str, phase: &str) -> Result<()> {
     let mut usage = std::mem::MaybeUninit::<libc::rusage>::uninit();
+    // SAFETY: usage supplies aligned, writable storage for one rusage value.
     if unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) } != 0 {
         return Err(io::Error::last_os_error().into());
     }
+    // SAFETY: successful getrusage initialized usage; the failure path returned.
     let usage = unsafe { usage.assume_init() };
     let status = fs::read_to_string("/proc/self/status")?;
     let resident = status
@@ -315,6 +319,8 @@ fn enforce() -> Result<std::path::PathBuf> {
         return Err("not pinned to CPU 0".into());
     }
     let mut limit = std::mem::MaybeUninit::<libc::rlimit>::uninit();
+    // SAFETY: limit supplies aligned, writable storage for one rlimit value.
+    // Short-circuiting evaluates assume_init only after getrlimit succeeds.
     if unsafe { libc::getrlimit(libc::RLIMIT_CORE, limit.as_mut_ptr()) } != 0
         || unsafe { limit.assume_init() }.rlim_cur != 0
     {
