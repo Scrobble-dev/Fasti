@@ -2949,3 +2949,42 @@ callers land. v17/archive v7 and all Access ownership boundaries remain unchange
 Next: finish exact qualification, then wire the shared projections into the real
 Desktop commands and browser/Workbench Search flow, retaining native cancellation,
 authority fencing, canonical Record routes and atomic receipt-based actions.
+
+### 2026-09-05 — Exact shared Search conversion gate and native projection seam
+
+Clean tested source `0e4b30dd69685124320e936d3d8d2d417510cf93`, tree
+`5150c9ccc7ceceb957985a7c1ea974468958592f`: canonical PR gate passed with
+27/27 contract and 11/11 portable checks, both receipts bound to this clean
+commit/tree. The 22 generated artifacts remain byte-identical and checked-in
+inventory has no drift. Desktop library tests passed 79 with 2 explicit ignores;
+Desktop strict all-target clippy passed. The native artwork runtime receipt above
+remains evidence for its exact earlier source, not a new runtime claim for this
+pure refactor. Existing bundle-size and hidden benchmark unused-variable warnings
+remain visible; no source warning was suppressed.
+
+Independent native read-only review compared the complete four-file implementation
+against `e8b8b5c2` and found no actionable issue: enums/reexports, route coordinates,
+all details results, action history rejection, HTTP headers, correlation mapping
+and dependency direction were preserved. One reviewer hit model capacity; the
+available native reviewer completed the pass. No Codex Security was used. The
+bounded `/review` pass is DONE, not full M4 landing approval. Its result belongs
+to this exact delta only; no complete-branch clean review is claimed.
+
+Next native local Search implementation has a concrete reuse path: move the
+existing API `record_summary_dto` and its field/time helpers into the contracts
+Record owner, call `SearchPersistencePort::search_local_records` once, and derive
+artwork scope from each already-selected summary before consuming it. Reuse a
+private Desktop wrapper carrying `poster_asset_path`, not a new public DTO field.
+The renderer must strip that private path and use `convertFileSrc` or null, never
+fall back to the remote poster URL. Preserve the complete Record and Store cursor;
+enforce the actual serialized private payload's existing 4 MiB ceiling too.
+
+Read-only preparation proved that the current artwork locator is scoped but not
+cached-only: `artwork_protocol.rs` calls `ArtworkCache::load`, which can fetch on a
+miss or stale entry. Strict offline Search rendering therefore needs a private
+delivery disposition enforced by the existing handler and cache-policy reader
+at serving time, not a cache-existence check during projection. Keep scope,
+selected-poster and current-credential rechecks; add a no-request-polled check for
+fresh/expired/no-cache/must-revalidate and removal-after-projection cases. Do not
+claim offline image delivery from locator generation or the Store query alone.
+This is retained M4 implementation work, not a dropped capability or a new stage.
