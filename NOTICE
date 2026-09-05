@@ -11,3 +11,9 @@ Fasti can run TrailBase v0.33.5 as a separate, unmodified human-account
 service. TrailBase is licensed under the Open Software License 3.0. The exact
 version, artifact digests, source link, licence digest, and integration review
 are recorded in `third_party/trailbase/`.
+
+The all-target dependency graph includes webpki-root-certs 1.0.9, whose
+CCADB-derived root-certificate data uses CDLA-Permissive-2.0. Its exact
+agreement and dependency review are retained in `third_party/webpki-root-certs/`.
+Any distribution containing that data must make the agreement text available
+with it. This notice does not claim that every Fasti target embeds that data.

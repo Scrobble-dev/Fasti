@@ -33,6 +33,14 @@ allow = [
 ]
 confidence-threshold = 0.9
 
+# Existing all-target graph only; no general permission for new CDLA data.
+# Exact package/text evidence and distribution condition:
+# third_party/webpki-root-certs/LICENSE-REVIEW.md
+[[licenses.exceptions]]
+name = "webpki-root-certs"
+version = "=1.0.9"
+allow = ["CDLA-Permissive-2.0"]
+
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"

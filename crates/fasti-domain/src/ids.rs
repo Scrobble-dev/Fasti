@@ -142,9 +142,20 @@ macro_rules! define_fasti_ids {
         ];
 
         $(
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
         #[serde(transparent)]
         pub struct $name(PrefixedUuidV7);
+
+        impl<'de> Deserialize<'de> for $name {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                String::deserialize(deserializer)?
+                    .parse()
+                    .map_err(serde::de::Error::custom)
+            }
+        }
 
         impl $name {
             pub fn new_v7() -> Self {
@@ -187,6 +198,23 @@ macro_rules! define_fasti_ids {
             }
         }
         )+
+
+        #[cfg(test)]
+        #[test]
+        fn every_typed_id_deserialization_enforces_its_own_prefix() {
+            $(
+                let own = $name::new_v7();
+                assert_eq!(serde_json::from_str::<$name>(&serde_json::to_string(&own).unwrap()).unwrap(), own);
+                for spec in ID_PREFIX_REGISTRY {
+                    let other = PrefixedUuidV7::new(spec.kind).to_string();
+                    let decoded = serde_json::from_str::<$name>(&serde_json::to_string(&other).unwrap());
+                    assert_eq!(decoded.is_ok(), spec.kind == IdKind::$kind, "{} accepted {}", stringify!($name), other);
+                }
+                for invalid in [format!("{}{}", $prefix, Uuid::new_v4().simple()), own.to_string().to_uppercase(), "fasti_pat_ab".into()] {
+                    assert!(serde_json::from_str::<$name>(&serde_json::to_string(&invalid).unwrap()).is_err());
+                }
+            )+
+        }
     };
 }
 
@@ -200,6 +228,18 @@ define_fasti_ids!(
     (TrailBaseInstance, TrailBaseInstanceId, "tbi_", Executable),
     (Membership, MembershipId, "mem_", Executable),
     (BrowserSession, BrowserSessionId, "ses_", Executable),
+    (
+        PersonalAccessToken,
+        PersonalAccessTokenId,
+        "pat_",
+        Executable
+    ),
+    (
+        AccessConsentRevision,
+        AccessConsentRevisionId,
+        "cnr_",
+        Executable
+    ),
     (Record, RecordId, "rec_", Executable),
     (MetadataClaim, MetadataClaimId, "mcl_", Executable),
     (ExternalIdentifier, ExternalIdentifierId, "xid_", Executable),
@@ -225,7 +265,7 @@ mod tests {
 
     #[test]
     fn registry_has_one_unique_prefix_per_kind() {
-        assert_eq!(ID_PREFIX_REGISTRY.len(), 24);
+        assert_eq!(ID_PREFIX_REGISTRY.len(), 26);
         let prefixes: HashSet<_> = ID_PREFIX_REGISTRY
             .iter()
             .map(|entry| entry.prefix)
@@ -258,6 +298,7 @@ mod tests {
             HashSet::from([
                 "wsp_", "prf_", "cli_", "crd_", "grt_", "sub_", "tbi_", "mem_", "ses_", "rec_",
                 "mcl_", "xid_", "evd_", "obs_", "occ_", "int_", "rev_", "op_", "rcp_", "req_",
+                "pat_", "cnr_",
             ])
         );
         assert_eq!(reserved, HashSet::from(["asr_", "cor_", "rst_", "fld_"]));
@@ -303,6 +344,31 @@ mod tests {
             record.parse::<ObservationId>(),
             Err(IdError::WrongType { .. })
         ));
+    }
+
+    #[test]
+    fn access_resource_ids_are_not_each_other_or_bearer_secrets() {
+        let pat = PersonalAccessTokenId::new_v7();
+        let consent = AccessConsentRevisionId::new_v7();
+        assert_eq!(pat.to_string().parse::<PersonalAccessTokenId>(), Ok(pat));
+        assert_eq!(
+            consent.to_string().parse::<AccessConsentRevisionId>(),
+            Ok(consent)
+        );
+        assert!(pat.to_string().parse::<AccessConsentRevisionId>().is_err());
+        assert!(consent
+            .to_string()
+            .parse::<PersonalAccessTokenId>()
+            .is_err());
+        let bearer = format!("fasti_pat_{}", "ab".repeat(32));
+        assert_eq!(
+            bearer.parse::<PersonalAccessTokenId>(),
+            Err(IdError::UnknownPrefix)
+        );
+        assert_eq!(
+            bearer.parse::<AccessConsentRevisionId>(),
+            Err(IdError::UnknownPrefix)
+        );
     }
 
     #[test]

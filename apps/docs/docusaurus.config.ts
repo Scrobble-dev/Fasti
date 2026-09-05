@@ -1,6 +1,7 @@
 import { cssVariables } from "@fasti/tokens";
 import type { Config } from "@docusaurus/types";
 import { themes as prismThemes } from "prism-react-renderer";
+import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 
 const config: Config = {
@@ -27,7 +28,10 @@ const config: Config = {
       "classic",
       {
         docs: {
-          path: resolve(__dirname, "../../target/docs-site/content"),
+          // Match webpack's physical resource paths when target is a symlink.
+          path: realpathSync(
+            resolve(__dirname, "../../target/docs-site/content"),
+          ),
           routeBasePath: "/",
           sidebarPath: resolve(__dirname, "sidebars.ts"),
           editUrl: "https://github.com/Scrobble-dev/Fasti/edit/dev/",

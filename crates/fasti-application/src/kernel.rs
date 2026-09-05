@@ -78,7 +78,7 @@ impl SecretMaterial {
 
 impl Drop for SecretMaterial {
     fn drop(&mut self) {
-        self.bytes.fill(0);
+        zeroize::Zeroize::zeroize(&mut self.bytes);
     }
 }
 
@@ -1326,6 +1326,12 @@ impl<T> LocalKernel for T where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn secret_digest_owner_has_zeroizing_drop() {
+        fn requires_zeroizing_drop<T: zeroize::ZeroizeOnDrop>() {}
+        requires_zeroizing_drop::<sha2::Sha256>();
+    }
 
     #[test]
     fn secret_round_trip_is_explicit_and_redacted_by_type() {

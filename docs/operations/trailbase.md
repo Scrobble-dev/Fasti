@@ -2,8 +2,9 @@
 
 This runbook covers the pinned TrailBase identity service used by Fasti
 development and conformance tests. C1 implements the TrailBase-to-Fasti
-exchange in local source. This runbook does not claim a supported package,
-merge, release, or deployment.
+exchange in local source. C1 ordinary-browser delivery merged in
+[PR #119](https://github.com/Scrobble-dev/Fasti/pull/119). This runbook does not
+claim a supported package, release, or deployment.
 
 ## Locked release
 
@@ -279,5 +280,7 @@ The command writes `target/fasti-receipts/access-c1.json` as the in-scope C1
 delivery receipt. Its locked desktop tests cover the trusted-host source
 boundary only. Packaged Tauri authentication, cross-platform WebView behavior,
 and packaged assistive-technology proof are deferred to
-`C1-TAURI-AUTH`; no packaged desktop authentication support is claimed. Final
-review, exact-head CI, merge, and merged-tree evidence remain required.
+`C1-TAURI-AUTH`; no packaged desktop authentication support is claimed. The
+[canonical checkpoint](../plans/trailbase-authentication-remediation.md#24-c1-delivery-and-c2-foundation-checkpoint)
+records the merged ordinary-browser C1 evidence. Review, exact-head CI, and
+merged-tree evidence remain required for subsequent changes.

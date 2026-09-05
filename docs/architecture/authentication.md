@@ -42,8 +42,9 @@ issuance require a verified installation receipt and persisted active
 activation. Port fallback, alternate loopback, generic local, integration,
 container-forwarded, wildcard, and remote routers omit C1 routes.
 
-This source state is not a supported release. C1 review, exact-head CI, merge,
-and merged-tree evidence remain pending. Packaged Tauri authentication,
+This source state is not a supported release. C1 ordinary-browser delivery
+merged in [PR #119](https://github.com/Scrobble-dev/Fasti/pull/119), with exact
+evidence in the [canonical checkpoint](../plans/trailbase-authentication-remediation.md#24-c1-delivery-and-c2-foundation-checkpoint). Packaged Tauri authentication,
 cross-platform WebView behavior, and packaged assistive-technology proof are
 deferred to `C1-TAURI-AUTH`; no packaged desktop authentication support is
 claimed.
@@ -58,7 +59,7 @@ next action. It does not generate or store placeholder security state.
 | ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | TrailBase password, registration, verification, reset, and supported social sign-in | TrailBase in B, then Fasti exchange in C1. Fasti does not store the human password.                                                                                               |
 | TrailBase password plus TOTP                                                        | Unavailable in C1 because v0.33.5 loses the original PKCE ceremony. Fasti does not store the TOTP secret or simulate the missing transition.                                      |
-| Fasti browser session                                                               | Fasti Access. C1 implements fixed-origin sign-in, issuance, inventory, rotation, profile selection, and revocation in local source. Package and delivery evidence remains pending. |
+| Fasti browser session                                                               | Fasti Access. Merged ordinary-browser C1 implements fixed-origin sign-in, issuance, inventory, rotation, profile selection, and revocation. Packaged Tauri authentication remains deferred. |
 | Passkey and Fasti recovery code                                                     | Fasti Access in D, linked to `AuthSubject` with a verified WebAuthn ceremony and active TrailBase-anchor check.                                                                    |
 | Generic OpenID Connect and Authentik sign-in                                        | Identity Integration in E1/E3. Require discovery, state, nonce, S256 Proof Key for Code Exchange, exact issuer and subject, token validation, linking policy, and logout evidence. |
 | Fasti OAuth and Nuvio or command-line device approval                               | Fasti Access in E2. Require approved clients, scopes, profile consent, bounded codes, polling, rotation, revocation, and replay tests.                                             |
