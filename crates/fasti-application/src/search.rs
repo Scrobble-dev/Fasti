@@ -330,6 +330,166 @@ pub struct PreparedSearchCandidateDetails {
     pub provider_authority_fingerprint: Sha256Digest,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    content = "record_id",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+pub enum SearchRecordAction {
+    Create,
+    Attach(RecordId),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchCandidateEvidenceMode {
+    Refetch,
+    Cached,
+}
+
+/// Internal command: the caller supplies intent, never metadata or provenance.
+#[derive(Debug, Clone)]
+pub struct SearchCandidateActionCommand {
+    pub request: ReadSearchCandidateRequest,
+    pub operation_id: fasti_domain::OperationId,
+    pub action: SearchRecordAction,
+    pub evidence_mode: SearchCandidateEvidenceMode,
+}
+
+impl SearchCandidateActionCommand {
+    pub fn semantic_digest(&self) -> Sha256Digest {
+        candidate_action_digest(
+            self.request.candidate_receipt_id,
+            self.request.provider.as_str(),
+            self.request.grain,
+            self.action,
+            self.evidence_mode,
+        )
+    }
+}
+
+fn candidate_action_digest(
+    receipt_id: SearchCandidateReceiptId,
+    provider: &str,
+    grain: Grain,
+    action: SearchRecordAction,
+    evidence_mode: SearchCandidateEvidenceMode,
+) -> Sha256Digest {
+    search_digest(&(
+        "fasti.search.record-action.v1",
+        receipt_id,
+        provider,
+        grain,
+        action,
+        evidence_mode,
+    ))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchRecordActionDisposition {
+    Created,
+    Reused,
+    Attached,
+    AlreadyAttached,
+}
+
+/// Historical evidence, not current authorization or a fresh Record projection.
+/// Subject IDs survive only as audit values; no session or grant is portable.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SearchCandidateActionReceipt {
+    pub workspace_id: WorkspaceId,
+    pub profile_id: ProfileId,
+    pub actor_client_id: ClientId,
+    pub actor_subject_id: Option<AuthSubjectId>,
+    pub operation_id: fasti_domain::OperationId,
+    pub candidate_receipt_id: SearchCandidateReceiptId,
+    pub provider: String,
+    pub grain: Grain,
+    pub action: SearchRecordAction,
+    pub evidence_mode: SearchCandidateEvidenceMode,
+    pub record_id: RecordId,
+    pub disposition: SearchRecordActionDisposition,
+    pub search_context_digest: Sha256Digest,
+    pub search_response_digest: Sha256Digest,
+    #[serde(deserialize_with = "deserialize_action_provenance")]
+    pub provenance: fasti_domain::FieldClaimProvenance,
+    pub fetched_at: DateTime<Utc>,
+    pub expires_at: Option<DateTime<Utc>>,
+    #[serde(deserialize_with = "deserialize_action_status")]
+    pub initial_status: fasti_domain::FieldClaimStatus,
+    pub committed_at: DateTime<Utc>,
+}
+
+impl SearchCandidateActionReceipt {
+    pub fn semantic_digest(&self) -> Sha256Digest {
+        candidate_action_digest(
+            self.candidate_receipt_id,
+            &self.provider,
+            self.grain,
+            self.action,
+            self.evidence_mode,
+        )
+    }
+}
+
+fn deserialize_action_status<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<fasti_domain::FieldClaimStatus, D::Error> {
+    match String::deserialize(deserializer)?.as_str() {
+        "fresh" => Ok(fasti_domain::FieldClaimStatus::Fresh),
+        "stale" => Ok(fasti_domain::FieldClaimStatus::Stale),
+        _ => Err(serde::de::Error::custom("invalid action evidence status")),
+    }
+}
+
+fn deserialize_action_provenance<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<fasti_domain::FieldClaimProvenance, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Stored {
+        provider_id: String,
+        source_namespace: String,
+        source_identifier: String,
+        locale: Option<String>,
+        region: Option<String>,
+        source_version: Option<String>,
+        evidence_digest: Sha256Digest,
+    }
+    let stored = Stored::deserialize(deserializer)?;
+    fasti_domain::FieldClaimProvenance::try_new(
+        fasti_domain::MetadataProviderId::try_new(stored.provider_id)
+            .map_err(serde::de::Error::custom)?,
+        fasti_domain::NamespaceKey::try_new(stored.source_namespace)
+            .map_err(serde::de::Error::custom)?,
+        stored.source_identifier,
+        stored
+            .locale
+            .map(MetadataLocale::try_new)
+            .transpose()
+            .map_err(serde::de::Error::custom)?,
+        stored
+            .region
+            .map(MetadataRegion::try_new)
+            .transpose()
+            .map_err(serde::de::Error::custom)?,
+        stored.source_version,
+        stored.evidence_digest,
+    )
+    .map_err(serde::de::Error::custom)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SearchCandidateActionPreparation {
+    Replay(Box<SearchCandidateActionReceipt>),
+    Cached(StoredSearchCandidate),
+    Refetch(PreparedSearchCandidateDetails),
+}
+
 pub trait SearchPersistencePort: Send + Sync {
     fn search_local_records(
         &self,
@@ -360,6 +520,16 @@ pub trait SearchPersistencePort: Send + Sync {
         &self,
         request: &ReadSearchCandidateRequest,
     ) -> ApplicationResult<Option<PreparedSearchCandidateDetails>>;
+    fn prepare_search_candidate_action(
+        &self,
+        command: &SearchCandidateActionCommand,
+    ) -> ApplicationResult<SearchCandidateActionPreparation>;
+    fn commit_search_candidate_action(
+        &self,
+        command: &SearchCandidateActionCommand,
+        prepared: &SearchCandidateActionPreparation,
+        refetched_fields: Option<&[crate::ProviderMetadataField]>,
+    ) -> ApplicationResult<SearchCandidateActionReceipt>;
 }
 
 /// The allowlist persisted from provider search. No raw body or request headers.
@@ -690,6 +860,7 @@ impl SearchCandidateReceipt {
 #[cfg(test)]
 mod tests {
     include!("search_metadata_tests.rs");
+    include!("search_action_tests.rs");
     use super::*;
     use fasti_domain::BrowserSessionId;
 

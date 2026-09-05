@@ -781,7 +781,9 @@ Durable action evidence needs a new versioned archive stream, not an extension
 of published archive v5 or a disguised observation/metadata-refresh receipt.
 M4 allocates archive v6 for that durable owner; activation must accompany its
 strict exporter/importer, schema-v16 compatibility and historical v1–v5 tests.
-Until that implementation lands, the current archive remains v5 with 34 streams.
+The current M4 source implements archive v6 with 35 streams; this remains
+unmerged programme work, not a new public export activation. Frozen v1–v5
+artifacts remain byte-identical, including the published v5/schema-v15 pairing.
 Ephemeral Search pages and candidates remain excluded. A historical browser
 subject ID is typed audit evidence, with no foreign key to excluded accounts or
 sessions; it never recreates authentication or grants. Profile/client/Record

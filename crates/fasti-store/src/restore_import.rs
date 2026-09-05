@@ -34,21 +34,23 @@ use fasti_application::{
     CancellationSignal, CapabilityKey, FastiProblem, PortabilityLimits, ReadSeek,
     WorkspaceExportEntity, MAX_CORRECTION_REASON_BYTES, WORKSPACE_ARCHIVE_V1_FORMAT_VERSION,
     WORKSPACE_ARCHIVE_V2_FORMAT_VERSION, WORKSPACE_ARCHIVE_V3_FORMAT_VERSION,
-    WORKSPACE_ARCHIVE_V4_FORMAT_VERSION,
+    WORKSPACE_ARCHIVE_V4_FORMAT_VERSION, WORKSPACE_ARCHIVE_V5_FORMAT_VERSION,
 };
 use fasti_contracts::VerifiedInboundWorkspaceManifest;
 use fasti_domain::{
-    ClientId, CorrectionId, EvidenceId, ExternalIdentifierClaim, ExternalIdentifierId, FieldClaim,
-    FieldClaimLifecycleEvent, FieldClaimProvenance, FieldClaimStatus, FieldKey, FieldOverride,
-    Grain, IdentityAssertionId, InterpretationId, InterpretationState, LastKnownGoodPolicy,
-    MetadataAttribution, MetadataClaimId, MetadataLocale, MetadataProjectionPolicy,
-    MetadataProviderId, MetadataRegion, NamespaceDefinition, NamespaceKey, NamespaceLicencePosture,
-    ObservationId, ObservedAt, OccurredAt, OccurrenceId, OperationId, ProfileFieldOverride,
-    ProfileId, RatingClaim, RatingScale, ReceiptId, ReceivedAt, RecordId, RecordStatus,
-    RequestCorrelationId, RestoreAttemptId, RestoreStatus, ReviewItemId, ReviewStatus,
-    Sha256Digest, TrackingDisposition, WorkspaceId,
+    AuthSubjectId, ClientId, CorrectionId, EvidenceId, ExternalIdentifierClaim,
+    ExternalIdentifierId, FieldClaim, FieldClaimLifecycleEvent, FieldClaimProvenance,
+    FieldClaimStatus, FieldKey, FieldOverride, Grain, IdentityAssertionId, InterpretationId,
+    InterpretationState, LastKnownGoodPolicy, MetadataAttribution, MetadataClaimId, MetadataLocale,
+    MetadataProjectionPolicy, MetadataProviderId, MetadataRegion, NamespaceDefinition,
+    NamespaceKey, NamespaceLicencePosture, ObservationId, ObservedAt, OccurredAt, OccurrenceId,
+    OperationId, ProfileFieldOverride, ProfileId, RatingClaim, RatingScale, ReceiptId, ReceivedAt,
+    RecordId, RecordStatus, RequestCorrelationId, RestoreAttemptId, RestoreStatus, ReviewItemId,
+    ReviewStatus, Sha256Digest, TrackingDisposition, WorkspaceId,
 };
-use rusqlite::{params, Connection, OpenFlags, Transaction, TransactionBehavior};
+use rusqlite::{
+    params, Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior,
+};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
@@ -839,10 +841,12 @@ fn accepted_archive_schema(
         || (format_version == WORKSPACE_ARCHIVE_V2_FORMAT_VERSION && (7..=11).contains(&version))
         || (format_version == WORKSPACE_ARCHIVE_V3_FORMAT_VERSION && version == 12)
         || (format_version == WORKSPACE_ARCHIVE_V4_FORMAT_VERSION && matches!(version, 13 | 14))
-        || (format_version == 5 && version == 15)
+        || (format_version == WORKSPACE_ARCHIVE_V5_FORMAT_VERSION && version == 15)
     {
         // Continue to the exact historical fingerprint match below.
-    } else if version == u32::try_from(SCHEMA_VERSION).unwrap_or(u32::MAX) {
+    } else if format_version == fasti_application::WORKSPACE_ARCHIVE_FORMAT_VERSION
+        && version == u32::try_from(SCHEMA_VERSION).unwrap_or(u32::MAX)
+    {
         return digest == current_digest;
     } else {
         return false;
@@ -1001,6 +1005,7 @@ fn verify_sql_counts(
         "profile_anime_grouping_policies",
         "client_anime_grouping_policies",
         "anime_grouping_policy_receipts",
+        "search_action_receipts",
     ];
     for (index, table) in TABLES.iter().enumerate() {
         let count: i64 = transaction
@@ -2348,6 +2353,42 @@ fn import_row(
                 row.operation_id.to_string(),
             ))
         }
+        WorkspaceExportEntity::SearchActionReceipts => {
+            let row: SearchActionReceiptRow = decode_row(line, path)?;
+            require_workspace(row.workspace_id, workspace_id)?;
+            let receipt = crate::search_actions::decode_receipt(
+                &row.receipt_json,
+                RequestCorrelationId::new_v7(),
+            )
+            .map_err(|_| RestoreImportError::DomainInvariant)?;
+            if receipt.workspace_id != row.workspace_id
+                || receipt.operation_id != row.operation_id
+                || receipt.profile_id != row.profile_id
+                || receipt.actor_client_id != row.actor_client_id
+                || receipt.actor_subject_id != row.actor_subject_id
+                || receipt.record_id != row.record_id
+                || receipt.semantic_digest() != row.semantic_digest
+            {
+                return Err(RestoreImportError::DomainInvariant);
+            }
+            let grain: String = transaction
+                .query_row(
+                    "SELECT grain FROM records WHERE workspace_id = ?1 AND record_id = ?2",
+                    params![workspace_id.to_string(), row.record_id.to_string()],
+                    |record| record.get(0),
+                )
+                .optional()
+                .map_err(RestoreImportError::Sqlite)?
+                .ok_or(RestoreImportError::DomainInvariant)?;
+            if grain != receipt.grain.as_str() {
+                return Err(RestoreImportError::DomainInvariant);
+            }
+            insert_row(transaction, entity, transaction.execute(
+                "INSERT INTO search_action_receipts(workspace_id, operation_id, profile_id, actor_client_id, actor_subject_id, record_id, semantic_digest, receipt_json) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![row.workspace_id.to_string(), row.operation_id.to_string(), row.profile_id.to_string(), row.actor_client_id.to_string(), row.actor_subject_id.map(|value| value.to_string()), row.record_id.to_string(), row.semantic_digest.to_string(), row.receipt_json],
+            ))?;
+            Ok(RowKey::One(row.operation_id.to_string()))
+        }
     }
 }
 
@@ -2942,6 +2983,17 @@ archive_row!(AnimeGroupingPolicyReceiptRow {
     workspace_id: WorkspaceId,
 });
 
+archive_row!(SearchActionReceiptRow {
+    actor_client_id: ClientId,
+    actor_subject_id: Option<AuthSubjectId>,
+    operation_id: OperationId,
+    profile_id: ProfileId,
+    receipt_json: String,
+    record_id: RecordId,
+    semantic_digest: Sha256Digest,
+    workspace_id: WorkspaceId,
+});
+
 #[cfg(target_os = "linux")]
 fn descriptor_child_path(directory: &File, name: &str) -> PathBuf {
     PathBuf::from(format!("/proc/self/fd/{}/{}", directory.as_raw_fd(), name))
@@ -3202,6 +3254,7 @@ fn cleanup_attempt(
 
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
+    include!("search_action_archive_tests.rs");
     use super::*;
     use crate::archive::ArchiveWriter;
     use crate::kernel::scope_storage_key;
@@ -5218,7 +5271,11 @@ mod tests {
     #[test]
     fn archive_v1_restore_keeps_legacy_rows_and_leaves_v2_tables_empty() {
         let fixture = full_fixture();
-        let archive = archive_v1_from_v2(&fixture.archive);
+        let archive = rewrite_manifest_schema(
+            &archive_v1_from_v2(&fixture.archive),
+            11,
+            "sha256:c833fb634b64d0b9680e4734b22684e8eab36710fca5c95d4315f3141491687a",
+        );
         let restore_root = tempfile::tempdir().expect("restore root");
         let lock = LockedDataRoot::acquire(restore_root.path()).expect("exclusive restore root");
         let attempt_id = RestoreAttemptId::new_v7();
@@ -5366,6 +5423,12 @@ mod tests {
         assert!(accepted_archive_schema(5, 15, digest, "current"));
         assert!(!accepted_archive_schema(5, 15, "forged", "current"));
         assert!(!accepted_archive_schema(4, 15, digest, "current"));
+        for format in 1..=5 {
+            assert!(!accepted_archive_schema(format, 16, "current", "current"));
+        }
+        assert!(accepted_archive_schema(6, 16, "current", "current"));
+        assert!(!accepted_archive_schema(6, 16, "forged", "current"));
+        assert!(!accepted_archive_schema(6, 15, digest, "current"));
     }
 
     #[test]

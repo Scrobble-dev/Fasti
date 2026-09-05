@@ -28,6 +28,7 @@ mod restore_import;
 mod review;
 mod schema;
 mod search;
+mod search_actions;
 mod seed;
 mod snapshot;
 mod stopped_portability;

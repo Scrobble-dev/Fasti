@@ -1773,7 +1773,7 @@ fn immutable_claim_conflict(
     Box::new(FastiProblem::integrity_failed(capability, correlation_id))
 }
 
-fn write_provider_fields(
+pub(crate) fn write_provider_fields(
     transaction: &Transaction<'_>,
     workspace_id: WorkspaceId,
     record_id: RecordId,

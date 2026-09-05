@@ -24,6 +24,19 @@ pub const MAX_PROVIDER_METADATA_FIELDS: usize = 16;
 pub const GOOGLE_BOOKS_PROVIDER_ID: &str = "google-books";
 pub const TMDB_PROVIDER_ID: &str = "tmdb";
 
+/// Actual top-level provider response locale, independent of UI preference.
+pub fn provider_metadata_response_locale(
+    provider: &str,
+    requested: Option<&MetadataLocale>,
+) -> Option<MetadataLocale> {
+    match provider {
+        TMDB_PROVIDER_ID => Some(requested.cloned().unwrap_or_else(|| {
+            MetadataLocale::try_new("en-US").expect("fixed TMDB locale is valid")
+        })),
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ProviderIdentifierValueKind {
     PositiveDecimal,

@@ -436,6 +436,7 @@
         "browser_session_revoked",
         "capability_unavailable",
         "forbidden",
+        "idempotency_conflict",
         "identity_conflict",
         "integrity_failed",
         "invalid_identifier",
