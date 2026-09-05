@@ -235,9 +235,27 @@ async function installTrustedHost(page: Page, scenario: Scenario) {
             return activeScenario === "credential-delete"
               ? statuses(providerConfigured, false)
               : statuses(true, true);
-          case "search_provider":
+          case "search_provider_page":
             if (activeScenario !== "search-race") return [];
-            return new Promise((resolve) => searchResolvers.push(resolve));
+            return new Promise((resolve) => {
+              const input = (
+                arguments_ as {
+                  input?: {
+                    provider_id?: string;
+                    request?: { page?: number };
+                  };
+                }
+              ).input;
+              searchResolvers.push((candidates) =>
+                resolve({
+                  outcome: "live",
+                  provider_id: input?.provider_id,
+                  page: input?.request?.page,
+                  candidates,
+                  next_page: null,
+                }),
+              );
+            });
           case "delete_provider_credential":
             deleteCalls += 1;
             providerConfigured = false;

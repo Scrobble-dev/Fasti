@@ -255,7 +255,7 @@ test("record summaries stay truthful, bounded, and free of poster egress", async
       thirdPartyRequests.push(request.url());
     }
   });
-  await page.route(/\/api\/v1\/records$/, (route) =>
+  await page.route(/\/api\/v1\/records(?:\?.*)?$/, (route) =>
     fulfillRecords(
       route,
       "Summary-only record",
@@ -426,13 +426,16 @@ test("Discover selects available providers and preserves an explicit choice", as
             }
             googleConfigured = true;
             return providerStatus();
-          case "search_provider": {
+          case "search_provider_page": {
             const input = (
               arguments_ as {
-                input?: { provider?: string; query?: string };
+                input?: {
+                  provider_id?: string;
+                  request?: { query?: string; page?: number };
+                };
               }
             )?.input;
-            const searchKey = `${input?.provider}:${input?.query}`;
+            const searchKey = `${input?.provider_id}:${input?.request?.query}`;
             if (
               !["tmdb:Breaking Bad", "google-books:Dune"].includes(searchKey) ||
               completedSearches.has(searchKey)
@@ -440,36 +443,57 @@ test("Discover selects available providers and preserves an explicit choice", as
               throw new Error(`Unexpected provider search: ${searchKey}`);
             }
             completedSearches.add(searchKey);
-            if (input?.provider === "google-books") {
-              return [
-                {
-                  provider: "google-books",
-                  provider_id: "dune-volume",
-                  title: "Dune",
-                  kind: "book",
-                  authors: ["Frank Herbert"],
-                  image_url: null,
-                },
-              ];
+            if (input?.provider_id === "google-books") {
+              return {
+                outcome: "live",
+                provider_id: "google-books",
+                page: input.request?.page,
+                candidates: [
+                  {
+                    provider: "google-books",
+                    provider_id: "dune-volume",
+                    title: "Dune",
+                    original_title: null,
+                    release_year: null,
+                    kind: "book",
+                    authors: ["Frank Herbert"],
+                    image_url: null,
+                    overview: null,
+                  },
+                ],
+                next_page: null,
+              };
             }
-            return [
-              {
-                provider: "tmdb",
-                provider_id: "1396",
-                title: "Breaking Bad",
-                kind: "show",
-                authors: [],
-                image_url: null,
-              },
-              {
-                provider: "tmdb",
-                provider_id: "1396",
-                title: "Breaking Bad: The Movie",
-                kind: "movie",
-                authors: [],
-                image_url: null,
-              },
-            ];
+            return {
+              outcome: "live",
+              provider_id: "tmdb",
+              page: input?.request?.page,
+              candidates: [
+                {
+                  provider: "tmdb",
+                  provider_id: "1396",
+                  title: "Breaking Bad",
+                  original_title: null,
+                  release_year: null,
+                  kind: "show",
+                  authors: [],
+                  image_url: null,
+                  overview: null,
+                },
+                {
+                  provider: "tmdb",
+                  provider_id: "1396",
+                  title: "Breaking Bad: The Movie",
+                  original_title: null,
+                  release_year: null,
+                  kind: "movie",
+                  authors: [],
+                  image_url: null,
+                  overview: null,
+                },
+              ],
+              next_page: null,
+            };
           }
           case "track_provider_candidate": {
             const input = (
@@ -680,5 +704,12 @@ test("browser Discover fails closed when provider credentials are unavailable", 
   await expect(page.getByRole("button", { name: "Create Record" })).toHaveCount(
     0,
   );
-  await expect(page.getByRole("searchbox")).toHaveCount(0);
+  await expect(
+    page.getByRole("searchbox", { name: "Search TMDB" }),
+  ).toBeEnabled();
+  await expect(
+    page.getByText(
+      "Local Records remain searchable without a network connection.",
+    ),
+  ).toBeVisible();
 });
