@@ -36,6 +36,8 @@ import {
   parseProblemDetailsForOperation,
   parseProviderCapabilityResponse,
   parseProviderHealthResponse,
+  parseSearchProviderPageRequest,
+  parseSearchProviderPageResponse,
   parseRefreshMetadataClaimsRequest,
   parseRefreshMetadataClaimsResponse,
   parseResolveIdentityRouteResponse,
@@ -94,6 +96,8 @@ import {
   type ProblemCode,
   type ProviderCapabilityResponse,
   type ProviderHealthResponse,
+  type SearchProviderPageRequest,
+  type SearchProviderPageResponse,
   type RefreshMetadataClaimsRequest,
   type RefreshMetadataClaimsResponse,
   type ResolveIdentityRouteResponse,
@@ -889,6 +893,52 @@ export class FastiClient {
         return response;
       },
       responseLabel: "Provider health response",
+      options,
+    });
+  }
+
+  searchProviderPage(
+    providerId: string,
+    request: SearchProviderPageRequest,
+    options: CallOptions = {},
+  ): Promise<SearchProviderPageResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.searchProviderPage;
+    const identifiers = providerPathIdentifiers(providerId);
+    const body = parseOutgoing(
+      parseSearchProviderPageRequest,
+      request,
+      "Provider Search request",
+    );
+    const requestedPage = body.page;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: providerOperationPath(operation.path, identifiers),
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      browserMutation: true,
+      retryMode: "never",
+      body,
+      // 100 receipts, each with at most 64 KiB of admitted candidate JSON,
+      // plus bounded receipt IDs and page metadata. No global limit increase.
+      maxResponseBytes: 100 * (64 * 1024 + 1024) + 8 * 1024,
+      responseParser: (value) => {
+        const response = parseSearchProviderPageResponse(value);
+        if (
+          response.provider_id !== identifiers.providerId ||
+          (response.outcome === "page" &&
+            (response.page !== requestedPage ||
+              response.candidates.some(
+                (receipt) =>
+                  receipt.candidate.provider !== identifiers.providerId,
+              )))
+        ) {
+          throw new FastiContractParseError(
+            "Provider Search response does not match the requested provider and page",
+          );
+        }
+        return response;
+      },
+      responseLabel: "Provider Search response",
       options,
     });
   }

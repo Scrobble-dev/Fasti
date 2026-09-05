@@ -189,6 +189,25 @@ fn prepare_partition(
 }
 
 impl SearchPersistencePort for SqliteKernel {
+    fn authorize_search_page_request(
+        &self,
+        id: RequestCorrelationId,
+        access: &ApplicationAccessContext,
+    ) -> ApplicationResult<()> {
+        let mut connection = self
+            .inner
+            .connection
+            .lock()
+            .map_err(|_| failure(ProblemCode::StorageUnavailable, id))?;
+        let transaction = map_sql(connection.transaction(), CAPABILITY, id)?;
+        authorize_application_transaction(&transaction, CAPABILITY, access, id)?;
+        if matches!(access, ApplicationAccessContext::BrowserSession(proof) if !proof.is_mutation())
+        {
+            return Err(failure(ProblemCode::Forbidden, id));
+        }
+        map_sql(transaction.commit(), CAPABILITY, id)
+    }
+
     fn prepare_search_candidate_action(
         &self,
         command: &fasti_application::SearchCandidateActionCommand,
@@ -645,6 +664,7 @@ fn read_candidates(
 
 #[cfg(test)]
 pub(crate) mod tests {
+    include!("search_authorization_tests.rs");
     include!("search_details_tests.rs");
     include!("search_metadata_tests.rs");
     include!("search_action_tests.rs");
@@ -680,16 +700,17 @@ pub(crate) mod tests {
 
     fn setup() -> (TestNode, SearchPageRequest) {
         let node = TestNode::new();
-        node.kernel
+        assert_eq!(node.kernel
             .inner
             .connection
             .lock()
             .unwrap()
-            .execute(
-                "INSERT INTO grant_scopes(grant_id, scope_key) VALUES (?1, 'metadata_search')",
+            .query_row(
+                "SELECT COUNT(*) FROM grant_scopes WHERE grant_id = ?1 AND scope_key = 'metadata_search'",
                 [node.access.grant_id().to_string()],
+                |row| row.get::<_, i64>(0),
             )
-            .unwrap();
+            .unwrap(), 1);
         node.kernel
             .put_provider_capability_state(node.access.workspace_id(), state(1))
             .unwrap();

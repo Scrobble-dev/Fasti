@@ -73,6 +73,9 @@ mod candidate_action_tests {
     }
 
     impl SearchPersistencePort for ActionPersistence {
+        fn authorize_search_page_request(&self, _: RequestCorrelationId, _: &ApplicationAccessContext) -> ApplicationResult<()> {
+            unreachable!("action tests do not acquire pages through HTTP")
+        }
         fn prepare_search_candidate_action(
             &self,
             command: &SearchCandidateActionCommand,

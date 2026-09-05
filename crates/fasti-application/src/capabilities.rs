@@ -117,8 +117,8 @@ define_capabilities!(
         SearchMetadata,
         M4,
         M4,
-        Reserved,
-        Guarded,
+        Finalized,
+        Implemented,
         ScopedOrBrowserSession,
         [MetadataSearch],
         [
@@ -130,8 +130,11 @@ define_capabilities!(
             Forbidden,
             IdempotencyConflict,
             IntegrityFailed,
+            MalformedJson,
+            PayloadTooLarge,
             SessionPolicyChanged,
             StorageUnavailable,
+            UnsupportedMediaType,
             ValidationFailed
         ],
         []

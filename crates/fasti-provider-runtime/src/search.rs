@@ -615,6 +615,13 @@ mod tests {
     }
 
     impl SearchPersistencePort for Persistence {
+        fn authorize_search_page_request(
+            &self,
+            _: RequestCorrelationId,
+            _: &ApplicationAccessContext,
+        ) -> ApplicationResult<()> {
+            unreachable!("runtime tests enter after transport authorization")
+        }
         fn prepare_search_candidate_action(
             &self,
             _: &fasti_application::SearchCandidateActionCommand,

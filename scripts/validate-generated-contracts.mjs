@@ -182,6 +182,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     "/api/v1/records/identifiers",
     "/api/v1/records/{record_id}/identity-route",
     "/api/v1/records/{record_id}/metadata-projection",
+    "/api/v1/search/providers/{provider_id}",
   ]);
   assert.deepEqual(Object.keys(openapi.components.securitySchemes), [
     "auth_binding_cookie",
@@ -477,6 +478,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     "select_browser_session_profile",
   ]);
   const hybridOperations = new Set([
+    "search_provider_page",
     "submit_observation",
     "create_record",
     "attach_identifier",
@@ -493,6 +495,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     "apply_anime_grouping_policy_change",
   ]);
   const hybridMutations = new Set([
+    "search_provider_page",
     "submit_observation",
     "create_record",
     "attach_identifier",

@@ -3305,6 +3305,261 @@ const PRODUCTION_SCHEMAS = {
     ],
     "type": "object"
   },
+  "SearchCacheStateDto": {
+    "enum": [
+      "fresh",
+      "stale_on_error"
+    ],
+    "type": "string"
+  },
+  "SearchCandidateDto": {
+    "additionalProperties": false,
+    "properties": {
+      "authors": {
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 10,
+        "type": "array"
+      },
+      "image_url": {
+        "maxLength": 2048,
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "kind": {
+        "type": "string"
+      },
+      "original_title": {
+        "maxLength": 512,
+        "minLength": 1,
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "overview": {
+        "maxLength": 4096,
+        "minLength": 1,
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "provider": {
+        "type": "string"
+      },
+      "provider_id": {
+        "type": "string"
+      },
+      "release_year": {
+        "format": "int32",
+        "maximum": 9999,
+        "minimum": 1000,
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "title": {
+        "maxLength": 512,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "provider",
+      "provider_id",
+      "kind",
+      "title",
+      "authors"
+    ],
+    "type": "object"
+  },
+  "SearchCandidateReceiptDto": {
+    "additionalProperties": false,
+    "properties": {
+      "candidate": {
+        "$ref": "#/components/schemas/SearchCandidateDto"
+      },
+      "candidate_receipt_id": {
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^scr_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      },
+      "grain": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "candidate_receipt_id",
+      "grain",
+      "candidate"
+    ],
+    "type": "object"
+  },
+  "SearchProviderPageRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "grains": {
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 32,
+        "type": "array"
+      },
+      "locale": {
+        "maxLength": 16,
+        "minLength": 2,
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "offline": {
+        "type": "boolean"
+      },
+      "page": {
+        "format": "int32",
+        "minimum": 1,
+        "type": "integer"
+      },
+      "query": {
+        "maxLength": 256,
+        "minLength": 1,
+        "type": "string"
+      },
+      "region": {
+        "description": "Reserved query context; current provider Search routes do not filter by region.",
+        "maxLength": 8,
+        "minLength": 2,
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "query",
+      "page",
+      "grains",
+      "offline"
+    ],
+    "type": "object"
+  },
+  "SearchProviderPageResponse": {
+    "oneOf": [
+      {
+        "additionalProperties": false,
+        "properties": {
+          "cache_state": {
+            "$ref": "#/components/schemas/SearchCacheStateDto"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/SearchCandidateReceiptDto"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "lifetime": {
+            "$ref": "#/components/schemas/SearchReceiptLifetimeDto"
+          },
+          "next_page": {
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "outcome": {
+            "enum": [
+              "page"
+            ],
+            "type": "string"
+          },
+          "page": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "provider_id": {
+            "type": "string"
+          },
+          "upstream_problem": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "provider_id",
+          "page",
+          "candidates",
+          "cache_state",
+          "lifetime",
+          "outcome"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "enum": [
+              "unavailable"
+            ],
+            "type": "string"
+          },
+          "problem_code": {
+            "type": "string"
+          },
+          "provider_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider_id",
+          "problem_code",
+          "outcome"
+        ],
+        "type": "object"
+      }
+    ]
+  },
+  "SearchReceiptLifetimeDto": {
+    "additionalProperties": false,
+    "properties": {
+      "created_at": {
+        "format": "date-time",
+        "type": "string"
+      },
+      "expires_at": {
+        "format": "date-time",
+        "type": "string"
+      },
+      "fresh_until": {
+        "format": "date-time",
+        "type": "string"
+      },
+      "stale_until": {
+        "format": "date-time",
+        "type": "string"
+      }
+    },
+    "required": [
+      "created_at",
+      "fresh_until",
+      "stale_until",
+      "expires_at"
+    ],
+    "type": "object"
+  },
   "SelectBrowserSessionProfileRequest": {
     "additionalProperties": false,
     "properties": {
@@ -3859,6 +4114,9 @@ export type AnimeGroupingPolicySourceDto = "client_override" | "profile_default"
 // prettier-ignore
 export type AnimeGroupingPolicyChangeDto = { readonly applied_operation_id: string; readonly kind: "rollback" } | { readonly kind: "inherit_profile" } | { readonly kind: "set"; readonly preference: AnimeGroupingPreferenceDto };
 
+// prettier-ignore
+export type SearchCacheStateDto = "fresh" | "stale_on_error";
+
 // The Nuvio wire document intentionally preserves extension fields.
 export type NuvioCollectionsDocumentDto = ReadonlyArray<Record<string, unknown>>;
 
@@ -4055,6 +4313,43 @@ export interface RefreshMetadataClaimsRequest {
   readonly provider_id: string;
   readonly record_id: string;
   readonly region?: null | string;
+}
+
+export interface SearchProviderPageRequest {
+  readonly grains: ReadonlyArray<string>;
+  readonly locale?: null | string;
+  readonly offline: boolean;
+  readonly page: number;
+  readonly query: string;
+  readonly region?: null | string;
+}
+
+// prettier-ignore
+export type SearchProviderPageResponse = { readonly cache_state: SearchCacheStateDto; readonly candidates: ReadonlyArray<SearchCandidateReceiptDto>; readonly lifetime: SearchReceiptLifetimeDto; readonly next_page?: null | number; readonly outcome: "page"; readonly page: number; readonly provider_id: string; readonly upstream_problem?: null | string } | { readonly outcome: "unavailable"; readonly problem_code: string; readonly provider_id: string };
+
+export interface SearchCandidateReceiptDto {
+  readonly candidate: SearchCandidateDto;
+  readonly candidate_receipt_id: string;
+  readonly grain: string;
+}
+
+export interface SearchCandidateDto {
+  readonly authors: ReadonlyArray<string>;
+  readonly image_url?: null | string;
+  readonly kind: string;
+  readonly original_title?: null | string;
+  readonly overview?: null | string;
+  readonly provider: string;
+  readonly provider_id: string;
+  readonly release_year?: null | number;
+  readonly title: string;
+}
+
+export interface SearchReceiptLifetimeDto {
+  readonly created_at: string;
+  readonly expires_at: string;
+  readonly fresh_until: string;
+  readonly stale_until: string;
 }
 
 export interface MetadataClaimProvenanceDto {
@@ -4451,6 +4746,7 @@ export interface AccessProjectionResponse {
 
 // prettier-ignore
 export const LOCAL_RUNTIME_OPERATIONS = {
+  searchProviderPage: { operationId: "search_provider_page", method: "POST", path: "/api/v1/search/providers/{provider_id}", capabilityId: "metadata.search", authorization: "scoped_or_browser_session", requiredScopes: ["metadata_search"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "SearchProviderPageRequest", responseSchema: "SearchProviderPageResponse" },
   submitObservation: { operationId: "submit_observation", method: "POST", path: "/api/v1/observations", capabilityId: "observation.accept", authorization: "scoped_or_browser_session", requiredScopes: ["observation_accept"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","invalid_observation","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["observation.accept.capacity_exceeded","observation.accept.receipt","observation.accept.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: "SubmitObservationRequest", responseSchema: "SubmitObservationResponse" },
   nuvioWebhook: { operationId: "nuvio_webhook", method: "POST", path: "/api/v1/integrations/nuvio/webhook", capabilityId: "observation.accept", authorization: "scoped", requiredScopes: ["observation_accept"], problemCodes: ["authentication_failed","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","invalid_observation","malformed_json","payload_too_large","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["observation.accept.capacity_exceeded","observation.accept.receipt","observation.accept.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: "IntegrationObservationRequest", responseSchema: "SubmitObservationResponse" },
   tautulliWebhook: { operationId: "tautulli_webhook", method: "POST", path: "/api/v1/integrations/tautulli/webhook", capabilityId: "observation.accept", authorization: "scoped", requiredScopes: ["observation_accept"], problemCodes: ["authentication_failed","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","invalid_observation","malformed_json","payload_too_large","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["observation.accept.capacity_exceeded","observation.accept.receipt","observation.accept.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: "IntegrationObservationRequest", responseSchema: "SubmitObservationResponse" },
@@ -4586,6 +4882,16 @@ export function parseProviderCapabilityResponse(value: unknown): ProviderCapabil
 // prettier-ignore
 export function parseProviderHealthResponse(value: unknown): ProviderHealthResponse {
   return parseProductionDto("ProviderHealthResponse", value);
+}
+
+// prettier-ignore
+export function parseSearchProviderPageRequest(value: unknown): SearchProviderPageRequest {
+  return parseProductionDto("SearchProviderPageRequest", value);
+}
+
+// prettier-ignore
+export function parseSearchProviderPageResponse(value: unknown): SearchProviderPageResponse {
+  return parseProductionDto("SearchProviderPageResponse", value);
 }
 
 // prettier-ignore
@@ -7050,9 +7356,9 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       "examples": [],
       "id": "metadata.search",
       "lifecycle": {
-        "contract_state": "reserved",
+        "contract_state": "finalized",
         "introduced_in": "m4",
-        "runtime_availability": "guarded"
+        "runtime_availability": "implemented"
       },
       "problems": [
         "authentication_failed",
@@ -7063,8 +7369,11 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "forbidden",
         "idempotency_conflict",
         "integrity_failed",
+        "malformed_json",
+        "payload_too_large",
         "session_policy_changed",
         "storage_unavailable",
+        "unsupported_media_type",
         "validation_failed"
       ],
       "runtime_body": "m4",
@@ -8691,18 +9000,18 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "state": "required"
       },
       "http_openapi": {
-        "body": "m4",
-        "reason": "Search route integration is in progress in M4.",
-        "state": "later_body"
+        "binding": "openapi:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
       },
       "json_ld": {
         "reason": "Private query and candidate receipts are not linked data.",
         "state": "not_applicable"
       },
       "json_schema": {
-        "body": "m4",
-        "reason": "Search public data shapes are being integrated in M4.",
-        "state": "later_body"
+        "binding": "schema:production-openapi-operation:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
       },
       "knowledge": {
         "body": "m4",
@@ -8720,9 +9029,9 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "state": "later_body"
       },
       "sdk": {
-        "body": "m4",
-        "reason": "Search SDK follows the frozen M4 route contract.",
-        "state": "later_body"
+        "binding": "sdk:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
       },
       "sse_asyncapi": {
         "reason": "Search returns finite result pages without an event stream.",
@@ -12830,6 +13139,42 @@ export const PUBLIC_PROBLEM_CATALOG = {
     },
     {
       "capability_id": "metadata.search",
+      "code": "malformed_json",
+      "detail": "request JSON is malformed",
+      "next_actions": [
+        {
+          "id": "correct_json",
+          "label": "Correct the JSON syntax and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 400,
+      "title": "Malformed JSON",
+      "type": "https://fasti.scrobble.dev/v1/problems/malformed-json"
+    },
+    {
+      "capability_id": "metadata.search",
+      "code": "payload_too_large",
+      "detail": "request body exceeds the bounded transport limit",
+      "next_actions": [
+        {
+          "id": "reduce_request_body",
+          "label": "Reduce the request body and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 413,
+      "title": "Payload too large",
+      "type": "https://fasti.scrobble.dev/v1/problems/payload-too-large"
+    },
+    {
+      "capability_id": "metadata.search",
       "code": "session_policy_changed",
       "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
       "next_actions": [
@@ -12863,6 +13208,24 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "status": 503,
       "title": "Storage unavailable",
       "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "metadata.search",
+      "code": "unsupported_media_type",
+      "detail": "request media type is unsupported",
+      "next_actions": [
+        {
+          "id": "use_supported_media_type",
+          "label": "Use the documented media type and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 415,
+      "title": "Unsupported media type",
+      "type": "https://fasti.scrobble.dev/v1/problems/unsupported-media-type"
     },
     {
       "capability_id": "metadata.search",
