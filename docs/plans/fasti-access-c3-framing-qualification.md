@@ -430,6 +430,22 @@ notice and recovery approval. Hosted checks and merged-tree proof remain open.
 
 ## GSTACK REVIEW REPORT
 
+PR130 review reconciliation: native FFI calls now document aligned/capacity,
+initialization, lifetime/non-aliasing and wipe invariants verified against the
+exact binding and bundled native source. The fixture remains an independent
+wire constructor; sharing writer encoding would weaken negative-test independence.
+Only safety comments change in the test source; all assertions remain intact.
+The advisory matrix now uses the same Detached-signature label as its test job.
+README provenance records the comment delta. Independent exact-delta review
+confirmed all six fixture call sites, native field initialization and unchanged
+assertions. Full debug20+2/release20+2, formatting and strict all-target Clippy
+passed for this working tree; actionlint and all100 Markdown link checks passed.
+Qualification ledger: `2026-09-05T20-52-42-587Z-qualification-154958-1a0c1b6a.log`.
+Commented test source SHA-256:
+`2bacef53c8553c3c77def10cf2be5da66bc3da32d96bc5bcb240a9a54790da1a`.
+Clean-commit canonical and hosted verification remain required before delivery;
+prior source identities and failed evidence remain preserved.
+
 | Review | Runs | Status | Findings |
 | --- | --- | --- | --- |
 | Scope and architecture | 1 | Clear for isolated preservation | Seven exact files; existing adapter/archive/workflow reused |

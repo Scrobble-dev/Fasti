@@ -86,7 +86,10 @@ this package does not rehabilitate that candidate.
 
 The [frozen delivery gate](../../docs/plans/fasti-access-c3-framing-qualification.md)
 records original source, lock, failed-case hashes and the complete test matrix.
-The adapter, tests and lock were initially copied byte-for-byte. Strict Clippy
+The adapter, tests and lock were initially copied byte-for-byte. The tests
+later gained explicit native-FFI safety comments; assertions remain unchanged.
+The native prefix fixture remains independent of the writer's encoding so a
+shared helper cannot hide the same encoding defect in both paths. Strict Clippy
 on Rust 1.97.1 then required one adapter spelling change:
 `pmax % CHUNK as u64 != 0` became `!pmax.is_multiple_of(CHUNK as u64)`.
 The fixed divisor remains 65536; checked ceiling arithmetic and limits are

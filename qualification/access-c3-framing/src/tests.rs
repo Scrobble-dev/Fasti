@@ -301,6 +301,8 @@ fn native_frame(key: &SecretKey, envelope: &[u8], tag: u8, plain: &[u8]) -> Vec<
     let mut state = std::mem::MaybeUninit::<crypto_secretstream_xchacha20poly1305_state>::uninit();
     let mut header = [0; 24];
     assert_eq!(
+        // SAFETY: state is aligned writable storage, header has the native
+        // 24-byte capacity, and the initialized SecretKey owns 32 readable bytes.
         unsafe {
             crypto_secretstream_xchacha20poly1305_init_push(
                 state.as_mut_ptr(),
@@ -310,7 +312,11 @@ fn native_frame(key: &SecretKey, envelope: &[u8], tag: u8, plain: &[u8]) -> Vec<
         },
         0
     );
+    // SAFETY: successful init_push above initializes every state field,
+    // including the native padding array, before this value is read.
     let mut state = unsafe { state.assume_init() };
+    // Keep this native test fixture independent of the writer's prefix builder:
+    // sharing it would hide a common encoding defect from the negative tests.
     let mut prefix = Vec::new();
     prefix.extend_from_slice(MAGIC);
     prefix.extend_from_slice(&(envelope.len() as u32).to_be_bytes());
@@ -321,6 +327,10 @@ fn native_frame(key: &SecretKey, envelope: &[u8], tag: u8, plain: &[u8]) -> Vec<
     aad.extend_from_slice(&len.to_be_bytes());
     let mut cipher = vec![0; len as usize];
     let mut actual = 0;
+    // SAFETY: state is initialized and exclusively borrowed. All fixture
+    // callers use at most seven plaintext bytes, so len is plain.len() + 17
+    // without truncation; cipher owns that capacity. Input/AAD slices and the
+    // length output stay live and do not alias the writable state or ciphertext.
     let result = unsafe {
         crypto_secretstream_xchacha20poly1305_push(
             &mut state,
@@ -333,6 +343,8 @@ fn native_frame(key: &SecretKey, envelope: &[u8], tag: u8, plain: &[u8]) -> Vec<
             tag,
         )
     };
+    // SAFETY: this is the exclusively owned live state allocation; its exact
+    // byte size is writable, and no field is read after the wipe.
     unsafe {
         sodium_memzero(
             (&mut state as *mut crypto_secretstream_xchacha20poly1305_state).cast(),

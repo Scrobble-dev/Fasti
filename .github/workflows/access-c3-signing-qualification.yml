@@ -82,7 +82,7 @@ jobs:
       matrix:
         include:
           - package: access-c3-signing
-            label: Signing
+            label: Detached-signature
           - package: access-c3-framing
             label: Framing
     permissions:
