@@ -504,3 +504,54 @@ fanout/API/SDK/Workbench, details refetch, atomic Record actions and action
 receipts, local text index/keyset/10,000-Record evidence, browser QA and exact
 merged-head delivery remain active M4 gates. Schema v16 remains unfrozen;
 archive v5 is unchanged. No v17 allocation or shared-file release has occurred.
+
+### M4 effective Search coordinates and landing preparation — 2026-09-05
+
+Governed Search service commit `c766da295dff29630dd7df27c24027fbd8e2c298`, tree
+`238e58dae1c289a247144e9248c44f30c8f40831`, passed all 27 exact-head native
+contract gates with a clean receipt. C2 received that material checkpoint with
+no migration allocation or ownership release.
+
+Search now reuses the existing metadata locale-normalization owner before
+preparation, cache reads, fetching or commit. TMDB retains requested language
+or canonical `en-us`; its unsupported Search region is absent. Google Books
+Search uses neither coordinate. Query text, provider, page and grain filters
+are unchanged. This matches the current [TMDB multi-search reference](https://developer.themoviedb.org/reference/search-multi)
+and [Google Books volume-list reference](https://developers.google.com/books/docs/v1/reference/volumes/list),
+checked 2026-09-05. Google `langRestrict` is a book-language filter, not a
+replacement for response localization. Thirty-eight provider runtime tests and
+strict Clippy pass; native read-only review finds no P0/P1/P2 introduced. Tests
+cover default equivalence, distinct TMDB locales, ignored regional preferences,
+Google normalization, idempotence and public empty-cache/offline paths.
+
+This does not change M2 historical detail-region provenance. The documented
+movie/TV top-level routes do not prove regional responses. Correcting new
+acquisition and deciding historical claim/receipt disposition remain explicit
+work; do not rewrite immutable evidence or silently remove M8 regional scope.
+
+Parallel host preparation identifies the existing daemon runtime/kernel and
+provider gate map as the composition roots. Search handlers must use the
+application browser-or-bearer authentication owner, not the older bearer-only
+metadata handler helper. Snapshot-writing browser requests need the existing
+mutation proof; candidate reads use the read boundary. Never mount Search on
+integration/webhook listeners. Desktop retains its existing shared provider gate;
+local results must not wait on it. Preserve the legacy vector-returning Search
+path until its receipt-bearing replacement is verified. No implemented multi-
+source fanout owner exists yet. Trusted terms revision must come from pinned
+provider policy evidence, never browser input; the existing descriptor's posture
+label must not be presented as an independently versioned legal-terms receipt.
+
+Parallel local-Search preparation found no existing interactive keyset owner.
+Reuse the archive owner's total-order SQL pattern, existing Record indexes and
+selected-ID enrichment, not its archive cursor framework. Bundled SQLite already
+supports FTS5. The global shortcut currently uses substring matching; retain that
+behavior until an explicit, tested replacement exists. Do not index only
+`metadata_projections`: reads resolve current profile policy/overrides/time
+independently, and that table is not comprehensively maintained. The derived
+candidate index must feed the existing resolver without duplicating precedence
+or leaking profile-private matches through counts/cursors. One-/two-character,
+punctuation, literal FTS syntax and Unicode queries need coverage. Stable Record-
+ID pagination is not a frozen snapshot under concurrent title/membership changes.
+The 10,000-Record gate must measure the full authorized selection and enrichment,
+including extensive-history fixtures; returned-row bounds and SELECT counts do
+not prove bounded scanned work. Existing benchmark script ownership is retained.

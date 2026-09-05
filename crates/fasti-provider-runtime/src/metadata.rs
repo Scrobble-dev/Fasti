@@ -114,8 +114,12 @@ impl ProviderMetadataRefreshService {
             .runtime
             .descriptor(provider_id.as_str())
             .map_err(|error| runtime_problem(error, capability, correlation_id))?;
-        let effective_locale =
-            provider_response_locale(provider_id.as_str(), command.locale(), correlation_id)?;
+        let effective_locale = provider_response_locale(
+            provider_id.as_str(),
+            command.locale(),
+            capability,
+            correlation_id,
+        )?;
         let effective_region = provider_response_region(provider_id.as_str(), command.region());
         let enrichment_keys = cache_keys(
             &command,
@@ -418,9 +422,10 @@ fn cache_entries(
     .collect()
 }
 
-fn provider_response_locale(
+pub(crate) fn provider_response_locale(
     provider: &str,
     requested: Option<&fasti_domain::MetadataLocale>,
+    capability: CapabilityKey,
     correlation_id: fasti_domain::RequestCorrelationId,
 ) -> fasti_application::ApplicationResult<Option<fasti_domain::MetadataLocale>> {
     match provider {
@@ -430,13 +435,7 @@ fn provider_response_locale(
                 || fasti_domain::MetadataLocale::try_new("en-US").map(Some),
                 |locale| Ok(Some(locale)),
             )
-            .map_err(|_| {
-                problem(
-                    ProblemCode::IntegrityFailed,
-                    CapabilityKey::RefreshMetadataClaims,
-                    correlation_id,
-                )
-            }),
+            .map_err(|_| problem(ProblemCode::IntegrityFailed, capability, correlation_id)),
         crate::GOOGLE_BOOKS_PROVIDER => Ok(None),
         _ => Ok(None),
     }
