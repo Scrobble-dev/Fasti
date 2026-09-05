@@ -31,10 +31,12 @@ async function expectCopyLayout(copies: Locator, count: number) {
     expect(result.basis, result.text ?? "").toBe(
       result.mobile ? "auto" : result.desktopBasis,
     );
-    if (result.mobile)
+    if (result.mobile) {
+      expect(result.unusedSpace, result.text ?? "").toBeGreaterThanOrEqual(-1);
       expect(result.unusedSpace, result.text ?? "").toBeLessThanOrEqual(
         result.lineHeight + 1,
       );
+    }
   }
 }
 

@@ -543,3 +543,14 @@ is unchanged from `63f955c4`. Evidence is in
 `b7cc1ab497b4c435ece5ec670a3ef3ca3990986dbcd026c44d5054b47e839ced`.
 Owned processes and the short temporary runtime directory were cleaned up;
 all raw evidence, including setup failures, remains retained.
+
+### Hosted review correction
+
+PR 129 review identified a missing lower bound in the mobile copy-layout test.
+The assertion now rejects content extending below its container by more than
+one pixel, while preserving the existing excess-space upper bound. Both checks
+remain inside the mobile branch. No production implementation changed.
+The focused Light/Dark, width and enlarged-text matrix passed 10/10 without
+retries; evidence is `access-layout-review-lower-bound.json` under the retained
+QA reports. This is focused correction evidence, not a replacement for the
+144-case clean-source browser run or final exact-head hosted gates.
