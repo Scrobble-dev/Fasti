@@ -1,8 +1,6 @@
 use crate::crypto::{encode_hex, sha256_reader};
 use crate::evidence::{canonical_digest_hex, path_to_storage_value, relative_evidence_path};
-use crate::kernel::{
-    authorize_transaction, map_sql, reject_unsafe_existing_file, SqliteKernel, StoreOpenError,
-};
+use crate::kernel::{authorize_transaction, map_sql, SqliteKernel, StoreOpenError};
 use crate::schema::workspace_revision;
 use fasti_application::{
     ApplicationResult, CapabilityKey, ExportWorkspaceQuery, FastiProblem, PortabilityLimits,
@@ -18,7 +16,6 @@ use rusqlite::types::{Value, ValueRef};
 use rusqlite::{params, Connection, Transaction, TransactionBehavior};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
-use std::fs::File;
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 
@@ -71,7 +68,8 @@ pub(crate) fn map_offline_open_error(
         | StoreOpenError::JournalMode(_)
         | StoreOpenError::SynchronousLevel(_)
         | StoreOpenError::SchemaVersion { .. }
-        | StoreOpenError::RestoreActivation => {
+        | StoreOpenError::RestoreActivation
+        | StoreOpenError::AccessRecovery => {
             Box::new(FastiProblem::integrity_failed(capability, correlation_id))
         }
     }
@@ -482,10 +480,8 @@ fn verify_evidence_file(
     if path_to_storage_value(&expected_relative) != stored_path {
         return integrity_failure(capability, correlation_id);
     }
-    let path = kernel.inner.current_root.join(&expected_relative);
-    reject_unsafe_existing_file(&path)
-        .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
-    let file = File::open(&path)
+    let file = kernel
+        .open_evidence_file(digest_hex)
         .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
     let (actual_digest, actual_size) = sha256_reader(file)
         .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
@@ -1008,9 +1004,9 @@ mod tests {
                 .query_row(
                     "SELECT COUNT(*) FROM operations WHERE workspace_id = ?1",
                     [node.access.workspace_id().to_string()],
-                    |row| row.get(0),
+                    |row| row.get::<_, i64>(0),
                 )
-                .expect("expected operation count")
+                .expect("expected operation count") as u64
         };
         let mut bytes = Vec::new();
         let outcome = node
@@ -1032,11 +1028,13 @@ mod tests {
             .iter()
             .position(|line| line.get("section") == Some(&serde_json::json!("operations")))
             .expect("operations marker");
-        let trailer = lines
+        let next_section = lines
             .iter()
-            .position(|line| line.get("section") == Some(&serde_json::json!("trailer")))
-            .expect("trailer marker");
-        assert_eq!(trailer - operations - 1, operation_count);
+            .enumerate()
+            .skip(operations + 1)
+            .find_map(|(index, line)| line.get("section").map(|_| index))
+            .expect("section after operations");
+        assert_eq!(next_section - operations - 1, operation_count);
     }
 
     #[test]
@@ -1589,6 +1587,195 @@ const EXPORT_SECTIONS: &[ExportSection] = &[
               ORDER BY client_id, operation_id LIMIT ?4",
         count_sql: "SELECT COUNT(*) FROM operations WHERE workspace_id = ?1",
         cursor_columns: &[CursorColumn::Text(1), CursorColumn::Text(2)],
+    },
+    ExportSection {
+        entity: WorkspaceExportEntity::MetadataFieldClaims,
+        sql: "SELECT workspace_id, record_id, field_key, source, value, locale, \
+                     fetched_at, expires_at, created_at \
+              FROM metadata_field_claims \
+              WHERE workspace_id = ?1 \
+                AND (record_id, field_key, source, fetched_at) > (?2, ?3, ?4, ?5) \
+              ORDER BY record_id, field_key, source, fetched_at LIMIT ?6",
+        count_sql: "SELECT COUNT(*) FROM metadata_field_claims WHERE workspace_id = ?1",
+        cursor_columns: &[
+            CursorColumn::Text(1),
+            CursorColumn::Text(2),
+            CursorColumn::Text(3),
+            CursorColumn::Text(6),
+        ],
+    },
+    ExportSection {
+        entity: WorkspaceExportEntity::MetadataFieldOverrides,
+        sql: "SELECT workspace_id, record_id, field_key, value, created_at \
+              FROM metadata_field_overrides \
+              WHERE workspace_id = ?1 AND (record_id, field_key) > (?2, ?3) \
+              ORDER BY record_id, field_key LIMIT ?4",
+        count_sql: "SELECT COUNT(*) FROM metadata_field_overrides WHERE workspace_id = ?1",
+        cursor_columns: &[CursorColumn::Text(1), CursorColumn::Text(2)],
+    },
+    ExportSection {
+        entity: WorkspaceExportEntity::ProfileRecordTrackingDispositions,
+        sql: "SELECT workspace_id, profile_id, record_id, disposition, updated_at \
+              FROM profile_record_tracking_dispositions \
+              WHERE workspace_id = ?1 AND (profile_id, record_id) > (?2, ?3) \
+              ORDER BY profile_id, record_id LIMIT ?4",
+        count_sql: "SELECT COUNT(*) FROM profile_record_tracking_dispositions WHERE workspace_id = ?1",
+        cursor_columns: &[CursorColumn::Text(1), CursorColumn::Text(2)],
+    },
+    ExportSection {
+        entity: WorkspaceExportEntity::MetadataClaims,
+        sql: "SELECT claim_id, workspace_id, record_id, claim_kind, created_at \
+              FROM metadata_claims \
+              WHERE workspace_id = ?1 AND claim_id > ?2 \
+              ORDER BY claim_id LIMIT ?3",
+        count_sql: "SELECT COUNT(*) FROM metadata_claims WHERE workspace_id = ?1",
+        cursor_columns: &[CursorColumn::Text(0)],
+    },
+    ExportSection {
+        entity: WorkspaceExportEntity::MetadataClaimProvenance,
+        sql: "SELECT claim_id, workspace_id, record_id, field_key, source, fetched_at, \
+                     provider_id, source_record_id, region, source_version, evidence_digest, \
+                     classification, terms_revision, provenance_state, initial_status, created_at \
+              FROM metadata_claim_provenance \
+              WHERE workspace_id = ?1 AND claim_id > ?2 \
+              ORDER BY claim_id LIMIT ?3",
+        count_sql: "SELECT COUNT(*) FROM metadata_claim_provenance WHERE workspace_id = ?1",
+        cursor_columns: &[CursorColumn::Text(0)],
+    },
+    ExportSection {
+        entity: WorkspaceExportEntity::MetadataRatingClaims,
+        sql: "SELECT claim_id, workspace_id, record_id, value_millis, scale_minimum_millis, \
+                     scale_maximum_millis, provider_id, source, source_record_id, locale, region, \
+                     source_version, evidence_digest, classification, terms_revision, fetched_at, \
+                     expires_at, initial_status, created_at \
+              FROM metadata_rating_claims \
+              WHERE workspace_id = ?1 AND claim_id > ?2 \
+              ORDER BY claim_id LIMIT ?3",
+        count_sql: "SELECT COUNT(*) FROM metadata_rating_claims WHERE workspace_id = ?1",
+        cursor_columns: &[CursorColumn::Text(0)],
+    },
+    ExportSection {
+        entity: WorkspaceExportEntity::MetadataClaimLifecycleEvents,
+        sql: "SELECT claim_id, sequence, workspace_id, previous_status, status, occurred_at, \
+                     evidence_digest \
+              FROM metadata_claim_lifecycle_events \
+              WHERE workspace_id = ?1 AND (claim_id, sequence) > (?2, ?3) \
+              ORDER BY claim_id, sequence LIMIT ?4",
+        count_sql: "SELECT COUNT(*) FROM metadata_claim_lifecycle_events WHERE workspace_id = ?1",
+        cursor_columns: &[CursorColumn::Text(0), CursorColumn::NonNegativeInteger(1)],
+    },
+    ExportSection {
+        entity: WorkspaceExportEntity::MetadataProjectionPolicies,
+        sql: "SELECT workspace_id, profile_id, preferred_provider_id, preferred_locale, \
+                     original_locale, region, enabled_field_groups, allow_english_fallback, \
+                     last_known_good_policy, updated_at \
+              FROM metadata_projection_policies \
+              WHERE workspace_id = ?1 AND profile_id > ?2 \
+              ORDER BY profile_id LIMIT ?3",
+        count_sql: "SELECT COUNT(*) FROM metadata_projection_policies WHERE workspace_id = ?1",
+        cursor_columns: &[CursorColumn::Text(1)],
+    },
+    ExportSection {
+        entity: WorkspaceExportEntity::MetadataProfileFieldOverrides,
+        sql: "SELECT workspace_id, profile_id, record_id, field_key, value, created_at, \
+                     updated_at, origin \
+              FROM metadata_profile_field_overrides \
+              WHERE workspace_id = ?1 AND (profile_id, record_id, field_key) > (?2, ?3, ?4) \
+              ORDER BY profile_id, record_id, field_key LIMIT ?5",
+        count_sql: "SELECT COUNT(*) FROM metadata_profile_field_overrides WHERE workspace_id = ?1",
+        cursor_columns: &[CursorColumn::Text(1), CursorColumn::Text(2), CursorColumn::Text(3)],
+    },
+    ExportSection {
+        entity: WorkspaceExportEntity::MetadataLegacyOverrideOwnership,
+        sql: "SELECT workspace_id, record_id, field_key, owner_profile_id, state, review_reason, \
+                     recorded_at \
+              FROM metadata_legacy_override_ownership \
+              WHERE workspace_id = ?1 AND (record_id, field_key) > (?2, ?3) \
+              ORDER BY record_id, field_key LIMIT ?4",
+        count_sql: "SELECT COUNT(*) FROM metadata_legacy_override_ownership WHERE workspace_id = ?1",
+        cursor_columns: &[CursorColumn::Text(1), CursorColumn::Text(2)],
+    },
+    ExportSection {
+        entity: WorkspaceExportEntity::MetadataOverrideMigrationReceipts,
+        sql: "SELECT receipt_id, workspace_id, record_id, field_key, profile_id, \
+                     source_created_at, migrated_at \
+              FROM metadata_override_migration_receipts \
+              WHERE workspace_id = ?1 AND receipt_id > ?2 \
+              ORDER BY receipt_id LIMIT ?3",
+        count_sql: "SELECT COUNT(*) FROM metadata_override_migration_receipts WHERE workspace_id = ?1",
+        cursor_columns: &[CursorColumn::Text(0)],
+    },
+    ExportSection {
+        entity: WorkspaceExportEntity::MetadataAttributions,
+        sql: "SELECT workspace_id, provider_id, attribution_text, documentation_url, updated_at \
+              FROM metadata_attributions \
+              WHERE workspace_id = ?1 AND provider_id > ?2 \
+              ORDER BY provider_id LIMIT ?3",
+        count_sql: "SELECT COUNT(*) FROM metadata_attributions WHERE workspace_id = ?1",
+        cursor_columns: &[CursorColumn::Text(1)],
+    },
+    ExportSection {
+        entity: WorkspaceExportEntity::MetadataRefreshReceipts,
+        sql: "SELECT workspace_id, profile_id, client_id, operation_id, semantic_digest, \
+                     record_id, provider_id, response_json, created_at \
+              FROM metadata_refresh_receipts \
+              WHERE workspace_id = ?1 AND (client_id, operation_id) > (?2, ?3) \
+              ORDER BY client_id, operation_id LIMIT ?4",
+        count_sql: "SELECT COUNT(*) FROM metadata_refresh_receipts WHERE workspace_id = ?1",
+        cursor_columns: &[CursorColumn::Text(2), CursorColumn::Text(3)],
+    },
+    ExportSection {
+        entity: WorkspaceExportEntity::IdentityAssertions,
+        sql: "SELECT assertion_id, workspace_id, record_id, source_external_identifier_id, \
+                     target_namespace, target_grain, target_value, relation, coverage_json, \
+                     episode_links_json, evidence_class, evidence_json, id_source, source_version, \
+                     authority, reasoning, initial_status, created_at \
+              FROM identity_assertions \
+              WHERE workspace_id = ?1 AND assertion_id > ?2 \
+              ORDER BY assertion_id LIMIT ?3",
+        count_sql: "SELECT COUNT(*) FROM identity_assertions WHERE workspace_id = ?1",
+        cursor_columns: &[CursorColumn::Text(0)],
+    },
+    ExportSection {
+        entity: WorkspaceExportEntity::IdentityAssertionLifecycleEvents,
+        sql: "SELECT workspace_id, assertion_id, sequence, previous_status, status, \
+                     reviewer_client_id, occurred_at, evidence_digest \
+              FROM identity_assertion_lifecycle_events \
+              WHERE workspace_id = ?1 AND (assertion_id, sequence) > (?2, ?3) \
+              ORDER BY assertion_id, sequence LIMIT ?4",
+        count_sql: "SELECT COUNT(*) FROM identity_assertion_lifecycle_events WHERE workspace_id = ?1",
+        cursor_columns: &[CursorColumn::Text(1), CursorColumn::NonNegativeInteger(2)],
+    },
+    ExportSection {
+        entity: WorkspaceExportEntity::ProfileAnimeGroupingPolicies,
+        sql: "SELECT workspace_id, profile_id, preference, revision, updated_at \
+              FROM profile_anime_grouping_policies \
+              WHERE workspace_id = ?1 AND profile_id > ?2 \
+              ORDER BY profile_id LIMIT ?3",
+        count_sql: "SELECT COUNT(*) FROM profile_anime_grouping_policies WHERE workspace_id = ?1",
+        cursor_columns: &[CursorColumn::Text(1)],
+    },
+    ExportSection {
+        entity: WorkspaceExportEntity::ClientAnimeGroupingPolicies,
+        sql: "SELECT workspace_id, profile_id, client_id, preference, revision, updated_at \
+              FROM client_anime_grouping_policies \
+              WHERE workspace_id = ?1 AND (profile_id, client_id) > (?2, ?3) \
+              ORDER BY profile_id, client_id LIMIT ?4",
+        count_sql: "SELECT COUNT(*) FROM client_anime_grouping_policies WHERE workspace_id = ?1",
+        cursor_columns: &[CursorColumn::Text(1), CursorColumn::Text(2)],
+    },
+    ExportSection {
+        entity: WorkspaceExportEntity::AnimeGroupingPolicyReceipts,
+        sql: "SELECT workspace_id, profile_id, actor_client_id, scope_kind, scope_client_id, \
+                     operation_id, semantic_digest, change_kind, requested_preference, \
+                     rollback_operation_id, previous_preference, previous_source, \
+                     result_preference, result_source, result_revision, affected_records, \
+                     unresolved_routes, possible_season_regroupings, created_at \
+              FROM anime_grouping_policy_receipts \
+              WHERE workspace_id = ?1 AND (actor_client_id, operation_id) > (?2, ?3) \
+              ORDER BY actor_client_id, operation_id LIMIT ?4",
+        count_sql: "SELECT COUNT(*) FROM anime_grouping_policy_receipts WHERE workspace_id = ?1",
+        cursor_columns: &[CursorColumn::Text(2), CursorColumn::Text(5)],
     },
 ];
 

@@ -748,6 +748,26 @@ impl WorkspaceArchiveDestination for FilesystemArchiveDestination {
         }
     }
 
+    /// Flushes, verifies, and atomically publishes the staged archive.
+    ///
+    /// The archive is published only when its SHA-256 digest matches `archive_digest`.
+    /// A directory synchronization failure is reported as indeterminate durability after
+    /// publication.
+    ///
+    /// # Arguments
+    ///
+    /// * `archive_digest` — Expected SHA-256 digest of the complete archive.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// destination.complete(&archive_digest, &manifest_digest)?;
+    /// # Ok::<(), WorkspaceArchiveCompletionError>(())
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if flushing, syncing, digest verification, or publication fails.
     fn complete(
         mut self: Box<Self>,
         archive_digest: &Sha256Digest,
@@ -760,15 +780,17 @@ impl WorkspaceArchiveDestination for FilesystemArchiveDestination {
             .ok_or_else(|| io::Error::other("archive destination is closed"))?;
         sync_open_handle(file).map_err(archive_error_to_io)?;
         destination_crash_test_point("file_synced");
-        let actual_digest = format!("sha256:{:x}", self.hasher.clone().finalize());
-        if actual_digest != archive_digest.as_str() {
+        let actual_digest_bytes: [u8; 32] = self.hasher.clone().finalize().into();
+        let actual_digest = Sha256Digest::from_bytes(&actual_digest_bytes);
+        if actual_digest != *archive_digest {
             return Err(io::Error::other("archive destination digest mismatch").into());
         }
         #[cfg(not(target_os = "linux"))]
         return Err(io::Error::new(
             io::ErrorKind::Unsupported,
             "archive destination is unsupported on this platform",
-        ));
+        )
+        .into());
         #[cfg(target_os = "linux")]
         {
             use std::os::fd::AsRawFd as _;
@@ -1082,8 +1104,8 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     fn destination_digest(bytes: &[u8]) -> Sha256Digest {
-        Sha256Digest::parse(format!("sha256:{:x}", Sha256::digest(bytes)))
-            .expect("destination digest")
+        let digest_bytes: [u8; 32] = Sha256::digest(bytes).into();
+        Sha256Digest::from_bytes(&digest_bytes)
     }
 
     #[cfg(target_os = "linux")]

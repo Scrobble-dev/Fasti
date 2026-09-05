@@ -13,6 +13,8 @@ jobs:
   verify:
     name: Verify source gates without publishing
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@032958afbdc797a9164d3bc0b56325c1308924a5 # 1.97.1
@@ -53,6 +55,8 @@ jobs:
     name: Build ${{ matrix.platform }} OCI image without publishing
     needs: verify
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -65,6 +69,277 @@ jobs:
         with:
           context: .
           file: ./Dockerfile
+          target: runtime
           platforms: ${{ matrix.platform }}
           push: false
           tags: fasti:release-readiness
+
+  # B8b: prepares checksums, SBOM, provenance, security-review, and release
+  # notes as CI evidence -- none of it published anywhere. See
+  # docs/architecture/b8b-release-readiness.md for what each job proves and
+  # what stays deliberately deferred to B8's own release action.
+
+  checksums:
+    name: Content-digest checksums (${{ matrix.arch }})
+    needs: verify
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@032958afbdc797a9164d3bc0b56325c1308924a5 # 1.97.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - name: Build native release binaries
+        run: cargo build --locked --release --bin fastid --bin fasti
+      - name: Build the OCI image for this architecture
+        run: docker build --target runtime --tag "fasti:release-readiness-${{ matrix.arch }}" .
+      - name: Save the OCI archive
+        run: |
+          mkdir -p target/fasti-evidence/b8b/checksums-staging
+          docker image save "fasti:release-readiness-${{ matrix.arch }}" \
+            -o "target/fasti-evidence/b8b/checksums-staging/oci-${{ matrix.arch }}.tar"
+      - name: Generate the checksums manifest
+        run: |
+          cp target/release/fastid target/release/fasti target/fasti-evidence/b8b/checksums-staging/
+          cd target/fasti-evidence/b8b/checksums-staging
+          sha256sum fastid fasti "oci-${{ matrix.arch }}.tar" > "checksums-${{ matrix.arch }}.sha256"
+      # Self-verified against the staged binaries/OCI archive, which are not
+      # themselves evidence -- only the resulting manifest is published below.
+      - name: Self-verify the checksums manifest matches the artifacts
+        run: |
+          cd target/fasti-evidence/b8b/checksums-staging
+          sha256sum -c "checksums-${{ matrix.arch }}.sha256"
+      - name: Publish only the checksums manifest as evidence
+        run: |
+          mkdir -p target/fasti-evidence/b8b/checksums
+          cp "target/fasti-evidence/b8b/checksums-staging/checksums-${{ matrix.arch }}.sha256" \
+            target/fasti-evidence/b8b/checksums/
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fasti-b8b-checksums-${{ matrix.arch }}-attempt-${{ github.run_attempt }}
+          path: target/fasti-evidence/b8b/checksums/
+          if-no-files-found: error
+          retention-days: 30
+
+  sbom-rust:
+    name: SBOM (Rust)
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@032958afbdc797a9164d3bc0b56325c1308924a5 # 1.97.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: taiki-e/install-action@f347db2dee5edb1a4bddcbed2220c6e7828a0fad # cargo-cyclonedx
+        with:
+          tool: cargo-cyclonedx
+      - name: Generate the workspace SBOM
+        run: cargo cyclonedx --format json --all
+      - name: Generate the isolated Tauri benchmark shell's SBOM
+        run: cargo cyclonedx --format json --manifest-path benchmarks/b1/tauri-shell/src-tauri/Cargo.toml
+      - name: Stage SBOM output
+        run: |
+          mkdir -p target/fasti-evidence/b8b/sbom
+          find . -name '*.cdx.json' -not -path './target/fasti-evidence/*' -not -path '*/node_modules/*' -exec cp {} target/fasti-evidence/b8b/sbom/ \;
+      - name: Sanity-check every SBOM is CycloneDX and non-empty
+        run: |
+          for f in target/fasti-evidence/b8b/sbom/*.cdx.json; do
+            jq -e '.bomFormat == "CycloneDX" and (.components | length) > 0' "$f" > /dev/null
+          done
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fasti-b8b-sbom-rust-attempt-${{ github.run_attempt }}
+          path: target/fasti-evidence/b8b/sbom/
+          if-no-files-found: error
+          retention-days: 30
+
+  sbom-npm:
+    name: SBOM (retained npm packages)
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+        with:
+          version: 11.22.0
+      - run: pnpm install --frozen-lockfile
+      # --ignore-npm-errors: cyclonedx-npm shells out to `npm ls`, which
+      # disagrees with pnpm's (correct) refusal to flatten a transitive
+      # package's own devDependencies into node_modules. Verified this
+      # doesn't drop real components -- with the flag, the production tree
+      # still resolves to hundreds of real components; without it, `npm ls`
+      # exits nonzero on those benign mismatches before writing anything.
+      - name: Generate the pnpm workspace SBOM
+        run: |
+          mkdir -p target/fasti-evidence/b8b/sbom
+          pnpm exec cyclonedx-npm --ignore-npm-errors --output-format json --output-file target/fasti-evidence/b8b/sbom/npm-sbom.cdx.json
+      - name: Sanity-check the SBOM is CycloneDX and non-empty
+        run: jq -e '.bomFormat == "CycloneDX" and (.components | length) > 0' target/fasti-evidence/b8b/sbom/npm-sbom.cdx.json > /dev/null
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fasti-b8b-sbom-npm-attempt-${{ github.run_attempt }}
+          path: target/fasti-evidence/b8b/sbom/npm-sbom.cdx.json
+          if-no-files-found: error
+          retention-days: 30
+
+  security-review:
+    name: Final security review (cargo-deny, cargo-audit)
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@032958afbdc797a9164d3bc0b56325c1308924a5 # 1.97.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: taiki-e/install-action@f347db2dee5edb1a4bddcbed2220c6e7828a0fad # cargo-deny
+        with:
+          tool: cargo-deny
+      - uses: taiki-e/install-action@f347db2dee5edb1a4bddcbed2220c6e7828a0fad # cargo-audit
+        with:
+          tool: cargo-audit
+      - name: Check the workspace lockfile (blocking)
+        run: cargo deny check
+      # The isolated Tauri benchmark shell's lockfile carries 13 pre-existing
+      # "unmaintained" advisories inherited from Tauri's Linux GTK3/webkit2gtk
+      # binding stack, with no safe upgrade available upstream. Report-only
+      # until a maintainer decides how to treat them -- see
+      # docs/architecture/b8b-release-readiness.md.
+      - name: Check the Tauri benchmark shell's lockfile (report-only)
+        continue-on-error: true
+        run: cargo deny --manifest-path benchmarks/b1/tauri-shell/src-tauri/Cargo.toml --config deny.toml check
+      - name: Audit the workspace lockfile for known vulnerabilities (blocking)
+        run: cargo audit --file Cargo.lock
+      - name: Record the security-review receipt
+        run: |
+          mkdir -p target/fasti-evidence/b8b/security-review
+          # --format is a top-level flag (must precede the check subcommand);
+          # cargo-deny writes one JSON object per line to stderr, ending with
+          # a {"type":"summary",...} line -- never to stdout.
+          cargo deny --format json check > /dev/null 2> /tmp/cargo-deny-workspace.ndjson || true
+          cargo audit --file Cargo.lock --json > /tmp/cargo-audit-workspace.json 2>/dev/null || true
+          # Fails the job (not just the receipt) if either tool didn't
+          # produce parseable output, rather than silently recording a
+          # null-shaped receipt that only fails later, at verification time.
+          jq -n \
+            --slurpfile deny_lines /tmp/cargo-deny-workspace.ndjson \
+            --slurpfile audit /tmp/cargo-audit-workspace.json \
+            --arg git_commit "$(git rev-parse --verify HEAD)" \
+            --arg git_tree "$(git rev-parse HEAD^{tree})" \
+            '($deny_lines | map(select(.type == "summary")) | last) as $deny_summary |
+             if $deny_summary == null then error("cargo-deny produced no summary line; refusing to record an empty security-review receipt") else . end |
+             ($audit[0]) as $audit_result |
+             if $audit_result == null then error("cargo-audit produced no JSON output; refusing to record an empty security-review receipt") else . end |
+             {
+               source: {git_commit: $git_commit, git_tree: $git_tree},
+               cargo_deny: {
+                 advisories_errors: $deny_summary.fields.advisories.errors,
+                 bans_errors: $deny_summary.fields.bans.errors,
+                 licenses_errors: $deny_summary.fields.licenses.errors,
+                 sources_errors: $deny_summary.fields.sources.errors
+               },
+               cargo_audit: {
+                 vulnerabilities_found: $audit_result.vulnerabilities.count
+               }
+             }' \
+            > target/fasti-evidence/b8b/security-review/b8b-security-review.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fasti-b8b-security-review-attempt-${{ github.run_attempt }}
+          path: target/fasti-evidence/b8b/security-review/
+          if-no-files-found: error
+          retention-days: 30
+
+  provenance:
+    name: Generate provenance statement
+    needs: [checksums, sbom-rust, sbom-npm]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: fasti-b8b-checksums-*-attempt-${{ github.run_attempt }}
+          path: /tmp/b8b-artifacts/checksums
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: fasti-b8b-sbom-*-attempt-${{ github.run_attempt }}
+          path: /tmp/b8b-artifacts/sbom
+      - name: Generate the provenance statement
+        run: |
+          node scripts/generate-provenance.mjs \
+            $(find /tmp/b8b-artifacts/checksums -name '*.sha256') \
+            $(find /tmp/b8b-artifacts/sbom -name '*.cdx.json')
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fasti-b8b-provenance-attempt-${{ github.run_attempt }}
+          path: target/fasti-evidence/b8b/provenance/
+          if-no-files-found: error
+          retention-days: 30
+
+  release-notes:
+    name: Generate release notes
+    needs: verify
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+      - name: Extract this tag's release notes from CHANGELOG.md
+        # The tag name is passed via env, not interpolated directly into the
+        # shell command -- ${{ }} expansion happens before the shell parses
+        # the line, so a tag containing shell metacharacters (e.g. `$(...)`)
+        # would otherwise be interpreted as shell syntax, not a literal string.
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node scripts/generate-release-notes.mjs "$RELEASE_TAG"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fasti-b8b-release-notes-attempt-${{ github.run_attempt }}
+          path: target/fasti-evidence/b8b/release-notes.md
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Explicit publish authorization gate (placeholder)
+    needs:
+      [
+        verify,
+        multi-platform-oci,
+        checksums,
+        sbom-rust,
+        sbom-npm,
+        security-review,
+        provenance,
+        release-notes,
+      ]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    environment: production-release
+    steps:
+      - name: Confirm the human-approval gate was reached
+        run: echo "production-release environment approval satisfied; no publish action exists yet"

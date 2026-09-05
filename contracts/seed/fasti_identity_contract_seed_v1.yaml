@@ -1,0 +1,525 @@
+schema: https://scrobble.dev/schemas/fasti/identity-contract/1
+version: 1.0.0-planning-seed
+generated_on: '2026-08-21'
+status: planning_seed_not_runtime_contract
+product: Fasti
+product_boundary: Fasti records. Players play.
+core_statement: Fasti keeps the record stable while its understanding improves.
+source_of_design_lessons:
+  primary: Electric-Town/anime-crosswalk-mappings
+  implementation_candidates:
+  - AniBridge
+  - provider APIs
+  - user overlays
+  - imported mapping bundles
+  rule: Implementation data may vary. Fasti identity semantics and conformance do not depend on one source.
+principles:
+- Fasti assigns stable local entity identifiers that never depend on a provider.
+- External identifiers are typed coordinates attached through assertions.
+- Mappings are directional, typed and scope-aware edges, not fields on a record.
+- Original observations remain separate from later interpretations.
+- An alias useful for a read is not automatically safe for a write.
+- Provider preference changes projections, not Chronicle history.
+- Unresolved is a safe and useful state.
+- Absence, timeout, 404, empty response and cache miss are not deletion.
+- Reversible enrichment may be automated within policy; irreversible changes require review.
+- Evidence class is categorical. Fasti does not reduce identity truth to one numeric confidence score.
+- Every accepted decision is reproducible from policy, evidence and source versions.
+id_prefixes:
+  entity: fst_ent_
+  external_identity: fst_xid_
+  assertion: fst_asn_
+  evidence: fst_evd_
+  source_snapshot: fst_src_
+  resolution_plan: fst_rpl_
+  resolution_decision: fst_rsd_
+  reconciliation_case: fst_rec_
+  occurrence: fst_occ_
+  observation: fst_obs_
+  interpretation: fst_int_
+  bundle: fst_bnd_
+  overlay: fst_ovr_
+  namespace: fst_ns_
+  field_definition: fst_fld_
+  record_type_definition: fst_rtd_
+common_entity_roles:
+  work: An abstract creative work when the domain supports that distinction.
+  release: A published, broadcast, issued or distributed unit.
+  segment: A consumable part such as an episode, chapter, track or podcast episode.
+  variant: A cut, edition, platform build, language edition or other material variant.
+  grouping: A presentation or navigation grouping such as series, franchise, collection or release group.
+  source_scoped: A local or provider record whose global grain is not yet known.
+domain_profiles:
+  video:
+    roles:
+    - work
+    - release
+    - segment
+    - variant
+    - grouping
+    examples:
+    - film
+    - series
+    - season/release block
+    - episode
+    - special
+    - alternate cut
+    coordinate_spaces:
+    - season
+    - absolute
+    - dvd
+    - aired
+    - special
+  anime:
+    roles:
+    - work
+    - release
+    - segment
+    - variant
+    - grouping
+    examples:
+    - cour
+    - OVA
+    - ONA
+    - film
+    - special
+    - episode
+    required_mapping_capabilities:
+    - range_scoped_coverage
+    - non_zero_offset
+    - dual_numbering
+    - cross_boundary_span
+    - discontinuous_coverage
+    - cardinality_expand
+    - cardinality_merge
+    - numbering_space
+    - negative_assertion
+    - alternate_cut
+    - multi_series_membership
+    - known_absent
+    - ordering_variance
+  books:
+    roles:
+    - work
+    - release
+    - segment
+    - variant
+    - grouping
+    examples:
+    - work
+    - edition
+    - volume
+    - chapter
+    - audiobook edition
+    identity_notes:
+    - ISBN normally identifies an edition, not the abstract work.
+  music:
+    roles:
+    - work
+    - release
+    - segment
+    - variant
+    - grouping
+    examples:
+    - work
+    - recording
+    - release group
+    - release
+    - track
+    identity_notes:
+    - A recording and a track on a release are different grains.
+  podcasts:
+    roles:
+    - work
+    - release
+    - segment
+    - variant
+    - grouping
+    examples:
+    - podcast/feed identity
+    - season
+    - episode
+    - feed URL observation
+    identity_notes:
+    - A feed URL can move. Stable podcast and episode GUIDs are preferred evidence.
+  games:
+    roles:
+    - work
+    - release
+    - variant
+    - grouping
+    examples:
+    - game work
+    - platform release
+    - store product
+    - edition
+    - build
+    identity_notes:
+    - Steam, GOG, Epic and console IDs identify source-specific products or releases.
+  custom:
+    roles:
+    - work
+    - release
+    - segment
+    - variant
+    - grouping
+    - source_scoped
+    rule: The record-type definition states supported grains, progress units, actions and identity fields.
+namespace_definition:
+  required_fields:
+  - namespace_id
+  - key
+  - display_name
+  - owner
+  - entity_grains
+  - identifier_type
+  - normalization
+  - case_sensitivity
+  - uniqueness_scope
+  - deep_link_template
+  - acquisition_posture
+  - license_posture
+  - lifecycle_policy
+  - version
+  custom_namespace_key_rule: Use a reverse-domain or owner-scoped key. Display aliases are mutable; registry IDs
+    are not.
+  examples:
+  - tmdb
+  - tvdb
+  - imdb
+  - mal
+  - anilist
+  - kitsu
+  - musicbrainz.recording
+  - isbn13
+  - podcast.guid
+  - store.gog.product
+relation_types:
+  exact: Same grain and boundaries for the stated scope.
+  subset_of: Source describes part of target.
+  superset_of: Source contains several target records.
+  overlaps: Partial non-nesting overlap. Explicit coverage is required.
+  alternate_cut_of: Same underlying work with a materially different edit.
+  edition_of: Published or distributed edition of a work.
+  release_of: Release or issue of a work or release group.
+  track_of: Track placement on a release.
+  segment_of: Consumable segment belongs to a release.
+  grouped_with: Presentation grouping only. Never used for automatic merge.
+  related: Sequel, prequel, spin-off, adaptation or other non-identity relation.
+  not_same_as: Negative assertion that blocks a repeated bad merge.
+  redirects_to: Retired identifier or entity forwards to another stable target.
+coverage_model:
+  modes:
+  - single
+  - flat
+  - season
+  - absolute
+  - custom
+  fields:
+  - source_start
+  - source_end
+  - target_start
+  - target_end
+  - offset
+  - ratio
+  - numbering_space
+  - territory
+  - language
+  - valid_from
+  - valid_to
+  explicit_segment_link_kinds:
+  - exact
+  - expands
+  - merges
+  - absent
+  rules:
+  - Coverage is directional.
+  - One mapping can carry several discontinuous segments.
+  - Where constant arithmetic cannot express the relationship, explicit segment links are required.
+  - Availability and language are not canonical identity unless the media is a distinct edition or variant.
+evidence_classes:
+  asserted: Declared by an authority within its own bounded scope.
+  verified: A reviewer checked the relevant sources.
+  corroborated: Provably independent derivation roots agree.
+  deterministic: Produced by a reproducible exact transform.
+  inferred: Derived from one source or transitive evidence.
+  manual_override: A user or curator accepted a local decision.
+  candidate: Heuristic proposal. Not accepted truth.
+  disputed: Conflicting assertions remain open and unranked.
+  revoked: Assertion is known to be wrong and is retained for audit.
+evidence_required_fields:
+- evidence_id
+- class
+- method
+- observed_source
+- retrieved_at
+- derivation_root
+- acquisition_route
+- source_version
+- license_posture
+- reviewer_or_actor
+- notes
+resolution_intents:
+  metadata_lookup: Select identifiers usable by a metadata provider.
+  metadata_search: Find candidates; never destructive.
+  tracker_read: Read remote state using a safe alias or provider-native identity.
+  tracker_write: Require exact provider-native or documented write identity.
+  play_handoff: Select an identifier/deep link supported by a configured player.
+  segment_translation: Translate a concrete segment across coordinate spaces.
+  deduplication: Return same-entity evidence only; no title fallback.
+  import_attachment: Attach imported evidence or create a source-scoped entity.
+  export_projection: Select target-compatible identities while declaring loss.
+  calendar_schedule: Select schedule source independently from display metadata.
+  display_projection: Choose field claims and artwork for presentation.
+resolution_plan:
+  required_fields:
+  - plan_id
+  - entity_id
+  - intent
+  - requested_namespace
+  - profile_id
+  - client_id
+  - policy_version
+  - candidate_routes
+  - selected_route
+  - lossiness
+  - blocked_reasons
+  - source_versions
+  - created_at
+  - expires_at
+  rules:
+  - A selected external ID is operation-scoped. It is not the canonical identity of the entity.
+  - Exact write operations fail closed when no exact route exists.
+  - Read/enrichment operations may use declared aliases and lossy routes when the consequence is clear.
+  - The plan must explain why a route was selected or blocked.
+automatic_decision_policy:
+  may_auto_accept:
+  - Attach an additional assertion when it is reversible, exact for the stated grain, policy-approved and supported
+    by admissible evidence.
+  - Activate a metadata field claim according to a deterministic field policy.
+  - Mark a known external ID stale after bounded verification without deleting it.
+  must_require_review:
+  - Merge or split Fasti entities.
+  - Move one or more Chronicle interpretations.
+  - Change segment topology.
+  - Replace a user override.
+  - Delete or revoke an accepted assertion.
+  - Apply a lossy route to an outward write.
+  - Publish a private overlay to a shared dataset.
+  rule: Gate on irreversibility, not on a single confidence threshold.
+persistence_entities:
+- name: catalog_entity
+  purpose: Stable Fasti entity and lifecycle.
+- name: entity_relation
+  purpose: Typed relation between Fasti entities.
+- name: namespace_registry
+  purpose: Versioned external identifier namespaces.
+- name: external_identity
+  purpose: One normalized identifier in one namespace.
+- name: identity_assertion
+  purpose: Claim connecting an entity and external identity with relation and scope.
+- name: assertion_coverage
+  purpose: Range, offset, ratio and numbering-space coverage.
+- name: segment_link
+  purpose: Explicit exact/expand/merge/absent segment correspondence.
+- name: assertion_evidence
+  purpose: Evidence, source route and derivation root for an assertion.
+- name: source_snapshot
+  purpose: Bounded source evidence used by a decision.
+- name: known_absence
+  purpose: Recorded reason that no counterpart exists.
+- name: assertion_revocation
+  purpose: Retained withdrawal of a bad assertion.
+- name: identity_tombstone
+  purpose: Permanent retired identity with optional redirect.
+- name: resolution_policy
+  purpose: Versioned deterministic selection rules.
+- name: resolution_plan
+  purpose: Purpose-specific route selection.
+- name: resolution_decision
+  purpose: Accepted, rejected or deferred decision with actor and impact.
+- name: reconciliation_case
+  purpose: Persistent user-review work item.
+- name: mapping_bundle
+  purpose: Immutable verified mapping artifact and manifest.
+- name: mapping_overlay
+  purpose: Consumer-owned local corrections.
+- name: observed_reference
+  purpose: External/local identifiers exactly as observed at ingestion.
+- name: occurrence_interpretation
+  purpose: Versioned interpretation of one original Chronicle observation.
+- name: metadata_claim
+  purpose: Provider-owned field value with provenance and validity.
+- name: metadata_projection
+  purpose: Current display/read projection produced from claims and user overrides.
+- name: record_type_definition
+  purpose: Versioned custom or built-in media-domain profile.
+- name: field_definition
+  purpose: Typed custom metadata or identity field definition.
+- name: extension_document
+  purpose: Validated custom field values for one entity.
+- name: derived_field_index
+  purpose: Disposable bounded index for declared queryable custom fields.
+lifecycle_rules:
+  external_identity:
+  - active
+  - stale
+  - known_absent
+  - retired
+  - redirected
+  assertion:
+  - candidate
+  - accepted
+  - disputed
+  - revoked
+  entity:
+  - active
+  - merged_with_redirect
+  - split_with_lineage
+  - retired
+  reconciliation_case:
+  - open
+  - snoozed
+  - blocked
+  - resolved
+  - superseded
+  mapping_bundle:
+  - staged
+  - active
+  - rolled_back
+  - revoked
+  invariants:
+  - Identifiers are never silently reused.
+  - Redirect chains must terminate and cannot cycle.
+  - Revocation preserves the original assertion and decisions that used it.
+  - A provider 404 alone cannot retire a Fasti entity.
+provider_adapter_contract:
+  operations:
+  - capabilities
+  - search
+  - lookup
+  - external_id_candidates
+  - metadata_claims
+  - topology_assertions
+  - schedule_claims
+  - health
+  - cache_policy
+  forbidden:
+  - Direct database writes
+  - Canonical entity creation without application service
+  - User-state mutation
+  - Silent entity merge
+  - Secret leakage
+  - Unbounded fetch fan-out
+  required_manifest_fields:
+  - id
+  - version
+  - domains
+  - operations
+  - namespaces
+  - auth
+  - rate_limits
+  - network_policy
+  - cache_defaults
+  - field_claims
+  - license_posture
+  - conformance
+custom_identity_fields:
+  rule: A custom field participates in identity only when it references a registered namespace.
+  required_definition_fields:
+  - field_id
+  - record_type
+  - key
+  - label
+  - value_type
+  - cardinality
+  - required
+  - identity_namespace_id
+  - normalization
+  - validation_schema
+  - filterable
+  - sortable
+  - index_budget
+  - privacy
+  - version
+  prohibited:
+  - Automatic merge from an ordinary text field
+  - Arbitrary SQL expressions
+  - Unbounded indexes
+  - Namespace creation without owner and grain
+import_classifications:
+- created
+- reused_exact
+- reused_with_new_assertion
+- candidate_match
+- needs_topology_review
+- known_absent
+- unsupported_but_preserved
+- invalid_source_record
+- failed_retryable
+- failed_terminal
+user_visible_states:
+- local_only
+- resolved_exact
+- resolved_for_display
+- resolved_for_write
+- partially_enriched
+- needs_review
+- disputed
+- stale_source
+- mapping_bundle_unavailable
+- known_absent
+- provider_unavailable
+- safe_to_continue
+standard_errors:
+- code: identity.no_route_for_intent
+  message_pattern: Fasti cannot use the known identifiers for this operation.
+  must_include:
+  - safe_state
+  - known_namespaces
+  - requested_intent
+  - next_actions
+  - doc_url
+- code: identity.ambiguous_candidate
+  message_pattern: More than one plausible record matches the available evidence.
+  must_include:
+  - candidate_count
+  - factors
+  - safe_state
+  - review_url
+  - doc_url
+- code: identity.topology_conflict
+  message_pattern: The providers divide this media differently.
+  must_include:
+  - affected_segments
+  - loss_if_forced
+  - safe_state
+  - review_url
+  - doc_url
+- code: identity.source_stale
+  message_pattern: An external identifier no longer resolves at its source.
+  must_include:
+  - source
+  - last_success
+  - safe_state
+  - alternate_routes
+  - doc_url
+- code: identity.bundle_impact_requires_review
+  message_pattern: This mapping update can change existing interpretations.
+  must_include:
+  - affected_entities
+  - affected_occurrences
+  - rollback
+  - review_url
+  - doc_url
+conformance_requirements:
+- Stable Fasti ID survives provider preference changes.
+- Partial external identities remain usable and enrichable.
+- Every Electric-Town structural capability is representable and fixture-tested.
+- Exact and lossy resolution routes are distinguishable.
+- Negative assertions prevent repeated bad merges.
+- Target existence and identifier lifecycle are checked without deleting local state.
+- Historical interpretations remain pinned until explicitly changed.
+- Import and export preserve unresolved assertions and source route.
+- Provider adapter can be added without domain or UI-specific business logic.
+- Custom identity field requires a registered namespace.

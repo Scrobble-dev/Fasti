@@ -1,11 +1,15 @@
+mod docs;
 mod evidence;
 mod generate;
+mod integration;
 mod orchestration;
 mod registry;
 mod verify;
 
 use clap::{Parser, Subcommand, ValueEnum};
+use std::io::Write;
 use std::path::PathBuf;
+use std::process::ExitCode;
 
 #[derive(Parser)]
 #[command(name = "cargo xtask")]
@@ -17,6 +21,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Public documentation generation, verification, and packaging
+    Docs {
+        #[command(subcommand)]
+        command: DocsCommand,
+    },
     /// Contract generation and verification tasks
     Contract {
         #[command(subcommand)]
@@ -31,6 +40,37 @@ enum Command {
     Evidence {
         #[command(subcommand)]
         command: EvidenceCommand,
+    },
+    /// Focused, offline integration contract checks
+    Integration {
+        #[command(subcommand)]
+        command: IntegrationCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum IntegrationCommand {
+    /// Validate one authored provider manifest and its four deterministic fixtures
+    Check {
+        path: PathBuf,
+        #[arg(long, value_enum, default_value = "human")]
+        output: integration::OutputFormat,
+    },
+}
+
+#[derive(Subcommand)]
+enum DocsCommand {
+    /// Generate the deterministic public site projection under target/docs-site
+    Generate,
+    /// Verify governed sources and repeat the projection to prove determinism
+    Verify {
+        #[arg(long)]
+        locked: bool,
+    },
+    /// Verify, generate, and build the static Docusaurus artifact
+    Package {
+        #[arg(long)]
+        locked: bool,
     },
 }
 
@@ -52,10 +92,15 @@ enum TestCommand {
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum BodyArg {
+    #[value(name = "B")]
+    AccessB,
+    C1,
     B0,
     B1,
     B2,
     B3,
+    B8a,
+    B8b,
 }
 
 #[derive(Subcommand)]
@@ -80,14 +125,102 @@ enum ContractCommand {
     },
 }
 
-fn main() -> anyhow::Result<()> {
+/// Parses command-line arguments, dispatches the selected workspace operation, and reports its result.
+///
+/// # Examples
+///
+/// ```
+/// # fn main() -> std::io::Result<()> {
+/// let status = std::process::Command::new("cargo")
+///     .args(["xtask", "--help"])
+///     .status()?;
+/// assert!(status.success());
+/// # Ok(())
+/// # }
+/// ```
+fn main() -> ExitCode {
     let cli = Cli::parse();
-    let root = workspace_root()?;
+    let root = match workspace_root() {
+        Ok(root) => root,
+        Err(error) => {
+            eprintln!("Error: {error:#}");
+            return ExitCode::FAILURE;
+        }
+    };
     match cli.command {
+        Command::Integration {
+            command: IntegrationCommand::Check { path, output },
+        } => match integration::check(&root, &path) {
+            Ok(report) => match integration::render_success(&report, output) {
+                Ok(rendered) => match write_result(&rendered, false) {
+                    Ok(()) => ExitCode::SUCCESS,
+                    Err(error) => {
+                        eprintln!("Error: failed to write integration check output: {error}");
+                        ExitCode::FAILURE
+                    }
+                },
+                Err(error) => {
+                    eprintln!("Error: {error:#}");
+                    ExitCode::FAILURE
+                }
+            },
+            Err(failure @ integration::CheckFailure::Validation(_)) => {
+                let exit_code = ExitCode::from(failure.exit_code());
+                let integration::CheckFailure::Validation(problem) = failure else {
+                    unreachable!("matched validation failure")
+                };
+                match integration::render_validation_failure(&problem, output) {
+                    Ok(rendered) => match write_result(&rendered, true) {
+                        Ok(()) => exit_code,
+                        Err(error) => {
+                            eprintln!("Error: failed to write integration check output: {error}");
+                            ExitCode::FAILURE
+                        }
+                    },
+                    Err(error) => {
+                        eprintln!("Error: {error:#}");
+                        ExitCode::FAILURE
+                    }
+                }
+            }
+            Err(integration::CheckFailure::Tool(error)) => {
+                eprintln!("Error: integration check could not run: {error:#}");
+                ExitCode::FAILURE
+            }
+        },
+        command => match run_existing(command, &root) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("Error: {error:#}");
+                ExitCode::FAILURE
+            }
+        },
+    }
+}
+
+fn write_result(rendered: &str, stderr: bool) -> std::io::Result<()> {
+    if stderr {
+        std::io::stderr().write_all(rendered.as_bytes())
+    } else {
+        std::io::stdout().write_all(rendered.as_bytes())
+    }
+}
+
+fn run_existing(command: Command, root: &std::path::Path) -> anyhow::Result<()> {
+    match command {
+        Command::Docs {
+            command: DocsCommand::Generate,
+        } => docs::generate(root).map(|_| ()),
+        Command::Docs {
+            command: DocsCommand::Verify { locked },
+        } => docs::verify(root, locked),
+        Command::Docs {
+            command: DocsCommand::Package { locked },
+        } => docs::package(root, locked),
         Command::Contract {
             command: ContractCommand::ValidateRegistry,
         } => {
-            let summary = registry::validate(&root)?;
+            let summary = registry::validate(root)?;
             println!(
                 "PASS: contract_version={} capabilities={} surface_profiles={}",
                 summary.contract_version, summary.capability_count, summary.surface_profile_count
@@ -97,38 +230,70 @@ fn main() -> anyhow::Result<()> {
         Command::Contract {
             command: ContractCommand::Generate,
         } => {
-            let artifacts = generate::generate_checked_in(&root)?;
+            let artifacts = generate::generate_checked_in(root)?;
             println!("PASS: generated {} contract artifacts", artifacts.len());
             Ok(())
         }
         Command::Contract {
             command: ContractCommand::Verify { locked },
-        } => verify_contracts(&root, locked),
+        } => verify_contracts(root, locked),
         Command::Test {
             command: TestCommand::Pr,
-        } => run_pr(&root),
+        } => run_pr(root),
         Command::Test {
             command: TestCommand::Deep,
-        } => run_deep(&root),
+        } => run_deep(root),
         Command::Test {
             command: TestCommand::Milestone { body, manifest },
-        } => run_milestone(&root, body, manifest),
+        } => run_milestone(root, body, manifest),
         Command::Evidence {
             command: EvidenceCommand::Schema,
         } => evidence::print_schema(),
         Command::Evidence {
             command: EvidenceCommand::Verify { manifest },
-        } => evidence::verify(&root, &manifest).map(|_| ()),
+        } => evidence::verify(root, &manifest).map(|_| ()),
+        Command::Integration { .. } => unreachable!("integration checks return before dispatch"),
     }
 }
 
+/// Runs the canonical B1 pull-request gate, including contract verification and portable tests.
+///
+/// # Arguments
+///
+/// * `root` - Path to the workspace root.
+///
+/// # Errors
+///
+/// Returns an error if contract verification or portable B1 tests fail.
+///
+/// # Examples
+///
+/// ```no_run
+/// # fn main() -> anyhow::Result<()> {
+/// run_pr(std::path::Path::new("."))?;
+/// # Ok(())
+/// # }
+/// ```
 fn run_pr(root: &std::path::Path) -> anyhow::Result<()> {
     verify_contracts(root, true)?;
+    docs::verify(root, false)?;
     orchestration::run_portable_b1(root)?;
     println!("PASS: canonical B1 pull-request gate");
     Ok(())
 }
 
+/// Runs the pull-request gate and all deep checks applicable to the current B1 body.
+///
+/// # Errors
+///
+/// Returns an error if the pull-request gate or any deep check fails.
+///
+/// # Examples
+///
+/// ```no_run
+/// run_deep(std::path::Path::new("."))?;
+/// # Ok::<(), anyhow::Error>(())
+/// ```
 fn run_deep(root: &std::path::Path) -> anyhow::Result<()> {
     run_pr(root)?;
     orchestration::run_deep_b1(root)?;
@@ -136,12 +301,43 @@ fn run_deep(root: &std::path::Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Runs the selected milestone gate and creates its evidence manifest when applicable.
+///
+/// # Arguments
+///
+/// * `manifest` - Optional output path for the evidence manifest. Defaults to the
+///   milestone-specific path under `target/fasti-evidence`.
+///
+/// # Examples
+///
+/// ```
+/// let result = run_milestone(
+///     std::path::Path::new("."),
+///     BodyArg::B8a,
+///     None,
+/// );
+/// assert!(result.is_err());
+/// ```
+///
+/// # Errors
+///
+/// Returns an error if the milestone is unavailable, a prerequisite is missing
+/// or invalid, or gate verification fails. B8b additionally requires a passing
+/// B8a manifest.
 fn run_milestone(
     root: &std::path::Path,
     body: BodyArg,
     manifest: Option<PathBuf>,
 ) -> anyhow::Result<()> {
     match body {
+        BodyArg::AccessB => orchestration::run_access_b(root),
+        BodyArg::C1 => {
+            anyhow::ensure!(
+                manifest.is_none(),
+                "C1 emits target/fasti-receipts/access-c1.json as its in-scope delivery receipt; packaged Tauri authentication is a deferred follow-up and is not represented by this command"
+            );
+            orchestration::run_access_c1(root)
+        }
         BodyArg::B1 => {
             run_deep(root)?;
             let manifest = manifest
@@ -159,9 +355,39 @@ fn run_milestone(
                 _ => unreachable!(),
             }
         ),
+        BodyArg::B8a => anyhow::bail!(
+            "B8a milestone evidence formalization is not implemented; B8a is a prerequisite for B8b and is out of scope for this gate"
+        ),
+        BodyArg::B8b => {
+            run_deep(root)?;
+            evidence::verify_b8a_prerequisite(root)?;
+            let manifest =
+                manifest.unwrap_or_else(|| root.join("target/fasti-evidence/b8b-manifest.json"));
+            evidence::create_b8b_milestone_manifest(root, &manifest).map(|_| ())
+        }
     }
 }
 
+/// Validates B1 software contracts and writes a verification receipt when all checks succeed.
+///
+/// This verifies the capability registry, deterministic generated artifacts, checked-in artifacts,
+/// registry examples, and the remaining contract checks. Any existing receipt is removed when
+/// verification fails.
+///
+/// # Arguments
+///
+/// * `root` - Path to the workspace root.
+/// * `locked` - Whether dependency verification must use locked dependency graphs.
+///
+/// # Examples
+///
+/// ```no_run
+/// # fn main() -> anyhow::Result<()> {
+/// let root = workspace_root()?;
+/// verify_contracts(&root, true)?;
+/// # Ok(())
+/// # }
+/// ```
 fn verify_contracts(root: &std::path::Path, locked: bool) -> anyhow::Result<()> {
     verify::clear_receipt(root)?;
 
@@ -235,6 +461,19 @@ fn verify_contracts(root: &std::path::Path, locked: bool) -> anyhow::Result<()> 
     Ok(())
 }
 
+/// Locates the workspace root directory containing the `xtask` crate.
+///
+/// # Errors
+///
+/// Returns an error when the `xtask` crate manifest directory has no parent.
+///
+/// # Examples
+///
+/// ```
+/// let root = workspace_root()?;
+/// assert!(root.is_dir());
+/// # Ok::<(), anyhow::Error>(())
+/// ```
 fn workspace_root() -> anyhow::Result<PathBuf> {
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     manifest

@@ -326,6 +326,14 @@ define_problem_catalog!(
         default_next_action: ("correct_json", "Correct the JSON syntax and retry"),
         param_policy: ProblemParamPolicy::None
     },
+    MetadataClaimStale => "metadata_claim_stale" {
+        title: "Metadata claim stale", status: 409,
+        detail: ProblemDetail::Static("the provider refresh did not produce a fresh claim; the last-known-good claim remains active"),
+        documentation_path: "v1/problems/metadata-claim-stale", safe_state: PriorStateRetained,
+        retryability: RetrySafe,
+        default_next_action: ("retry_metadata_refresh", "Retry the metadata refresh or use the labelled last-known-good value"),
+        param_policy: ProblemParamPolicy::None
+    },
     OperationCanceled => "operation_canceled" {
         title: "Restore canceled", status: 409,
         detail: ProblemDetail::Static("the clean restore ended before an active data root was published"),
@@ -348,6 +356,62 @@ define_problem_catalog!(
         documentation_path: "v1/problems/payload-too-large", safe_state: NoMutation,
         retryability: RetryAfterCorrection,
         default_next_action: ("reduce_request_body", "Reduce the request body and retry"),
+        param_policy: ProblemParamPolicy::None
+    },
+    ProviderUnavailable => "provider_unavailable" {
+        title: "Provider unavailable", status: 503,
+        detail: ProblemDetail::Static("the provider is unavailable within the bounded request policy"),
+        documentation_path: "v1/problems/provider-unavailable", safe_state: PriorStateRetained,
+        retryability: RetrySafe,
+        default_next_action: ("retry_provider", "Retry after checking provider and network status"),
+        param_policy: ProblemParamPolicy::None
+    },
+    ProviderCredentialMissing => "provider_credential_missing" {
+        title: "Provider credential missing", status: 409,
+        detail: ProblemDetail::Static("this provider capability requires a stored credential"),
+        documentation_path: "v1/problems/provider-credential-missing", safe_state: PriorStateRetained,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("configure_provider_credential", "Configure the required provider credential"),
+        param_policy: ProblemParamPolicy::None
+    },
+    ProviderCredentialInvalid => "provider_credential_invalid" {
+        title: "Provider credential invalid", status: 401,
+        detail: ProblemDetail::Static("the provider rejected the configured credential"),
+        documentation_path: "v1/problems/provider-credential-invalid", safe_state: PriorStateRetained,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("replace_provider_credential", "Replace the provider credential and test it again"),
+        param_policy: ProblemParamPolicy::None
+    },
+    ProviderCredentialExpired => "provider_credential_expired" {
+        title: "Provider credential expired", status: 401,
+        detail: ProblemDetail::Static("the configured provider credential has expired"),
+        documentation_path: "v1/problems/provider-credential-expired", safe_state: PriorStateRetained,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("reauthorize_provider", "Reauthorize the provider connection"),
+        param_policy: ProblemParamPolicy::None
+    },
+    ProviderRateLimited => "provider_rate_limited" {
+        title: "Provider rate limited", status: 429,
+        detail: ProblemDetail::Static("the provider request budget is temporarily exhausted"),
+        documentation_path: "v1/problems/provider-rate-limited", safe_state: PriorStateRetained,
+        retryability: RetrySafe,
+        default_next_action: ("retry_after_provider_limit", "Retry after the provider limit resets"),
+        param_policy: ProblemParamPolicy::None
+    },
+    ProviderResponseInvalid => "provider_response_invalid" {
+        title: "Provider response invalid", status: 502,
+        detail: ProblemDetail::Static("the provider response did not satisfy the bounded response contract"),
+        documentation_path: "v1/problems/provider-response-invalid", safe_state: PriorStateRetained,
+        retryability: RetrySafe,
+        default_next_action: ("inspect_provider_health", "Inspect provider health before retrying"),
+        param_policy: ProblemParamPolicy::None
+    },
+    ProviderRouteUnavailable => "provider_route_unavailable" {
+        title: "Provider route unavailable", status: 422,
+        detail: ProblemDetail::Static("no verified provider route is available for this capability"),
+        documentation_path: "v1/problems/provider-route-unavailable", safe_state: PriorStateRetained,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("review_provider_route", "Review the provider capability and identity route"),
         param_policy: ProblemParamPolicy::None
     },
     ReceiptNotFound => "receipt_not_found" {
@@ -381,6 +445,134 @@ define_problem_catalog!(
         retryability: NotRetryable,
         default_next_action: ("inspect_review_queue", "Inspect the current review queue"),
         param_policy: ProblemParamPolicy::Fixed("/review_item_id")
+    },
+    IdentityServiceUnavailable => "identity_service_unavailable" {
+        title: "Identity service unavailable", status: 503,
+        detail: ProblemDetail::Static("the pinned human identity service did not complete the requested operation"),
+        documentation_path: "v1/problems/identity-service-unavailable", safe_state: PriorStateRetained,
+        retryability: RetrySafe,
+        default_next_action: ("retry_identity_service", "Check TrailBase health and retry the same safe operation"),
+        param_policy: ProblemParamPolicy::None
+    },
+    TrailBaseVersionUnsupported => "trailbase_version_unsupported" {
+        title: "TrailBase version unsupported", status: 503,
+        detail: ProblemDetail::Static("the active TrailBase release is not the pinned supported release"),
+        documentation_path: "v1/problems/trailbase-version-unsupported", safe_state: NoMutation,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("install_supported_trailbase", "Install the pinned supported TrailBase release"),
+        param_policy: ProblemParamPolicy::None
+    },
+    TrailBaseTrustUnavailable => "trailbase_trust_unavailable" {
+        title: "TrailBase trust unavailable", status: 503,
+        detail: ProblemDetail::Static("the active TrailBase installation does not satisfy the pinned trust contract"),
+        documentation_path: "v1/problems/trailbase-trust-unavailable", safe_state: NoMutation,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("repair_trailbase_activation", "Repair the pinned TrailBase activation before retrying"),
+        param_policy: ProblemParamPolicy::None
+    },
+    TrailBaseProofInvalid => "trailbase_proof_invalid" {
+        title: "TrailBase proof invalid", status: 401,
+        detail: ProblemDetail::Static("the TrailBase authentication proof did not satisfy the active ceremony"),
+        documentation_path: "v1/problems/trailbase-proof-invalid", safe_state: PriorStateRetained,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("restart_sign_in", "Start a new sign-in ceremony"),
+        param_policy: ProblemParamPolicy::None
+    },
+    TrailBaseSessionCleanupFailed => "trailbase_session_cleanup_failed" {
+        title: "TrailBase session cleanup failed", status: 502,
+        detail: ProblemDetail::Static("TrailBase did not confirm refresh-session cleanup, so Fasti did not issue a browser session"),
+        documentation_path: "v1/problems/trailbase-session-cleanup-failed", safe_state: PriorStateRetained,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("inspect_trailbase_cleanup", "Check TrailBase health, then start a new sign-in ceremony"),
+        param_policy: ProblemParamPolicy::None
+    },
+    AuthBrowserBindingInvalid => "auth_browser_binding_invalid" {
+        title: "Authentication browser binding invalid", status: 401,
+        detail: ProblemDetail::Static("the browser request is not bound to one active Fasti authentication ceremony"),
+        documentation_path: "v1/problems/auth-browser-binding-invalid", safe_state: NoMutation,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("restart_sign_in", "Start a new sign-in ceremony"),
+        param_policy: ProblemParamPolicy::None
+    },
+    AuthSubjectUnaffiliated => "auth_subject_unaffiliated" {
+        title: "Authentication subject unaffiliated", status: 403,
+        detail: ProblemDetail::Static("the authenticated subject does not have active access to the requested workspace"),
+        documentation_path: "v1/problems/auth-subject-unaffiliated", safe_state: PriorStateRetained,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("request_workspace_membership", "Ask a workspace administrator for access"),
+        param_policy: ProblemParamPolicy::None
+    },
+    AuthSelectionChanged => "auth_selection_changed" {
+        title: "Sign-in choices changed", status: 409,
+        detail: ProblemDetail::Static("the available sign-in choices changed after they were reviewed"),
+        documentation_path: "v1/problems/auth-selection-changed", safe_state: PriorStateRetained,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("review_sign_in_choices", "Review the current sign-in choices"),
+        param_policy: ProblemParamPolicy::None
+    },
+    AuthContinuationPersistenceFailed => "auth_continuation_persistence_failed" {
+        title: "Sign-in continuation persistence failed", status: 503,
+        detail: ProblemDetail::Static("Fasti could not persist the sign-in selection after TrailBase session cleanup, so no Fasti browser session was issued"),
+        documentation_path: "v1/problems/auth-continuation-persistence-failed", safe_state: PriorStateRetained,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("restart_sign_in", "Start a new sign-in ceremony"),
+        param_policy: ProblemParamPolicy::None
+    },
+    AuthIdentityConflict => "auth_identity_conflict" {
+        title: "Authentication identity conflict", status: 409,
+        detail: ProblemDetail::Static("the proven identity conflicts with an existing Fasti identity link"),
+        documentation_path: "v1/problems/auth-identity-conflict", safe_state: PriorStateRetained,
+        retryability: NotRetryable,
+        default_next_action: ("inspect_identity_link", "Inspect the existing identity link before making changes"),
+        param_policy: ProblemParamPolicy::None
+    },
+    AuthLastSignInMethod => "auth_last_sign_in_method" {
+        title: "Last sign-in method", status: 409,
+        detail: ProblemDetail::Static("the requested change would remove the account's last verified sign-in method"),
+        documentation_path: "v1/problems/auth-last-sign-in-method", safe_state: PriorStateRetained,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("add_sign_in_method", "Add another verified sign-in method before removal"),
+        param_policy: ProblemParamPolicy::None
+    },
+    AuthAssuranceInsufficient => "auth_assurance_insufficient" {
+        title: "Authentication assurance insufficient", status: 403,
+        detail: ProblemDetail::Static("the current authentication proof does not meet this action's required assurance"),
+        documentation_path: "v1/problems/auth-assurance-insufficient", safe_state: NoMutation,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("use_required_assurance", "Use a sign-in method that meets the required assurance level"),
+        param_policy: ProblemParamPolicy::None
+    },
+    RecentAuthenticationRequired => "recent_authentication_required" {
+        title: "Recent authentication required", status: 403,
+        detail: ProblemDetail::Static("this sensitive action requires a current recent-authentication proof"),
+        documentation_path: "v1/problems/recent-authentication-required", safe_state: NoMutation,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("authenticate_again", "Authenticate again before this sensitive action"),
+        param_policy: ProblemParamPolicy::None
+    },
+    BrowserSessionExpired => "browser_session_expired" {
+        title: "Browser session expired", status: 401,
+        detail: ProblemDetail::Static("the Fasti browser session reached its idle or absolute expiry"),
+        documentation_path: "v1/problems/browser-session-expired", safe_state: NoMutation,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("sign_in_again", "Sign in again to continue"),
+        param_policy: ProblemParamPolicy::None
+    },
+    BrowserSessionRevoked => "browser_session_revoked" {
+        title: "Browser session revoked", status: 401,
+        detail: ProblemDetail::Static("the Fasti browser session is no longer active"),
+        documentation_path: "v1/problems/browser-session-revoked", safe_state: NoMutation,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("sign_in_again", "Sign in again to continue"),
+        param_policy: ProblemParamPolicy::None
+    },
+    SessionPolicyChanged => "session_policy_changed" {
+        title: "Session policy changed", status: 401,
+        detail: ProblemDetail::Static("the Fasti browser session no longer satisfies the current subject or authorization policy"),
+        documentation_path: "v1/problems/session-policy-changed", safe_state: NoMutation,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("sign_in_again", "Sign in again to continue"),
+        param_policy: ProblemParamPolicy::None
     },
     StorageUnavailable => "storage_unavailable" {
         title: "Storage unavailable", status: 503,
@@ -446,6 +638,30 @@ impl ProblemCode {
             | Self::ReviewNotFound
             | Self::StorageUnavailable
             | Self::UnsupportedListener => CapabilityBody::B2,
+            Self::IdentityServiceUnavailable
+            | Self::TrailBaseVersionUnsupported
+            | Self::TrailBaseTrustUnavailable
+            | Self::TrailBaseProofInvalid
+            | Self::TrailBaseSessionCleanupFailed
+            | Self::AuthBrowserBindingInvalid
+            | Self::AuthSubjectUnaffiliated
+            | Self::AuthSelectionChanged
+            | Self::AuthContinuationPersistenceFailed
+            | Self::AuthIdentityConflict
+            | Self::AuthLastSignInMethod
+            | Self::AuthAssuranceInsufficient
+            | Self::RecentAuthenticationRequired
+            | Self::BrowserSessionExpired
+            | Self::BrowserSessionRevoked
+            | Self::SessionPolicyChanged => CapabilityBody::C1,
+            Self::ProviderUnavailable
+            | Self::ProviderCredentialMissing
+            | Self::ProviderCredentialInvalid
+            | Self::ProviderCredentialExpired
+            | Self::ProviderRateLimited
+            | Self::ProviderResponseInvalid
+            | Self::ProviderRouteUnavailable => CapabilityBody::M1,
+            Self::MetadataClaimStale => CapabilityBody::M2,
             Self::DataRootLocked
             | Self::ExportCanceled
             | Self::OperationCanceled
@@ -457,9 +673,36 @@ impl ProblemCode {
     }
 
     pub const fn contract_state(self) -> ContractState {
-        match self.introduced_in() {
-            CapabilityBody::B0 | CapabilityBody::B1 => ContractState::Finalized,
-            CapabilityBody::B2 | CapabilityBody::B3 => ContractState::Reserved,
+        match self {
+            Self::IdentityServiceUnavailable
+            | Self::TrailBaseVersionUnsupported
+            | Self::TrailBaseTrustUnavailable
+            | Self::TrailBaseProofInvalid
+            | Self::TrailBaseSessionCleanupFailed
+            | Self::AuthBrowserBindingInvalid
+            | Self::AuthSubjectUnaffiliated
+            | Self::AuthSelectionChanged
+            | Self::AuthContinuationPersistenceFailed
+            | Self::AuthIdentityConflict
+            | Self::AlreadyInitialized
+            | Self::AuthenticationFailed
+            | Self::BootstrapClosed
+            | Self::IdentityConflict
+            | Self::IntegrityFailed
+            | Self::RecordNotFound
+            | Self::BrowserSessionExpired
+            | Self::BrowserSessionRevoked
+            | Self::SessionPolicyChanged
+            | Self::StorageUnavailable => ContractState::Finalized,
+            _ => match self.introduced_in() {
+                CapabilityBody::B0 | CapabilityBody::B1 => ContractState::Finalized,
+                CapabilityBody::M1 | CapabilityBody::M2 | CapabilityBody::M3 => {
+                    ContractState::Finalized
+                }
+                CapabilityBody::B2 | CapabilityBody::B3 | CapabilityBody::C1 => {
+                    ContractState::Reserved
+                }
+            },
         }
     }
 }
@@ -915,18 +1158,71 @@ mod tests {
     }
 
     #[test]
-    fn later_problem_contracts_remain_reserved_until_their_body_activates() {
+    fn only_activated_problem_contracts_are_finalized() {
         for code in [
             ProblemCode::AlreadyInitialized,
             ProblemCode::AuthenticationFailed,
             ProblemCode::BootstrapClosed,
-            ProblemCode::CursorExpired,
-            ProblemCode::EvidenceNotFound,
             ProblemCode::IdentityConflict,
             ProblemCode::IntegrityFailed,
             ProblemCode::RecordNotFound,
-            ProblemCode::ReviewNotFound,
             ProblemCode::StorageUnavailable,
+        ] {
+            assert_eq!(code.introduced_in(), CapabilityBody::B2);
+            assert_eq!(code.contract_state(), ContractState::Finalized);
+        }
+
+        for code in [
+            ProblemCode::IdentityServiceUnavailable,
+            ProblemCode::TrailBaseVersionUnsupported,
+            ProblemCode::TrailBaseTrustUnavailable,
+            ProblemCode::TrailBaseProofInvalid,
+            ProblemCode::TrailBaseSessionCleanupFailed,
+            ProblemCode::AuthBrowserBindingInvalid,
+            ProblemCode::AuthSubjectUnaffiliated,
+            ProblemCode::AuthIdentityConflict,
+            ProblemCode::BrowserSessionExpired,
+            ProblemCode::BrowserSessionRevoked,
+            ProblemCode::SessionPolicyChanged,
+        ] {
+            assert_eq!(code.introduced_in(), CapabilityBody::C1);
+            assert_eq!(code.contract_state(), ContractState::Finalized);
+        }
+
+        for code in [
+            ProblemCode::AuthLastSignInMethod,
+            ProblemCode::AuthAssuranceInsufficient,
+            ProblemCode::RecentAuthenticationRequired,
+        ] {
+            assert_eq!(code.introduced_in(), CapabilityBody::C1);
+            assert_eq!(code.contract_state(), ContractState::Reserved);
+        }
+
+        for code in [
+            ProblemCode::ProviderUnavailable,
+            ProblemCode::ProviderCredentialMissing,
+            ProblemCode::ProviderCredentialInvalid,
+            ProblemCode::ProviderCredentialExpired,
+            ProblemCode::ProviderRateLimited,
+            ProblemCode::ProviderResponseInvalid,
+            ProblemCode::ProviderRouteUnavailable,
+        ] {
+            assert_eq!(code.introduced_in(), CapabilityBody::M1);
+            assert_eq!(code.contract_state(), ContractState::Finalized);
+            assert_eq!(code.contract().safe_state(), SafeState::PriorStateRetained);
+        }
+
+        {
+            let code = ProblemCode::MetadataClaimStale;
+            assert_eq!(code.introduced_in(), CapabilityBody::M2);
+            assert_eq!(code.contract_state(), ContractState::Finalized);
+            assert_eq!(code.contract().safe_state(), SafeState::PriorStateRetained);
+        }
+
+        for code in [
+            ProblemCode::CursorExpired,
+            ProblemCode::EvidenceNotFound,
+            ProblemCode::ReviewNotFound,
             ProblemCode::UnsupportedListener,
         ] {
             assert_eq!(code.introduced_in(), CapabilityBody::B2);
@@ -950,6 +1246,40 @@ mod tests {
             assert_eq!(code.introduced_in(), CapabilityBody::B3);
             assert_eq!(code.contract_state(), ContractState::Reserved);
         }
+    }
+
+    #[test]
+    fn c1_identity_problem_contracts_preserve_the_frozen_wire_semantics() {
+        let cleanup = ProblemCode::TrailBaseSessionCleanupFailed.contract();
+        assert_eq!(cleanup.status(), 502);
+        assert_eq!(cleanup.safe_state(), SafeState::PriorStateRetained);
+        assert_eq!(cleanup.retryability(), Retryability::RetryAfterCorrection);
+        assert_eq!(
+            cleanup.default_next_action().id(),
+            "inspect_trailbase_cleanup"
+        );
+
+        let binding = ProblemCode::AuthBrowserBindingInvalid.contract();
+        assert_eq!(binding.status(), 401);
+        assert_eq!(binding.safe_state(), SafeState::NoMutation);
+        assert_eq!(binding.param_policy(), ProblemParamPolicy::None);
+
+        let persistence = ProblemCode::AuthContinuationPersistenceFailed.contract();
+        assert_eq!(persistence.status(), 503);
+        assert_eq!(persistence.safe_state(), SafeState::PriorStateRetained);
+        assert_eq!(
+            persistence.retryability(),
+            Retryability::RetryAfterCorrection
+        );
+        assert_eq!(persistence.default_next_action().id(), "restart_sign_in");
+
+        let conflict = ProblemCode::AuthIdentityConflict.contract();
+        assert_eq!(conflict.status(), 409);
+        assert_eq!(conflict.retryability(), Retryability::NotRetryable);
+
+        let selection = ProblemCode::AuthSelectionChanged;
+        assert_eq!(selection.introduced_in(), CapabilityBody::C1);
+        assert_eq!(selection.contract_state(), ContractState::Finalized);
     }
 
     #[test]
@@ -1002,6 +1332,20 @@ mod tests {
         );
         assert_eq!(problem.safe_state(), SafeState::PriorStateRetained);
         assert_eq!(problem.param(), Some("/operation_id"));
+    }
+
+    #[test]
+    fn metadata_refresh_problem_preserves_last_known_good_state() {
+        let correlation_id = RequestCorrelationId::new_v7();
+        let stale = FastiProblem::from_code(
+            ProblemCode::MetadataClaimStale,
+            CapabilityKey::RefreshMetadataClaims,
+            correlation_id,
+        );
+        assert_eq!(stale.status(), 409);
+        assert_eq!(stale.safe_state(), SafeState::PriorStateRetained);
+        assert_eq!(stale.retryability(), Retryability::RetrySafe);
+        assert_eq!(stale.next_actions()[0].id(), "retry_metadata_refresh");
     }
 
     #[test]

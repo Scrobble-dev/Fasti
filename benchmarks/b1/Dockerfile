@@ -8,6 +8,7 @@ COPY crates/ ./crates/
 COPY apps/fastid/ ./apps/fastid/
 COPY xtask/ ./xtask/
 COPY contracts/ ./contracts/
+COPY third_party/trailbase/release.json ./third_party/trailbase/release.json
 
 RUN cargo build --locked --release --bin fastid --bin fasti
 

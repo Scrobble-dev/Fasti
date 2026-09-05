@@ -10,6 +10,7 @@ description = "Fasti SQLite and filesystem adapters for the local kernel"
 
 [dependencies]
 chrono = { workspace = true }
+argon2 = { workspace = true }
 fasti-application = { workspace = true }
 fasti-contracts = { workspace = true }
 fasti-domain = { workspace = true }
@@ -18,7 +19,7 @@ rusqlite = { workspace = true }
 rustix = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-sha2 = "0.10.9"
+sha2 = "0.11.0"
 tar = { workspace = true }
 thiserror = { workspace = true }
 zstd = { workspace = true }

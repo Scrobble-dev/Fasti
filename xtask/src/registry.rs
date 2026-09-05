@@ -9,14 +9,24 @@ use std::fs;
 use std::path::Path;
 
 const REGISTRY_PATH: &str = "contracts/registry/v1/capabilities.yaml";
-const EXPECTED_PROFILES: [&str; 7] = [
+const EXPECTED_PROFILES: [&str; 17] = [
+    "b1_durable_bootstrap",
     "b1_http_fixture",
+    "b1_integration_status",
     "b1_observation_accept",
     "b1_receipt_replay",
     "b1_receipt_stream",
+    "b1_records",
+    "b2_profile_state",
+    "c1_access_projection",
+    "c1_browser_session_foundation",
+    "c1_identity_bootstrap",
     "health",
     "later_b2",
     "later_b3",
+    "m1_providers",
+    "m2_metadata",
+    "m3_identity_routing",
 ];
 
 #[derive(Debug)]
@@ -199,14 +209,20 @@ pub(crate) struct RequiredBinding {
     pub binding: String,
 }
 
-pub(crate) fn finalized_b1_required_bindings(
+pub(crate) fn finalized_required_bindings(
     workspace_root: &Path,
 ) -> anyhow::Result<Vec<RequiredBinding>> {
     let registry = load_validated(workspace_root)?;
     let mut bindings = Vec::new();
     for capability in registry.capabilities {
-        if capability.contract_body != CapabilityBody::B1
-            || capability.lifecycle.contract_state != ContractState::Finalized
+        if !matches!(
+            capability.contract_body,
+            CapabilityBody::B1
+                | CapabilityBody::C1
+                | CapabilityBody::M1
+                | CapabilityBody::M2
+                | CapabilityBody::M3
+        ) || capability.lifecycle.contract_state != ContractState::Finalized
         {
             continue;
         }
@@ -381,6 +397,10 @@ fn validate_capabilities(registry: &Registry) -> anyhow::Result<()> {
                 AuthorizationKind::Unauthenticated => requirement.is_unauthenticated(),
                 AuthorizationKind::BootstrapOnly => requirement.is_bootstrap_only(),
                 AuthorizationKind::LocalOperator => requirement.is_local_operator(),
+                AuthorizationKind::BrowserSession => requirement.is_browser_session(),
+                AuthorizationKind::ScopedOrBrowserSession => {
+                    requirement.is_scoped_or_browser_session()
+                }
                 AuthorizationKind::Scoped => {
                     !requirement.is_unauthenticated()
                         && !requirement.is_bootstrap_only()
@@ -442,10 +462,21 @@ fn validate_capabilities(registry: &Registry) -> anyhow::Result<()> {
                 "{label}: reserved problem code {problem:?} cannot enter the public registry before {}",
                 problem_code.introduced_in().as_str()
             );
+            let is_browser_session_extension = capability.authorization
+                == AuthorizationKind::ScopedOrBrowserSession
+                && matches!(
+                    problem_code,
+                    ProblemCode::BrowserSessionExpired
+                        | ProblemCode::BrowserSessionRevoked
+                        | ProblemCode::SessionPolicyChanged
+                );
             ensure!(
-                body_rank(problem_code.introduced_in()) <= body_rank(capability.contract_body),
-                "{label}: problem code {problem:?} cannot precede its owning body {}",
-                problem_code.introduced_in().as_str()
+                body_rank(problem_code.introduced_in())
+                    <= body_rank(capability.contract_body).max(body_rank(capability.runtime_body))
+                    || is_browser_session_extension,
+                "{label}: problem code {problem:?} belongs after both contract body {} and runtime body {}",
+                capability.contract_body.as_str(),
+                capability.runtime_body.as_str()
             );
             ensure!(
                 capability_problems.insert(problem.as_str()),
@@ -538,7 +569,7 @@ fn validate_uat(label: &str, entries: &[UatOwnership]) -> anyhow::Result<()> {
     for entry in entries {
         ensure!(
             uat_id_is_well_formed(&entry.id),
-            "{label}: UAT ID must use ID-NNN: {}",
+            "{label}: UAT ID must use ID-NNN or MDN-NNN: {}",
             entry.id
         );
         ensure!(
@@ -585,9 +616,9 @@ fn segment_is_well_formed(segment: &str) -> bool {
 }
 
 fn uat_id_is_well_formed(value: &str) -> bool {
-    value.len() == 6
-        && value.starts_with("ID-")
-        && value[3..]
+    ((value.len() == 6 && value.starts_with("ID-"))
+        || (value.len() == 7 && value.starts_with("MDN-")))
+        && value[value.len() - 3..]
             .chars()
             .all(|character| character.is_ascii_digit())
 }
@@ -599,14 +630,51 @@ fn nonempty(value: Option<&str>) -> bool {
 const fn expected_surface_profile(key: CapabilityKey) -> &'static str {
     match key {
         CapabilityKey::SystemHealth => "health",
+        CapabilityKey::IntegrationStatus => "b1_integration_status",
+        CapabilityKey::InitializeNode | CapabilityKey::EnrollFirstClient => "b1_durable_bootstrap",
         CapabilityKey::AcceptObservation => "b1_observation_accept",
         CapabilityKey::ReplayReceipt => "b1_receipt_replay",
         CapabilityKey::StreamReceipts => "b1_receipt_stream",
+        CapabilityKey::CreateRecord
+        | CapabilityKey::AttachIdentifier
+        | CapabilityKey::ListRecords
+        | CapabilityKey::RegisterNamespace => "b1_records",
+        CapabilityKey::ClearNuvioCollections
+        | CapabilityKey::GetNuvioCollections
+        | CapabilityKey::ReplaceNuvioCollections
+        | CapabilityKey::ListTrackingDispositions
+        | CapabilityKey::SetTrackingDisposition => "b2_profile_state",
+        CapabilityKey::CreateBrowserSession
+        | CapabilityKey::ReadBrowserSession
+        | CapabilityKey::EndBrowserSession
+        | CapabilityKey::ListBrowserSessions
+        | CapabilityKey::RevokeBrowserSession
+        | CapabilityKey::RevokeOtherBrowserSessions
+        | CapabilityKey::RevokeAllBrowserSessions
+        | CapabilityKey::RotateBrowserSession
+        | CapabilityKey::SelectBrowserSessionProfile => "c1_browser_session_foundation",
+        CapabilityKey::AccessIdentityBootstrap => "c1_identity_bootstrap",
+        CapabilityKey::ReadAccessProjection => "c1_access_projection",
+        CapabilityKey::ListProviders
+        | CapabilityKey::ConfigureProviderCredential
+        | CapabilityKey::TestProviderCredential
+        | CapabilityKey::ReadProviderHealth => "m1_providers",
+        CapabilityKey::RefreshMetadataClaims
+        | CapabilityKey::ReadMetadataProjection
+        | CapabilityKey::ConfigureMetadataProjection => "m2_metadata",
+        CapabilityKey::ResolveIdentityRoute
+        | CapabilityKey::ReadAnimeGroupingPolicy
+        | CapabilityKey::PreviewAnimeGroupingPolicyChange
+        | CapabilityKey::ApplyAnimeGroupingPolicyChange => "m3_identity_routing",
         _ => match key.contract_body() {
             CapabilityBody::B1 => "b1_http_fixture",
             CapabilityBody::B2 => "later_b2",
             CapabilityBody::B3 => "later_b3",
             CapabilityBody::B0 => "health",
+            CapabilityBody::C1 => "c1_browser_session_foundation",
+            CapabilityBody::M1 => "m1_providers",
+            CapabilityBody::M2 => "m2_metadata",
+            CapabilityBody::M3 => "m3_identity_routing",
         },
     }
 }
@@ -617,6 +685,10 @@ const fn body_rank(body: CapabilityBody) -> u8 {
         CapabilityBody::B1 => 1,
         CapabilityBody::B2 => 2,
         CapabilityBody::B3 => 3,
+        CapabilityBody::C1 => 4,
+        CapabilityBody::M1 => 5,
+        CapabilityBody::M2 => 6,
+        CapabilityBody::M3 => 7,
     }
 }
 
@@ -635,14 +707,16 @@ mod tests {
     #[test]
     fn uat_ids_are_fixed_width() {
         assert!(uat_id_is_well_formed("ID-065"));
+        assert!(uat_id_is_well_formed("MDN-018"));
         assert!(!uat_id_is_well_formed("ID-65"));
+        assert!(!uat_id_is_well_formed("MDN-18"));
     }
 
     #[test]
     fn surface_profile_policy_separates_finalized_and_later_contracts() {
         assert_eq!(
             expected_surface_profile(CapabilityKey::InitializeNode),
-            "b1_http_fixture"
+            "b1_durable_bootstrap"
         );
         assert_eq!(
             expected_surface_profile(CapabilityKey::AcceptObservation),
@@ -650,7 +724,7 @@ mod tests {
         );
         assert_eq!(
             expected_surface_profile(CapabilityKey::CreateRecord),
-            "later_b2"
+            "b1_records"
         );
         assert_eq!(
             expected_surface_profile(CapabilityKey::ExportWorkspace),
@@ -676,8 +750,8 @@ mod tests {
         reserved
             .capabilities
             .iter_mut()
-            .find(|capability| capability.application_key == CapabilityKey::CreateRecord)
-            .expect("create-record capability")
+            .find(|capability| capability.application_key == CapabilityKey::ResolveReview)
+            .expect("resolve-review capability")
             .surface_profile = "b1_http_fixture".to_owned();
         assert!(validate_capabilities(&reserved).is_err());
     }
@@ -741,7 +815,7 @@ mod tests {
     }
 
     #[test]
-    fn restore_is_the_only_local_operator_capability() {
+    fn local_operator_capabilities_are_explicit_and_scope_free() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .expect("xtask lives under workspace root");
@@ -752,12 +826,17 @@ mod tests {
             .filter(|capability| capability.authorization == AuthorizationKind::LocalOperator)
             .collect();
 
-        assert_eq!(local_operator.len(), 1);
+        assert_eq!(local_operator.len(), 2);
         assert_eq!(
             local_operator[0].application_key,
-            CapabilityKey::RestoreWorkspace
+            CapabilityKey::AccessIdentityBootstrap
         );
         assert!(local_operator[0].scopes.is_empty());
+        assert_eq!(
+            local_operator[1].application_key,
+            CapabilityKey::RestoreWorkspace
+        );
+        assert!(local_operator[1].scopes.is_empty());
 
         let export = registry
             .capabilities
@@ -777,19 +856,70 @@ mod tests {
     }
 
     #[test]
-    fn reserved_problem_codes_stay_out_of_the_b1_registry() {
+    fn staged_cursor_problem_stays_out_of_the_public_registry() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .expect("xtask lives under workspace root");
         let public = normalized_public_json(root).expect("public registry");
         let rendered = serde_json::to_string(&public).expect("serialize public registry");
 
-        assert!(!rendered.contains(ProblemCode::AuthenticationFailed.as_str()));
-        assert!(!rendered.contains(ProblemCode::StorageUnavailable.as_str()));
+        assert!(!rendered.contains(ProblemCode::CursorExpired.as_str()));
+        assert!(!rendered.contains(ProblemCode::AuthLastSignInMethod.as_str()));
+        assert!(!rendered.contains(ProblemCode::AuthAssuranceInsufficient.as_str()));
+        assert!(!rendered.contains(ProblemCode::RecentAuthenticationRequired.as_str()));
+        assert!(rendered.contains(ProblemCode::StorageUnavailable.as_str()));
         assert_eq!(
-            ProblemCode::AuthenticationFailed.contract_state(),
+            ProblemCode::CursorExpired.contract_state(),
             ContractState::Reserved
         );
+        assert_eq!(
+            ProblemCode::StorageUnavailable.contract_state(),
+            ContractState::Finalized
+        );
+    }
+
+    #[test]
+    fn hybrid_authorization_is_limited_to_the_frozen_capabilities() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("xtask lives under workspace root");
+        let registry = load_validated(root).expect("authored registry is valid");
+        let hybrid: Vec<_> = registry
+            .capabilities
+            .iter()
+            .filter(|capability| {
+                capability.authorization == AuthorizationKind::ScopedOrBrowserSession
+            })
+            .map(|capability| capability.application_key)
+            .collect();
+        assert_eq!(
+            hybrid,
+            [
+                CapabilityKey::AcceptObservation,
+                CapabilityKey::CreateRecord,
+                CapabilityKey::AttachIdentifier,
+                CapabilityKey::ListRecords,
+                CapabilityKey::RegisterNamespace,
+                CapabilityKey::ListTrackingDispositions,
+                CapabilityKey::SetTrackingDisposition,
+                CapabilityKey::GetNuvioCollections,
+                CapabilityKey::ReplaceNuvioCollections,
+                CapabilityKey::ClearNuvioCollections,
+                CapabilityKey::ResolveIdentityRoute,
+                CapabilityKey::ReadAnimeGroupingPolicy,
+                CapabilityKey::PreviewAnimeGroupingPolicyChange,
+                CapabilityKey::ApplyAnimeGroupingPolicyChange,
+            ]
+        );
+
+        let mut broadened = registry;
+        broadened
+            .capabilities
+            .iter_mut()
+            .find(|capability| capability.application_key == CapabilityKey::ReplayReceipt)
+            .expect("receipt replay")
+            .authorization = AuthorizationKind::ScopedOrBrowserSession;
+        assert!(validate_capabilities(&broadened).is_err());
     }
 
     #[test]

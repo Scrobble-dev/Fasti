@@ -1,0 +1,58 @@
+{
+  "integrations": [
+    {
+      "id": "nuvio",
+      "label": "NuvioTV",
+      "state": "setup_required",
+      "available": true,
+      "endpoint_ready": true,
+      "setup_action": "Create an observation client and configure the Nuvio Fasti provider.",
+      "detail": "Authenticated occurrence ingress is mounted. Nuvio must keep its own durable retry outbox."
+    },
+    {
+      "id": "plex",
+      "label": "Plex",
+      "state": "setup_required",
+      "available": true,
+      "endpoint_ready": true,
+      "setup_action": "Use Tautulli, or place the Plex webhook behind a trusted proxy that injects a scoped Fasti Authorization header.",
+      "detail": "Plex webhooks do not carry a Fasti credential. Fasti never places authorization secrets in webhook URLs."
+    },
+    {
+      "id": "tautulli",
+      "label": "Tautulli",
+      "state": "setup_required",
+      "available": true,
+      "endpoint_ready": true,
+      "setup_action": "Configure the documented JSON template and Authorization header.",
+      "detail": "Tautulli can submit watched events through a bounded authenticated webhook."
+    },
+    {
+      "id": "jellyfin",
+      "label": "Jellyfin",
+      "state": "setup_required",
+      "available": true,
+      "endpoint_ready": true,
+      "setup_action": "Configure the Jellyfin Webhook plugin with the Fasti template and Authorization header.",
+      "detail": "Completed playback notifications are normalized into durable Fasti occurrences."
+    },
+    {
+      "id": "emby",
+      "label": "Emby",
+      "state": "setup_required",
+      "available": true,
+      "endpoint_ready": true,
+      "setup_action": "Configure Emby playback-stop/mark-played webhooks with a scoped Authorization header.",
+      "detail": "Native Emby event payloads are accepted only when completion is explicit."
+    },
+    {
+      "id": "mpris",
+      "label": "Desktop MPRIS observer",
+      "state": "setup_required",
+      "available": true,
+      "endpoint_ready": false,
+      "setup_action": "Enable the desktop MPRIS observer.",
+      "detail": "MPRIS support is platform-scoped and never claimed on unsupported operating systems."
+    }
+  ]
+}

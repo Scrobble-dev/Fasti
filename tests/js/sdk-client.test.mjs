@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -9,12 +10,18 @@ import { test } from "node:test";
 import {
   FastiAbortError,
   FastiClient,
+  FastiContractParseError,
   FastiProblemError,
   FastiProtocolError,
   FastiTimeoutError,
   FastiTransportError,
+  connectionEndpoint,
+  normalizeBaseUrl,
   parseAcceptObservationRequest,
   parseHealthResponse,
+  parseListRecordsResponse,
+  parseConfigureMetadataProjectionRequest,
+  parseRefreshMetadataClaimsRequest,
   parseReceiptCommittedEvent,
   PUBLIC_CAPABILITY_REGISTRY,
   RECEIPT_STREAM_CONTRACT,
@@ -42,7 +49,457 @@ const contractIds = {
   client: v7("cli", "5"),
   observation: v7("obs", "6"),
   evidence: v7("evd", "7"),
+  record: v7("rec", "8"),
+  browserSession: v7("ses", "9"),
 };
+
+test("metadata refresh parser enforces canonical operation IDs", () => {
+  const request = {
+    operation_id: contractIds.operation,
+    record_id: contractIds.record,
+    provider_id: "tmdb",
+    field_groups: ["basic_info"],
+    locale: "en-ie",
+    region: "IE",
+    mode: "prefer_cache",
+  };
+  assert.deepEqual(parseRefreshMetadataClaimsRequest(request), request);
+  assert.throws(
+    () =>
+      parseRefreshMetadataClaimsRequest({
+        ...request,
+        operation_id: "x".repeat(35),
+      }),
+    FastiContractParseError,
+  );
+});
+
+test("identity routing SDK binds queries, policy bodies, and response identity", async () => {
+  const policy = {
+    profile_id: contractIds.profile,
+    scope: { kind: "profile", client_id: null },
+    source: "profile_default",
+    preference: "automatic",
+    revision: 0,
+  };
+  const route = {
+    record_id: contractIds.record,
+    intent: "metadata_enrichment",
+    target_provider: "tmdb",
+    status: "missing",
+    known_identifiers: [],
+    candidate_routes: [],
+    selected_route: null,
+    nuvio_content_id: null,
+  };
+  const previewRequest = {
+    scope: policy.scope,
+    change: { kind: "set", preference: "group_by_tv_work" },
+    after_record_id: null,
+    limit: 10,
+  };
+  const preview = {
+    policy,
+    proposed_preference: "group_by_tv_work",
+    proposed_source: "profile_default",
+    total_records: 0,
+    affected_records: 0,
+    unresolved_routes: 0,
+    possible_season_regroupings: 0,
+    records: [],
+    next_after_record_id: null,
+  };
+  const applyRequest = {
+    operation_id: contractIds.operation,
+    scope: policy.scope,
+    expected_revision: 0,
+    change: previewRequest.change,
+  };
+  const applied = {
+    operation_id: contractIds.operation,
+    change: applyRequest.change,
+    previous_preference: "automatic",
+    previous_source: "profile_default",
+    policy: { ...policy, preference: "group_by_tv_work", revision: 1 },
+    affected_records: 0,
+    unresolved_routes: 0,
+    possible_season_regroupings: 0,
+    rolled_back_operation_id: null,
+  };
+  const requests = [];
+  const client = new FastiClient({
+    baseUrl: "http://127.0.0.1:8420",
+    credential: "credential",
+    fetch: async (url, init) => {
+      requests.push({ url: String(url), init });
+      const path = new URL(String(url)).pathname;
+      const response = path.endsWith("/identity-route")
+        ? route
+        : path.endsWith("/preview")
+          ? preview
+          : init.method === "PUT"
+            ? applied
+            : { policy };
+      return new Response(JSON.stringify(response), {
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+
+  assert.deepEqual(
+    await client.resolveIdentityRoute(contractIds.record, {
+      intent: "metadata_enrichment",
+      target_provider: "tmdb",
+    }),
+    route,
+  );
+  assert.deepEqual(await client.readAnimeGroupingPolicy({ scope: "profile" }), {
+    policy,
+  });
+  assert.deepEqual(
+    await client.previewAnimeGroupingPolicyChange(previewRequest),
+    preview,
+  );
+  assert.deepEqual(
+    await client.applyAnimeGroupingPolicyChange(applyRequest),
+    applied,
+  );
+  assert.deepEqual(
+    requests.map(({ url, init }) => ({
+      url,
+      method: init.method,
+      authorization: new Headers(init.headers).get("authorization"),
+      body: init.body === undefined ? undefined : JSON.parse(init.body),
+    })),
+    [
+      {
+        url: `http://127.0.0.1:8420/api/v1/records/${contractIds.record}/identity-route?intent=metadata_enrichment&target_provider=tmdb`,
+        method: "GET",
+        authorization: "Bearer credential",
+        body: undefined,
+      },
+      {
+        url: "http://127.0.0.1:8420/api/v1/profile/anime-grouping-policy?scope=profile",
+        method: "GET",
+        authorization: "Bearer credential",
+        body: undefined,
+      },
+      {
+        url: "http://127.0.0.1:8420/api/v1/profile/anime-grouping-policy/preview",
+        method: "POST",
+        authorization: "Bearer credential",
+        body: previewRequest,
+      },
+      {
+        url: "http://127.0.0.1:8420/api/v1/profile/anime-grouping-policy",
+        method: "PUT",
+        authorization: "Bearer credential",
+        body: applyRequest,
+      },
+    ],
+  );
+  assert.throws(
+    () =>
+      client.resolveIdentityRoute(contractIds.record, {
+        intent: "metadata_enrichment",
+        target_provider: "TMDB with spaces",
+      }),
+    TypeError,
+  );
+
+  const mismatched = new FastiClient({
+    baseUrl: "http://127.0.0.1:8420",
+    credential: "credential",
+    fetch: async () =>
+      new Response(JSON.stringify({ ...route, record_id: v7("rec", "f") }), {
+        headers: { "content-type": "application/json" },
+      }),
+  });
+  await assert.rejects(
+    mismatched.resolveIdentityRoute(contractIds.record, {
+      intent: "metadata_enrichment",
+      target_provider: "tmdb",
+    }),
+    FastiProtocolError,
+  );
+});
+
+test("browser authentication SDK exposes callable operations but never the callback", () => {
+  const client = new FastiClient({
+    baseUrl: "http://127.0.0.1:8420",
+  });
+  for (const method of [
+    "startTrailBaseSignIn",
+    "readTrailBaseContinuation",
+    "completeTrailBaseContinuation",
+    "cancelTrailBaseContinuation",
+    "readAccessProjection",
+    "readBrowserSession",
+    "endBrowserSession",
+    "listBrowserSessions",
+    "revokeBrowserSession",
+    "revokeOtherBrowserSessions",
+    "revokeAllBrowserSessions",
+    "rotateBrowserSession",
+    "selectBrowserSessionProfile",
+  ]) {
+    assert.equal(typeof client[method], "function", method);
+  }
+  assert.equal(client.completeTrailBaseAuthentication, undefined);
+});
+
+test("TrailBase continuation SDK keeps binding authority in same-origin cookies", async () => {
+  const revision = `sha256:${"a".repeat(64)}`;
+  const projection = {
+    expires_at: "2026-08-31T12:00:00Z",
+    remembered: true,
+    candidate_revision: revision,
+    choices: [
+      {
+        choice_ordinal: 0,
+        workspace_ordinal: 1,
+        profile_ordinal: 1,
+        workspace_created_at: "2026-08-30T10:00:00Z",
+        profile_created_at: "2026-08-30T10:01:00Z",
+        membership_state: "active",
+        role: "member",
+      },
+    ],
+  };
+  const requests = [];
+  const client = new FastiClient({
+    baseUrl: "http://127.0.0.1:8420",
+    credential: "must-not-be-sent",
+    retryPolicy: { maxAttempts: 3 },
+    fetch: async (url, init) => {
+      requests.push({ url: String(url), init });
+      return init?.method === "GET"
+        ? new Response(JSON.stringify(projection), {
+            headers: { "content-type": "application/json" },
+          })
+        : new Response(null, { status: 204 });
+    },
+  });
+
+  assert.deepEqual(await client.readTrailBaseContinuation(), projection);
+  await client.completeTrailBaseContinuation({
+    choice_ordinal: 0,
+    candidate_revision: revision,
+  });
+  await client.cancelTrailBaseContinuation();
+
+  assert.deepEqual(
+    requests.map(({ url, init }) => ({
+      url,
+      method: init.method,
+      body: init.body,
+      credentials: init.credentials,
+      authorization: new Headers(init.headers).get("authorization"),
+      csrf: new Headers(init.headers).get("x-csrf-token"),
+    })),
+    [
+      {
+        url: "http://127.0.0.1:8420/api/access/v1/trailbase/continuation",
+        method: "GET",
+        body: undefined,
+        credentials: "same-origin",
+        authorization: null,
+        csrf: null,
+      },
+      {
+        url: "http://127.0.0.1:8420/api/access/v1/trailbase/continuation",
+        method: "POST",
+        body: JSON.stringify({
+          choice_ordinal: 0,
+          candidate_revision: revision,
+        }),
+        credentials: "same-origin",
+        authorization: null,
+        csrf: null,
+      },
+      {
+        url: "http://127.0.0.1:8420/api/access/v1/trailbase/continuation",
+        method: "DELETE",
+        body: undefined,
+        credentials: "same-origin",
+        authorization: null,
+        csrf: null,
+      },
+    ],
+  );
+  assert.throws(
+    () =>
+      client.completeTrailBaseContinuation({
+        choice_ordinal: 0,
+        candidate_revision: revision,
+        workspace_id: contractIds.workspace,
+      }),
+    FastiProtocolError,
+  );
+  assert.equal(requests.length, 3);
+
+  const leakingClient = new FastiClient({
+    baseUrl: "http://127.0.0.1:8420",
+    fetch: async () =>
+      new Response(
+        JSON.stringify({
+          ...projection,
+          choices: [
+            {
+              ...projection.choices[0],
+              workspace_id: contractIds.workspace,
+            },
+          ],
+        }),
+        { headers: { "content-type": "application/json" } },
+      ),
+  });
+  await assert.rejects(
+    leakingClient.readTrailBaseContinuation(),
+    FastiProtocolError,
+  );
+});
+
+test("TrailBase continuation mutations make one attempt on network failure", async () => {
+  const revision = `sha256:${"a".repeat(64)}`;
+  for (const [label, invoke] of [
+    [
+      "complete",
+      (client) =>
+        client.completeTrailBaseContinuation({
+          choice_ordinal: 0,
+          candidate_revision: revision,
+        }),
+    ],
+    ["cancel", (client) => client.cancelTrailBaseContinuation()],
+  ]) {
+    let attempts = 0;
+    const client = new FastiClient({
+      baseUrl: "http://127.0.0.1:8420",
+      retryPolicy: { maxAttempts: 3, baseDelayMs: 0, maxDelayMs: 0 },
+      fetch: async () => {
+        attempts += 1;
+        throw new Error("network unavailable");
+      },
+    });
+    await assert.rejects(invoke(client), FastiTransportError, label);
+    assert.equal(attempts, 1, label);
+  }
+});
+
+test("TrailBase continuation SDK accepts governed continuation evidence problems", async () => {
+  const catalog = JSON.parse(
+    await readFile(
+      path.join(repositoryRoot, "contracts/generated/v1/problems.json"),
+      "utf8",
+    ),
+  );
+  const revision = `sha256:${"a".repeat(64)}`;
+  for (const code of [
+    "auth_continuation_persistence_failed",
+    "auth_subject_unaffiliated",
+    "identity_service_unavailable",
+    "storage_unavailable",
+    "trailbase_session_cleanup_failed",
+    "trailbase_trust_unavailable",
+  ]) {
+    const { param_policy: _paramPolicy, ...definition } = catalog.problems.find(
+      (problem) =>
+        problem.capability_id === "browser.session.create" &&
+        problem.code === code,
+    );
+    const problem = {
+      ...definition,
+      actual: null,
+      correlation_id: ids.correlation,
+      violations: [],
+    };
+    for (const [label, invoke] of [
+      ["read", (client) => client.readTrailBaseContinuation()],
+      [
+        "complete",
+        (client) =>
+          client.completeTrailBaseContinuation({
+            choice_ordinal: 0,
+            candidate_revision: revision,
+          }),
+      ],
+    ]) {
+      let attempts = 0;
+      const client = new FastiClient({
+        baseUrl: "http://127.0.0.1:8420",
+        retryPolicy: { maxAttempts: 3, baseDelayMs: 0, maxDelayMs: 0 },
+        fetch: async () => {
+          attempts += 1;
+          return new Response(JSON.stringify(problem), {
+            status: problem.status,
+            headers: { "content-type": "application/problem+json" },
+          });
+        },
+      });
+      await assert.rejects(invoke(client), (error) => {
+        assert.ok(error instanceof FastiProblemError, `${label}: ${code}`);
+        assert.equal(error.problem.code, code, label);
+        return true;
+      });
+      assert.equal(
+        attempts,
+        label === "read" && problem.retryability === "retry_safe" ? 3 : 1,
+        `${label}: ${code}`,
+      );
+    }
+  }
+});
+
+test("browser mutations copy the exact CSRF cookie and omit bearer credentials", async () => {
+  const csrf = "a".repeat(64);
+  const original = Object.getOwnPropertyDescriptor(globalThis, "document");
+  Object.defineProperty(globalThis, "document", {
+    configurable: true,
+    value: { cookie: `unrelated=1; __Host-fasti_csrf=${csrf}` },
+  });
+  try {
+    let request;
+    const client = new FastiClient({
+      baseUrl: "http://127.0.0.1:8420",
+      credential: "must-not-be-sent",
+      fetch: async (url, init) => {
+        request = { url: String(url), init };
+        return new Response(JSON.stringify({ revoked_count: 1 }), {
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+    assert.deepEqual(
+      await client.revokeBrowserSession(contractIds.browserSession),
+      { revoked_count: 1 },
+    );
+    const headers = new Headers(request.init.headers);
+    assert.equal(
+      request.url,
+      `http://127.0.0.1:8420/api/access/v1/browser-sessions/${contractIds.browserSession}`,
+    );
+    assert.equal(request.init.credentials, "same-origin");
+    assert.equal(headers.get("x-csrf-token"), csrf);
+    assert.equal(headers.get("authorization"), null);
+  } finally {
+    if (original) Object.defineProperty(globalThis, "document", original);
+    else delete globalThis.document;
+  }
+});
+
+test("browser mutations fail locally without one valid CSRF cookie", async () => {
+  let called = false;
+  const client = new FastiClient({
+    baseUrl: "http://127.0.0.1:8420",
+    fetch: async () => {
+      called = true;
+      throw new Error("must not call fetch");
+    },
+  });
+  await assert.rejects(client.endBrowserSession(), FastiProtocolError);
+  assert.equal(called, false);
+});
 
 test("health omits credentials and returns the exact public contract", async () => {
   const credential = "local-secret-that-must-not-leak";
@@ -60,6 +517,71 @@ test("health omits credentials and returns the exact public contract", async () 
       });
     },
   );
+});
+
+test("durable bootstrap SDK keeps one-time secrets in JSON bodies", async () => {
+  const proof = "a".repeat(64);
+  const credential = "b".repeat(64);
+  const requests = [];
+  const client = new FastiClient({
+    baseUrl: "http://127.0.0.1:8420",
+    fetch: async (url, init) => {
+      requests.push({
+        url: String(url),
+        authorization: new Headers(init?.headers).get("authorization"),
+        body: JSON.parse(init?.body),
+      });
+      if (String(url).endsWith("/api/v1/node/initialization")) {
+        return new Response(JSON.stringify({ initialization_proof: proof }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(
+        JSON.stringify({ credential_scheme: "Bearer", credential }),
+        { headers: { "content-type": "application/json" } },
+      );
+    },
+  });
+
+  const initialized = await client.initializeDurableNode();
+  assert.equal(initialized.initialization_proof, proof);
+  const enrolled = await client.enrollDurableFirstClient({
+    initialization_proof: initialized.initialization_proof,
+  });
+  assert.equal(enrolled.credential, credential);
+
+  assert.deepEqual(requests, [
+    {
+      url: "http://127.0.0.1:8420/api/v1/node/initialization",
+      authorization: null,
+      body: {},
+    },
+    {
+      url: "http://127.0.0.1:8420/api/v1/client-enrollments",
+      authorization: null,
+      body: { initialization_proof: proof },
+    },
+  ]);
+});
+
+test("default fetch keeps the platform receiver", async () => {
+  const originalFetch = globalThis.fetch;
+  let receiver;
+  globalThis.fetch = function () {
+    receiver = this;
+    return Promise.resolve(
+      new Response(JSON.stringify({ status: "healthy", version: "0.1.0" }), {
+        headers: { "content-type": "application/json" },
+      }),
+    );
+  };
+  try {
+    const client = new FastiClient({ baseUrl: "http://127.0.0.1:8420" });
+    assert.equal((await client.health()).status, "healthy");
+    assert.equal(receiver, globalThis);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("media types are matched case-insensitively", async () => {
@@ -408,17 +930,55 @@ test("credentials are header-only on authenticated surfaces and no offline queue
         ).sort();
         assert.deepEqual(methods, [
           "acceptObservation",
+          "applyAnimeGroupingPolicyChange",
+          "attachIdentifier",
+          "cancelTrailBaseContinuation",
+          "clearNuvioCollections",
+          "completeTrailBaseContinuation",
           "configureListener",
+          "configureMetadataProjection",
+          "configureProviderCredential",
           "constructor",
+          "createRecord",
           "discoverCapabilities",
+          "endBrowserSession",
+          "enrollDurableFirstClient",
           "enrollFirstClient",
+          "getNuvioCollections",
           "health",
+          "initializeDurableNode",
           "initializeNode",
+          "listBrowserSessions",
+          "listIntegrations",
+          "listProviders",
+          "listRecords",
+          "listTrackingDispositions",
+          "previewAnimeGroupingPolicyChange",
+          "readAccessProjection",
+          "readAnimeGroupingPolicy",
+          "readBrowserSession",
+          "readMetadataProjection",
+          "readProviderHealth",
+          "readTrailBaseContinuation",
           "receiptEvents",
+          "refreshMetadataClaims",
+          "registerNamespace",
+          "removeProviderCredential",
+          "replaceNuvioCollections",
           "replayReceipt",
+          "resolveIdentityRoute",
+          "revokeAllBrowserSessions",
+          "revokeBrowserSession",
           "revokeCredential",
+          "revokeOtherBrowserSessions",
+          "rotateBrowserSession",
           "rotateCredential",
+          "selectBrowserSessionProfile",
           "selectProfile",
+          "setTrackingDisposition",
+          "startTrailBaseSignIn",
+          "submitObservation",
+          "testProviderCredential",
         ]);
       },
     );
@@ -535,6 +1095,141 @@ test("exact generated parsers reject inherited fields, class instances, and impo
   );
 });
 
+test("generated record parser accepts required boolean fields", () => {
+  const record = parseListRecordsResponse({
+    records: [
+      {
+        record_id: "018f7f2d-8f58-7a0a-8000-000000000001",
+        grain: "work",
+        status: "active",
+        title: {
+          tier: "preferred_provider_claim",
+          value: "A real local record",
+          source: "google-books",
+          is_stale: false,
+        },
+        poster: {
+          tier: "empty",
+          value: null,
+          source: null,
+          is_stale: false,
+        },
+        latest_activity: null,
+      },
+    ],
+    truncated: false,
+  }).records[0];
+  assert.equal(record.title.is_stale, false);
+  assert.equal(record.poster.is_stale, false);
+});
+
+test("generated record parser rejects a response missing truncated", () => {
+  assert.throws(
+    () =>
+      parseListRecordsResponse({
+        records: [],
+      }),
+    FastiContractParseError,
+  );
+});
+
+test("client.listRecords() surfaces the truncated flag through the transport", async () => {
+  const client = new FastiClient({
+    baseUrl: "http://127.0.0.1:8420",
+    credential: "records-secret",
+    fetch: async () =>
+      new Response(JSON.stringify({ records: [], truncated: true }), {
+        headers: { "content-type": "application/json" },
+      }),
+  });
+
+  assert.deepEqual(await client.listRecords(), {
+    records: [],
+    truncated: true,
+  });
+});
+
+test("provider SDK keeps reads retry-safe and credential mutations single-attempt", async (context) => {
+  await context.test("provider list retries a transient response", async () => {
+    let attempts = 0;
+    const client = new FastiClient({
+      baseUrl: "http://127.0.0.1:8420",
+      credential: "provider-reader",
+      retryPolicy: { maxAttempts: 2, baseDelayMs: 0, maxDelayMs: 0 },
+      fetch: async (_url, init) => {
+        attempts += 1;
+        assert.equal(init?.method, "GET");
+        if (attempts === 1) return new Response(null, { status: 503 });
+        return new Response(JSON.stringify(providerListResponse()), {
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+    assert.equal(
+      (await client.listProviders()).providers[0].provider_id,
+      "tmdb",
+    );
+    assert.equal(attempts, 2);
+  });
+
+  for (const [name, invoke, method] of [
+    [
+      "configure",
+      (client) =>
+        client.configureProviderCredential("tmdb", "metadata.search", {
+          secret: "write-only-token",
+        }),
+      "PUT",
+    ],
+    [
+      "remove",
+      (client) => client.removeProviderCredential("tmdb", "metadata.search"),
+      "DELETE",
+    ],
+    [
+      "test",
+      (client) => client.testProviderCredential("tmdb", "metadata.search"),
+      "POST",
+    ],
+  ]) {
+    await context.test(`${name} is never retried`, async () => {
+      let attempts = 0;
+      const client = new FastiClient({
+        baseUrl: "http://127.0.0.1:8420",
+        credential: "provider-writer",
+        retryPolicy: { maxAttempts: 3, baseDelayMs: 0, maxDelayMs: 0 },
+        fetch: async (url, init) => {
+          attempts += 1;
+          assert.equal(init?.method, method);
+          assert.match(
+            String(url),
+            /\/api\/v1\/providers\/tmdb\/credentials\/metadata\.search/,
+          );
+          return new Response(null, { status: 503 });
+        },
+      });
+      await assert.rejects(invoke(client), FastiTransportError);
+      assert.equal(attempts, 1);
+    });
+  }
+});
+
+test("provider SDK rejects ambiguous path identifiers before transport", () => {
+  let called = false;
+  const client = new FastiClient({
+    baseUrl: "http://127.0.0.1:8420",
+    fetch: async () => {
+      called = true;
+      return new Response();
+    },
+  });
+  assert.throws(
+    () => client.readProviderHealth("tmdb/other"),
+    /providerId does not match/,
+  );
+  assert.equal(called, false);
+});
+
 test("base URL semantics reject application paths instead of silently discarding them", () => {
   assert.throws(
     () => new FastiClient({ baseUrl: "http://127.0.0.1:8420/fasti" }),
@@ -545,11 +1240,44 @@ test("base URL semantics reject application paths instead of silently discarding
   );
 });
 
+test("connection endpoints preserve custom domains and expose loopback alternatives", () => {
+  assert.equal(
+    normalizeBaseUrl("https://fasti.internal:9443").origin,
+    "https://fasti.internal:9443",
+  );
+  assert.deepEqual(connectionEndpoint("https://fasti.internal", "build"), {
+    url: "https://fasti.internal",
+    port: 443,
+    source: "build",
+    managed: true,
+    scheme: "https",
+    loopbackAliases: [],
+  });
+  assert.deepEqual(
+    connectionEndpoint("http://localhost:8420").loopbackAliases,
+    ["http://localhost:8420", "http://127.0.0.1:8420"],
+  );
+});
+
+test("connection endpoints reject unsafe origins", () => {
+  for (const value of [
+    "ftp://fasti.internal",
+    "http://user:secret@fasti.internal",
+    "http://fasti.internal",
+    "https://fasti.internal/path",
+    "https://fasti.internal?query=yes",
+    "https://fasti.internal#fragment",
+    "https://fasti.internal:0",
+    "http://127.0.0.1:0",
+  ]) {
+    assert.throws(() => connectionEndpoint(value));
+  }
+});
 test("generated public metadata preserves complete registry and surface dispositions", () => {
-  assert.equal(PUBLIC_CAPABILITY_REGISTRY.capabilities.length, 22);
+  assert.equal(PUBLIC_CAPABILITY_REGISTRY.capabilities.length, 52);
   assert.equal(
     Object.keys(PUBLIC_CAPABILITY_REGISTRY.surface_profiles).length,
-    7,
+    17,
   );
   const stream = PUBLIC_CAPABILITY_REGISTRY.capabilities.find(
     (capability) => capability.id === "receipt.stream",
@@ -580,6 +1308,138 @@ test("generated public metadata preserves complete registry and surface disposit
   assert.equal(
     RECEIPT_STREAM_CONTRACT.sseIdPointer,
     "$message.payload#/receipt_id",
+  );
+  assert.deepEqual(
+    PUBLIC_CAPABILITY_REGISTRY.surface_profiles.b2_profile_state.ui,
+    {
+      binding: "ui:{capability_id}",
+      binding_visibility: "public",
+      state: "required",
+    },
+  );
+});
+
+test("profile tracking disposition SDK is authenticated, exact, and record-bound", async () => {
+  const calls = [];
+  const client = new FastiClient({
+    baseUrl: "http://127.0.0.1:8420",
+    credential: "profile-state-secret",
+    fetch: async (url, init) => {
+      calls.push({
+        url: String(url),
+        method: init?.method,
+        authorization: new Headers(init?.headers).get("authorization"),
+        body: init?.body === undefined ? undefined : JSON.parse(init.body),
+      });
+      const body = String(url).endsWith(
+        "/api/v1/profile/record-tracking-dispositions",
+      )
+        ? { states: [], truncated: true }
+        : { record_id: contractIds.record, disposition: "watching" };
+      return new Response(JSON.stringify(body), {
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+
+  assert.deepEqual(await client.listTrackingDispositions(), {
+    states: [],
+    truncated: true,
+  });
+  assert.deepEqual(
+    await client.setTrackingDisposition(contractIds.record, {
+      disposition: "watching",
+    }),
+    { record_id: contractIds.record, disposition: "watching" },
+  );
+  assert.deepEqual(calls, [
+    {
+      url: "http://127.0.0.1:8420/api/v1/profile/record-tracking-dispositions",
+      method: "GET",
+      authorization: "Bearer profile-state-secret",
+      body: undefined,
+    },
+    {
+      url: `http://127.0.0.1:8420/api/v1/profile/record-tracking-dispositions/${contractIds.record}`,
+      method: "PUT",
+      authorization: "Bearer profile-state-secret",
+      body: { disposition: "watching" },
+    },
+  ]);
+  assert.throws(
+    () =>
+      client.setTrackingDisposition("not-a-record", {
+        disposition: "dropped",
+      }),
+    /recordId does not match the generated contract/,
+  );
+});
+
+test("Nuvio Collections SDK preserves the bare document and its larger bounded response", async () => {
+  const largeDocument = Array.from({ length: 64 }, (_, index) => ({
+    id: `collection-${index}`,
+    title: `Collection ${index}`,
+    folders: [],
+    extension: "x".repeat(8_192),
+  }));
+  const calls = [];
+  const client = new FastiClient({
+    baseUrl: "http://127.0.0.1:8420",
+    credential: "profile-state-secret",
+    fetch: async (url, init) => {
+      calls.push({
+        url: String(url),
+        method: init?.method,
+        authorization: new Headers(init?.headers).get("authorization"),
+        body: init?.body === undefined ? undefined : JSON.parse(init.body),
+      });
+      const document =
+        init?.method === "DELETE"
+          ? null
+          : init?.method === "PUT"
+            ? JSON.parse(init.body)
+            : largeDocument;
+      return new Response(JSON.stringify({ document }), {
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+
+  assert.deepEqual(await client.getNuvioCollections(), {
+    document: largeDocument,
+  });
+  const replacement = [{ id: "collection", title: "Collection", folders: [] }];
+  assert.deepEqual(await client.replaceNuvioCollections(replacement), {
+    document: replacement,
+  });
+  assert.deepEqual(await client.clearNuvioCollections(), { document: null });
+  assert.deepEqual(
+    calls.map(({ url, method, authorization, body }) => ({
+      url,
+      method,
+      authorization,
+      body,
+    })),
+    [
+      {
+        url: "http://127.0.0.1:8420/api/v1/profile/nuvio-collections",
+        method: "GET",
+        authorization: "Bearer profile-state-secret",
+        body: undefined,
+      },
+      {
+        url: "http://127.0.0.1:8420/api/v1/profile/nuvio-collections",
+        method: "PUT",
+        authorization: "Bearer profile-state-secret",
+        body: replacement,
+      },
+      {
+        url: "http://127.0.0.1:8420/api/v1/profile/nuvio-collections",
+        method: "DELETE",
+        authorization: "Bearer profile-state-secret",
+        body: undefined,
+      },
+    ],
   );
 });
 
@@ -812,7 +1672,113 @@ test("mutation retries require stable idempotency and preserve exact serialized 
   );
 });
 
-test("all implemented B1 SDK routes complete against the loopback Rust fixture", async () => {
+test("metadata retries require a stable operation ID", async (context) => {
+  for (const [name, method, path, attempts, invoke] of [
+    [
+      "claim refresh",
+      "POST",
+      "/api/v1/metadata/claims/refresh",
+      3,
+      (client) =>
+        client.refreshMetadataClaims({
+          operation_id: "op_018f0e0e7f7b70008000000000000004",
+          record_id: contractIds.record,
+          provider_id: "tmdb",
+          field_groups: ["basic_info"],
+          locale: "en-IE",
+          region: "IE",
+          mode: "revalidate",
+        }),
+    ],
+    [
+      "projection configuration",
+      "PUT",
+      "/api/v1/profile/metadata-projection",
+      1,
+      (client) =>
+        client.configureMetadataProjection({
+          preferred_provider_id: "tmdb",
+          preferred_locale: "en-IE",
+          original_locale: null,
+          allow_english_fallback: true,
+          last_known_good: "allow",
+          region: "IE",
+          enabled_field_groups: ["basic_info"],
+          overrides: [],
+        }),
+    ],
+  ]) {
+    await context.test(name, async () => {
+      let requests = 0;
+      const bodies = [];
+      const client = new FastiClient({
+        baseUrl: "http://127.0.0.1:8420",
+        credential: "metadata-writer",
+        retryPolicy: { maxAttempts: 3, baseDelayMs: 0, maxDelayMs: 0 },
+        fetch: async (url, init) => {
+          requests += 1;
+          bodies.push(init?.body);
+          assert.equal(init?.method, method);
+          assert.equal(new URL(url).pathname, path);
+          return new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.error(new Error("simulated response socket reset"));
+              },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        },
+      });
+
+      await assert.rejects(invoke(client), FastiTransportError);
+      assert.equal(requests, attempts);
+      assert.equal(new Set(bodies).size, 1);
+    });
+  }
+});
+
+test("metadata override parser rejects mismatched discriminated operations", () => {
+  const base = {
+    preferred_provider_id: "tmdb",
+    preferred_locale: "en-IE",
+    original_locale: null,
+    allow_english_fallback: true,
+    last_known_good: "allow",
+    region: "IE",
+    enabled_field_groups: ["basic_info"],
+  };
+  for (const override of [
+    {
+      operation: "set",
+      record_id: contractIds.record,
+      field_key: "core.title",
+    },
+    {
+      operation: "clear",
+      record_id: contractIds.record,
+      field_key: "core.title",
+      value: "must not be accepted",
+    },
+    {
+      operation: "set",
+      record_id: contractIds.record,
+      field_key: "Core Title",
+      value: "Replacement",
+    },
+  ]) {
+    assert.throws(
+      () =>
+        parseConfigureMetadataProjectionRequest({
+          ...base,
+          overrides: [override],
+        }),
+      FastiContractParseError,
+    );
+  }
+});
+
+test("all implemented contract routes complete against the loopback Rust fixture", async () => {
   await withRustFixture(async (baseUrl) => {
     const bootstrap = new FastiClient({ baseUrl });
     const initialized = await bootstrap.initializeNode();
@@ -845,7 +1811,7 @@ test("all implemented B1 SDK routes complete against the loopback Rust fixture",
       discovery.surface_profiles,
       PUBLIC_CAPABILITY_REGISTRY.surface_profiles,
     );
-    assert.equal(discovery.capabilities.length, 22);
+    assert.equal(discovery.capabilities.length, 52);
     assert.ok(
       discovery.capabilities.some(
         (capability) =>
@@ -973,6 +1939,47 @@ function streamClient(body) {
 
 function sse(id, payload) {
   return `id: ${id}\nevent: receiptCommitted\ndata: ${JSON.stringify(payload)}\n\n`;
+}
+
+function providerListResponse() {
+  const passed = {
+    state: "passed",
+    checked_at: "2026-08-30T12:00:00Z",
+    safe_problem_code: null,
+  };
+  return {
+    providers: [
+      {
+        provider_id: "tmdb",
+        display_name: "The Movie Database (TMDB)",
+        provider_kind: "metadata",
+        documentation_url:
+          "https://developer.themoviedb.org/docs/authentication-application",
+        attribution:
+          "This product uses the TMDB API but is not endorsed or certified by TMDB.",
+        supported_media_grains: ["film", "series"],
+        capabilities: [
+          {
+            capability_id: "metadata.search",
+            purpose: "Search provider metadata",
+            credential_requirement: "bearer_token",
+            credential_state: "valid",
+            credential_source: "credential_store",
+            state: "available",
+            version: 1,
+            writable: true,
+            testable: true,
+            health: passed,
+            credential_test: passed,
+          },
+        ],
+        network_hosts: ["api.themoviedb.org"],
+        locale_support: true,
+        region_support: true,
+        identity_namespaces: ["tmdb.movie", "tmdb.tv"],
+      },
+    ],
+  };
 }
 
 function json(response, status, body) {

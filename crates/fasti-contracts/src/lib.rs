@@ -15,13 +15,33 @@ fn explicit_null_openapi() -> utoipa::openapi::schema::Object {
         .build()
 }
 
+mod access;
+mod bootstrap;
 mod conformance;
 mod generated_capability_ids;
+mod identity_routing;
+mod integrations;
+mod metadata;
+mod nuvio_collections;
+mod observation;
 mod portability;
+mod profile_state;
+mod providers;
+mod records;
 
+pub use access::*;
+pub use bootstrap::*;
 pub use conformance::*;
 pub use generated_capability_ids::public_capability_id;
+pub use identity_routing::*;
+pub use integrations::*;
+pub use metadata::*;
+pub use nuvio_collections::*;
+pub use observation::*;
 pub use portability::*;
+pub use profile_state::*;
+pub use providers::*;
+pub use records::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(deny_unknown_fields)]

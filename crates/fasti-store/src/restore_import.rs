@@ -25,19 +25,28 @@ use crate::restore_activation::{
     write_restore_phase, RestoreActivationError, RestoreActivationMarker,
     RESTORE_STAGING_DIRECTORY, RESTORE_STATE_FILES,
 };
-use crate::schema::{migrate, workspace_revision, SCHEMA_VERSION};
+use crate::schema::{
+    migrate, migrate_imported_legacy_metadata_v12, repair_legacy_provider_coordinates_v1,
+    workspace_revision, SCHEMA_VERSION,
+};
 use chrono::{DateTime, Utc};
 use fasti_application::{
     CancellationSignal, CapabilityKey, FastiProblem, PortabilityLimits, ReadSeek,
-    WorkspaceExportEntity, MAX_CORRECTION_REASON_BYTES,
+    WorkspaceExportEntity, MAX_CORRECTION_REASON_BYTES, WORKSPACE_ARCHIVE_V1_FORMAT_VERSION,
+    WORKSPACE_ARCHIVE_V2_FORMAT_VERSION, WORKSPACE_ARCHIVE_V3_FORMAT_VERSION,
+    WORKSPACE_ARCHIVE_V4_FORMAT_VERSION,
 };
 use fasti_contracts::VerifiedInboundWorkspaceManifest;
 use fasti_domain::{
-    ClientId, CorrectionId, EvidenceId, ExternalIdentifierClaim, ExternalIdentifierId, Grain,
-    InterpretationId, InterpretationState, NamespaceDefinition, NamespaceLicencePosture,
-    ObservationId, ObservedAt, OccurredAt, OccurrenceId, OperationId, ProfileId, ReceiptId,
-    RecordId, RecordStatus, RequestCorrelationId, RestoreAttemptId, RestoreStatus, ReviewItemId,
-    ReviewStatus, Sha256Digest, WorkspaceId,
+    ClientId, CorrectionId, EvidenceId, ExternalIdentifierClaim, ExternalIdentifierId, FieldClaim,
+    FieldClaimLifecycleEvent, FieldClaimProvenance, FieldClaimStatus, FieldKey, FieldOverride,
+    Grain, IdentityAssertionId, InterpretationId, InterpretationState, LastKnownGoodPolicy,
+    MetadataAttribution, MetadataClaimId, MetadataLocale, MetadataProjectionPolicy,
+    MetadataProviderId, MetadataRegion, NamespaceDefinition, NamespaceKey, NamespaceLicencePosture,
+    ObservationId, ObservedAt, OccurredAt, OccurrenceId, OperationId, ProfileFieldOverride,
+    ProfileId, RatingClaim, RatingScale, ReceiptId, ReceivedAt, RecordId, RecordStatus,
+    RequestCorrelationId, RestoreAttemptId, RestoreStatus, ReviewItemId, ReviewStatus,
+    Sha256Digest, TrackingDisposition, WorkspaceId,
 };
 use rusqlite::{params, Connection, OpenFlags, Transaction, TransactionBehavior};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -157,6 +166,20 @@ pub(crate) enum RestoreImportError {
     },
     #[error("staged rows violate workspace, profile, namespace, reference, or domain invariants")]
     DomainInvariant,
+    #[error("staged identity assertions or lifecycle chains are invalid")]
+    IdentityRoutingInvariant,
+    #[error("staged anime grouping rollback receipts are invalid")]
+    PolicyReceiptInvariant,
+    #[error("staged SQLite integrity checks failed")]
+    SqliteIntegrity,
+    #[error("staged cross-table relations are invalid")]
+    RelationInvariant,
+    #[error("staged domain aggregate relations are invalid")]
+    AggregateInvariant,
+    #[error("staged interpretation chains are invalid")]
+    InterpretationChainInvariant,
+    #[error("staged metadata lifecycle chains are invalid")]
+    MetadataLifecycleInvariant,
     #[error("staged SQLite schema does not match the verified manifest")]
     SchemaMismatch,
     #[error("staged workspace revision does not match the verified manifest")]
@@ -490,7 +513,7 @@ fn import_verified_pass_two(
     pass_two?;
     crash_test_point("import", "rows_written");
 
-    verify_imported_database(
+    verify_imported_archive(
         &transaction,
         preflight.manifest(),
         correlation_id,
@@ -498,6 +521,9 @@ fn import_verified_pass_two(
         limits,
         cancellation,
     )?;
+    repair_legacy_provider_coordinates_v1(&transaction).map_err(RestoreImportError::Sqlite)?;
+    migrate_imported_legacy_metadata_v12(&transaction).map_err(RestoreImportError::Sqlite)?;
+    verify_imported_database(&transaction, preflight.manifest(), correlation_id)?;
     crash_test_point("import", "verified");
     transaction.commit().map_err(RestoreImportError::Sqlite)?;
     crash_test_point("import", "transaction_committed");
@@ -553,8 +579,8 @@ fn visit_import_entries(
     let mut manifest_seen = false;
     let summary = visit_archive_entries(&mut digesting, archive_limits, |path, size, reader| {
         check_cancellation(cancellation)?;
-        if stream_index < WorkspaceExportEntity::ALL.len() {
-            let entity = WorkspaceExportEntity::ALL[stream_index];
+        if stream_index < manifest.streams().len() {
+            let entity = manifest.streams()[stream_index].entity();
             let expected_path = format!("{}.ndjson", entity.as_str());
             if path != expected_path {
                 return Err(RestoreImportError::EntryOrder {
@@ -602,7 +628,7 @@ fn visit_import_entries(
         Ok(())
     })?;
 
-    if stream_index != WorkspaceExportEntity::ALL.len()
+    if stream_index != manifest.streams().len()
         || blob_index != manifest.blobs().len()
         || !manifest_seen
     {
@@ -769,8 +795,8 @@ fn copy_blob(
                     path: expected_path.clone(),
                 })?;
     }
-    let digest = Sha256Digest::parse(format!("sha256:{:x}", hasher.finalize()))
-        .expect("SHA-256 output is canonical");
+    let digest_bytes: [u8; 32] = hasher.finalize().into();
+    let digest = Sha256Digest::from_bytes(&digest_bytes);
     if bytes != declared_size || digest != *expected.digest() {
         return Err(RestoreImportError::BlobDescriptor {
             path: expected_path,
@@ -787,20 +813,59 @@ fn verify_schema(
     correlation_id: RequestCorrelationId,
 ) -> Result<(), RestoreImportError> {
     let manifest = verified.manifest();
-    if manifest.migration_version() != u32::try_from(SCHEMA_VERSION).unwrap_or(u32::MAX) {
-        return Err(RestoreImportError::SchemaMismatch);
-    }
     let fingerprint = schema_fingerprint(connection, correlation_id)
         .map_err(|_| RestoreImportError::SchemaMismatch)?;
-    if fingerprint.migration_version() != manifest.migration_version()
-        || fingerprint.digest() != manifest.migration_digest()
+    if fingerprint.migration_version() != u32::try_from(SCHEMA_VERSION).unwrap_or(u32::MAX)
+        || !accepted_archive_schema(
+            manifest.format_version(),
+            manifest.migration_version(),
+            manifest.migration_digest().as_str(),
+            fingerprint.digest().as_str(),
+        )
     {
         return Err(RestoreImportError::SchemaMismatch);
     }
     Ok(())
 }
 
-fn verify_imported_database(
+fn accepted_archive_schema(
+    format_version: u32,
+    version: u32,
+    digest: &str,
+    current_digest: &str,
+) -> bool {
+    if (format_version == WORKSPACE_ARCHIVE_V1_FORMAT_VERSION && version <= 11)
+        || (format_version == WORKSPACE_ARCHIVE_V2_FORMAT_VERSION && (7..=11).contains(&version))
+        || (format_version == WORKSPACE_ARCHIVE_V3_FORMAT_VERSION && version == 12)
+        || (format_version == WORKSPACE_ARCHIVE_V4_FORMAT_VERSION && matches!(version, 13 | 14))
+    {
+        // Continue to the exact historical fingerprint match below.
+    } else if version == u32::try_from(SCHEMA_VERSION).unwrap_or(u32::MAX) {
+        return digest == current_digest;
+    } else {
+        return false;
+    }
+    digest
+        == match version {
+            1 => "sha256:54fdbe7a1abd38a9f3fb528edf7fe18a2086a3465673eeecb37ced6831471eba",
+            2 => "sha256:2d758df15b556e8f33ef79f6c0e366e793c81e22775ed6cde2d66222ad1cd51f",
+            3 => "sha256:88567141fce9927e6c330f8b93d650b255ba3fd1a6c285df88a8197dc9a2d90d",
+            4 => "sha256:51308ec0da45af490fbdec8221b324147d1b3af9c382b519bc4093d98a6e128b",
+            5 => "sha256:862bc9f5ca71e1a3ec4fcf46a9312a9b05203a97e8420cb8ec621d31bfd29acc",
+            6 => "sha256:9c415c43b39793ec3ac58bd819e6ad8e1c56c096c88fe62aa3e78a50696760aa",
+            7 => "sha256:174264c60cee620d31041031f5510336208034318ff17378e01696bd53df27c3",
+            8 => "sha256:4c3ecc5db6b6491f3884d56782241aafdca4e1bd6e0eaa58508738fbc8a974c3",
+            9 => "sha256:4e0b16c5d4148d1b5e75a176ac1f3e58f6a31c569c0cfb5c6bb7c1de5d11584e",
+            10 => "sha256:7c7c93de4419d8a56db8fd2dfb5c239fd3ffa994218b2ec583ec371c463726dd",
+            11 => "sha256:c833fb634b64d0b9680e4734b22684e8eab36710fca5c95d4315f3141491687a",
+            12 => "sha256:eea7d899b8c257b7bafa359a540bd25ba2cdc4d9ddb7f50ce0ec8f80e251cfb9",
+            13 => "sha256:e470f2e8ae2972aa05fecd5b39642b79ef739de89eda204c37bf1d3e48f892c3",
+            14 => "sha256:630bc759b1bc6148931fe1b496e6e149553c5c005cf8d5956da683f2872c0375",
+            _ => return false,
+        }
+}
+
+fn verify_imported_archive(
     transaction: &Transaction<'_>,
     verified: &VerifiedInboundWorkspaceManifest,
     correlation_id: RequestCorrelationId,
@@ -818,16 +883,7 @@ fn verify_imported_database(
     verify_sql_counts(transaction, imported_counts)?;
     verify_evidence_inventory(transaction, verified)?;
     verify_node_local_state_absent(transaction)?;
-    verify_import_domain_invariants(transaction, manifest.workspace_id())?;
-    verify_sqlite_integrity(transaction, CapabilityKey::RestoreWorkspace, correlation_id)
-        .map_err(|_| RestoreImportError::DomainInvariant)?;
-    verify_domain_relations(
-        transaction,
-        manifest.workspace_id(),
-        CapabilityKey::RestoreWorkspace,
-        correlation_id,
-    )
-    .map_err(|_| RestoreImportError::DomainInvariant)?;
+    verify_derived_metadata_state_absent(transaction)?;
 
     for expected in manifest.streams() {
         let mut sink = io::sink();
@@ -850,7 +906,9 @@ fn verify_imported_database(
             if cancellation.is_cancelled() {
                 RestoreImportError::Canceled
             } else {
-                RestoreImportError::DomainInvariant
+                RestoreImportError::StreamDescriptor {
+                    path: format!("{}.ndjson", expected.entity().as_str()),
+                }
             }
         })?;
         if actual != *expected {
@@ -859,6 +917,26 @@ fn verify_imported_database(
             });
         }
     }
+
+    Ok(())
+}
+
+fn verify_imported_database(
+    transaction: &Transaction<'_>,
+    verified: &VerifiedInboundWorkspaceManifest,
+    correlation_id: RequestCorrelationId,
+) -> Result<(), RestoreImportError> {
+    let manifest = verified.manifest();
+    verify_import_domain_invariants(transaction, manifest.workspace_id(), correlation_id)?;
+    verify_sqlite_integrity(transaction, CapabilityKey::RestoreWorkspace, correlation_id)
+        .map_err(|_| RestoreImportError::SqliteIntegrity)?;
+    verify_domain_relations(
+        transaction,
+        manifest.workspace_id(),
+        CapabilityKey::RestoreWorkspace,
+        correlation_id,
+    )
+    .map_err(|_| RestoreImportError::RelationInvariant)?;
 
     let revision = i64::try_from(manifest.workspace_revision())
         .map_err(|_| RestoreImportError::RevisionMismatch)?;
@@ -902,6 +980,24 @@ fn verify_sql_counts(
         "corrections",
         "receipts",
         "operations",
+        "metadata_field_claims",
+        "metadata_field_overrides",
+        "profile_record_tracking_dispositions",
+        "metadata_claims",
+        "metadata_claim_provenance",
+        "metadata_rating_claims",
+        "metadata_claim_lifecycle_events",
+        "metadata_projection_policies",
+        "metadata_profile_field_overrides",
+        "metadata_legacy_override_ownership",
+        "metadata_override_migration_receipts",
+        "metadata_attributions",
+        "metadata_refresh_receipts",
+        "identity_assertions",
+        "identity_assertion_lifecycle_events",
+        "profile_anime_grouping_policies",
+        "client_anime_grouping_policies",
+        "anime_grouping_policy_receipts",
     ];
     for (index, table) in TABLES.iter().enumerate() {
         let count: i64 = transaction
@@ -957,18 +1053,26 @@ fn verify_evidence_inventory(
     Ok(())
 }
 
+const NODE_LOCAL_STATE_COUNT_SQL: &str = r#"
+    SELECT (SELECT COUNT(*) FROM node_state)
+         + (SELECT COUNT(*) FROM credentials)
+         + (SELECT COUNT(*) FROM profile_grants)
+         + (SELECT COUNT(*) FROM grant_scopes)
+         + (SELECT COUNT(*) FROM auth_subjects)
+         + (SELECT COUNT(*) FROM auth_subject_profile_grants)
+         + (SELECT COUNT(*) FROM fasti_browser_sessions)
+         + (SELECT COUNT(*) FROM fasti_browser_session_grants)
+         + (SELECT COUNT(*) FROM trailbase_installation)
+         + (SELECT COUNT(*) FROM trailbase_auth_anchors)
+         + (SELECT COUNT(*) FROM workspace_memberships)
+         + (SELECT COUNT(*) FROM auth_ceremonies)
+         + (SELECT COUNT(*) FROM fasti_browser_session_authentication)
+         + (SELECT COUNT(*) FROM access_audit_events)
+"#;
+
 fn verify_node_local_state_absent(transaction: &Transaction<'_>) -> Result<(), RestoreImportError> {
     let count: i64 = transaction
-        .query_row(
-            r#"
-            SELECT (SELECT COUNT(*) FROM node_state)
-                 + (SELECT COUNT(*) FROM credentials)
-                 + (SELECT COUNT(*) FROM profile_grants)
-                 + (SELECT COUNT(*) FROM grant_scopes)
-            "#,
-            [],
-            |row| row.get(0),
-        )
+        .query_row(NODE_LOCAL_STATE_COUNT_SQL, [], |row| row.get(0))
         .map_err(RestoreImportError::Sqlite)?;
     if count != 0 {
         return Err(RestoreImportError::NodeLocalStatePresent);
@@ -976,9 +1080,30 @@ fn verify_node_local_state_absent(transaction: &Transaction<'_>) -> Result<(), R
     Ok(())
 }
 
+fn verify_derived_metadata_state_absent(
+    transaction: &Transaction<'_>,
+) -> Result<(), RestoreImportError> {
+    let count: i64 = transaction
+        .query_row(
+            r#"
+            SELECT (SELECT COUNT(*) FROM metadata_projections)
+                 + (SELECT COUNT(*) FROM metadata_cache_entries)
+                 + (SELECT COUNT(*) FROM metadata_cache_claims)
+            "#,
+            [],
+            |row| row.get(0),
+        )
+        .map_err(RestoreImportError::Sqlite)?;
+    if count != 0 {
+        return Err(RestoreImportError::DomainInvariant);
+    }
+    Ok(())
+}
+
 fn verify_import_domain_invariants(
     transaction: &Transaction<'_>,
     workspace_id: WorkspaceId,
+    correlation_id: RequestCorrelationId,
 ) -> Result<(), RestoreImportError> {
     let invalid: i64 = transaction
         .query_row(
@@ -1076,7 +1201,7 @@ fn verify_import_domain_invariants(
         )
         .map_err(RestoreImportError::Sqlite)?;
     if invalid != 0 {
-        return Err(RestoreImportError::DomainInvariant);
+        return Err(RestoreImportError::AggregateInvariant);
     }
 
     let chain_count: (i64, i64) = transaction
@@ -1101,8 +1226,69 @@ fn verify_import_domain_invariants(
         )
         .map_err(RestoreImportError::Sqlite)?;
     if chain_count.0 != chain_count.1 {
-        return Err(RestoreImportError::DomainInvariant);
+        return Err(RestoreImportError::InterpretationChainInvariant);
     }
+
+    let invalid_lifecycle: i64 = transaction
+        .query_row(
+            r#"
+            WITH initial AS (
+                SELECT claim_id, initial_status, fetched_at AS initial_at
+                FROM metadata_claim_provenance
+                WHERE workspace_id = ?1
+                UNION ALL
+                SELECT claim_id, initial_status, fetched_at AS initial_at
+                FROM metadata_rating_claims
+                WHERE workspace_id = ?1
+            ), ordered AS (
+                SELECT event.claim_id,
+                       event.sequence,
+                       event.previous_status,
+                       event.status,
+                       event.occurred_at,
+                       initial.claim_id AS initial_claim_id,
+                       initial.initial_status,
+                       initial.initial_at,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY event.claim_id ORDER BY event.sequence
+                       ) AS expected_sequence,
+                       LAG(event.status) OVER (
+                           PARTITION BY event.claim_id ORDER BY event.sequence
+                       ) AS prior_status,
+                       LAG(event.occurred_at) OVER (
+                           PARTITION BY event.claim_id ORDER BY event.sequence
+                       ) AS prior_occurred_at
+                FROM metadata_claim_lifecycle_events event
+                LEFT JOIN initial ON initial.claim_id = event.claim_id
+                WHERE event.workspace_id = ?1
+            )
+            SELECT COUNT(*)
+            FROM ordered
+            WHERE initial_claim_id IS NULL
+               OR sequence <> expected_sequence
+               OR previous_status <> COALESCE(prior_status, initial_status)
+               OR occurred_at < COALESCE(prior_occurred_at, initial_at)
+            "#,
+            [workspace_id.to_string()],
+            |row| row.get(0),
+        )
+        .map_err(RestoreImportError::Sqlite)?;
+    if invalid_lifecycle != 0 {
+        return Err(RestoreImportError::MetadataLifecycleInvariant);
+    }
+    crate::identity_routing::validate_workspace_identity_routing_state(
+        transaction,
+        workspace_id,
+        correlation_id,
+    )
+    .map_err(|_| RestoreImportError::IdentityRoutingInvariant)?;
+
+    crate::identity_routing::validate_workspace_anime_grouping_policy_receipts(
+        transaction,
+        workspace_id,
+        correlation_id,
+    )
+    .map_err(|_| RestoreImportError::PolicyReceiptInvariant)?;
     Ok(())
 }
 
@@ -1110,6 +1296,8 @@ fn verify_import_domain_invariants(
 enum RowKey {
     One(String),
     Two(String, String),
+    Three(String, String, String),
+    Four(String, String, String, String),
     TextInteger(String, u64),
 }
 
@@ -1563,6 +1751,598 @@ fn import_row(
                 row.operation_id.to_string(),
             ))
         }
+        WorkspaceExportEntity::MetadataFieldClaims => {
+            let row: MetadataFieldClaimRow = decode_row(line, path)?;
+            require_workspace(row.workspace_id, workspace_id)?;
+            let field_key = FieldKey::try_new(row.field_key.clone())
+                .map_err(|_| RestoreImportError::DomainInvariant)?;
+            validate_timestamp(&row.fetched_at)?;
+            validate_timestamp(&row.created_at)?;
+            let expires_at = row
+                .expires_at
+                .as_deref()
+                .map(|value| {
+                    validate_timestamp(value)?;
+                    parse_timestamp(value)
+                })
+                .transpose()?;
+            FieldClaim::try_new(
+                row.source.clone(),
+                row.value.clone(),
+                row.locale.clone(),
+                ReceivedAt::from_application_clock(parse_timestamp(&row.fetched_at)?),
+                expires_at,
+            )
+            .map_err(|_| RestoreImportError::DomainInvariant)?;
+            insert_row(
+                transaction,
+                entity,
+                transaction.execute(
+                    r#"
+                    INSERT INTO metadata_field_claims(
+                        workspace_id, record_id, field_key, source, value, locale,
+                        fetched_at, expires_at, created_at
+                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                    "#,
+                    params![
+                        row.workspace_id.to_string(),
+                        row.record_id.to_string(),
+                        field_key.as_str(),
+                        row.source.as_str(),
+                        row.value,
+                        row.locale,
+                        row.fetched_at,
+                        row.expires_at,
+                        row.created_at,
+                    ],
+                ),
+            )?;
+            Ok(RowKey::Four(
+                row.record_id.to_string(),
+                field_key.as_str().to_owned(),
+                row.source.as_str().to_owned(),
+                row.fetched_at,
+            ))
+        }
+        WorkspaceExportEntity::MetadataFieldOverrides => {
+            let row: MetadataFieldOverrideRow = decode_row(line, path)?;
+            require_workspace(row.workspace_id, workspace_id)?;
+            let field_key = FieldKey::try_new(row.field_key.clone())
+                .map_err(|_| RestoreImportError::DomainInvariant)?;
+            validate_timestamp(&row.created_at)?;
+            FieldOverride::try_new(
+                row.value.clone(),
+                ReceivedAt::from_application_clock(parse_timestamp(&row.created_at)?),
+            )
+            .map_err(|_| RestoreImportError::DomainInvariant)?;
+            insert_row(
+                transaction,
+                entity,
+                transaction.execute(
+                    r#"
+                    INSERT INTO metadata_field_overrides(
+                        workspace_id, record_id, field_key, value, created_at
+                    ) VALUES (?1, ?2, ?3, ?4, ?5)
+                    "#,
+                    params![
+                        row.workspace_id.to_string(),
+                        row.record_id.to_string(),
+                        field_key.as_str(),
+                        row.value,
+                        row.created_at,
+                    ],
+                ),
+            )?;
+            Ok(RowKey::Two(
+                row.record_id.to_string(),
+                field_key.as_str().to_owned(),
+            ))
+        }
+        WorkspaceExportEntity::ProfileRecordTrackingDispositions => {
+            let row: ProfileRecordTrackingDispositionRow = decode_row(line, path)?;
+            require_workspace(row.workspace_id, workspace_id)?;
+            validate_timestamp(&row.updated_at)?;
+            insert_row(
+                transaction,
+                entity,
+                transaction.execute(
+                    r#"
+                    INSERT INTO profile_record_tracking_dispositions(
+                        workspace_id, profile_id, record_id, disposition, updated_at
+                    ) VALUES (?1, ?2, ?3, ?4, ?5)
+                    "#,
+                    params![
+                        row.workspace_id.to_string(),
+                        row.profile_id.to_string(),
+                        row.record_id.to_string(),
+                        row.disposition.as_str(),
+                        row.updated_at,
+                    ],
+                ),
+            )?;
+            Ok(RowKey::Two(
+                row.profile_id.to_string(),
+                row.record_id.to_string(),
+            ))
+        }
+        WorkspaceExportEntity::MetadataClaims => {
+            let row: MetadataClaimRow = decode_row(line, path)?;
+            require_workspace(row.workspace_id, workspace_id)?;
+            if !matches!(row.claim_kind.as_str(), "field" | "rating") {
+                return Err(RestoreImportError::DomainInvariant);
+            }
+            validate_timestamp(&row.created_at)?;
+            insert_row(
+                transaction,
+                entity,
+                transaction.execute(
+                    "INSERT INTO metadata_claims(claim_id, workspace_id, record_id, claim_kind, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![row.claim_id.to_string(), row.workspace_id.to_string(), row.record_id.to_string(), row.claim_kind, row.created_at],
+                ),
+            )?;
+            Ok(RowKey::One(row.claim_id.to_string()))
+        }
+        WorkspaceExportEntity::MetadataClaimProvenance => {
+            let row: MetadataClaimProvenanceRow = decode_row(line, path)?;
+            require_workspace(row.workspace_id, workspace_id)?;
+            FieldKey::try_new(row.field_key.clone())
+                .map_err(|_| RestoreImportError::DomainInvariant)?;
+            validate_timestamp(&row.fetched_at)?;
+            validate_timestamp(&row.created_at)?;
+            validate_classification(&row.classification)?;
+            let complete = row.provenance_state == "complete"
+                && row.provider_id.is_some()
+                && row.source_record_id.is_some()
+                && row.evidence_digest.is_some();
+            let legacy = row.provenance_state == "legacy_incomplete"
+                && row.provider_id.is_none()
+                && row.source_record_id.is_none()
+                && row.evidence_digest.is_none();
+            if !(complete || legacy) || parse_claim_status(&row.initial_status).is_none() {
+                return Err(RestoreImportError::DomainInvariant);
+            }
+            if let Some(provider_id) = &row.provider_id {
+                MetadataProviderId::try_new(provider_id.clone())
+                    .map_err(|_| RestoreImportError::DomainInvariant)?;
+            }
+            if let Some(region) = &row.region {
+                MetadataRegion::try_new(region.clone())
+                    .map_err(|_| RestoreImportError::DomainInvariant)?;
+            }
+            validate_optional_bounded(&row.source_record_id, 512)?;
+            validate_optional_bounded(&row.source_version, 128)?;
+            validate_optional_bounded(&row.terms_revision, 128)?;
+            insert_row(
+                transaction,
+                entity,
+                transaction.execute(
+                    r#"INSERT INTO metadata_claim_provenance(
+                        claim_id, workspace_id, record_id, field_key, source, fetched_at,
+                        provider_id, source_record_id, region, source_version, evidence_digest,
+                        classification, terms_revision, provenance_state, initial_status, created_at
+                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)"#,
+                    params![
+                        row.claim_id.to_string(), row.workspace_id.to_string(), row.record_id.to_string(),
+                        row.field_key, row.source.as_str(), row.fetched_at, row.provider_id,
+                        row.source_record_id, row.region, row.source_version,
+                        row.evidence_digest.map(|value| value.to_string()), row.classification,
+                        row.terms_revision, row.provenance_state, row.initial_status, row.created_at,
+                    ],
+                ),
+            )?;
+            Ok(RowKey::One(row.claim_id.to_string()))
+        }
+        WorkspaceExportEntity::MetadataRatingClaims => {
+            let row: MetadataRatingClaimRow = decode_row(line, path)?;
+            require_workspace(row.workspace_id, workspace_id)?;
+            validate_timestamp(&row.fetched_at)?;
+            validate_timestamp(&row.created_at)?;
+            let fetched_at = parse_timestamp(&row.fetched_at)?;
+            let expires_at = row.expires_at.as_deref().map(parse_timestamp).transpose()?;
+            if let Some(value) = row.expires_at.as_deref() {
+                validate_timestamp(value)?;
+            }
+            validate_classification(&row.classification)?;
+            validate_optional_bounded(&row.terms_revision, 128)?;
+            let provider_id = MetadataProviderId::try_new(row.provider_id.clone())
+                .map_err(|_| RestoreImportError::DomainInvariant)?;
+            let locale = row
+                .locale
+                .clone()
+                .map(MetadataLocale::try_new)
+                .transpose()
+                .map_err(|_| RestoreImportError::DomainInvariant)?;
+            let region = row
+                .region
+                .clone()
+                .map(MetadataRegion::try_new)
+                .transpose()
+                .map_err(|_| RestoreImportError::DomainInvariant)?;
+            let provenance = FieldClaimProvenance::try_new(
+                provider_id,
+                row.source.clone(),
+                row.source_record_id.clone(),
+                locale,
+                region,
+                row.source_version.clone(),
+                row.evidence_digest.clone(),
+            )
+            .map_err(|_| RestoreImportError::DomainInvariant)?;
+            let value =
+                u32::try_from(row.value_millis).map_err(|_| RestoreImportError::DomainInvariant)?;
+            let minimum = u32::try_from(row.scale_minimum_millis)
+                .map_err(|_| RestoreImportError::DomainInvariant)?;
+            let maximum = u32::try_from(row.scale_maximum_millis)
+                .map_err(|_| RestoreImportError::DomainInvariant)?;
+            let status = parse_claim_status(&row.initial_status)
+                .ok_or(RestoreImportError::DomainInvariant)?;
+            RatingClaim::try_new(
+                row.claim_id,
+                row.record_id,
+                value,
+                RatingScale::try_new(minimum, maximum)
+                    .map_err(|_| RestoreImportError::DomainInvariant)?,
+                provenance,
+                ReceivedAt::from_application_clock(fetched_at),
+                expires_at,
+                status,
+            )
+            .map_err(|_| RestoreImportError::DomainInvariant)?;
+            insert_row(
+                transaction,
+                entity,
+                transaction.execute(
+                    r#"INSERT INTO metadata_rating_claims(
+                        claim_id, workspace_id, record_id, value_millis, scale_minimum_millis,
+                        scale_maximum_millis, provider_id, source, source_record_id, locale, region,
+                        source_version, evidence_digest, classification, terms_revision, fetched_at,
+                        expires_at, initial_status, created_at
+                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)"#,
+                    params![
+                        row.claim_id.to_string(), row.workspace_id.to_string(), row.record_id.to_string(),
+                        value, minimum, maximum, row.provider_id, row.source.as_str(),
+                        row.source_record_id, row.locale, row.region, row.source_version,
+                        row.evidence_digest.to_string(), row.classification, row.terms_revision,
+                        row.fetched_at, row.expires_at, row.initial_status, row.created_at,
+                    ],
+                ),
+            )?;
+            Ok(RowKey::One(row.claim_id.to_string()))
+        }
+        WorkspaceExportEntity::MetadataClaimLifecycleEvents => {
+            let row: MetadataClaimLifecycleEventRow = decode_row(line, path)?;
+            require_workspace(row.workspace_id, workspace_id)?;
+            validate_timestamp(&row.occurred_at)?;
+            let sequence =
+                u32::try_from(row.sequence).map_err(|_| RestoreImportError::DomainInvariant)?;
+            let previous_status = parse_claim_status(&row.previous_status)
+                .ok_or(RestoreImportError::DomainInvariant)?;
+            let status =
+                parse_claim_status(&row.status).ok_or(RestoreImportError::DomainInvariant)?;
+            FieldClaimLifecycleEvent::try_new(
+                row.claim_id,
+                sequence,
+                previous_status,
+                status,
+                ReceivedAt::from_application_clock(parse_timestamp(&row.occurred_at)?),
+                row.evidence_digest.clone(),
+            )
+            .map_err(|_| RestoreImportError::DomainInvariant)?;
+            insert_row(
+                transaction,
+                entity,
+                transaction.execute(
+                    "INSERT INTO metadata_claim_lifecycle_events(claim_id, sequence, workspace_id, previous_status, status, occurred_at, evidence_digest) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    params![row.claim_id.to_string(), sequence, row.workspace_id.to_string(), row.previous_status, row.status, row.occurred_at, row.evidence_digest.map(|value| value.to_string())],
+                ),
+            )?;
+            Ok(RowKey::TextInteger(
+                row.claim_id.to_string(),
+                u64::from(sequence),
+            ))
+        }
+        WorkspaceExportEntity::MetadataProjectionPolicies => {
+            let row: MetadataProjectionPolicyRow = decode_row(line, path)?;
+            require_workspace(row.workspace_id, workspace_id)?;
+            validate_timestamp(&row.updated_at)?;
+            let preferred_provider = row
+                .preferred_provider_id
+                .clone()
+                .map(MetadataProviderId::try_new)
+                .transpose()
+                .map_err(|_| RestoreImportError::DomainInvariant)?;
+            let preferred_locale = row
+                .preferred_locale
+                .clone()
+                .map(MetadataLocale::try_new)
+                .transpose()
+                .map_err(|_| RestoreImportError::DomainInvariant)?;
+            let original_locale = row
+                .original_locale
+                .clone()
+                .map(MetadataLocale::try_new)
+                .transpose()
+                .map_err(|_| RestoreImportError::DomainInvariant)?;
+            if let Some(region) = &row.region {
+                MetadataRegion::try_new(region.clone())
+                    .map_err(|_| RestoreImportError::DomainInvariant)?;
+            }
+            validate_field_groups(&row.enabled_field_groups)?;
+            let allow_english = match row.allow_english_fallback {
+                0 => false,
+                1 => true,
+                _ => return Err(RestoreImportError::DomainInvariant),
+            };
+            let last_known_good = match row.last_known_good_policy.as_str() {
+                "allow" => LastKnownGoodPolicy::Allow,
+                "deny" => LastKnownGoodPolicy::Deny,
+                _ => return Err(RestoreImportError::DomainInvariant),
+            };
+            MetadataProjectionPolicy::new(
+                row.profile_id,
+                preferred_provider,
+                preferred_locale,
+                original_locale,
+                allow_english,
+                last_known_good,
+            );
+            insert_row(
+                transaction,
+                entity,
+                transaction.execute(
+                    r#"INSERT INTO metadata_projection_policies(
+                        workspace_id, profile_id, preferred_provider_id, preferred_locale,
+                        original_locale, region, enabled_field_groups, allow_english_fallback,
+                        last_known_good_policy, updated_at
+                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)"#,
+                    params![
+                        row.workspace_id.to_string(),
+                        row.profile_id.to_string(),
+                        row.preferred_provider_id,
+                        row.preferred_locale,
+                        row.original_locale,
+                        row.region,
+                        row.enabled_field_groups,
+                        i64::try_from(row.allow_english_fallback)
+                            .map_err(|_| RestoreImportError::DomainInvariant)?,
+                        row.last_known_good_policy,
+                        row.updated_at
+                    ],
+                ),
+            )?;
+            Ok(RowKey::One(row.profile_id.to_string()))
+        }
+        WorkspaceExportEntity::MetadataProfileFieldOverrides => {
+            let row: MetadataProfileFieldOverrideRow = decode_row(line, path)?;
+            require_workspace(row.workspace_id, workspace_id)?;
+            validate_timestamp(&row.created_at)?;
+            validate_timestamp(&row.updated_at)?;
+            if parse_timestamp(&row.updated_at)? < parse_timestamp(&row.created_at)?
+                || !matches!(row.origin.as_str(), "user" | "legacy_migration")
+            {
+                return Err(RestoreImportError::DomainInvariant);
+            }
+            let field_key = FieldKey::try_new(row.field_key.clone())
+                .map_err(|_| RestoreImportError::DomainInvariant)?;
+            ProfileFieldOverride::try_new(
+                row.profile_id,
+                row.record_id,
+                field_key,
+                row.value.clone(),
+                ReceivedAt::from_application_clock(parse_timestamp(&row.created_at)?),
+            )
+            .map_err(|_| RestoreImportError::DomainInvariant)?;
+            insert_row(
+                transaction,
+                entity,
+                transaction.execute(
+                    "INSERT INTO metadata_profile_field_overrides(workspace_id, profile_id, record_id, field_key, value, created_at, updated_at, origin) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    params![row.workspace_id.to_string(), row.profile_id.to_string(), row.record_id.to_string(), row.field_key, row.value, row.created_at, row.updated_at, row.origin],
+                ),
+            )?;
+            Ok(RowKey::Three(
+                row.profile_id.to_string(),
+                row.record_id.to_string(),
+                row.field_key,
+            ))
+        }
+        WorkspaceExportEntity::MetadataLegacyOverrideOwnership => {
+            let row: MetadataLegacyOverrideOwnershipRow = decode_row(line, path)?;
+            require_workspace(row.workspace_id, workspace_id)?;
+            FieldKey::try_new(row.field_key.clone())
+                .map_err(|_| RestoreImportError::DomainInvariant)?;
+            validate_timestamp(&row.recorded_at)?;
+            let valid = matches!(
+                (
+                    row.state.as_str(),
+                    row.owner_profile_id,
+                    row.review_reason.as_deref()
+                ),
+                ("migrated", Some(_), None)
+                    | (
+                        "review_required",
+                        None,
+                        Some("zero_profiles" | "multiple_profiles")
+                    )
+            );
+            if !valid {
+                return Err(RestoreImportError::DomainInvariant);
+            }
+            insert_row(
+                transaction,
+                entity,
+                transaction.execute(
+                    "INSERT INTO metadata_legacy_override_ownership(workspace_id, record_id, field_key, owner_profile_id, state, review_reason, recorded_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    params![row.workspace_id.to_string(), row.record_id.to_string(), row.field_key, row.owner_profile_id.map(|value| value.to_string()), row.state, row.review_reason, row.recorded_at],
+                ),
+            )?;
+            Ok(RowKey::Two(row.record_id.to_string(), row.field_key))
+        }
+        WorkspaceExportEntity::MetadataOverrideMigrationReceipts => {
+            let row: MetadataOverrideMigrationReceiptRow = decode_row(line, path)?;
+            require_workspace(row.workspace_id, workspace_id)?;
+            if row.receipt_id.is_empty() || row.receipt_id.len() > 512 {
+                return Err(RestoreImportError::DomainInvariant);
+            }
+            FieldKey::try_new(row.field_key.clone())
+                .map_err(|_| RestoreImportError::DomainInvariant)?;
+            validate_timestamp(&row.source_created_at)?;
+            validate_timestamp(&row.migrated_at)?;
+            insert_row(
+                transaction,
+                entity,
+                transaction.execute(
+                    "INSERT INTO metadata_override_migration_receipts(receipt_id, workspace_id, record_id, field_key, profile_id, source_created_at, migrated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    params![row.receipt_id, row.workspace_id.to_string(), row.record_id.to_string(), row.field_key, row.profile_id.to_string(), row.source_created_at, row.migrated_at],
+                ),
+            )?;
+            Ok(RowKey::One(row.receipt_id))
+        }
+        WorkspaceExportEntity::MetadataAttributions => {
+            let row: MetadataAttributionRow = decode_row(line, path)?;
+            require_workspace(row.workspace_id, workspace_id)?;
+            validate_timestamp(&row.updated_at)?;
+            MetadataAttribution::try_new(
+                MetadataProviderId::try_new(row.provider_id.clone())
+                    .map_err(|_| RestoreImportError::DomainInvariant)?,
+                row.attribution_text.clone(),
+                row.documentation_url.clone(),
+            )
+            .map_err(|_| RestoreImportError::DomainInvariant)?;
+            insert_row(
+                transaction,
+                entity,
+                transaction.execute(
+                    "INSERT INTO metadata_attributions(workspace_id, provider_id, attribution_text, documentation_url, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![row.workspace_id.to_string(), row.provider_id, row.attribution_text, row.documentation_url, row.updated_at],
+                ),
+            )?;
+            Ok(RowKey::One(row.provider_id))
+        }
+        WorkspaceExportEntity::MetadataRefreshReceipts => {
+            let row: MetadataRefreshReceiptRow = decode_row(line, path)?;
+            require_workspace(row.workspace_id, workspace_id)?;
+            validate_timestamp(&row.created_at)?;
+            let provider_id = MetadataProviderId::try_new(row.provider_id.clone())
+                .map_err(|_| RestoreImportError::DomainInvariant)?;
+            crate::metadata::decode_refresh_receipt_outcome(
+                &row.response_json,
+                row.record_id,
+                &provider_id,
+                row.profile_id,
+                CapabilityKey::RefreshMetadataClaims,
+                RequestCorrelationId::new_v7(),
+            )
+            .map_err(|_| RestoreImportError::DomainInvariant)?;
+            insert_row(
+                transaction,
+                entity,
+                transaction.execute(
+                    "INSERT INTO metadata_refresh_receipts(workspace_id, profile_id, client_id, operation_id, semantic_digest, record_id, provider_id, response_json, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    params![row.workspace_id.to_string(), row.profile_id.to_string(), row.client_id.to_string(), row.operation_id.to_string(), row.semantic_digest.to_string(), row.record_id.to_string(), row.provider_id, row.response_json, row.created_at],
+                ),
+            )?;
+            Ok(RowKey::Two(
+                row.client_id.to_string(),
+                row.operation_id.to_string(),
+            ))
+        }
+        WorkspaceExportEntity::IdentityAssertions => {
+            let row: IdentityAssertionRow = decode_row(line, path)?;
+            require_workspace(row.workspace_id, workspace_id)?;
+            validate_timestamp(&row.created_at)?;
+            validate_claimed_json::<serde_json::Value>(&row.coverage_json)?;
+            validate_claimed_json::<serde_json::Value>(&row.episode_links_json)?;
+            validate_claimed_json::<serde_json::Value>(&row.evidence_json)?;
+            insert_row(
+                transaction,
+                entity,
+                transaction.execute(
+                    "INSERT INTO identity_assertions(assertion_id, workspace_id, record_id, source_external_identifier_id, target_namespace, target_grain, target_value, relation, coverage_json, episode_links_json, evidence_class, evidence_json, id_source, source_version, authority, reasoning, initial_status, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+                    params![row.assertion_id.to_string(), row.workspace_id.to_string(), row.record_id.to_string(), row.source_external_identifier_id.to_string(), row.target_namespace, row.target_grain, row.target_value, row.relation, row.coverage_json, row.episode_links_json, row.evidence_class, row.evidence_json, row.id_source, row.source_version, row.authority, row.reasoning, row.initial_status, row.created_at],
+                ),
+            )?;
+            Ok(RowKey::One(row.assertion_id.to_string()))
+        }
+        WorkspaceExportEntity::IdentityAssertionLifecycleEvents => {
+            let row: IdentityAssertionLifecycleEventRow = decode_row(line, path)?;
+            require_workspace(row.workspace_id, workspace_id)?;
+            validate_timestamp(&row.occurred_at)?;
+            let sequence =
+                i64::try_from(row.sequence).map_err(|_| RestoreImportError::DomainInvariant)?;
+            insert_row(
+                transaction,
+                entity,
+                transaction.execute(
+                    "INSERT INTO identity_assertion_lifecycle_events(workspace_id, assertion_id, sequence, previous_status, status, reviewer_client_id, occurred_at, evidence_digest) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    params![row.workspace_id.to_string(), row.assertion_id.to_string(), sequence, row.previous_status, row.status, row.reviewer_client_id.to_string(), row.occurred_at, row.evidence_digest.map(|value| value.to_string())],
+                ),
+            )?;
+            Ok(RowKey::TextInteger(
+                row.assertion_id.to_string(),
+                row.sequence,
+            ))
+        }
+        WorkspaceExportEntity::ProfileAnimeGroupingPolicies => {
+            let row: ProfileAnimeGroupingPolicyRow = decode_row(line, path)?;
+            require_workspace(row.workspace_id, workspace_id)?;
+            validate_timestamp(&row.updated_at)?;
+            let revision =
+                i64::try_from(row.revision).map_err(|_| RestoreImportError::DomainInvariant)?;
+            insert_row(
+                transaction,
+                entity,
+                transaction.execute(
+                    "INSERT INTO profile_anime_grouping_policies(workspace_id, profile_id, preference, revision, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![row.workspace_id.to_string(), row.profile_id.to_string(), row.preference, revision, row.updated_at],
+                ),
+            )?;
+            Ok(RowKey::One(row.profile_id.to_string()))
+        }
+        WorkspaceExportEntity::ClientAnimeGroupingPolicies => {
+            let row: ClientAnimeGroupingPolicyRow = decode_row(line, path)?;
+            require_workspace(row.workspace_id, workspace_id)?;
+            validate_timestamp(&row.updated_at)?;
+            let revision =
+                i64::try_from(row.revision).map_err(|_| RestoreImportError::DomainInvariant)?;
+            insert_row(
+                transaction,
+                entity,
+                transaction.execute(
+                    "INSERT INTO client_anime_grouping_policies(workspace_id, profile_id, client_id, preference, revision, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    params![row.workspace_id.to_string(), row.profile_id.to_string(), row.client_id.to_string(), row.preference, revision, row.updated_at],
+                ),
+            )?;
+            Ok(RowKey::Two(
+                row.profile_id.to_string(),
+                row.client_id.to_string(),
+            ))
+        }
+        WorkspaceExportEntity::AnimeGroupingPolicyReceipts => {
+            let row: AnimeGroupingPolicyReceiptRow = decode_row(line, path)?;
+            require_workspace(row.workspace_id, workspace_id)?;
+            validate_timestamp(&row.created_at)?;
+            let result_revision = i64::try_from(row.result_revision)
+                .map_err(|_| RestoreImportError::DomainInvariant)?;
+            let affected_records = i64::try_from(row.affected_records)
+                .map_err(|_| RestoreImportError::DomainInvariant)?;
+            let unresolved_routes = i64::try_from(row.unresolved_routes)
+                .map_err(|_| RestoreImportError::DomainInvariant)?;
+            let possible_season_regroupings = i64::try_from(row.possible_season_regroupings)
+                .map_err(|_| RestoreImportError::DomainInvariant)?;
+            insert_row(
+                transaction,
+                entity,
+                transaction.execute(
+                    "INSERT INTO anime_grouping_policy_receipts(workspace_id, profile_id, actor_client_id, scope_kind, scope_client_id, operation_id, semantic_digest, change_kind, requested_preference, rollback_operation_id, previous_preference, previous_source, result_preference, result_source, result_revision, affected_records, unresolved_routes, possible_season_regroupings, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+                    params![row.workspace_id.to_string(), row.profile_id.to_string(), row.actor_client_id.to_string(), row.scope_kind, row.scope_client_id.map(|value| value.to_string()), row.operation_id.to_string(), row.semantic_digest.to_string(), row.change_kind, row.requested_preference, row.rollback_operation_id.map(|value| value.to_string()), row.previous_preference, row.previous_source, row.result_preference, row.result_source, result_revision, affected_records, unresolved_routes, possible_season_regroupings, row.created_at],
+                ),
+            )?;
+            Ok(RowKey::Two(
+                row.actor_client_id.to_string(),
+                row.operation_id.to_string(),
+            ))
+        }
     }
 }
 
@@ -1618,6 +2398,76 @@ fn parse_timestamp(value: &str) -> Result<DateTime<Utc>, RestoreImportError> {
 fn validate_timestamp(value: &str) -> Result<(), RestoreImportError> {
     let parsed = parse_timestamp(value)?;
     if timestamp(parsed) != value {
+        return Err(RestoreImportError::DomainInvariant);
+    }
+    Ok(())
+}
+
+fn parse_claim_status(value: &str) -> Option<FieldClaimStatus> {
+    match value {
+        "fresh" => Some(FieldClaimStatus::Fresh),
+        "stale" => Some(FieldClaimStatus::Stale),
+        "invalid" => Some(FieldClaimStatus::Invalid),
+        "revoked" => Some(FieldClaimStatus::Revoked),
+        "superseded" => Some(FieldClaimStatus::Superseded),
+        "unavailable" => Some(FieldClaimStatus::Unavailable),
+        _ => None,
+    }
+}
+
+fn validate_classification(value: &str) -> Result<(), RestoreImportError> {
+    if matches!(value, "public" | "internal" | "confidential" | "restricted") {
+        Ok(())
+    } else {
+        Err(RestoreImportError::DomainInvariant)
+    }
+}
+
+fn validate_optional_bounded(
+    value: &Option<String>,
+    max_bytes: usize,
+) -> Result<(), RestoreImportError> {
+    if value.as_ref().is_some_and(|value| {
+        value.is_empty()
+            || value.len() > max_bytes
+            || value.trim() != value
+            || value.chars().any(char::is_control)
+    }) {
+        Err(RestoreImportError::DomainInvariant)
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_field_groups(value: &str) -> Result<(), RestoreImportError> {
+    let groups: Vec<String> =
+        serde_json::from_str(value).map_err(|_| RestoreImportError::DomainInvariant)?;
+    if serde_json::to_string(&groups).map_err(|_| RestoreImportError::DomainInvariant)? != value
+        || groups.iter().any(|group| {
+            !matches!(
+                group.as_str(),
+                "artwork"
+                    | "basic_info"
+                    | "details"
+                    | "release_dates"
+                    | "credits"
+                    | "production_companies"
+                    | "networks"
+                    | "episodes"
+                    | "season_artwork"
+                    | "recommendations"
+                    | "collections"
+                    | "trailers"
+                    | "watch_providers"
+            )
+        })
+    {
+        return Err(RestoreImportError::DomainInvariant);
+    }
+    let mut canonical = groups.clone();
+    canonical.sort_unstable();
+    canonical.dedup();
+    if canonical != groups {
         return Err(RestoreImportError::DomainInvariant);
     }
     Ok(())
@@ -1880,6 +2730,210 @@ archive_row!(OperationRow {
     operation_id: OperationId,
     receipt_id: ReceiptId,
     semantic_digest: Sha256Digest,
+    workspace_id: WorkspaceId,
+});
+archive_row!(MetadataFieldClaimRow {
+    created_at: String,
+    expires_at: Option<String>,
+    fetched_at: String,
+    field_key: String,
+    locale: Option<String>,
+    record_id: RecordId,
+    source: NamespaceKey,
+    value: String,
+    workspace_id: WorkspaceId,
+});
+archive_row!(MetadataFieldOverrideRow {
+    created_at: String,
+    field_key: String,
+    record_id: RecordId,
+    value: String,
+    workspace_id: WorkspaceId,
+});
+archive_row!(ProfileRecordTrackingDispositionRow {
+    disposition: TrackingDisposition,
+    profile_id: ProfileId,
+    record_id: RecordId,
+    updated_at: String,
+    workspace_id: WorkspaceId,
+});
+archive_row!(MetadataClaimRow {
+    claim_id: MetadataClaimId,
+    claim_kind: String,
+    created_at: String,
+    record_id: RecordId,
+    workspace_id: WorkspaceId,
+});
+archive_row!(MetadataClaimProvenanceRow {
+    claim_id: MetadataClaimId,
+    classification: String,
+    created_at: String,
+    evidence_digest: Option<Sha256Digest>,
+    fetched_at: String,
+    field_key: String,
+    initial_status: String,
+    provenance_state: String,
+    provider_id: Option<String>,
+    record_id: RecordId,
+    region: Option<String>,
+    source: NamespaceKey,
+    source_record_id: Option<String>,
+    source_version: Option<String>,
+    terms_revision: Option<String>,
+    workspace_id: WorkspaceId,
+});
+archive_row!(MetadataRatingClaimRow {
+    claim_id: MetadataClaimId,
+    classification: String,
+    created_at: String,
+    evidence_digest: Sha256Digest,
+    expires_at: Option<String>,
+    fetched_at: String,
+    initial_status: String,
+    locale: Option<String>,
+    provider_id: String,
+    record_id: RecordId,
+    region: Option<String>,
+    scale_maximum_millis: u64,
+    scale_minimum_millis: u64,
+    source: NamespaceKey,
+    source_record_id: String,
+    source_version: Option<String>,
+    terms_revision: Option<String>,
+    value_millis: u64,
+    workspace_id: WorkspaceId,
+});
+archive_row!(MetadataClaimLifecycleEventRow {
+    claim_id: MetadataClaimId,
+    evidence_digest: Option<Sha256Digest>,
+    occurred_at: String,
+    previous_status: String,
+    sequence: u64,
+    status: String,
+    workspace_id: WorkspaceId,
+});
+archive_row!(MetadataProjectionPolicyRow {
+    allow_english_fallback: u64,
+    enabled_field_groups: String,
+    last_known_good_policy: String,
+    original_locale: Option<String>,
+    preferred_locale: Option<String>,
+    preferred_provider_id: Option<String>,
+    profile_id: ProfileId,
+    region: Option<String>,
+    updated_at: String,
+    workspace_id: WorkspaceId,
+});
+archive_row!(MetadataProfileFieldOverrideRow {
+    created_at: String,
+    field_key: String,
+    origin: String,
+    profile_id: ProfileId,
+    record_id: RecordId,
+    updated_at: String,
+    value: String,
+    workspace_id: WorkspaceId,
+});
+archive_row!(MetadataLegacyOverrideOwnershipRow {
+    field_key: String,
+    owner_profile_id: Option<ProfileId>,
+    recorded_at: String,
+    record_id: RecordId,
+    review_reason: Option<String>,
+    state: String,
+    workspace_id: WorkspaceId,
+});
+archive_row!(MetadataOverrideMigrationReceiptRow {
+    field_key: String,
+    migrated_at: String,
+    profile_id: ProfileId,
+    receipt_id: String,
+    record_id: RecordId,
+    source_created_at: String,
+    workspace_id: WorkspaceId,
+});
+archive_row!(MetadataAttributionRow {
+    attribution_text: String,
+    documentation_url: String,
+    provider_id: String,
+    updated_at: String,
+    workspace_id: WorkspaceId,
+});
+archive_row!(MetadataRefreshReceiptRow {
+    client_id: ClientId,
+    created_at: String,
+    operation_id: OperationId,
+    profile_id: ProfileId,
+    provider_id: String,
+    record_id: RecordId,
+    response_json: String,
+    semantic_digest: Sha256Digest,
+    workspace_id: WorkspaceId,
+});
+archive_row!(IdentityAssertionRow {
+    assertion_id: IdentityAssertionId,
+    authority: Option<String>,
+    coverage_json: String,
+    created_at: String,
+    episode_links_json: String,
+    evidence_class: String,
+    evidence_json: String,
+    id_source: String,
+    initial_status: String,
+    reasoning: Option<String>,
+    record_id: RecordId,
+    relation: String,
+    source_external_identifier_id: ExternalIdentifierId,
+    source_version: Option<String>,
+    target_grain: String,
+    target_namespace: String,
+    target_value: String,
+    workspace_id: WorkspaceId,
+});
+archive_row!(IdentityAssertionLifecycleEventRow {
+    assertion_id: IdentityAssertionId,
+    evidence_digest: Option<Sha256Digest>,
+    occurred_at: String,
+    previous_status: String,
+    reviewer_client_id: ClientId,
+    sequence: u64,
+    status: String,
+    workspace_id: WorkspaceId,
+});
+archive_row!(ProfileAnimeGroupingPolicyRow {
+    preference: String,
+    profile_id: ProfileId,
+    revision: u64,
+    updated_at: String,
+    workspace_id: WorkspaceId,
+});
+archive_row!(ClientAnimeGroupingPolicyRow {
+    client_id: ClientId,
+    preference: Option<String>,
+    profile_id: ProfileId,
+    revision: u64,
+    updated_at: String,
+    workspace_id: WorkspaceId,
+});
+archive_row!(AnimeGroupingPolicyReceiptRow {
+    actor_client_id: ClientId,
+    affected_records: u64,
+    change_kind: String,
+    created_at: String,
+    operation_id: OperationId,
+    possible_season_regroupings: u64,
+    previous_preference: String,
+    previous_source: String,
+    profile_id: ProfileId,
+    requested_preference: Option<String>,
+    result_preference: String,
+    result_revision: u64,
+    result_source: String,
+    rollback_operation_id: Option<OperationId>,
+    scope_client_id: Option<ClientId>,
+    scope_kind: String,
+    semantic_digest: Sha256Digest,
+    unresolved_routes: u64,
     workspace_id: WorkspaceId,
 });
 
@@ -2150,17 +3204,23 @@ mod tests {
     use crate::test_support::TestNode;
     use crate::StoreOpenError;
     use fasti_application::{
-        AccessAdministrationPort, AppendCorrectionCommand, AuthenticateCredentialQuery,
-        CancellationSignal, CompleteRecoveryBootstrapRequest, CorrectionPort, CorrectionTarget,
-        CreateRecordCommand, ExportWorkspaceQuery, ExportWorkspaceRequest, IdentityPort,
-        ObservationAcceptancePort, PrepareRecoveryBootstrapRequest, RecoveryBootstrapPort,
-        RegisterNamespaceDefinitionCommand, ResolveReviewCommand, RestoreWorkspaceRequest,
-        ReviewPort, ReviewResolutionTarget, ScopeKey, SecretMaterial, VerifyWorkspaceQuery,
-        WorkspaceArchiveDestination, WorkspaceManifest, WorkspaceRestorePort,
-        WorkspaceStreamDescriptor, WorkspaceVerificationPort,
+        AccessAdministrationPort, AnimeGroupingPolicyChange, AnimeGroupingPolicyScope,
+        AppendCorrectionCommand, ApplyAnimeGroupingPolicyChangeCommand,
+        AuthenticateCredentialQuery, CancellationSignal, CompleteRecoveryBootstrapRequest,
+        CorrectionPort, CorrectionTarget, CreateRecordCommand, ExportWorkspaceQuery,
+        ExportWorkspaceRequest, IdentityPort, IdentityRoutingPort, ObservationAcceptancePort,
+        PrepareRecoveryBootstrapRequest, ProfileRecordStatePort, RecoveryBootstrapPort,
+        RefreshMetadataClaimsOutcome, RegisterNamespaceDefinitionCommand, ResolveReviewCommand,
+        RestoreWorkspaceRequest, ReviewPort, ReviewResolutionTarget, ScopeKey, SecretMaterial,
+        SetTrackingDispositionCommand, VerifyWorkspaceQuery, WorkspaceArchiveDestination,
+        WorkspaceManifest, WorkspaceRestorePort, WorkspaceStreamDescriptor,
+        WorkspaceVerificationPort,
     };
     use fasti_contracts::CanonicalWorkspaceManifestProjection;
-    use fasti_domain::{ClaimedTrust, ExternalIdentifierClaim, ObservedAt};
+    use fasti_domain::{
+        AnimeGroupingPreference, ClaimedTrust, EnrichmentPolicy, ExternalIdentifierClaim,
+        MetadataFieldGroup, ObservedAt,
+    };
     use std::io::Cursor;
     use std::num::NonZeroU64;
     use std::os::unix::process::ExitStatusExt as _;
@@ -2284,6 +3344,54 @@ mod tests {
             ))
             .expect("second record")
             .record_id();
+        let metadata_time = ReceivedAt::from_application_clock(
+            DateTime::parse_from_rfc3339("2026-08-24T11:00:00Z")
+                .expect("metadata time")
+                .with_timezone(&Utc),
+        );
+        {
+            let connection = node
+                .kernel
+                .inner
+                .connection
+                .lock()
+                .expect("SQLite connection");
+            crate::metadata::write_field_claim(
+                &connection,
+                node.access.workspace_id(),
+                first,
+                &FieldKey::try_new("core.title").expect("field key"),
+                &FieldClaim::try_new(
+                    NamespaceKey::try_new("fixture").expect("metadata source"),
+                    "Provider title",
+                    Some("en".to_owned()),
+                    metadata_time,
+                    None,
+                )
+                .expect("field claim"),
+                CapabilityKey::ExportWorkspace,
+                RequestCorrelationId::new_v7(),
+            )
+            .expect("persist field claim");
+            crate::metadata::write_field_override(
+                &connection,
+                node.access.workspace_id(),
+                first,
+                &FieldKey::try_new("core.title").expect("field key"),
+                &FieldOverride::try_new("Preferred title", metadata_time).expect("field override"),
+                CapabilityKey::ExportWorkspace,
+                RequestCorrelationId::new_v7(),
+            )
+            .expect("persist field override");
+        }
+        node.kernel
+            .set_tracking_disposition(SetTrackingDispositionCommand::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+                first,
+                Some(TrackingDisposition::Watching),
+            ))
+            .expect("persist tracking disposition");
         node.kernel
             .register_namespace_definition(RegisterNamespaceDefinitionCommand::new(
                 RequestCorrelationId::new_v7(),
@@ -2396,6 +3504,522 @@ mod tests {
         }
     }
 
+    struct IdentityRoutingArchiveFixture {
+        archive: Vec<u8>,
+        assertion_id: IdentityAssertionId,
+        profile_id: ProfileId,
+        client_id: ClientId,
+        profile_operation_id: OperationId,
+    }
+
+    fn identity_routing_archive_fixture() -> IdentityRoutingArchiveFixture {
+        let FullFixture { node, .. } = full_fixture();
+        let workspace_id = node.access.workspace_id();
+        let profile_id = node.access.profile_id();
+        let client_id = node.access.client_id();
+        let assertion_id = IdentityAssertionId::new_v7();
+        {
+            let connection = node
+                .kernel
+                .inner
+                .connection
+                .lock()
+                .expect("SQLite connection");
+            let (record_id, external_identifier_id): (String, String) = connection
+                .query_row(
+                    "SELECT record_id, external_identifier_id FROM external_identifiers WHERE workspace_id = ?1 AND value = 'a'",
+                    [workspace_id.to_string()],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .expect("identity source");
+            let evidence_json = serde_json::json!([{
+                "method": "human_verified",
+                "observed_source": "restore fixture",
+                "derivation_root": "fixture-root",
+                "reviewer": "fixture-reviewer",
+                "observed_at": "2026-08-30",
+                "evidence_id": null,
+            }])
+            .to_string();
+            connection
+                .execute(
+                    r#"
+                    INSERT INTO identity_assertions(
+                        assertion_id, workspace_id, record_id, source_external_identifier_id,
+                        target_namespace, target_grain, target_value, relation, coverage_json,
+                        episode_links_json, evidence_class, evidence_json, id_source,
+                        source_version, authority, reasoning, initial_status, created_at
+                    ) VALUES (
+                        ?1, ?2, ?3, ?4, 'fixture', 'release', 'b', 'exact', '[]', '[]',
+                        'verified', ?5, 'restore-fixture', 'v1', NULL, NULL, 'candidate', ?6
+                    )
+                    "#,
+                    params![
+                        assertion_id.to_string(),
+                        workspace_id.to_string(),
+                        record_id,
+                        external_identifier_id,
+                        evidence_json,
+                        "2026-08-31T12:00:00.000000Z",
+                    ],
+                )
+                .expect("identity assertion");
+            connection
+                .execute(
+                    "INSERT INTO identity_assertion_lifecycle_events(workspace_id, assertion_id, sequence, previous_status, status, reviewer_client_id, occurred_at, evidence_digest) VALUES (?1, ?2, 1, 'candidate', 'accepted', ?3, ?4, NULL)",
+                    params![
+                        workspace_id.to_string(),
+                        assertion_id.to_string(),
+                        client_id.to_string(),
+                        "2026-08-31T12:00:01.000000Z",
+                    ],
+                )
+                .expect("identity lifecycle event");
+        }
+
+        let profile_operation_id = OperationId::new_v7();
+        node.kernel
+            .authorize_and_apply_anime_grouping_policy_change(
+                ApplyAnimeGroupingPolicyChangeCommand::try_new(
+                    RequestCorrelationId::new_v7(),
+                    node.access,
+                    AnimeGroupingPolicyScope::Profile,
+                    profile_operation_id,
+                    Sha256Digest::parse(format!("sha256:{}", "1a".repeat(32)))
+                        .expect("profile semantic digest"),
+                    0,
+                    AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::GroupByTvWork),
+                )
+                .expect("profile policy command"),
+            )
+            .expect("profile policy");
+        node.kernel
+            .authorize_and_apply_anime_grouping_policy_change(
+                ApplyAnimeGroupingPolicyChangeCommand::try_new(
+                    RequestCorrelationId::new_v7(),
+                    node.access,
+                    AnimeGroupingPolicyScope::Client(client_id),
+                    OperationId::new_v7(),
+                    Sha256Digest::parse(format!("sha256:{}", "2b".repeat(32)))
+                        .expect("client semantic digest"),
+                    1,
+                    AnimeGroupingPolicyChange::Set(
+                        AnimeGroupingPreference::KeepMalReleasesSeparate,
+                    ),
+                )
+                .expect("client policy command"),
+            )
+            .expect("client policy");
+        node.kernel
+            .authorize_and_apply_anime_grouping_policy_change(
+                ApplyAnimeGroupingPolicyChangeCommand::try_new(
+                    RequestCorrelationId::new_v7(),
+                    node.access,
+                    AnimeGroupingPolicyScope::Client(client_id),
+                    OperationId::new_v7(),
+                    Sha256Digest::parse(format!("sha256:{}", "3c".repeat(32)))
+                        .expect("inherit semantic digest"),
+                    2,
+                    AnimeGroupingPolicyChange::InheritProfile,
+                )
+                .expect("inherit policy command"),
+            )
+            .expect("inherit profile policy");
+        node.kernel
+            .authorize_and_apply_anime_grouping_policy_change(
+                ApplyAnimeGroupingPolicyChangeCommand::try_new(
+                    RequestCorrelationId::new_v7(),
+                    node.access,
+                    AnimeGroupingPolicyScope::Profile,
+                    OperationId::new_v7(),
+                    Sha256Digest::parse(format!("sha256:{}", "4d".repeat(32)))
+                        .expect("advanced profile semantic digest"),
+                    1,
+                    AnimeGroupingPolicyChange::Set(
+                        AnimeGroupingPreference::KeepKitsuReleasesSeparate,
+                    ),
+                )
+                .expect("advanced profile policy command"),
+            )
+            .expect("profile policy after inherited client revision");
+        node.kernel
+            .authorize_and_apply_anime_grouping_policy_change(
+                ApplyAnimeGroupingPolicyChangeCommand::try_new(
+                    RequestCorrelationId::new_v7(),
+                    node.access,
+                    AnimeGroupingPolicyScope::Profile,
+                    OperationId::new_v7(),
+                    Sha256Digest::parse(format!("sha256:{}", "5e".repeat(32)))
+                        .expect("rollback semantic digest"),
+                    4,
+                    AnimeGroupingPolicyChange::Rollback {
+                        applied_operation_id: profile_operation_id,
+                    },
+                )
+                .expect("rollback policy command"),
+            )
+            .expect("rollback profile policy");
+
+        crate::identity_routing::validate_workspace_identity_routing_state(
+            &node
+                .kernel
+                .inner
+                .connection
+                .lock()
+                .expect("SQLite connection"),
+            workspace_id,
+            RequestCorrelationId::new_v7(),
+        )
+        .expect("valid source identity-routing state");
+
+        let destination = Arc::new(Mutex::new(DestinationState::default()));
+        export_online_workspace_archive(
+            &node.kernel,
+            ExportWorkspaceRequest::new(
+                ExportWorkspaceQuery::new(RequestCorrelationId::new_v7(), node.access),
+                limits(),
+                CancellationSignal::new(),
+            ),
+            Box::new(MemoryDestination(Arc::clone(&destination))),
+        )
+        .expect("export identity-routing fixture");
+        let archive = destination.lock().expect("destination state").bytes.clone();
+        IdentityRoutingArchiveFixture {
+            archive,
+            assertion_id,
+            profile_id,
+            client_id,
+            profile_operation_id,
+        }
+    }
+
+    struct MetadataV3Fixture {
+        archive: Vec<u8>,
+        field_claim_id: MetadataClaimId,
+        rating_claim_id: MetadataClaimId,
+        first_profile_id: ProfileId,
+        second_profile_id: ProfileId,
+        record_id: RecordId,
+        operation_id: OperationId,
+    }
+
+    fn metadata_v3_fixture() -> MetadataV3Fixture {
+        let FullFixture { node, .. } = full_fixture();
+        let workspace_id = node.access.workspace_id();
+        let first_profile_id = node.access.profile_id();
+        let second_profile_id = ProfileId::new_v7();
+        let operation_id = OperationId::new_v7();
+        let record_id = {
+            let connection = node
+                .kernel
+                .inner
+                .connection
+                .lock()
+                .expect("SQLite connection");
+            connection
+                .execute(
+                    "INSERT INTO profiles(profile_id, workspace_id, created_at) VALUES (?1, ?2, ?3)",
+                    params![
+                        second_profile_id.to_string(),
+                        workspace_id.to_string(),
+                        timestamp(Utc::now())
+                    ],
+                )
+                .expect("second profile");
+            connection
+                .query_row(
+                    "SELECT record_id FROM records WHERE workspace_id = ?1 ORDER BY record_id LIMIT 1",
+                    [workspace_id.to_string()],
+                    |row| row.get::<_, String>(0),
+                )
+                .expect("fixture record")
+                .parse::<RecordId>()
+                .expect("record ID")
+        };
+        let field_key = FieldKey::try_new("core.title").expect("field key");
+        let fetched_at = ReceivedAt::from_application_clock(
+            DateTime::parse_from_rfc3339("2026-08-30T12:00:00Z")
+                .expect("fetched time")
+                .with_timezone(&Utc),
+        );
+        let evidence_digest =
+            Sha256Digest::parse(format!("sha256:{}", "a".repeat(64))).expect("evidence digest");
+        let provenance = FieldClaimProvenance::try_new(
+            MetadataProviderId::try_new("tmdb").expect("provider"),
+            NamespaceKey::try_new("tmdb.movie").expect("namespace"),
+            "438631",
+            Some(MetadataLocale::try_new("en-IE").expect("locale")),
+            Some(MetadataRegion::try_new("IE").expect("region")),
+            Some("v3".to_owned()),
+            evidence_digest.clone(),
+        )
+        .expect("provenance");
+        let field_claim_id = MetadataClaimId::new_v7();
+        let field_claim = FieldClaim::try_new_provider(
+            field_claim_id,
+            record_id,
+            field_key.clone(),
+            "Archive title",
+            provenance.clone(),
+            fetched_at,
+            None,
+            FieldClaimStatus::Fresh,
+        )
+        .expect("field claim");
+        let rating_claim_id = MetadataClaimId::new_v7();
+        let rating_claim = RatingClaim::try_new(
+            rating_claim_id,
+            record_id,
+            8_400,
+            RatingScale::try_new(0, 10_000).expect("rating scale"),
+            provenance,
+            fetched_at,
+            None,
+            FieldClaimStatus::Fresh,
+        )
+        .expect("rating claim");
+        let first_policy = EnrichmentPolicy::new(
+            MetadataProjectionPolicy::new(
+                first_profile_id,
+                Some(MetadataProviderId::try_new("tmdb").expect("provider")),
+                Some(MetadataLocale::try_new("en-IE").expect("locale")),
+                None,
+                true,
+                LastKnownGoodPolicy::Allow,
+            ),
+            Some(MetadataRegion::try_new("IE").expect("region")),
+            vec![MetadataFieldGroup::BasicInfo],
+        );
+        let second_policy = EnrichmentPolicy::new(
+            MetadataProjectionPolicy::new(
+                second_profile_id,
+                None,
+                Some(MetadataLocale::try_new("fr-FR").expect("locale")),
+                None,
+                false,
+                LastKnownGoodPolicy::Deny,
+            ),
+            Some(MetadataRegion::try_new("FR").expect("region")),
+            vec![MetadataFieldGroup::BasicInfo, MetadataFieldGroup::Artwork],
+        );
+        {
+            let connection = node
+                .kernel
+                .inner
+                .connection
+                .lock()
+                .expect("SQLite connection");
+            crate::metadata::write_field_claim(
+                &connection,
+                workspace_id,
+                record_id,
+                &field_key,
+                &field_claim,
+                CapabilityKey::ExportWorkspace,
+                RequestCorrelationId::new_v7(),
+            )
+            .expect("provider field claim");
+            crate::metadata::write_rating_claim(
+                &connection,
+                workspace_id,
+                &rating_claim,
+                CapabilityKey::ExportWorkspace,
+                RequestCorrelationId::new_v7(),
+            )
+            .expect("rating claim");
+            connection
+                .execute(
+                    "INSERT INTO metadata_claim_lifecycle_events(claim_id, sequence, workspace_id, previous_status, status, occurred_at, evidence_digest) VALUES (?1, 1, ?2, 'fresh', 'stale', ?3, ?4)",
+                    params![
+                        field_claim_id.to_string(),
+                        workspace_id.to_string(),
+                        timestamp(Utc::now()),
+                        evidence_digest.to_string()
+                    ],
+                )
+                .expect("lifecycle event");
+            for policy in [&first_policy, &second_policy] {
+                crate::metadata::write_enrichment_policy(
+                    &connection,
+                    workspace_id,
+                    policy,
+                    CapabilityKey::ExportWorkspace,
+                    RequestCorrelationId::new_v7(),
+                )
+                .expect("projection policy");
+            }
+            for override_ in [
+                ProfileFieldOverride::try_new(
+                    first_profile_id,
+                    record_id,
+                    field_key.clone(),
+                    "First profile title",
+                    fetched_at,
+                )
+                .expect("first override"),
+                ProfileFieldOverride::try_new(
+                    second_profile_id,
+                    record_id,
+                    field_key.clone(),
+                    "Second profile title",
+                    fetched_at,
+                )
+                .expect("second override"),
+            ] {
+                crate::metadata::write_profile_field_override(
+                    &connection,
+                    workspace_id,
+                    &override_,
+                    CapabilityKey::ExportWorkspace,
+                    RequestCorrelationId::new_v7(),
+                )
+                .expect("profile override");
+            }
+            crate::metadata::write_metadata_attribution(
+                &connection,
+                workspace_id,
+                &MetadataAttribution::try_new(
+                    MetadataProviderId::try_new("tmdb").expect("provider"),
+                    "Metadata supplied by TMDB",
+                    "https://developer.themoviedb.org/",
+                )
+                .expect("attribution"),
+                CapabilityKey::ExportWorkspace,
+                RequestCorrelationId::new_v7(),
+            )
+            .expect("attribution");
+            let provider_id = MetadataProviderId::try_new("tmdb").expect("provider");
+            let response_json = crate::metadata::encode_refresh_receipt_outcome(
+                record_id,
+                &provider_id,
+                &RefreshMetadataClaimsOutcome::new(
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                ),
+                CapabilityKey::ExportWorkspace,
+                RequestCorrelationId::new_v7(),
+            )
+            .expect("receipt response");
+            connection
+                .execute(
+                    "INSERT INTO metadata_refresh_receipts(workspace_id, profile_id, client_id, operation_id, semantic_digest, record_id, provider_id, response_json, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    params![workspace_id.to_string(), first_profile_id.to_string(), node.access.client_id().to_string(), operation_id.to_string(), evidence_digest.to_string(), record_id.to_string(), provider_id.as_str(), response_json, timestamp(Utc::now())],
+                )
+                .expect("metadata refresh receipt");
+        }
+
+        let destination = Arc::new(Mutex::new(DestinationState::default()));
+        export_online_workspace_archive(
+            &node.kernel,
+            ExportWorkspaceRequest::new(
+                ExportWorkspaceQuery::new(RequestCorrelationId::new_v7(), node.access),
+                limits(),
+                CancellationSignal::new(),
+            ),
+            Box::new(MemoryDestination(Arc::clone(&destination))),
+        )
+        .expect("export metadata-v3 fixture");
+        let archive = destination.lock().expect("destination state").bytes.clone();
+        MetadataV3Fixture {
+            archive,
+            field_claim_id,
+            rating_claim_id,
+            first_profile_id,
+            second_profile_id,
+            record_id,
+            operation_id,
+        }
+    }
+
+    fn legacy_google_books_archive() -> Vec<u8> {
+        let fixture = full_fixture();
+        fixture
+            .node
+            .kernel
+            .register_namespace_definition(RegisterNamespaceDefinitionCommand::new(
+                RequestCorrelationId::new_v7(),
+                fixture.node.access,
+                NamespaceDefinition::try_new(
+                    "google-books",
+                    "google-books",
+                    [Grain::Chapter],
+                    ".+",
+                    "identity",
+                    NamespaceLicencePosture::IdentifiersOnly,
+                )
+                .expect("legacy Google Books namespace"),
+            ))
+            .expect("register legacy Google Books namespace");
+        let record_id = fixture
+            .node
+            .kernel
+            .create_record(CreateRecordCommand::new(
+                RequestCorrelationId::new_v7(),
+                fixture.node.access,
+                Grain::Chapter,
+            ))
+            .expect("legacy Google Books record")
+            .record_id();
+        fixture
+            .node
+            .kernel
+            .attach_identifier(fasti_application::AttachIdentifierCommand::new(
+                RequestCorrelationId::new_v7(),
+                fixture.node.access,
+                record_id,
+                ExternalIdentifierClaim::try_new("google-books", Grain::Chapter, "restore-book")
+                    .expect("legacy Google Books identifier"),
+            ))
+            .expect("attach legacy Google Books identifier");
+        {
+            let connection = fixture
+                .node
+                .kernel
+                .inner
+                .connection
+                .lock()
+                .expect("SQLite connection");
+            crate::metadata::write_field_claim(
+                &connection,
+                fixture.node.access.workspace_id(),
+                record_id,
+                &FieldKey::try_new("core.title").expect("field key"),
+                &FieldClaim::try_new(
+                    NamespaceKey::try_new("google-books").expect("legacy metadata source"),
+                    "Restored book",
+                    None,
+                    ReceivedAt::from_application_clock(
+                        DateTime::parse_from_rfc3339("2026-08-24T11:30:00Z")
+                            .expect("metadata time")
+                            .with_timezone(&Utc),
+                    ),
+                    None,
+                )
+                .expect("legacy provider claim"),
+                CapabilityKey::ExportWorkspace,
+                RequestCorrelationId::new_v7(),
+            )
+            .expect("persist legacy provider claim");
+        }
+
+        let destination = Arc::new(Mutex::new(DestinationState::default()));
+        export_online_workspace_archive(
+            &fixture.node.kernel,
+            ExportWorkspaceRequest::new(
+                ExportWorkspaceQuery::new(RequestCorrelationId::new_v7(), fixture.node.access),
+                limits(),
+                CancellationSignal::new(),
+            ),
+            Box::new(MemoryDestination(Arc::clone(&destination))),
+        )
+        .expect("export legacy provider fixture");
+        let archive = destination.lock().expect("destination state").bytes.clone();
+        archive
+    }
+
     fn archive_entries(bytes: &[u8]) -> Vec<(String, Vec<u8>)> {
         let archive_limits =
             ArchiveLimits::new(64 * 1024 * 1024, 128, 16 * 1024 * 1024, 64 * 1024 * 1024)
@@ -2412,8 +4036,8 @@ mod tests {
     }
 
     fn digest(bytes: &[u8]) -> Sha256Digest {
-        Sha256Digest::parse(format!("sha256:{:x}", Sha256::digest(bytes)))
-            .expect("canonical digest")
+        let digest_bytes: [u8; 32] = Sha256::digest(bytes).into();
+        Sha256Digest::from_bytes(&digest_bytes)
     }
 
     fn rewrite_stream(
@@ -2467,6 +4091,214 @@ mod tests {
                 .expect("append rewritten entry");
         }
         writer.finish().expect("finish rewritten archive")
+    }
+
+    fn archive_v1_from_v2(archive: &[u8]) -> Vec<u8> {
+        let mut entries = archive_entries(archive);
+        let manifest_bytes = entries.pop().expect("manifest entry").1;
+        let verified =
+            VerifiedInboundWorkspaceManifest::try_from_canonical_json(&manifest_bytes, limits())
+                .expect("verified fixture manifest");
+        entries.retain(|(entry_path, _)| {
+            WorkspaceExportEntity::ALL[WorkspaceExportEntity::V1.len()..]
+                .iter()
+                .all(|entity| entry_path != &format!("{}.ndjson", entity.as_str()))
+        });
+
+        let manifest = verified.manifest();
+        let rebuilt = WorkspaceManifest::try_new_for_format(
+            WORKSPACE_ARCHIVE_V1_FORMAT_VERSION,
+            manifest.workspace_id(),
+            manifest.workspace_revision(),
+            manifest.contract_version().to_owned(),
+            manifest.migration_version(),
+            manifest.migration_digest().clone(),
+            manifest.streams()[..WorkspaceExportEntity::V1.len()].to_vec(),
+            manifest.blobs().to_vec(),
+        )
+        .expect("rebuilt archive-v1 application manifest");
+        let projection = CanonicalWorkspaceManifestProjection::try_from_application(rebuilt)
+            .expect("rebuilt archive-v1 wire manifest");
+        entries.push((
+            "manifest.json".to_owned(),
+            projection.canonical_json_bytes().to_vec(),
+        ));
+
+        let archive_limits =
+            ArchiveLimits::new(64 * 1024 * 1024, 128, 16 * 1024 * 1024, 64 * 1024 * 1024)
+                .expect("archive limits");
+        let mut writer = ArchiveWriter::new(Vec::new(), archive_limits).expect("archive writer");
+        for (entry_path, bytes) in entries {
+            writer
+                .append(&entry_path, bytes.len() as u64, Cursor::new(bytes))
+                .expect("append archive-v1 entry");
+        }
+        writer.finish().expect("finish archive-v1 fixture")
+    }
+
+    fn archive_v2_from_v3(archive: &[u8]) -> Vec<u8> {
+        let mut entries = archive_entries(archive);
+        let manifest_bytes = entries.pop().expect("manifest entry").1;
+        let verified =
+            VerifiedInboundWorkspaceManifest::try_from_canonical_json(&manifest_bytes, limits())
+                .expect("verified fixture manifest");
+        entries.retain(|(entry_path, _)| {
+            WorkspaceExportEntity::ALL[WorkspaceExportEntity::V2.len()..]
+                .iter()
+                .all(|entity| entry_path != &format!("{}.ndjson", entity.as_str()))
+        });
+        let manifest = verified.manifest();
+        let rebuilt = WorkspaceManifest::try_new_for_format(
+            WORKSPACE_ARCHIVE_V2_FORMAT_VERSION,
+            manifest.workspace_id(),
+            manifest.workspace_revision(),
+            manifest.contract_version().to_owned(),
+            manifest.migration_version(),
+            manifest.migration_digest().clone(),
+            manifest.streams()[..WorkspaceExportEntity::V2.len()].to_vec(),
+            manifest.blobs().to_vec(),
+        )
+        .expect("rebuilt archive-v2 application manifest");
+        let projection = CanonicalWorkspaceManifestProjection::try_from_application(rebuilt)
+            .expect("rebuilt archive-v2 wire manifest");
+        entries.push((
+            "manifest.json".to_owned(),
+            projection.canonical_json_bytes().to_vec(),
+        ));
+        let archive_limits =
+            ArchiveLimits::new(64 * 1024 * 1024, 128, 16 * 1024 * 1024, 64 * 1024 * 1024)
+                .expect("archive limits");
+        let mut writer = ArchiveWriter::new(Vec::new(), archive_limits).expect("archive writer");
+        for (entry_path, bytes) in entries {
+            writer
+                .append(&entry_path, bytes.len() as u64, Cursor::new(bytes))
+                .expect("append archive-v2 entry");
+        }
+        writer.finish().expect("finish archive-v2 fixture")
+    }
+
+    fn archive_v3_from_v4(archive: &[u8]) -> Vec<u8> {
+        let mut entries = archive_entries(archive);
+        let manifest_bytes = entries.pop().expect("manifest entry").1;
+        let verified =
+            VerifiedInboundWorkspaceManifest::try_from_canonical_json(&manifest_bytes, limits())
+                .expect("verified fixture manifest");
+        entries.retain(|(entry_path, _)| {
+            WorkspaceExportEntity::ALL[WorkspaceExportEntity::V3.len()..]
+                .iter()
+                .all(|entity| entry_path != &format!("{}.ndjson", entity.as_str()))
+        });
+        let manifest = verified.manifest();
+        let rebuilt = WorkspaceManifest::try_new_for_format(
+            WORKSPACE_ARCHIVE_V3_FORMAT_VERSION,
+            manifest.workspace_id(),
+            manifest.workspace_revision(),
+            manifest.contract_version().to_owned(),
+            12,
+            Sha256Digest::parse(
+                "sha256:eea7d899b8c257b7bafa359a540bd25ba2cdc4d9ddb7f50ce0ec8f80e251cfb9",
+            )
+            .expect("published v12 schema digest"),
+            manifest.streams()[..WorkspaceExportEntity::V3.len()].to_vec(),
+            manifest.blobs().to_vec(),
+        )
+        .expect("rebuilt archive-v3 application manifest");
+        let projection = CanonicalWorkspaceManifestProjection::try_from_application(rebuilt)
+            .expect("rebuilt archive-v3 wire manifest");
+        entries.push((
+            "manifest.json".to_owned(),
+            projection.canonical_json_bytes().to_vec(),
+        ));
+        let archive_limits =
+            ArchiveLimits::new(64 * 1024 * 1024, 128, 16 * 1024 * 1024, 64 * 1024 * 1024)
+                .expect("archive limits");
+        let mut writer = ArchiveWriter::new(Vec::new(), archive_limits).expect("archive writer");
+        for (entry_path, bytes) in entries {
+            writer
+                .append(&entry_path, bytes.len() as u64, Cursor::new(bytes))
+                .expect("append archive-v3 entry");
+        }
+        writer.finish().expect("finish archive-v3 fixture")
+    }
+
+    fn archive_v4_from_v5(archive: &[u8]) -> Vec<u8> {
+        let mut entries = archive_entries(archive);
+        let manifest_bytes = entries.pop().expect("manifest entry").1;
+        let verified =
+            VerifiedInboundWorkspaceManifest::try_from_canonical_json(&manifest_bytes, limits())
+                .expect("verified fixture manifest");
+        entries.retain(|(entry_path, _)| {
+            WorkspaceExportEntity::ALL[WorkspaceExportEntity::V4.len()..]
+                .iter()
+                .all(|entity| entry_path != &format!("{}.ndjson", entity.as_str()))
+        });
+        let manifest = verified.manifest();
+        let rebuilt = WorkspaceManifest::try_new_for_format(
+            WORKSPACE_ARCHIVE_V4_FORMAT_VERSION,
+            manifest.workspace_id(),
+            manifest.workspace_revision(),
+            manifest.contract_version().to_owned(),
+            13,
+            Sha256Digest::parse(
+                "sha256:e470f2e8ae2972aa05fecd5b39642b79ef739de89eda204c37bf1d3e48f892c3",
+            )
+            .expect("published v13 schema digest"),
+            manifest.streams()[..WorkspaceExportEntity::V4.len()].to_vec(),
+            manifest.blobs().to_vec(),
+        )
+        .expect("rebuilt archive-v4 application manifest");
+        let projection = CanonicalWorkspaceManifestProjection::try_from_application(rebuilt)
+            .expect("rebuilt archive-v4 wire manifest");
+        entries.push((
+            "manifest.json".to_owned(),
+            projection.canonical_json_bytes().to_vec(),
+        ));
+        let archive_limits =
+            ArchiveLimits::new(64 * 1024 * 1024, 128, 16 * 1024 * 1024, 64 * 1024 * 1024)
+                .expect("archive limits");
+        let mut writer = ArchiveWriter::new(Vec::new(), archive_limits).expect("archive writer");
+        for (entry_path, bytes) in entries {
+            writer
+                .append(&entry_path, bytes.len() as u64, Cursor::new(bytes))
+                .expect("append archive-v4 entry");
+        }
+        writer.finish().expect("finish archive-v4 fixture")
+    }
+
+    fn rewrite_manifest_schema(archive: &[u8], version: u32, digest: &str) -> Vec<u8> {
+        let mut entries = archive_entries(archive);
+        let manifest_bytes = entries.pop().expect("manifest entry").1;
+        let verified =
+            VerifiedInboundWorkspaceManifest::try_from_canonical_json(&manifest_bytes, limits())
+                .expect("verified fixture manifest");
+        let manifest = verified.manifest();
+        let rebuilt = WorkspaceManifest::try_new_for_format(
+            manifest.format_version(),
+            manifest.workspace_id(),
+            manifest.workspace_revision(),
+            manifest.contract_version().to_owned(),
+            version,
+            Sha256Digest::parse(digest).expect("historical schema digest"),
+            manifest.streams().to_vec(),
+            manifest.blobs().to_vec(),
+        )
+        .expect("rebuilt historical manifest");
+        let projection = CanonicalWorkspaceManifestProjection::try_from_application(rebuilt)
+            .expect("rebuilt historical wire manifest");
+        entries.push((
+            "manifest.json".to_owned(),
+            projection.canonical_json_bytes().to_vec(),
+        ));
+        let archive_limits =
+            ArchiveLimits::new(64 * 1024 * 1024, 128, 16 * 1024 * 1024, 64 * 1024 * 1024)
+                .expect("archive limits");
+        let mut writer = ArchiveWriter::new(Vec::new(), archive_limits).expect("archive writer");
+        for (entry_path, bytes) in entries {
+            writer
+                .append(&entry_path, bytes.len() as u64, Cursor::new(bytes))
+                .expect("append historical archive entry");
+        }
+        writer.finish().expect("finish historical archive")
     }
 
     fn assert_attempt_removed(root: &Path, attempt_id: RestoreAttemptId) {
@@ -2775,7 +4607,7 @@ mod tests {
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )
         .expect("open staged database");
-        let expected_counts = [1_i64, 1, 1, 2, 1, 2, 1, 1, 2, 1, 3, 1, 2, 1, 1, 1];
+        let expected_counts = [1_i64, 1, 1, 2, 1, 2, 1, 1, 2, 1, 3, 1, 2, 1, 1, 1, 1, 1, 1];
         for (table, expected) in [
             "workspaces",
             "profiles",
@@ -2793,6 +4625,9 @@ mod tests {
             "corrections",
             "receipts",
             "operations",
+            "metadata_field_claims",
+            "metadata_field_overrides",
+            "profile_record_tracking_dispositions",
         ]
         .into_iter()
         .zip(expected_counts)
@@ -2805,11 +4640,7 @@ mod tests {
             assert_eq!(count, expected, "{table}");
         }
         let local_rows: i64 = database
-            .query_row(
-                "SELECT (SELECT COUNT(*) FROM node_state) + (SELECT COUNT(*) FROM credentials) + (SELECT COUNT(*) FROM profile_grants) + (SELECT COUNT(*) FROM grant_scopes)",
-                [],
-                |row| row.get(0),
-            )
+            .query_row(NODE_LOCAL_STATE_COUNT_SQL, [], |row| row.get(0))
             .expect("node-local row count");
         assert_eq!(local_rows, 0);
         drop(database);
@@ -2829,6 +4660,769 @@ mod tests {
 
         staged.cleanup().expect("remove staged attempt");
         assert_attempt_removed(restore_root.path(), attempt_id);
+    }
+
+    #[test]
+    fn archive_v3_round_trips_two_profile_metadata_without_identity_loss() {
+        let fixture = metadata_v3_fixture();
+        let archive = archive_v3_from_v4(&fixture.archive);
+        let restore_root = tempfile::tempdir().expect("restore root");
+        let lock = LockedDataRoot::acquire(restore_root.path()).expect("exclusive restore root");
+        let attempt_id = RestoreAttemptId::new_v7();
+        let staged = stage_workspace_archive_pass_two(
+            &lock,
+            &mut Cursor::new(archive),
+            attempt_id,
+            RequestCorrelationId::new_v7(),
+            limits(),
+            &CancellationSignal::new(),
+        )
+        .expect("stage metadata-v3 archive");
+        let database = Connection::open_with_flags(
+            staged.database_path(),
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .expect("open staged database");
+
+        assert_eq!(
+            database
+                .query_row(
+                    "SELECT claim_kind FROM metadata_claims WHERE claim_id = ?1",
+                    [fixture.field_claim_id.to_string()],
+                    |row| row.get::<_, String>(0),
+                )
+                .expect("field claim identity"),
+            "field"
+        );
+        assert_eq!(
+            database
+                .query_row(
+                    "SELECT claim_kind FROM metadata_claims WHERE claim_id = ?1",
+                    [fixture.rating_claim_id.to_string()],
+                    |row| row.get::<_, String>(0),
+                )
+                .expect("rating claim identity"),
+            "rating"
+        );
+        assert_eq!(
+            database
+                .query_row(
+                    "SELECT value_millis FROM metadata_rating_claims WHERE claim_id = ?1",
+                    [fixture.rating_claim_id.to_string()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .expect("rating value"),
+            8_400
+        );
+        assert_eq!(
+            database
+                .query_row(
+                    "SELECT previous_status || '>' || status FROM metadata_claim_lifecycle_events WHERE claim_id = ?1 AND sequence = 1",
+                    [fixture.field_claim_id.to_string()],
+                    |row| row.get::<_, String>(0),
+                )
+                .expect("lifecycle event"),
+            "fresh>stale"
+        );
+
+        let policies = database
+            .prepare(
+                "SELECT profile_id, preferred_locale, region, enabled_field_groups, last_known_good_policy FROM metadata_projection_policies ORDER BY profile_id",
+            )
+            .expect("policy statement")
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                ))
+            })
+            .expect("policy rows")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("policies");
+        assert_eq!(policies.len(), 2);
+        assert!(policies.contains(&(
+            fixture.first_profile_id.to_string(),
+            Some("en-ie".to_owned()),
+            Some("IE".to_owned()),
+            "[\"basic_info\"]".to_owned(),
+            "allow".to_owned(),
+        )));
+        assert!(policies.contains(&(
+            fixture.second_profile_id.to_string(),
+            Some("fr-fr".to_owned()),
+            Some("FR".to_owned()),
+            "[\"artwork\",\"basic_info\"]".to_owned(),
+            "deny".to_owned(),
+        )));
+
+        let overrides = database
+            .prepare(
+                "SELECT profile_id, value FROM metadata_profile_field_overrides WHERE record_id = ?1 ORDER BY profile_id",
+            )
+            .expect("override statement")
+            .query_map([fixture.record_id.to_string()], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .expect("override rows")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("overrides");
+        assert!(overrides.contains(&(
+            fixture.first_profile_id.to_string(),
+            "First profile title".to_owned(),
+        )));
+        assert!(overrides.contains(&(
+            fixture.second_profile_id.to_string(),
+            "Second profile title".to_owned(),
+        )));
+        assert_eq!(
+            database
+                .query_row(
+                    "SELECT attribution_text FROM metadata_attributions WHERE provider_id = 'tmdb'",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .expect("attribution"),
+            "Metadata supplied by TMDB"
+        );
+
+        drop(database);
+        staged.cleanup().expect("remove staged attempt");
+        assert_attempt_removed(restore_root.path(), attempt_id);
+    }
+
+    #[test]
+    fn archive_v4_round_trips_immutable_metadata_refresh_receipts() {
+        let fixture = metadata_v3_fixture();
+        let archive = archive_v4_from_v5(&fixture.archive);
+        let restore_root = tempfile::tempdir().expect("restore root");
+        let lock = LockedDataRoot::acquire(restore_root.path()).expect("exclusive restore root");
+        let attempt_id = RestoreAttemptId::new_v7();
+        let staged = stage_workspace_archive_pass_two(
+            &lock,
+            &mut Cursor::new(archive),
+            attempt_id,
+            RequestCorrelationId::new_v7(),
+            limits(),
+            &CancellationSignal::new(),
+        )
+        .expect("stage metadata-v4 archive");
+        let database = Connection::open_with_flags(
+            staged.database_path(),
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .expect("open staged database");
+        let response_json: String = database
+            .query_row(
+                "SELECT response_json FROM metadata_refresh_receipts WHERE operation_id = ?1",
+                [fixture.operation_id.to_string()],
+                |row| row.get(0),
+            )
+            .expect("restored receipt response");
+        crate::metadata::decode_refresh_receipt_outcome(
+            &response_json,
+            fixture.record_id,
+            &MetadataProviderId::try_new("tmdb").expect("provider"),
+            fixture.first_profile_id,
+            CapabilityKey::ExportWorkspace,
+            RequestCorrelationId::new_v7(),
+        )
+        .expect("restored exact outcome");
+        assert!(database
+            .execute(
+                "UPDATE metadata_refresh_receipts SET provider_id = 'mdblist' WHERE operation_id = ?1",
+                [fixture.operation_id.to_string()],
+            )
+            .is_err());
+        assert!(database
+            .execute(
+                "DELETE FROM metadata_refresh_receipts WHERE operation_id = ?1",
+                [fixture.operation_id.to_string()],
+            )
+            .is_err());
+        drop(database);
+
+        staged.cleanup().expect("remove staged attempt");
+        assert_attempt_removed(restore_root.path(), attempt_id);
+    }
+
+    #[test]
+    fn archive_v5_round_trips_identity_routing_and_policy_receipts() {
+        let fixture = identity_routing_archive_fixture();
+        let restore_root = tempfile::tempdir().expect("restore root");
+        let lock = LockedDataRoot::acquire(restore_root.path()).expect("exclusive restore root");
+        let attempt_id = RestoreAttemptId::new_v7();
+        let staged = stage_workspace_archive_pass_two(
+            &lock,
+            &mut Cursor::new(fixture.archive),
+            attempt_id,
+            RequestCorrelationId::new_v7(),
+            limits(),
+            &CancellationSignal::new(),
+        )
+        .expect("stage identity-routing archive-v5");
+        let database = Connection::open_with_flags(
+            staged.database_path(),
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .expect("open staged database");
+
+        for (table, expected) in [
+            ("identity_assertions", 1_i64),
+            ("identity_assertion_lifecycle_events", 1),
+            ("profile_anime_grouping_policies", 1),
+            ("client_anime_grouping_policies", 1),
+            ("anime_grouping_policy_receipts", 5),
+        ] {
+            let count: i64 = database
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .expect("restored M3 count");
+            assert_eq!(count, expected, "{table}");
+        }
+        assert_eq!(
+            database
+                .query_row(
+                    "SELECT preference FROM profile_anime_grouping_policies WHERE profile_id = ?1",
+                    [fixture.profile_id.to_string()],
+                    |row| row.get::<_, String>(0),
+                )
+                .expect("profile policy"),
+            "automatic"
+        );
+        assert_eq!(
+            database
+                .query_row(
+                    "SELECT preference FROM client_anime_grouping_policies WHERE client_id = ?1",
+                    [fixture.client_id.to_string()],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .expect("client policy"),
+            None
+        );
+        assert!(database
+            .execute(
+                "DELETE FROM identity_assertions WHERE assertion_id = ?1",
+                [fixture.assertion_id.to_string()],
+            )
+            .is_err());
+        assert!(database
+            .execute(
+                "UPDATE anime_grouping_policy_receipts SET affected_records = 0 WHERE operation_id = ?1",
+                [fixture.profile_operation_id.to_string()],
+            )
+            .is_err());
+        drop(database);
+
+        staged.cleanup().expect("remove staged attempt");
+        assert_attempt_removed(restore_root.path(), attempt_id);
+    }
+
+    #[test]
+    fn archive_v5_rejects_invalid_identity_lifecycle_and_payloads() {
+        let fixture = identity_routing_archive_fixture();
+        let maximum_profile_revision = rewrite_stream(
+            &fixture.archive,
+            WorkspaceExportEntity::ProfileAnimeGroupingPolicies,
+            |bytes| {
+                let mut row: serde_json::Value =
+                    serde_json::from_slice(&bytes[..bytes.len().saturating_sub(1)])
+                        .expect("profile anime policy row");
+                row["revision"] = serde_json::json!(9_007_199_254_740_991_u64);
+                *bytes = serde_json::to_vec(&row).expect("profile policy mutation");
+                bytes.push(b'\n');
+            },
+        );
+        let maximum_profile_revision = rewrite_stream(
+            &maximum_profile_revision,
+            WorkspaceExportEntity::AnimeGroupingPolicyReceipts,
+            |bytes| {
+                let mut rewritten = Vec::with_capacity(bytes.len());
+                for line in bytes
+                    .split(|byte| *byte == b'\n')
+                    .filter(|line| !line.is_empty())
+                {
+                    let mut row: serde_json::Value =
+                        serde_json::from_slice(line).expect("policy receipt row");
+                    if row["scope_kind"] == "profile" && row["change_kind"] == "rollback" {
+                        row["result_revision"] = serde_json::json!(9_007_199_254_740_991_u64);
+                    }
+                    rewritten.extend_from_slice(
+                        &serde_json::to_vec(&row).expect("policy receipt mutation"),
+                    );
+                    rewritten.push(b'\n');
+                }
+                *bytes = rewritten;
+            },
+        );
+        let duplicate_profile_revision = rewrite_stream(
+            &fixture.archive,
+            WorkspaceExportEntity::ProfileAnimeGroupingPolicies,
+            |bytes| {
+                let mut row: serde_json::Value =
+                    serde_json::from_slice(&bytes[..bytes.len().saturating_sub(1)])
+                        .expect("profile anime policy row");
+                row["revision"] = serde_json::json!(4);
+                *bytes = serde_json::to_vec(&row).expect("profile policy mutation");
+                bytes.push(b'\n');
+            },
+        );
+        let duplicate_profile_revision = rewrite_stream(
+            &duplicate_profile_revision,
+            WorkspaceExportEntity::AnimeGroupingPolicyReceipts,
+            |bytes| {
+                let mut rewritten = Vec::with_capacity(bytes.len());
+                for line in bytes
+                    .split(|byte| *byte == b'\n')
+                    .filter(|line| !line.is_empty())
+                {
+                    let mut row: serde_json::Value =
+                        serde_json::from_slice(line).expect("policy receipt row");
+                    if row["scope_kind"] == "profile" && row["change_kind"] == "rollback" {
+                        row["result_revision"] = serde_json::json!(4);
+                    }
+                    rewritten.extend_from_slice(
+                        &serde_json::to_vec(&row).expect("policy receipt mutation"),
+                    );
+                    rewritten.push(b'\n');
+                }
+                *bytes = rewritten;
+            },
+        );
+        let maximum_client_revision = rewrite_stream(
+            &fixture.archive,
+            WorkspaceExportEntity::ClientAnimeGroupingPolicies,
+            |bytes| {
+                let mut row: serde_json::Value =
+                    serde_json::from_slice(&bytes[..bytes.len().saturating_sub(1)])
+                        .expect("client anime policy row");
+                row["preference"] = serde_json::Value::Null;
+                row["revision"] = serde_json::json!(9_007_199_254_740_991_u64);
+                *bytes = serde_json::to_vec(&row).expect("client policy mutation");
+                bytes.push(b'\n');
+            },
+        );
+        let maximum_client_revision = rewrite_stream(
+            &maximum_client_revision,
+            WorkspaceExportEntity::AnimeGroupingPolicyReceipts,
+            |bytes| {
+                let mut rewritten = Vec::with_capacity(bytes.len());
+                for line in bytes
+                    .split(|byte| *byte == b'\n')
+                    .filter(|line| !line.is_empty())
+                {
+                    let mut row: serde_json::Value =
+                        serde_json::from_slice(line).expect("policy receipt row");
+                    if row["scope_kind"] == "client" {
+                        row["change_kind"] = serde_json::json!("inherit_profile");
+                        row["requested_preference"] = serde_json::Value::Null;
+                        row["result_preference"] = serde_json::json!("group_by_tv_work");
+                        row["result_source"] = serde_json::json!("profile_default");
+                        row["result_revision"] = serde_json::json!(9_007_199_254_740_991_u64);
+                    }
+                    rewritten.extend_from_slice(
+                        &serde_json::to_vec(&row).expect("policy receipt mutation"),
+                    );
+                    rewritten.push(b'\n');
+                }
+                *bytes = rewritten;
+            },
+        );
+        for (hostile, expected_policy_error) in [
+            (
+                rewrite_stream(
+                    &fixture.archive,
+                    WorkspaceExportEntity::IdentityAssertionLifecycleEvents,
+                    |bytes| {
+                        let mut row: serde_json::Value =
+                            serde_json::from_slice(&bytes[..bytes.len().saturating_sub(1)])
+                                .expect("identity lifecycle row");
+                        row["sequence"] = serde_json::json!(2);
+                        *bytes = serde_json::to_vec(&row).expect("sequence mutation");
+                        bytes.push(b'\n');
+                    },
+                ),
+                false,
+            ),
+            (
+                rewrite_stream(
+                    &fixture.archive,
+                    WorkspaceExportEntity::IdentityAssertions,
+                    |bytes| {
+                        let mut row: serde_json::Value =
+                            serde_json::from_slice(&bytes[..bytes.len().saturating_sub(1)])
+                                .expect("identity assertion row");
+                        row["evidence_json"] = serde_json::json!(serde_json::json!([{
+                            "method": "invented",
+                            "observed_source": "hostile",
+                            "derivation_root": null,
+                            "reviewer": null,
+                            "observed_at": "2026-08-30",
+                            "evidence_id": null,
+                        }])
+                        .to_string());
+                        *bytes = serde_json::to_vec(&row).expect("payload mutation");
+                        bytes.push(b'\n');
+                    },
+                ),
+                false,
+            ),
+            (
+                rewrite_stream(
+                    &fixture.archive,
+                    WorkspaceExportEntity::AnimeGroupingPolicyReceipts,
+                    |bytes| {
+                        let line_end = bytes
+                            .iter()
+                            .position(|byte| *byte == b'\n')
+                            .expect("policy receipt line");
+                        let mut row: serde_json::Value =
+                            serde_json::from_slice(&bytes[..line_end]).expect("policy receipt row");
+                        row["previous_preference"] =
+                            serde_json::json!("keep_kitsu_releases_separate");
+                        let mut replacement =
+                            serde_json::to_vec(&row).expect("policy receipt mutation");
+                        replacement.push(b'\n');
+                        replacement.extend_from_slice(&bytes[line_end + 1..]);
+                        *bytes = replacement;
+                    },
+                ),
+                true,
+            ),
+            (
+                rewrite_stream(
+                    &fixture.archive,
+                    WorkspaceExportEntity::AnimeGroupingPolicyReceipts,
+                    |bytes| {
+                        let line_end = bytes
+                            .iter()
+                            .position(|byte| *byte == b'\n')
+                            .expect("policy receipt line");
+                        let mut row: serde_json::Value =
+                            serde_json::from_slice(&bytes[..line_end]).expect("policy receipt row");
+                        row["affected_records"] = serde_json::json!(999);
+                        let mut replacement =
+                            serde_json::to_vec(&row).expect("policy receipt mutation");
+                        replacement.push(b'\n');
+                        replacement.extend_from_slice(&bytes[line_end + 1..]);
+                        *bytes = replacement;
+                    },
+                ),
+                true,
+            ),
+            (maximum_client_revision, true),
+            (maximum_profile_revision, true),
+            (duplicate_profile_revision, true),
+        ] {
+            let restore_root = tempfile::tempdir().expect("restore root");
+            let lock =
+                LockedDataRoot::acquire(restore_root.path()).expect("exclusive restore root");
+            let attempt_id = RestoreAttemptId::new_v7();
+            let error = stage_workspace_archive_pass_two(
+                &lock,
+                &mut Cursor::new(hostile),
+                attempt_id,
+                RequestCorrelationId::new_v7(),
+                limits(),
+                &CancellationSignal::new(),
+            )
+            .err()
+            .expect("invalid identity-routing state must fail");
+            assert!(if expected_policy_error {
+                matches!(error, RestoreImportError::PolicyReceiptInvariant)
+            } else {
+                matches!(error, RestoreImportError::IdentityRoutingInvariant)
+            });
+            assert_attempt_removed(restore_root.path(), attempt_id);
+        }
+    }
+
+    #[test]
+    fn restore_repairs_legacy_provider_coordinates_before_activation() {
+        let restore_root = tempfile::tempdir().expect("restore root");
+        let lock = LockedDataRoot::acquire(restore_root.path()).expect("exclusive restore root");
+        let attempt_id = RestoreAttemptId::new_v7();
+        let staged = stage_workspace_archive_pass_two(
+            &lock,
+            &mut Cursor::new(legacy_google_books_archive()),
+            attempt_id,
+            RequestCorrelationId::new_v7(),
+            limits(),
+            &CancellationSignal::new(),
+        )
+        .expect("stage legacy provider fixture");
+        let database = Connection::open_with_flags(
+            staged.database_path(),
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .expect("open staged database");
+        let restored: (String, String, String, String, i64) = database
+            .query_row(
+                r#"
+                SELECT record.grain, identifier.namespace, identifier.grain, claim.source,
+                       (SELECT user_version FROM pragma_user_version)
+                FROM records record
+                JOIN external_identifiers identifier ON identifier.record_id = record.record_id
+                JOIN metadata_field_claims claim ON claim.record_id = record.record_id
+                WHERE identifier.value = 'restore-book'
+                "#,
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .expect("restored canonical provider coordinate");
+        assert_eq!(
+            restored,
+            (
+                "edition".to_owned(),
+                "googlebooks.volume".to_owned(),
+                "edition".to_owned(),
+                "googlebooks.volume".to_owned(),
+                SCHEMA_VERSION,
+            )
+        );
+
+        drop(database);
+        staged.cleanup().expect("remove staged attempt");
+        assert_attempt_removed(restore_root.path(), attempt_id);
+    }
+
+    #[test]
+    fn archive_v1_restore_keeps_legacy_rows_and_leaves_v2_tables_empty() {
+        let fixture = full_fixture();
+        let archive = archive_v1_from_v2(&fixture.archive);
+        let restore_root = tempfile::tempdir().expect("restore root");
+        let lock = LockedDataRoot::acquire(restore_root.path()).expect("exclusive restore root");
+        let attempt_id = RestoreAttemptId::new_v7();
+
+        let staged = stage_workspace_archive_pass_two(
+            &lock,
+            &mut Cursor::new(archive),
+            attempt_id,
+            RequestCorrelationId::new_v7(),
+            limits(),
+            &CancellationSignal::new(),
+        )
+        .expect("stage archive-v1 fixture");
+        let database = Connection::open_with_flags(
+            staged.database_path(),
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .expect("open staged database");
+        let record_count: i64 = database
+            .query_row("SELECT COUNT(*) FROM records", [], |row| row.get(0))
+            .expect("restored legacy record count");
+        assert_eq!(record_count, 2);
+        for table in [
+            "metadata_field_claims",
+            "metadata_field_overrides",
+            "profile_record_tracking_dispositions",
+        ] {
+            let count: i64 = database
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .expect("archive-v2 table count");
+            assert_eq!(count, 0, "{table}");
+        }
+        drop(database);
+
+        staged.cleanup().expect("remove staged attempt");
+        assert_attempt_removed(restore_root.path(), attempt_id);
+    }
+
+    #[test]
+    fn historical_v11_archive_v1_and_v2_restore_into_the_current_schema() {
+        let fixture = full_fixture();
+        let v2 = archive_v2_from_v3(&fixture.archive);
+        for archive in [archive_v1_from_v2(&v2), v2] {
+            let archive = rewrite_manifest_schema(
+                &archive,
+                11,
+                "sha256:c833fb634b64d0b9680e4734b22684e8eab36710fca5c95d4315f3141491687a",
+            );
+            let restore_root = tempfile::tempdir().expect("restore root");
+            let lock =
+                LockedDataRoot::acquire(restore_root.path()).expect("exclusive restore root");
+            let attempt_id = RestoreAttemptId::new_v7();
+            let staged = stage_workspace_archive_pass_two(
+                &lock,
+                &mut Cursor::new(archive),
+                attempt_id,
+                RequestCorrelationId::new_v7(),
+                limits(),
+                &CancellationSignal::new(),
+            )
+            .expect("historical archive restores into current schema");
+            staged.cleanup().expect("remove staged attempt");
+            assert_attempt_removed(restore_root.path(), attempt_id);
+        }
+    }
+
+    #[test]
+    fn historical_v13_archive_v4_restores_without_local_access_authority() {
+        let fixture = full_fixture();
+        let archive = archive_v4_from_v5(&fixture.archive);
+        let restore_root = tempfile::tempdir().expect("restore root");
+        let lock = LockedDataRoot::acquire(restore_root.path()).expect("exclusive restore root");
+        let attempt_id = RestoreAttemptId::new_v7();
+        let staged = stage_workspace_archive_pass_two(
+            &lock,
+            &mut Cursor::new(archive),
+            attempt_id,
+            RequestCorrelationId::new_v7(),
+            limits(),
+            &CancellationSignal::new(),
+        )
+        .expect("historical archive-v4/schema-v13 restores");
+        let database = Connection::open_with_flags(
+            staged.database_path(),
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .expect("open staged database");
+        let local_rows: i64 = database
+            .query_row(NODE_LOCAL_STATE_COUNT_SQL, [], |row| row.get(0))
+            .expect("node-local state");
+        assert_eq!(local_rows, 0);
+        drop(database);
+        staged.cleanup().expect("remove staged attempt");
+        assert_attempt_removed(restore_root.path(), attempt_id);
+    }
+
+    #[test]
+    fn archive_v4_rejects_a_forged_v13_schema_fingerprint() {
+        let fixture = full_fixture();
+        let v4 = archive_v4_from_v5(&fixture.archive);
+        let archive = rewrite_manifest_schema(
+            &v4,
+            13,
+            "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        );
+        let restore_root = tempfile::tempdir().expect("restore root");
+        let lock = LockedDataRoot::acquire(restore_root.path()).expect("exclusive restore root");
+        let attempt_id = RestoreAttemptId::new_v7();
+        let error = stage_workspace_archive_pass_two(
+            &lock,
+            &mut Cursor::new(archive),
+            attempt_id,
+            RequestCorrelationId::new_v7(),
+            limits(),
+            &CancellationSignal::new(),
+        )
+        .err()
+        .expect("forged schema fingerprint is rejected");
+        assert!(matches!(error, RestoreImportError::SchemaMismatch));
+        assert_attempt_removed(restore_root.path(), attempt_id);
+    }
+
+    #[test]
+    fn archive_v4_accepts_only_the_exact_v14_schema_fingerprint() {
+        let digest = "sha256:630bc759b1bc6148931fe1b496e6e149553c5c005cf8d5956da683f2872c0375";
+        assert!(accepted_archive_schema(
+            WORKSPACE_ARCHIVE_V4_FORMAT_VERSION,
+            14,
+            digest,
+            "unused-current-digest",
+        ));
+        assert!(!accepted_archive_schema(
+            WORKSPACE_ARCHIVE_V4_FORMAT_VERSION,
+            14,
+            "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "unused-current-digest",
+        ));
+    }
+
+    #[test]
+    fn archive_v3_cannot_claim_a_pre_v3_schema_fingerprint() {
+        let fixture = metadata_v3_fixture();
+        let archive = archive_v3_from_v4(&fixture.archive);
+        let hostile = rewrite_manifest_schema(
+            &archive,
+            11,
+            "sha256:c833fb634b64d0b9680e4734b22684e8eab36710fca5c95d4315f3141491687a",
+        );
+        let restore_root = tempfile::tempdir().expect("restore root");
+        let lock = LockedDataRoot::acquire(restore_root.path()).expect("exclusive restore root");
+        let attempt_id = RestoreAttemptId::new_v7();
+        let error = stage_workspace_archive_pass_two(
+            &lock,
+            &mut Cursor::new(hostile),
+            attempt_id,
+            RequestCorrelationId::new_v7(),
+            limits(),
+            &CancellationSignal::new(),
+        )
+        .err()
+        .expect("archive-v3 must require the v3 schema");
+        assert!(matches!(error, RestoreImportError::SchemaMismatch));
+        assert_attempt_removed(restore_root.path(), attempt_id);
+    }
+
+    #[test]
+    fn hostile_metadata_lifecycle_chains_are_rejected() {
+        let fixture = metadata_v3_fixture();
+        for hostile in [
+            rewrite_stream(
+                &fixture.archive,
+                WorkspaceExportEntity::MetadataClaimLifecycleEvents,
+                |bytes| {
+                    let mut row: serde_json::Value =
+                        serde_json::from_slice(&bytes[..bytes.len().saturating_sub(1)])
+                            .expect("lifecycle row");
+                    row["sequence"] = serde_json::json!(2);
+                    *bytes = serde_json::to_vec(&row).expect("sequence mutation");
+                    bytes.push(b'\n');
+                },
+            ),
+            rewrite_stream(
+                &fixture.archive,
+                WorkspaceExportEntity::MetadataClaimLifecycleEvents,
+                |bytes| {
+                    let mut row: serde_json::Value =
+                        serde_json::from_slice(&bytes[..bytes.len().saturating_sub(1)])
+                            .expect("lifecycle row");
+                    row["previous_status"] = serde_json::json!("stale");
+                    *bytes = serde_json::to_vec(&row).expect("status mutation");
+                    bytes.push(b'\n');
+                },
+            ),
+            rewrite_stream(
+                &fixture.archive,
+                WorkspaceExportEntity::MetadataClaimProvenance,
+                Vec::clear,
+            ),
+        ] {
+            let restore_root = tempfile::tempdir().expect("restore root");
+            let lock =
+                LockedDataRoot::acquire(restore_root.path()).expect("exclusive restore root");
+            let attempt_id = RestoreAttemptId::new_v7();
+            let error = stage_workspace_archive_pass_two(
+                &lock,
+                &mut Cursor::new(hostile),
+                attempt_id,
+                RequestCorrelationId::new_v7(),
+                limits(),
+                &CancellationSignal::new(),
+            )
+            .err()
+            .expect("invalid lifecycle chain must fail");
+            assert!(matches!(
+                error,
+                RestoreImportError::DomainInvariant
+                    | RestoreImportError::MetadataLifecycleInvariant
+            ));
+            assert_attempt_removed(restore_root.path(), attempt_id);
+        }
     }
 
     #[test]
@@ -2857,7 +5451,10 @@ mod tests {
         .err()
         .expect("cross-workspace row must fail");
         assert!(
-            matches!(error, RestoreImportError::DomainInvariant),
+            matches!(
+                error,
+                RestoreImportError::DomainInvariant | RestoreImportError::AggregateInvariant
+            ),
             "unexpected error: {error:?}"
         );
         assert_attempt_removed(restore_root.path(), attempt_id);
@@ -2948,7 +5545,10 @@ mod tests {
         .err()
         .expect("missing record reference must fail");
         assert!(
-            matches!(error, RestoreImportError::DomainInvariant),
+            matches!(
+                error,
+                RestoreImportError::DomainInvariant | RestoreImportError::AggregateInvariant
+            ),
             "unexpected error: {error:?}"
         );
         assert_attempt_removed(restore_root.path(), attempt_id);
@@ -3147,11 +5747,7 @@ mod tests {
             )
             .expect("restored workspace");
         let local_rows: i64 = connection
-            .query_row(
-                "SELECT (SELECT COUNT(*) FROM node_state) + (SELECT COUNT(*) FROM credentials) + (SELECT COUNT(*) FROM profile_grants) + (SELECT COUNT(*) FROM grant_scopes)",
-                [],
-                |row| row.get(0),
-            )
+            .query_row(NODE_LOCAL_STATE_COUNT_SQL, [], |row| row.get(0))
             .expect("node-local state");
         assert_eq!(workspace_rows, 1);
         assert_eq!(local_rows, 0);
@@ -3192,6 +5788,7 @@ mod tests {
         let rejected = restored
             .authenticate_credential(AuthenticateCredentialQuery::new(
                 RequestCorrelationId::new_v7(),
+                CapabilityKey::VerifyWorkspace,
                 SecretMaterial::try_from_hex(&fixture.source_credential_hex)
                     .expect("copy source credential"),
             ))
@@ -3203,6 +5800,7 @@ mod tests {
         let recovered_access = restored
             .authenticate_credential(AuthenticateCredentialQuery::new(
                 RequestCorrelationId::new_v7(),
+                CapabilityKey::VerifyWorkspace,
                 SecretMaterial::from_bytes([7_u8; 32]),
             ))
             .expect("recovery credential authenticates");

@@ -1,0 +1,57 @@
+name: Contributor Task / Good First Issue
+description: Maintainer-defined scoped task, documentation fix, or fixture addition ready for community work
+title: "task: [Concise task title]"
+labels: ["help wanted", "good first issue", "contributor-ready"]
+body:
+  - type: markdown
+    attributes:
+      value: "This task is ready for an external contributor. Please read CONTRIBUTING.md before getting started."
+  - type: input
+    id: youtrack_id
+    attributes:
+      label: YouTrack Card Reference
+      description: Internal YouTrack issue identifier.
+      placeholder: "FASTI-123"
+    validations:
+      required: false
+  - type: dropdown
+    id: difficulty
+    attributes:
+      label: Difficulty & Time Estimate
+      options:
+        - "Quick (< 30 min) — Good First Issue"
+        - "Moderate (1–3 hours) — Help Wanted"
+        - "Deep (1–2 days) — Requires Domain Alignment"
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: User / Developer Outcome
+      description: What will be possible or fixed once this task is merged?
+    validations:
+      required: true
+  - type: textarea
+    id: paths
+    attributes:
+      label: Relevant Files & Directories
+      description: List the files or crates most likely involved.
+      placeholder: "- crates/fasti-cli/src/...\n- tests/conformance/..."
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: Acceptance Criteria
+      description: Explicit bullet list of conditions for completion.
+      placeholder: "- [ ] Test added in...\n- [ ] Truth check passes: bash scripts/check-repository-truth.sh"
+    validations:
+      required: true
+  - type: textarea
+    id: test_command
+    attributes:
+      label: Primary Validation Command
+      description: Command the contributor should run locally to prove the fix.
+      placeholder: "cargo xtask test pr\n\nFocused checks (if applicable):\ncargo test -p fasti-cli -- --nocapture"
+    validations:
+      required: true

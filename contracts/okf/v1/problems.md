@@ -1,19 +1,48 @@
 ---
 type: Fasti Problem Catalogue
-title: B1 problem codes
-description: Shared problem-code identifiers referenced by finalized B1 capabilities.
+title: Governed problem codes
+description: Shared problem-code identifiers referenced by finalized catalogue capabilities.
 resource: https://fasti.scrobble.dev/ns/knowledge/v1/problems
-tags: [fasti, b1, contracts, problems]
+tags: [fasti, contracts, problems]
 status: draft
 identifiers:
+  - already_initialized
+  - auth_browser_binding_invalid
+  - auth_continuation_persistence_failed
+  - auth_identity_conflict
+  - auth_selection_changed
+  - auth_subject_unaffiliated
+  - authentication_failed
+  - bootstrap_closed
+  - browser_session_expired
+  - browser_session_revoked
   - capacity_exceeded
   - capability_unavailable
   - forbidden
   - idempotency_conflict
+  - identity_conflict
+  - identity_service_unavailable
+  - integrity_failed
+  - invalid_identifier
   - invalid_observation
   - malformed_json
+  - metadata_claim_stale
   - payload_too_large
+  - provider_credential_expired
+  - provider_credential_invalid
+  - provider_credential_missing
+  - provider_rate_limited
+  - provider_response_invalid
+  - provider_route_unavailable
+  - provider_unavailable
   - receipt_not_found
+  - record_not_found
+  - storage_unavailable
+  - session_policy_changed
+  - trailbase_proof_invalid
+  - trailbase_session_cleanup_failed
+  - trailbase_trust_unavailable
+  - trailbase_version_unsupported
   - unsupported_media_type
   - validation_failed
 sources:
@@ -22,26 +51,55 @@ sources:
     title: Fasti capability registry v1
 ---
 
-# B1 problem codes
+# Governed problem codes
 
-These are the stable problem names referenced by finalized B1 capabilities in
+These are the stable problem names referenced by finalized capabilities in
 the [registry](../../registry/v1/capabilities.yaml).[^fasti-capability-registry]
 The shared RFC 9457 representation carries a capability ID, safe state,
 retryability, ordered next actions, and a correlation ID. Individual codes do
 not claim a later-body failure path is executable.
 
-| Code                     | Contract meaning                                                 |
-| ------------------------ | ---------------------------------------------------------------- |
-| `capacity_exceeded`      | A bounded application resource rejected work without mutation.   |
-| `capability_unavailable` | The requested capability is owned by another runtime body.       |
-| `forbidden`              | The request context is not authorized for the capability.        |
-| `idempotency_conflict`   | An operation identifier was reused with different semantics.     |
-| `invalid_observation`    | An observation violates the governed input contract.             |
-| `malformed_json`         | The request body is not well-formed JSON; no mutation occurred.  |
-| `payload_too_large`      | The request exceeded its documented bounded body limit.          |
-| `receipt_not_found`      | No visible receipt matches the requested identifier and context. |
-| `unsupported_media_type` | The request did not use the required JSON media type.            |
-| `validation_failed`      | One or more public fields fail contract validation.              |
+| Code                          | Contract meaning                                                           |
+| ----------------------------- | -------------------------------------------------------------------------- |
+| `already_initialized`         | One-time durable node initialization already completed.                    |
+| `auth_browser_binding_invalid` | The browser request is not bound to one active Fasti authentication ceremony. |
+| `auth_continuation_persistence_failed` | The sign-in selection was not persisted after TrailBase cleanup; no Fasti session was issued. |
+| `auth_identity_conflict`      | The proven identity conflicts with an existing Fasti identity link.        |
+| `auth_selection_changed`      | Available sign-in choices changed after the person reviewed them.          |
+| `auth_subject_unaffiliated`   | The proven subject has no active membership in the selected workspace.     |
+| `authentication_failed`       | The bearer credential is missing, malformed, or inactive.                  |
+| `bootstrap_closed`            | The enrollment proof is invalid, expired, or already consumed.             |
+| `browser_session_expired`     | The opaque browser session reached its idle or absolute expiry.            |
+| `browser_session_revoked`     | The opaque browser session is no longer active.                            |
+| `capacity_exceeded`           | A bounded application resource rejected work without mutation.             |
+| `capability_unavailable`      | The requested capability is owned by another runtime body.                 |
+| `forbidden`                   | The request context is not authorized for the capability.                  |
+| `idempotency_conflict`        | An operation identifier was reused with different semantics.               |
+| `identity_conflict`           | An exact external identifier is already attached to another active record. |
+| `identity_service_unavailable` | The pinned human identity service did not complete the operation.         |
+| `integrity_failed`            | Durable local state failed a recorded integrity invariant.                 |
+| `invalid_identifier`          | An identifier or grain does not satisfy the governed format.               |
+| `invalid_observation`         | An observation violates the governed input contract.                       |
+| `malformed_json`              | The request body is not well-formed JSON; no mutation occurred.            |
+| `metadata_claim_stale`        | A refresh retained the labelled last-known-good claim instead of erasing it. |
+| `payload_too_large`           | The request exceeded its documented bounded body limit.                    |
+| `provider_credential_expired` | The provider credential has expired and must be replaced.                  |
+| `provider_credential_invalid` | The provider rejected the configured credential.                           |
+| `provider_credential_missing` | The capability requires a credential that is not available.                |
+| `provider_rate_limited`       | The provider rejected the request because its rate limit was reached.      |
+| `provider_response_invalid`   | The provider returned an invalid or unsafe response.                       |
+| `provider_route_unavailable`  | The governed provider route could not be reached.                          |
+| `provider_unavailable`        | The provider or requested capability is unavailable in this runtime.       |
+| `receipt_not_found`           | No visible receipt matches the requested identifier and context.           |
+| `record_not_found`            | No active record is available for the requested identifier.                |
+| `session_policy_changed`      | The browser session no longer satisfies current authorization policy.      |
+| `storage_unavailable`         | The local durability boundary is temporarily unavailable.                  |
+| `trailbase_proof_invalid`     | The TrailBase proof did not satisfy the active ceremony.                   |
+| `trailbase_session_cleanup_failed` | TrailBase refresh-session cleanup was not confirmed.                 |
+| `trailbase_trust_unavailable` | The active installation does not satisfy the pinned trust contract.        |
+| `trailbase_version_unsupported` | The active TrailBase release is not the pinned supported release.        |
+| `unsupported_media_type`      | The request did not use the required JSON media type.                      |
+| `validation_failed`           | One or more public fields fail contract validation.                        |
 
 See [capabilities](capabilities.md) for which codes each capability declares and
 [lifecycle](lifecycle.md) before treating a declared problem as a production

@@ -1,5 +1,23 @@
 packages:
+  - "apps/*"
   - "packages/*"
+overrides:
+  "brace-expansion@5.0.8": "5.0.9"
+  "serialize-javascript@<7.0.5": "7.0.5"
+  "uuid@<11.1.1": "11.1.1"
+  # Remove once Express and body-parser permit the fixed qs minor release.
+  "qs@>=6.14.2 <=6.15.3": "6.16.0"
+  "svelte-check@4.7.6>typescript": "6.0.3"
+audit:
+  level: high
+  # Both image-size advisories are fixed by the tracked patch below.
+  ignore:
+    - GHSA-5p2g-fcmc-qvqq
+    - GHSA-w3rx-r6r6-pgpr
 allowBuilds:
   "@scarf/scarf": false
+  core-js: false
+  libxmljs2: true
   nx: true
+patchedDependencies:
+  image-size@2.0.2: patches/image-size@2.0.2.patch

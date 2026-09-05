@@ -1,14 +1,19 @@
 api_version: fasti.scrobble.dev/addons/v0.1
 kind: MetadataProvider
 metadata:
-  id: org.example.google-books
+  id: google-books
   name: Google Books
   version: 0.1.0
-  description: Illustrative declarative provider manifest for book editions.
-  licence: Example only. Complete provider terms review before release.
+  status: review
+  description: Bounded Google Books volume search for neutral book candidates.
+  licence: Google Books API terms apply. Complete release terms review before distribution.
+  sources:
+    - https://developers.google.com/books/docs/v1/using
+    - https://developers.google.com/books/docs/v1/reference/volumes/list
+    - https://cloud.google.com/docs/authentication/api-keys-use
 
 compatibility:
-  fasti: '>=0.1.0 <0.2.0'
+  fasti: ">=0.1.0 <0.2.0"
   manifest_schema: 0.1.0
 
 permissions:
@@ -19,50 +24,25 @@ permissions:
       - https
     methods:
       - GET
+    classes:
+      - public
   secrets:
     - google_books_api_key
   capabilities:
     - metadata.search
-    - metadata.fetch
-    - identity.propose
-    - artwork.fetch
   writes: []
 
 authentication:
-  type: query_parameter
-  parameter: key
+  type: header
+  header: X-Goog-Api-Key
   secret_ref: secret:providers/google-books/api-key
-  optional_for_test: true
+  required: true
+  sources:
+    - environment: GOOGLE_BOOKS_API_KEY
 
 record_support:
   - record_type: book
-    grain:
-      - work
-      - edition
-  - record_type: manga
-    grain:
-      - work
-      - edition
-
-namespaces:
-  - namespace: google_books_volume
-    grain:
-      - edition
-    id_pattern: ^[A-Za-z0-9_-]+$
-    normalization: trim
-    licence_posture: identifiers_only
-  - namespace: isbn10
-    grain:
-      - edition
-    id_pattern: ^[0-9X]{10}$
-    normalization: isbn
-    licence_posture: open
-  - namespace: isbn13
-    grain:
-      - edition
-    id_pattern: ^[0-9]{13}$
-    normalization: isbn
-    licence_posture: open
+    result_kind: book
 
 operations:
   search:
@@ -70,85 +50,70 @@ operations:
     path: /books/v1/volumes
     query:
       q: ${input.query}
-      startIndex: ${page.offset}
-      maxResults: ${page.limit}
-      langRestrict: ${input.language?}
-    pagination:
-      kind: offset
-      total_path: $.totalItems
+      startIndex: 0
+      maxResults: 10
+      projection: lite
+    headers:
+      X-Goog-Api-Key: ${secret.google_books_api_key}
     items_path: $.items
-  detail:
-    method: GET
-    path: /books/v1/volumes/${identity.value}
 
 normalization:
-  record_grain: edition
-  identity:
-    - namespace: google_books_volume
-      value: $.id
-    - namespace: isbn10
-      value: $.volumeInfo.industryIdentifiers[?(@.type=="ISBN_10")].identifier
-      optional: true
-    - namespace: isbn13
-      value: $.volumeInfo.industryIdentifiers[?(@.type=="ISBN_13")].identifier
-      optional: true
-  fields:
-    - field: title
-      value: $.volumeInfo.title
-      required: true
-    - field: authors
-      value: $.volumeInfo.authors
-      optional: true
-    - field: publisher
-      value: $.volumeInfo.publisher
-      optional: true
-    - field: published_date
-      value: $.volumeInfo.publishedDate
-      optional: true
-    - field: page_count
-      value: $.volumeInfo.pageCount
-      optional: true
-    - field: language
-      value: $.volumeInfo.language
-      optional: true
-    - field: description
-      value: $.volumeInfo.description
-      optional: true
-    - field: cover
-      value: $.volumeInfo.imageLinks.thumbnail
-      optional: true
-
-cache:
-  search_ttl: PT10M
-  detail_ttl: P7D
-  stale_while_revalidate: P7D
-  negative_ttl: PT30M
-  retain_last_good: true
-  persist_policy: only-if-library-saved-completed-or-user-pinned
+  candidate:
+    provider: google-books
+    provider_id: $.id
+    title: $.volumeInfo.title
+    kind: book
+    authors: $.volumeInfo.authors
+  local_record_write: none
 
 limits:
-  max_page_size: 40
+  max_results: 10
+  max_query_bytes: 256
   max_response_bytes: 2000000
   timeout_seconds: 15
-  retry:
-    max_attempts: 3
-    backoff: exponential-jitter
+  redirects: none
+  denied_network_classes:
+    - loopback
+    - private
+    - link_local
+    - multicast
+    - unspecified
+    - documentation
+    - reserved
 
 errors:
-  '404':
-    code: provider.record_not_found
-    identity_effect: observation only; never delete Fasti record
-  '429':
-    code: provider.rate_limited
-    user_action: Wait for the retry time. Fasti keeps last-good metadata.
+  "400":
+    code: provider_credential_invalid
+    user_action: Replace or remove the provider key. Fasti local data is unchanged.
+  "401":
+    code: provider_credential_invalid
+    user_action: Replace or remove the provider key. Fasti local data is unchanged.
+  "403":
+    code: provider_credential_invalid
+    user_action: Replace or remove the provider key. Fasti local data is unchanged.
+  "429":
+    code: provider_rate_limited
+    user_action: Wait, then retry. Fasti local data is unchanged.
+  invalid_response:
+    code: provider_response_invalid
+    user_action: Retry later. Fasti local data is unchanged.
+
+runtime:
+  trusted_hosts:
+    - tauri_desktop
+    - tauri_android
+  browser_enabled: false
+  transport: tauri_ipc
 
 conformance:
   fixtures:
-    - search-empty
-    - search-pagination
-    - detail-with-isbn
-    - detail-without-isbn
-    - localized-edition
-    - rate-limit-with-last-good
-    - 404-does-not-delete
-    - invalid-response-schema
+    success: ../fixtures/google-books/success.json
+    empty: ../fixtures/google-books/empty.json
+    rate_limited: ../fixtures/google-books/rate-limited.json
+    invalid_response: ../fixtures/google-books/invalid-response.json
+  deterministic:
+    - maps-volume-to-neutral-candidate
+    - bounds-provider-credentials
+    - declaration-deny-wins
+    - rejects-non-public-dns-answers
+  live_smoke: optional

@@ -14,6 +14,12 @@ import { readStrictJson } from "./lib/strict-json.mjs";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
+/**
+ * Recursively validates that JSON Schema references are internal only (start with #/).
+ * @param {*} value - The value to validate (object, array, or primitive).
+ * @param {string} [path="$"] - The JSONPath to the current value for error reporting.
+ * @throws {AssertionError} If an external reference is found.
+ */
 const assertInternalReferencesOnly = (value, path = "$") => {
   if (Array.isArray(value)) {
     value.forEach((child, index) =>
@@ -35,9 +41,10 @@ const assertInternalReferencesOnly = (value, path = "$") => {
 };
 
 /**
- * Validates authored contract artifacts and their cross-document consistency.
- * @param {string} root - Repository root containing the contract artifacts.
- * @return {{asyncApiVersion: string, expandedDocumentCount: number, portabilityFormat: string}} Validation results including the AsyncAPI version, expanded JSON-LD document count, and portability format.
+ * Validates authored AsyncAPI, portability, and JSON-LD contracts for a repository.
+ * @param {string} [root=repositoryRoot] - Repository root directory containing the contract files.
+ * @returns {Promise<Object>} Validation results with the AsyncAPI version, expanded document count, and portability format.
+ * @throws {AssertionError} If contract validation or consistency checks fail.
  */
 export async function validateAuthoredContracts(root = repositoryRoot) {
   const asyncApiPath = resolve(root, "contracts/asyncapi/v1/transport.yaml");
@@ -66,6 +73,14 @@ export async function validateAuthoredContracts(root = repositoryRoot) {
   const portabilityExamplePath = resolve(
     root,
     "contracts/portability/v1/workspace-manifest.example.json",
+  );
+  const portabilityV2SchemaPath = resolve(
+    root,
+    "contracts/portability/v2/workspace-manifest.schema.json",
+  );
+  const portabilityV2ExamplePath = resolve(
+    root,
+    "contracts/portability/v2/workspace-manifest.example.json",
   );
 
   // asyncApiPath is root (default repositoryRoot, or a validator-chosen
@@ -238,13 +253,23 @@ export async function validateAuthoredContracts(root = repositoryRoot) {
 
   const portabilitySchema = await readStrictJson(portabilitySchemaPath);
   const portabilityExample = await readStrictJson(portabilityExamplePath);
+  const portabilityV2Schema = await readStrictJson(portabilityV2SchemaPath);
+  const portabilityV2Example = await readStrictJson(portabilityV2ExamplePath);
   assertInternalReferencesOnly(portabilitySchema);
+  assertInternalReferencesOnly(portabilityV2Schema);
   const portabilityAjv = new Ajv2020({ allErrors: true, strict: true });
   portabilityAjv.addKeyword("x-fasti-contract-state");
-  for (const format of ["fasti-evidence-id", "fasti-workspace-id", "sha256"]) {
+  for (const format of [
+    "fasti-evidence-id",
+    "fasti-workspace-id",
+    "sha256",
+    "uint32",
+    "uint64",
+  ]) {
     portabilityAjv.addFormat(format, true);
   }
   const validatePortability = portabilityAjv.compile(portabilitySchema);
+  const validatePortabilityV2 = portabilityAjv.compile(portabilityV2Schema);
   assert.equal(
     validatePortability(portabilityExample),
     true,
@@ -259,6 +284,31 @@ export async function validateAuthoredContracts(root = repositoryRoot) {
     portabilityExample.manifest_digest,
     computedManifestDigest,
     "manifest_digest must cover RFC 8785/JCS canonical manifest bytes",
+  );
+  assert.equal(
+    validatePortabilityV2(portabilityV2Example),
+    true,
+    `portability v2 example errors:\n${JSON.stringify(validatePortabilityV2.errors, null, 2)}`,
+  );
+  const canonicalV2Manifest = canonicalize(portabilityV2Example.manifest);
+  assert.equal(typeof canonicalV2Manifest, "string");
+  assert.equal(
+    portabilityV2Example.manifest_digest,
+    `sha256:${createHash("sha256").update(canonicalV2Manifest, "utf8").digest("hex")}`,
+    "archive-v2 manifest_digest must cover RFC 8785/JCS canonical manifest bytes",
+  );
+  assert.deepEqual(
+    portabilityV2Example.manifest.streams.slice(0, 16),
+    portabilityExample.manifest.streams,
+    "archive v2 must retain the frozen archive-v1 stream prefix byte-for-byte",
+  );
+  assert.deepEqual(
+    portabilityV2Example.manifest.streams.slice(16).map(({ entity }) => entity),
+    [
+      "metadata_field_claims",
+      "metadata_field_overrides",
+      "profile_record_tracking_dispositions",
+    ],
   );
 
   const loadedFileUrls = [];

@@ -8,6 +8,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 
@@ -19,7 +20,82 @@ benchmark = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(benchmark)
 
 
+class CollectEnvironmentTests(unittest.TestCase):
+    """Test cases for environment collection and hardware fingerprinting."""
+
+    def _fake_collector(self, temperature: dict) -> SimpleNamespace:
+        return SimpleNamespace(
+            parse_os_image=lambda: {"id": "ubuntu", "version_id": "24.04"},
+            parse_storage_identity=lambda: (
+                {
+                    "root_source": "/dev/sda1",
+                    "root_filesystem_type": "ext4",
+                    "root_mount_options": "rw,relatime",
+                },
+                None,
+            ),
+            parse_firmware_identity=lambda scope: {"scope": scope},
+            parse_cpu_governors=lambda: {"observed": ["performance"]},
+            parse_temperature=lambda: temperature,
+        )
+
+    def test_fingerprint_commands_documents_the_hwmon_fallback(self) -> None:
+        fake_collector = self._fake_collector(
+            {
+                "source": "/sys/class/hwmon/hwmon1/temp1_input",
+                "sensor": "k10temp:Tctl",
+                "celsius": 55.0,
+            }
+        )
+        with tempfile.NamedTemporaryFile() as image_file:
+            image_file.write(b"fake-os-image-bytes")
+            image_file.flush()
+            with mock.patch.object(
+                benchmark, "performance_environment_module", return_value=fake_collector
+            ), mock.patch.object(benchmark, "run_checked", return_value="2.4.11"):
+                environment, collector = benchmark.collect_environment(
+                    Path(image_file.name)
+                )
+
+        self.assertIs(collector, fake_collector)
+        self.assertIn(
+            "read /sys/class/thermal/thermal_zone*/{type,temp} or CPU "
+            "/sys/class/hwmon/hwmon*/temp*_input",
+            environment["fingerprint_commands"],
+        )
+
+    def test_preflight_temperature_is_propagated_from_the_hwmon_fallback(self) -> None:
+        fake_collector = self._fake_collector(
+            {
+                "source": "/sys/class/hwmon/hwmon1/temp1_input",
+                "sensor": "k10temp:Tctl",
+                "celsius": 55.0,
+            }
+        )
+        with tempfile.NamedTemporaryFile() as image_file:
+            image_file.write(b"fake-os-image-bytes")
+            image_file.flush()
+            with mock.patch.object(
+                benchmark, "performance_environment_module", return_value=fake_collector
+            ), mock.patch.object(benchmark, "run_checked", return_value="2.4.11"):
+                environment, _ = benchmark.collect_environment(Path(image_file.name))
+
+        self.assertEqual(
+            environment["temperature"],
+            {
+                "preflight": {
+                    "source": "/sys/class/hwmon/hwmon1/temp1_input",
+                    "sensor": "k10temp:Tctl",
+                    "celsius": 55.0,
+                },
+                "post_capture": None,
+            },
+        )
+
+
 class CgroupBoundaryTests(unittest.TestCase):
+    """Test cases for cgroup validation and transient scope enforcement."""
+
     def test_expected_transient_scope_is_accepted(self) -> None:
         unit = "fasti-b1-tauri-" + "1" * 32 + ".scope"
         path = benchmark.validate_control_group(
@@ -57,6 +133,8 @@ class CgroupBoundaryTests(unittest.TestCase):
 
 
 class DerivationTests(unittest.TestCase):
+    """Test cases for platform compatibility and display session validation."""
+
     def test_macos_is_refused_before_linux_capture_requirements(self) -> None:
         with mock.patch.object(benchmark.platform, "system", return_value="Darwin"):
             with self.assertRaisesRegex(benchmark.CaptureError, "WebKit XPC"):

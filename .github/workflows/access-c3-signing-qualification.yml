@@ -1,0 +1,130 @@
+name: Access C3 isolated qualification
+
+on:
+  push:
+    branches: ["dev"]
+    paths:
+      - ".github/workflows/access-c3-signing-qualification.yml"
+      - "qualification/access-c3-signing/**"
+      - "qualification/access-c3-framing/**"
+      - "qualification/access-c3-kdf/**"
+      - "crates/fasti-domain/**"
+      - "crates/fasti-application/**"
+      - "crates/fasti-contracts/**"
+      - "crates/fasti-store/**"
+      - "contracts/portability/v1/workspace-manifest.example.json"
+      - "Cargo.toml"
+  pull_request:
+    branches: ["dev"]
+    paths:
+      - ".github/workflows/access-c3-signing-qualification.yml"
+      - "qualification/access-c3-signing/**"
+      - "qualification/access-c3-framing/**"
+      - "qualification/access-c3-kdf/**"
+      - "crates/fasti-domain/**"
+      - "crates/fasti-application/**"
+      - "crates/fasti-contracts/**"
+      - "crates/fasti-store/**"
+      - "contracts/portability/v1/workspace-manifest.example.json"
+      - "Cargo.toml"
+
+permissions:
+  contents: read
+
+jobs:
+  qualification:
+    name: ${{ matrix.label }} qualification (not runtime)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: access-c3-signing
+            label: Detached-signature
+            unit_tests: 9
+            doctests: 3
+          - package: access-c3-framing
+            label: Framing
+            unit_tests: 20
+            doctests: 2
+          - package: access-c3-kdf
+            label: KDF runner
+            unit_tests: 14
+            doctests: 0
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CC: /usr/bin/cc
+      CARGO_BUILD_JOBS: 2
+      CARGO_TARGET_DIR: ${{ github.workspace }}/qualification/${{ matrix.package }}/target
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@032958afbdc797a9164d3bc0b56325c1308924a5 # 1.97.1
+        with:
+          components: rustfmt, clippy
+      - name: Reject native source and library overrides
+        shell: bash
+        run: |
+          for variable in SODIUM_LIB_DIR SODIUM_USE_PKG_CONFIG SODIUM_SHARED SODIUM_DIST_DIR; do
+            if [[ -v "$variable" ]]; then
+              echo "::error::Unset $variable before running C3 qualification."
+              exit 1
+            fi
+          done
+      - name: Fetch the isolated locked graph
+        run: cargo fetch --locked --manifest-path qualification/${{ matrix.package }}/Cargo.toml
+      - name: Check formatting
+        run: cargo fmt --manifest-path qualification/${{ matrix.package }}/Cargo.toml -- --check
+      - name: Run complete debug and release suites
+        shell: bash
+        env:
+          QUALIFICATION_PACKAGE: ${{ matrix.package }}
+          EXPECTED_UNIT_TESTS: ${{ matrix.unit_tests }}
+          EXPECTED_DOCTESTS: ${{ matrix.doctests }}
+        run: |
+          set -euo pipefail
+          expected_counts=("$EXPECTED_UNIT_TESTS")
+          if (( EXPECTED_DOCTESTS > 0 )); then
+            expected_counts+=("$EXPECTED_DOCTESTS")
+          fi
+          for profile in debug release; do
+            args=()
+            if [[ "$profile" == release ]]; then args+=(--release); fi
+            log="$RUNNER_TEMP/$QUALIFICATION_PACKAGE-$profile.log"
+            cargo test "${args[@]}" --offline --locked --manifest-path "qualification/$QUALIFICATION_PACKAGE/Cargo.toml" -- --test-threads=1 2>&1 | tee "$log"
+            test "$(grep -c '^test result:' "$log")" -eq "${#expected_counts[@]}"
+            for expected in "${expected_counts[@]}"; do
+              grep -Eq "^test result: ok\\. $expected passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in [0-9.]+s$" "$log"
+            done
+          done
+      - name: Deny compiler warnings
+        run: cargo clippy --offline --locked --manifest-path qualification/${{ matrix.package }}/Cargo.toml --all-targets -- -D warnings
+
+  advisories:
+    name: ${{ matrix.label }} qualification dependency advisories
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: access-c3-signing
+            label: Detached-signature
+          - package: access-c3-framing
+            label: Framing
+          - package: access-c3-kdf
+            label: KDF runner
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@f347db2dee5edb1a4bddcbed2220c6e7828a0fad # cargo-audit
+        with:
+          tool: cargo-audit
+      - name: Audit the isolated lockfile without suppression
+        run: cargo audit --file qualification/${{ matrix.package }}/Cargo.lock

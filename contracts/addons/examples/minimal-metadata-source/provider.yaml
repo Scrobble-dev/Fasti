@@ -1,0 +1,114 @@
+api_version: fasti.scrobble.dev/addons/v0.1
+kind: MetadataProvider
+metadata:
+  id: minimal-metadata-source
+  name: Minimal metadata source
+  version: 0.1.0
+  status: review
+  description: Offline synthetic metadata-source authoring example.
+  licence: Synthetic fixtures are Apache-2.0 OR AGPL-3.0-or-later.
+  sources:
+    - https://example.com/metadata-source-documentation
+
+compatibility:
+  fasti: ">=0.1.0 <0.2.0"
+  manifest_schema: 0.1.0
+
+permissions:
+  network:
+    hosts:
+      - api.example.com
+    schemes:
+      - https
+    methods:
+      - GET
+    classes:
+      - public
+  secrets:
+    - example_api_key
+  capabilities:
+    - metadata.search
+  writes: []
+
+authentication:
+  type: header
+  header: X-Example-Api-Key
+  secret_ref: secret:providers/minimal-metadata-source/api-key
+  required: true
+  sources:
+    - environment: EXAMPLE_METADATA_API_KEY
+
+record_support:
+  - record_type: book
+    result_kind: book
+
+operations:
+  search:
+    method: GET
+    path: /v1/search
+    query:
+      q: ${input.query}
+      limit: 10
+    headers:
+      X-Example-Api-Key: ${secret.example_api_key}
+    items_path: $.items
+
+normalization:
+  candidate:
+    provider: minimal-metadata-source
+    provider_id: $.id
+    title: $.title
+    kind: book
+    authors: $.authors
+  local_record_write: none
+
+limits:
+  max_results: 10
+  max_query_bytes: 256
+  max_response_bytes: 2000000
+  timeout_seconds: 15
+  redirects: none
+  denied_network_classes:
+    - loopback
+    - private
+    - link_local
+    - multicast
+    - unspecified
+    - documentation
+    - reserved
+
+errors:
+  "400":
+    code: provider_credential_invalid
+    user_action: Replace or remove the provider key. Fasti local data is unchanged.
+  "401":
+    code: provider_credential_invalid
+    user_action: Replace or remove the provider key. Fasti local data is unchanged.
+  "403":
+    code: provider_credential_invalid
+    user_action: Replace or remove the provider key. Fasti local data is unchanged.
+  "429":
+    code: provider_rate_limited
+    user_action: Wait, then retry. Fasti local data is unchanged.
+  invalid_response:
+    code: provider_response_invalid
+    user_action: Retry later. Fasti local data is unchanged.
+
+runtime:
+  trusted_hosts:
+    - tauri_desktop
+  browser_enabled: false
+  transport: tauri_ipc
+
+conformance:
+  fixtures:
+    success: fixtures/success.json
+    empty: fixtures/empty.json
+    rate_limited: fixtures/rate-limited.json
+    invalid_response: fixtures/invalid-response.json
+  deterministic:
+    - maps-synthetic-book-to-neutral-candidate
+    - keeps-credentials-out-of-query-parameters
+    - treats-empty-response-as-no-candidates
+    - maps-provider-failures-to-canonical-problems
+  live_smoke: optional

@@ -8,6 +8,10 @@ pub enum CapabilityBody {
     B1,
     B2,
     B3,
+    C1,
+    M1,
+    M2,
+    M3,
 }
 
 impl CapabilityBody {
@@ -17,6 +21,10 @@ impl CapabilityBody {
             Self::B1 => "B1",
             Self::B2 => "B2",
             Self::B3 => "B3",
+            Self::C1 => "C1",
+            Self::M1 => "M1",
+            Self::M2 => "M2",
+            Self::M3 => "M3",
         }
     }
 }
@@ -43,14 +51,11 @@ pub enum AuthorizationKind {
     Unauthenticated,
     BootstrapOnly,
     LocalOperator,
+    BrowserSession,
     Scoped,
+    ScopedOrBrowserSession,
 }
 
-/// Problem policy for one capability.
-///
-/// Iteration exposes only the finalized public contract. Runtime validation also
-/// accepts staged failures that are implemented in the current local kernel but
-/// remain reserved until their owning contract body is activated.
 #[derive(Debug, Clone, Copy)]
 pub struct CapabilityProblemPolicy {
     public: &'static [ProblemCode],
@@ -62,22 +67,18 @@ impl CapabilityProblemPolicy {
         Self { public, staged }
     }
 
-    /// Return the problem codes that belong to the active public contract.
     pub const fn public(self) -> &'static [ProblemCode] {
         self.public
     }
 
-    /// Return implemented runtime failures that are not public yet.
     pub const fn staged(self) -> &'static [ProblemCode] {
         self.staged
     }
 
-    /// Return true when runtime validation permits the problem for this capability.
     pub fn contains(self, code: &ProblemCode) -> bool {
         self.public().contains(code) || self.staged().contains(code)
     }
 
-    /// Iterate only the active public problem contract.
     pub fn iter(self) -> std::slice::Iter<'static, ProblemCode> {
         self.public().iter()
     }
@@ -87,46 +88,21 @@ macro_rules! define_capabilities {
     ($(($variant:ident, $contract_body:ident, $runtime_body:ident, $contract_state:ident, $runtime_availability:ident, $authorization:ident, [$($scope:ident),*], [$($problem:ident),*], [$($staged_problem:ident),*])),+ $(,)?) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
         #[serde(rename_all = "snake_case")]
-        pub enum CapabilityKey {
-            $($variant),+
-        }
+        pub enum CapabilityKey { $($variant),+ }
 
         impl CapabilityKey {
             pub const ALL: &'static [Self] = &[$(Self::$variant),+];
-
-            pub const fn contract_body(self) -> CapabilityBody {
-                match self { $(Self::$variant => CapabilityBody::$contract_body),+ }
-            }
-
-            pub const fn runtime_body(self) -> CapabilityBody {
-                match self { $(Self::$variant => CapabilityBody::$runtime_body),+ }
-            }
-
-            pub const fn contract_state(self) -> ContractState {
-                match self { $(Self::$variant => ContractState::$contract_state),+ }
-            }
-
-            pub const fn runtime_availability(self) -> RuntimeAvailability {
-                match self { $(Self::$variant => RuntimeAvailability::$runtime_availability),+ }
-            }
-
-            pub const fn authorization_kind(self) -> AuthorizationKind {
-                match self { $(Self::$variant => AuthorizationKind::$authorization),+ }
-            }
-
-            pub const fn required_scopes(self) -> &'static [ScopeKey] {
-                match self { $(Self::$variant => &[$(ScopeKey::$scope),*]),+ }
-            }
-
+            pub const fn contract_body(self) -> CapabilityBody { match self { $(Self::$variant => CapabilityBody::$contract_body),+ } }
+            pub const fn runtime_body(self) -> CapabilityBody { match self { $(Self::$variant => CapabilityBody::$runtime_body),+ } }
+            pub const fn contract_state(self) -> ContractState { match self { $(Self::$variant => ContractState::$contract_state),+ } }
+            pub const fn runtime_availability(self) -> RuntimeAvailability { match self { $(Self::$variant => RuntimeAvailability::$runtime_availability),+ } }
+            pub const fn authorization_kind(self) -> AuthorizationKind { match self { $(Self::$variant => AuthorizationKind::$authorization),+ } }
+            pub const fn required_scopes(self) -> &'static [ScopeKey] { match self { $(Self::$variant => &[$(ScopeKey::$scope),*]),+ } }
             pub const fn allowed_problem_codes(self) -> CapabilityProblemPolicy {
                 match self {
-                    $(Self::$variant => CapabilityProblemPolicy::new(
-                        &[$(ProblemCode::$problem),*],
-                        &[$(ProblemCode::$staged_problem),*],
-                    )),+
+                    $(Self::$variant => CapabilityProblemPolicy::new(&[$(ProblemCode::$problem),*], &[$(ProblemCode::$staged_problem),*])),+
                 }
             }
-
             pub const fn is_production_executable(self) -> bool {
                 matches!(self.runtime_availability(), RuntimeAvailability::Implemented)
             }
@@ -134,13 +110,22 @@ macro_rules! define_capabilities {
     };
 }
 
-// One application table owns capability lifecycle, authorization, scope, and
-// problem semantics. Transport bindings map stable public IDs onto these keys.
 define_capabilities!(
     (
         SystemHealth,
         B1,
         B0,
+        Finalized,
+        Implemented,
+        Unauthenticated,
+        [],
+        [],
+        []
+    ),
+    (
+        IntegrationStatus,
+        B1,
+        B1,
         Finalized,
         Implemented,
         Unauthenticated,
@@ -164,7 +149,7 @@ define_capabilities!(
         B1,
         B2,
         Finalized,
-        FixtureOnly,
+        Implemented,
         BootstrapOnly,
         [],
         [
@@ -172,16 +157,19 @@ define_capabilities!(
             MalformedJson,
             PayloadTooLarge,
             UnsupportedMediaType,
-            ValidationFailed
+            ValidationFailed,
+            AlreadyInitialized,
+            IntegrityFailed,
+            StorageUnavailable
         ],
-        [AlreadyInitialized, IntegrityFailed, StorageUnavailable]
+        []
     ),
     (
         EnrollFirstClient,
         B1,
         B2,
         Finalized,
-        FixtureOnly,
+        Implemented,
         Scoped,
         [ClientEnroll],
         [
@@ -189,9 +177,12 @@ define_capabilities!(
             MalformedJson,
             PayloadTooLarge,
             UnsupportedMediaType,
-            ValidationFailed
+            ValidationFailed,
+            BootstrapClosed,
+            IntegrityFailed,
+            StorageUnavailable
         ],
-        [BootstrapClosed, IntegrityFailed, StorageUnavailable]
+        []
     ),
     (
         SelectProfile,
@@ -202,7 +193,7 @@ define_capabilities!(
         Scoped,
         [ProfileSelect],
         [CapabilityUnavailable, Forbidden],
-        [IntegrityFailed, StorageUnavailable]
+        [AuthenticationFailed, IntegrityFailed, StorageUnavailable]
     ),
     (
         RotateCredential,
@@ -213,7 +204,7 @@ define_capabilities!(
         Scoped,
         [CredentialManage],
         [CapabilityUnavailable, Forbidden],
-        [IntegrityFailed, StorageUnavailable]
+        [AuthenticationFailed, IntegrityFailed, StorageUnavailable]
     ),
     (
         RevokeCredential,
@@ -235,27 +226,266 @@ define_capabilities!(
         Scoped,
         [ListenerConfigure],
         [CapabilityUnavailable, Forbidden],
-        [IntegrityFailed, StorageUnavailable, UnsupportedListener]
+        [
+            AuthenticationFailed,
+            IntegrityFailed,
+            StorageUnavailable,
+            UnsupportedListener
+        ]
     ),
     (
         AcceptObservation,
         B1,
         B2,
         Finalized,
-        FixtureOnly,
-        Scoped,
+        Implemented,
+        ScopedOrBrowserSession,
         [ObservationAccept],
         [
+            AuthenticationFailed,
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
             CapacityExceeded,
             Forbidden,
             IdempotencyConflict,
+            IntegrityFailed,
             InvalidObservation,
             MalformedJson,
             PayloadTooLarge,
+            SessionPolicyChanged,
+            StorageUnavailable,
             UnsupportedMediaType,
             ValidationFailed
         ],
-        [EvidenceNotFound, IntegrityFailed, StorageUnavailable]
+        [EvidenceNotFound]
+    ),
+    (
+        CreateBrowserSession,
+        C1,
+        C1,
+        Finalized,
+        Implemented,
+        Unauthenticated,
+        [],
+        [
+            AuthBrowserBindingInvalid,
+            AuthContinuationPersistenceFailed,
+            AuthIdentityConflict,
+            AuthSelectionChanged,
+            AuthSubjectUnaffiliated,
+            CapabilityUnavailable,
+            CapacityExceeded,
+            Forbidden,
+            IdentityServiceUnavailable,
+            IntegrityFailed,
+            MalformedJson,
+            PayloadTooLarge,
+            StorageUnavailable,
+            TrailBaseProofInvalid,
+            TrailBaseSessionCleanupFailed,
+            TrailBaseTrustUnavailable,
+            TrailBaseVersionUnsupported,
+            UnsupportedMediaType,
+            ValidationFailed
+        ],
+        []
+    ),
+    (
+        AccessIdentityBootstrap,
+        C1,
+        C1,
+        Finalized,
+        Implemented,
+        LocalOperator,
+        [],
+        [
+            AuthBrowserBindingInvalid,
+            AuthIdentityConflict,
+            CapacityExceeded,
+            Forbidden,
+            IdentityServiceUnavailable,
+            IntegrityFailed,
+            StorageUnavailable,
+            TrailBaseProofInvalid,
+            TrailBaseSessionCleanupFailed,
+            TrailBaseTrustUnavailable,
+            TrailBaseVersionUnsupported
+        ],
+        []
+    ),
+    (
+        ReadAccessProjection,
+        C1,
+        C1,
+        Finalized,
+        Implemented,
+        BrowserSession,
+        [],
+        [
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
+            CapabilityUnavailable,
+            IntegrityFailed,
+            SessionPolicyChanged,
+            StorageUnavailable
+        ],
+        []
+    ),
+    (
+        ReadBrowserSession,
+        C1,
+        C1,
+        Finalized,
+        Implemented,
+        BrowserSession,
+        [],
+        [
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
+            CapabilityUnavailable,
+            IntegrityFailed,
+            SessionPolicyChanged,
+            StorageUnavailable
+        ],
+        []
+    ),
+    (
+        EndBrowserSession,
+        C1,
+        C1,
+        Finalized,
+        Implemented,
+        BrowserSession,
+        [],
+        [
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
+            CapabilityUnavailable,
+            Forbidden,
+            IntegrityFailed,
+            SessionPolicyChanged,
+            StorageUnavailable
+        ],
+        []
+    ),
+    (
+        ListBrowserSessions,
+        C1,
+        C1,
+        Finalized,
+        Implemented,
+        BrowserSession,
+        [],
+        [
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
+            CapabilityUnavailable,
+            IntegrityFailed,
+            SessionPolicyChanged,
+            StorageUnavailable
+        ],
+        []
+    ),
+    (
+        RevokeBrowserSession,
+        C1,
+        C1,
+        Finalized,
+        Implemented,
+        BrowserSession,
+        [],
+        [
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
+            CapabilityUnavailable,
+            Forbidden,
+            IntegrityFailed,
+            SessionPolicyChanged,
+            StorageUnavailable,
+            ValidationFailed
+        ],
+        []
+    ),
+    (
+        RevokeOtherBrowserSessions,
+        C1,
+        C1,
+        Finalized,
+        Implemented,
+        BrowserSession,
+        [],
+        [
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
+            CapabilityUnavailable,
+            Forbidden,
+            IntegrityFailed,
+            SessionPolicyChanged,
+            StorageUnavailable,
+            ValidationFailed
+        ],
+        []
+    ),
+    (
+        RevokeAllBrowserSessions,
+        C1,
+        C1,
+        Finalized,
+        Implemented,
+        BrowserSession,
+        [],
+        [
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
+            CapabilityUnavailable,
+            Forbidden,
+            IntegrityFailed,
+            SessionPolicyChanged,
+            StorageUnavailable
+        ],
+        []
+    ),
+    (
+        RotateBrowserSession,
+        C1,
+        C1,
+        Finalized,
+        Implemented,
+        BrowserSession,
+        [],
+        [
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
+            CapabilityUnavailable,
+            Forbidden,
+            IntegrityFailed,
+            SessionPolicyChanged,
+            StorageUnavailable
+        ],
+        []
+    ),
+    (
+        SelectBrowserSessionProfile,
+        C1,
+        C1,
+        Finalized,
+        Implemented,
+        BrowserSession,
+        [],
+        [
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
+            CapabilityUnavailable,
+            Forbidden,
+            IntegrityFailed,
+            MalformedJson,
+            PayloadTooLarge,
+            SessionPolicyChanged,
+            StorageUnavailable,
+            UnsupportedMediaType,
+            ValidationFailed
+        ],
+        []
     ),
     (
         ReplayReceipt,
@@ -266,7 +496,7 @@ define_capabilities!(
         Scoped,
         [ReceiptRead],
         [Forbidden, ReceiptNotFound],
-        [IntegrityFailed, StorageUnavailable]
+        [AuthenticationFailed, IntegrityFailed, StorageUnavailable]
     ),
     (
         StreamReceipts,
@@ -277,35 +507,217 @@ define_capabilities!(
         Scoped,
         [ReceiptRead],
         [Forbidden, ReceiptNotFound],
-        [CursorExpired, IntegrityFailed, StorageUnavailable]
+        [
+            AuthenticationFailed,
+            CursorExpired,
+            IntegrityFailed,
+            StorageUnavailable
+        ]
     ),
     (
         CreateRecord,
+        B1,
         B2,
-        B2,
-        Reserved,
-        LaterBody,
-        Scoped,
+        Finalized,
+        Implemented,
+        ScopedOrBrowserSession,
         [IdentityWrite],
-        [CapabilityUnavailable, InvalidIdentifier, ValidationFailed],
-        [Forbidden, IntegrityFailed, StorageUnavailable]
+        [
+            AuthenticationFailed,
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
+            CapabilityUnavailable,
+            Forbidden,
+            IntegrityFailed,
+            InvalidIdentifier,
+            MalformedJson,
+            PayloadTooLarge,
+            SessionPolicyChanged,
+            StorageUnavailable,
+            UnsupportedMediaType,
+            ValidationFailed
+        ],
+        []
     ),
     (
         AttachIdentifier,
+        B1,
         B2,
-        B2,
-        Reserved,
-        LaterBody,
-        Scoped,
+        Finalized,
+        Implemented,
+        ScopedOrBrowserSession,
         [IdentityWrite],
-        [CapabilityUnavailable, InvalidIdentifier, ValidationFailed],
         [
+            AuthenticationFailed,
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
+            CapabilityUnavailable,
             Forbidden,
             IdentityConflict,
             IntegrityFailed,
+            InvalidIdentifier,
+            MalformedJson,
+            PayloadTooLarge,
             RecordNotFound,
+            SessionPolicyChanged,
+            StorageUnavailable,
+            UnsupportedMediaType,
+            ValidationFailed
+        ],
+        []
+    ),
+    (
+        ListRecords,
+        B1,
+        B2,
+        Finalized,
+        Implemented,
+        ScopedOrBrowserSession,
+        [IdentityRead],
+        [
+            AuthenticationFailed,
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
+            CapabilityUnavailable,
+            Forbidden,
+            IntegrityFailed,
+            SessionPolicyChanged,
             StorageUnavailable
-        ]
+        ],
+        []
+    ),
+    (
+        RegisterNamespace,
+        B1,
+        B2,
+        Finalized,
+        Implemented,
+        ScopedOrBrowserSession,
+        [IdentityWrite],
+        [
+            AuthenticationFailed,
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
+            CapabilityUnavailable,
+            Forbidden,
+            IntegrityFailed,
+            MalformedJson,
+            PayloadTooLarge,
+            SessionPolicyChanged,
+            StorageUnavailable,
+            UnsupportedMediaType,
+            ValidationFailed
+        ],
+        []
+    ),
+    (
+        GetNuvioCollections,
+        B2,
+        B2,
+        Finalized,
+        Implemented,
+        ScopedOrBrowserSession,
+        [ProfileStateRead],
+        [
+            AuthenticationFailed,
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
+            CapabilityUnavailable,
+            Forbidden,
+            IntegrityFailed,
+            SessionPolicyChanged,
+            StorageUnavailable
+        ],
+        []
+    ),
+    (
+        ReplaceNuvioCollections,
+        B2,
+        B2,
+        Finalized,
+        Implemented,
+        ScopedOrBrowserSession,
+        [ProfileStateWrite],
+        [
+            AuthenticationFailed,
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
+            CapabilityUnavailable,
+            Forbidden,
+            IntegrityFailed,
+            MalformedJson,
+            PayloadTooLarge,
+            SessionPolicyChanged,
+            StorageUnavailable,
+            UnsupportedMediaType,
+            ValidationFailed
+        ],
+        []
+    ),
+    (
+        ClearNuvioCollections,
+        B2,
+        B2,
+        Finalized,
+        Implemented,
+        ScopedOrBrowserSession,
+        [ProfileStateWrite],
+        [
+            AuthenticationFailed,
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
+            CapabilityUnavailable,
+            Forbidden,
+            IntegrityFailed,
+            SessionPolicyChanged,
+            StorageUnavailable
+        ],
+        []
+    ),
+    (
+        ListTrackingDispositions,
+        B2,
+        B2,
+        Finalized,
+        Implemented,
+        ScopedOrBrowserSession,
+        [ProfileStateRead],
+        [
+            AuthenticationFailed,
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
+            CapabilityUnavailable,
+            Forbidden,
+            IntegrityFailed,
+            SessionPolicyChanged,
+            StorageUnavailable
+        ],
+        []
+    ),
+    (
+        SetTrackingDisposition,
+        B2,
+        B2,
+        Finalized,
+        Implemented,
+        ScopedOrBrowserSession,
+        [ProfileStateWrite],
+        [
+            AuthenticationFailed,
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
+            CapabilityUnavailable,
+            Forbidden,
+            IntegrityFailed,
+            MalformedJson,
+            PayloadTooLarge,
+            RecordNotFound,
+            SessionPolicyChanged,
+            StorageUnavailable,
+            UnsupportedMediaType,
+            ValidationFailed
+        ],
+        []
     ),
     (
         InspectReview,
@@ -316,7 +728,7 @@ define_capabilities!(
         Scoped,
         [ReviewRead],
         [CapabilityUnavailable, Forbidden],
-        [IntegrityFailed, StorageUnavailable]
+        [AuthenticationFailed, IntegrityFailed, StorageUnavailable]
     ),
     (
         DeferReview,
@@ -327,7 +739,12 @@ define_capabilities!(
         Scoped,
         [ReviewWrite],
         [CapabilityUnavailable, Forbidden, ValidationFailed],
-        [IntegrityFailed, ReviewNotFound, StorageUnavailable]
+        [
+            AuthenticationFailed,
+            IntegrityFailed,
+            ReviewNotFound,
+            StorageUnavailable
+        ]
     ),
     (
         ResumeReview,
@@ -338,7 +755,12 @@ define_capabilities!(
         Scoped,
         [ReviewWrite],
         [CapabilityUnavailable, Forbidden, ValidationFailed],
-        [IntegrityFailed, ReviewNotFound, StorageUnavailable]
+        [
+            AuthenticationFailed,
+            IntegrityFailed,
+            ReviewNotFound,
+            StorageUnavailable
+        ]
     ),
     (
         ResolveReview,
@@ -350,6 +772,7 @@ define_capabilities!(
         [ReviewWrite],
         [CapabilityUnavailable, Forbidden, ValidationFailed],
         [
+            AuthenticationFailed,
             IdentityConflict,
             IntegrityFailed,
             InvalidIdentifier,
@@ -367,7 +790,12 @@ define_capabilities!(
         Scoped,
         [CorrectionWrite],
         [CapabilityUnavailable, Forbidden, ValidationFailed],
-        [IntegrityFailed, RecordNotFound, StorageUnavailable]
+        [
+            AuthenticationFailed,
+            IntegrityFailed,
+            RecordNotFound,
+            StorageUnavailable
+        ]
     ),
     (
         InspectCorrectionChain,
@@ -378,7 +806,12 @@ define_capabilities!(
         Scoped,
         [CorrectionRead],
         [CapabilityUnavailable, Forbidden],
-        [ValidationFailed, IntegrityFailed, StorageUnavailable]
+        [
+            AuthenticationFailed,
+            ValidationFailed,
+            IntegrityFailed,
+            StorageUnavailable
+        ]
     ),
     (
         ExportWorkspace,
@@ -390,6 +823,7 @@ define_capabilities!(
         [WorkspaceExport],
         [CapabilityUnavailable, Forbidden],
         [
+            AuthenticationFailed,
             CapacityExceeded,
             DataRootLocked,
             ExportCanceled,
@@ -428,7 +862,256 @@ define_capabilities!(
         Scoped,
         [WorkspaceVerify],
         [CapabilityUnavailable, Forbidden, ValidationFailed],
-        [DataRootLocked, IntegrityFailed, StorageUnavailable]
+        [
+            AuthenticationFailed,
+            DataRootLocked,
+            IntegrityFailed,
+            StorageUnavailable
+        ]
+    ),
+    (
+        ListProviders,
+        M1,
+        M1,
+        Finalized,
+        Implemented,
+        Scoped,
+        [ProviderRead],
+        [
+            AuthenticationFailed,
+            Forbidden,
+            IntegrityFailed,
+            StorageUnavailable
+        ],
+        []
+    ),
+    (
+        ConfigureProviderCredential,
+        M1,
+        M1,
+        Finalized,
+        Implemented,
+        Scoped,
+        [ProviderCredentialManage],
+        [
+            AuthenticationFailed,
+            Forbidden,
+            IntegrityFailed,
+            MalformedJson,
+            PayloadTooLarge,
+            ProviderCredentialInvalid,
+            ProviderUnavailable,
+            StorageUnavailable,
+            UnsupportedMediaType,
+            ValidationFailed
+        ],
+        []
+    ),
+    (
+        TestProviderCredential,
+        M1,
+        M1,
+        Finalized,
+        Implemented,
+        Scoped,
+        [ProviderCredentialManage],
+        [
+            AuthenticationFailed,
+            Forbidden,
+            IntegrityFailed,
+            ProviderCredentialExpired,
+            ProviderCredentialInvalid,
+            ProviderCredentialMissing,
+            ProviderRateLimited,
+            ProviderResponseInvalid,
+            ProviderRouteUnavailable,
+            ProviderUnavailable,
+            StorageUnavailable
+        ],
+        []
+    ),
+    (
+        ReadProviderHealth,
+        M1,
+        M1,
+        Finalized,
+        Implemented,
+        Scoped,
+        [ProviderRead],
+        [
+            AuthenticationFailed,
+            Forbidden,
+            IntegrityFailed,
+            ProviderRateLimited,
+            ProviderResponseInvalid,
+            ProviderRouteUnavailable,
+            ProviderUnavailable,
+            StorageUnavailable
+        ],
+        []
+    ),
+    (
+        RefreshMetadataClaims,
+        M2,
+        M2,
+        Finalized,
+        Implemented,
+        Scoped,
+        [MetadataClaimRefresh],
+        [
+            AuthenticationFailed,
+            Forbidden,
+            IdempotencyConflict,
+            IntegrityFailed,
+            MalformedJson,
+            MetadataClaimStale,
+            PayloadTooLarge,
+            ProviderCredentialExpired,
+            ProviderCredentialInvalid,
+            ProviderCredentialMissing,
+            ProviderRateLimited,
+            ProviderResponseInvalid,
+            ProviderRouteUnavailable,
+            ProviderUnavailable,
+            RecordNotFound,
+            StorageUnavailable,
+            UnsupportedMediaType,
+            ValidationFailed
+        ],
+        []
+    ),
+    (
+        ReadMetadataProjection,
+        M2,
+        M2,
+        Finalized,
+        Implemented,
+        Scoped,
+        [MetadataProjectionRead],
+        [
+            AuthenticationFailed,
+            Forbidden,
+            IntegrityFailed,
+            RecordNotFound,
+            StorageUnavailable,
+            ValidationFailed
+        ],
+        []
+    ),
+    (
+        ConfigureMetadataProjection,
+        M2,
+        M2,
+        Finalized,
+        Implemented,
+        Scoped,
+        [MetadataProjectionConfigure],
+        [
+            AuthenticationFailed,
+            Forbidden,
+            IntegrityFailed,
+            MalformedJson,
+            PayloadTooLarge,
+            StorageUnavailable,
+            UnsupportedMediaType,
+            ValidationFailed
+        ],
+        []
+    ),
+    (
+        ResolveIdentityRoute,
+        M3,
+        M3,
+        Finalized,
+        Implemented,
+        ScopedOrBrowserSession,
+        [IdentityRead],
+        [
+            AuthenticationFailed,
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
+            CapabilityUnavailable,
+            CapacityExceeded,
+            Forbidden,
+            IntegrityFailed,
+            RecordNotFound,
+            SessionPolicyChanged,
+            StorageUnavailable,
+            ValidationFailed
+        ],
+        []
+    ),
+    (
+        ReadAnimeGroupingPolicy,
+        M3,
+        M3,
+        Finalized,
+        Implemented,
+        ScopedOrBrowserSession,
+        [ProfileStateRead],
+        [
+            AuthenticationFailed,
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
+            CapabilityUnavailable,
+            Forbidden,
+            IntegrityFailed,
+            SessionPolicyChanged,
+            StorageUnavailable,
+            ValidationFailed
+        ],
+        []
+    ),
+    (
+        PreviewAnimeGroupingPolicyChange,
+        M3,
+        M3,
+        Finalized,
+        Implemented,
+        ScopedOrBrowserSession,
+        [ProfileStateRead],
+        [
+            AuthenticationFailed,
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
+            CapabilityUnavailable,
+            CapacityExceeded,
+            Forbidden,
+            IntegrityFailed,
+            MalformedJson,
+            PayloadTooLarge,
+            SessionPolicyChanged,
+            StorageUnavailable,
+            UnsupportedMediaType,
+            ValidationFailed
+        ],
+        []
+    ),
+    (
+        ApplyAnimeGroupingPolicyChange,
+        M3,
+        M3,
+        Finalized,
+        Implemented,
+        ScopedOrBrowserSession,
+        [ProfileStateWrite],
+        [
+            AuthenticationFailed,
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
+            CapabilityUnavailable,
+            CapacityExceeded,
+            Forbidden,
+            IdempotencyConflict,
+            IntegrityFailed,
+            MalformedJson,
+            PayloadTooLarge,
+            SessionPolicyChanged,
+            StorageUnavailable,
+            UnsupportedMediaType,
+            ValidationFailed
+        ],
+        []
     ),
 );
 
@@ -444,28 +1127,35 @@ mod tests {
     }
 
     #[test]
-    fn b2_runtime_capabilities_remain_non_production_until_activation() {
+    fn durable_local_activation_is_narrow() {
         for capability in [
             CapabilityKey::InitializeNode,
+            CapabilityKey::EnrollFirstClient,
             CapabilityKey::AcceptObservation,
             CapabilityKey::CreateRecord,
-            CapabilityKey::ResolveReview,
+            CapabilityKey::AttachIdentifier,
+            CapabilityKey::ListRecords,
+            CapabilityKey::RegisterNamespace,
         ] {
             assert_eq!(capability.runtime_body(), CapabilityBody::B2);
-            assert!(!capability.is_production_executable());
+            assert!(capability.is_production_executable());
         }
+
+        let capability = CapabilityKey::ResolveReview;
+        assert_eq!(capability.runtime_body(), CapabilityBody::B2);
+        assert!(!capability.is_production_executable());
 
         assert_eq!(
             CapabilityKey::InitializeNode.runtime_availability(),
-            RuntimeAvailability::FixtureOnly
+            RuntimeAvailability::Implemented
         );
         assert_eq!(
             CapabilityKey::CreateRecord.contract_state(),
-            ContractState::Reserved
+            ContractState::Finalized
         );
         assert_eq!(
             CapabilityKey::CreateRecord.runtime_availability(),
-            RuntimeAvailability::LaterBody
+            RuntimeAvailability::Implemented
         );
     }
 
@@ -514,8 +1204,82 @@ mod tests {
             .collect();
         assert_eq!(
             local_operator_capabilities,
-            [CapabilityKey::RestoreWorkspace]
+            [
+                CapabilityKey::AccessIdentityBootstrap,
+                CapabilityKey::RestoreWorkspace
+            ]
         );
+    }
+
+    #[test]
+    fn m1_provider_capabilities_use_separate_read_and_secret_management_scopes() {
+        for capability in [
+            CapabilityKey::ListProviders,
+            CapabilityKey::ReadProviderHealth,
+        ] {
+            assert_eq!(capability.contract_body(), CapabilityBody::M1);
+            assert_eq!(capability.runtime_body(), CapabilityBody::M1);
+            assert_eq!(capability.required_scopes(), &[ScopeKey::ProviderRead]);
+            assert!(capability.is_production_executable());
+        }
+        for capability in [
+            CapabilityKey::ConfigureProviderCredential,
+            CapabilityKey::TestProviderCredential,
+        ] {
+            assert_eq!(capability.contract_body(), CapabilityBody::M1);
+            assert_eq!(
+                capability.required_scopes(),
+                &[ScopeKey::ProviderCredentialManage]
+            );
+            assert!(capability.is_production_executable());
+        }
+    }
+
+    #[test]
+    fn m2_metadata_capabilities_keep_refresh_read_and_configuration_separate() {
+        for (capability, scope) in [
+            (
+                CapabilityKey::RefreshMetadataClaims,
+                ScopeKey::MetadataClaimRefresh,
+            ),
+            (
+                CapabilityKey::ReadMetadataProjection,
+                ScopeKey::MetadataProjectionRead,
+            ),
+            (
+                CapabilityKey::ConfigureMetadataProjection,
+                ScopeKey::MetadataProjectionConfigure,
+            ),
+        ] {
+            assert_eq!(capability.contract_body(), CapabilityBody::M2);
+            assert_eq!(capability.runtime_body(), CapabilityBody::M2);
+            assert_eq!(capability.required_scopes(), &[scope]);
+            assert!(capability.is_production_executable());
+        }
+    }
+
+    #[test]
+    fn m3_identity_routing_keeps_reads_and_policy_writes_separate() {
+        for (capability, scope) in [
+            (CapabilityKey::ResolveIdentityRoute, ScopeKey::IdentityRead),
+            (
+                CapabilityKey::ReadAnimeGroupingPolicy,
+                ScopeKey::ProfileStateRead,
+            ),
+            (
+                CapabilityKey::PreviewAnimeGroupingPolicyChange,
+                ScopeKey::ProfileStateRead,
+            ),
+            (
+                CapabilityKey::ApplyAnimeGroupingPolicyChange,
+                ScopeKey::ProfileStateWrite,
+            ),
+        ] {
+            assert_eq!(capability.contract_body(), CapabilityBody::M3);
+            assert_eq!(capability.runtime_body(), CapabilityBody::M3);
+            assert_eq!(capability.required_scopes(), &[scope]);
+            assert!(capability.is_production_executable());
+        }
     }
 
     #[test]
@@ -528,9 +1292,43 @@ mod tests {
 
         let enrollment = CapabilityKey::EnrollFirstClient.allowed_problem_codes();
         assert!(enrollment.contains(&ProblemCode::BootstrapClosed));
-        assert!(!enrollment
+        assert!(enrollment
             .iter()
             .any(|code| *code == ProblemCode::BootstrapClosed));
+
+        let observation = CapabilityKey::AcceptObservation.allowed_problem_codes();
+        for code in [
+            ProblemCode::AuthenticationFailed,
+            ProblemCode::IntegrityFailed,
+            ProblemCode::StorageUnavailable,
+        ] {
+            assert!(observation.contains(&code));
+            assert!(observation.iter().any(|published| *published == code));
+        }
+        assert!(observation.contains(&ProblemCode::EvidenceNotFound));
+        assert!(!observation
+            .iter()
+            .any(|published| *published == ProblemCode::EvidenceNotFound));
+
+        let review = CapabilityKey::InspectReview.allowed_problem_codes();
+        assert!(review.contains(&ProblemCode::AuthenticationFailed));
+        assert!(!review
+            .iter()
+            .any(|code| *code == ProblemCode::AuthenticationFailed));
+
+        for capability in CapabilityKey::ALL.iter().copied().filter(|capability| {
+            matches!(
+                capability.authorization_kind(),
+                AuthorizationKind::Scoped | AuthorizationKind::ScopedOrBrowserSession
+            ) && *capability != CapabilityKey::EnrollFirstClient
+        }) {
+            assert!(
+                capability
+                    .allowed_problem_codes()
+                    .contains(&ProblemCode::AuthenticationFailed),
+                "{capability:?} must accept route-attributed authentication failures"
+            );
+        }
 
         let review = CapabilityKey::ResolveReview.allowed_problem_codes();
         assert!(review.contains(&ProblemCode::ReviewNotFound));
@@ -568,6 +1366,66 @@ mod tests {
         assert!(!verify
             .iter()
             .any(|published| *published == ProblemCode::DataRootLocked));
+    }
+
+    #[test]
+    fn browser_application_access_is_limited_to_explicit_hybrid_capabilities() {
+        let hybrid: Vec<_> = CapabilityKey::ALL
+            .iter()
+            .copied()
+            .filter(|capability| {
+                capability.authorization_kind() == AuthorizationKind::ScopedOrBrowserSession
+            })
+            .collect();
+        assert_eq!(
+            hybrid,
+            [
+                CapabilityKey::AcceptObservation,
+                CapabilityKey::CreateRecord,
+                CapabilityKey::AttachIdentifier,
+                CapabilityKey::ListRecords,
+                CapabilityKey::RegisterNamespace,
+                CapabilityKey::GetNuvioCollections,
+                CapabilityKey::ReplaceNuvioCollections,
+                CapabilityKey::ClearNuvioCollections,
+                CapabilityKey::ListTrackingDispositions,
+                CapabilityKey::SetTrackingDisposition,
+                CapabilityKey::ResolveIdentityRoute,
+                CapabilityKey::ReadAnimeGroupingPolicy,
+                CapabilityKey::PreviewAnimeGroupingPolicyChange,
+                CapabilityKey::ApplyAnimeGroupingPolicyChange,
+            ]
+        );
+        assert!(hybrid
+            .iter()
+            .all(|capability| !capability.required_scopes().is_empty()));
+        for capability in hybrid {
+            for problem in [
+                ProblemCode::BrowserSessionExpired,
+                ProblemCode::BrowserSessionRevoked,
+                ProblemCode::SessionPolicyChanged,
+            ] {
+                assert!(
+                    capability.allowed_problem_codes().contains(&problem),
+                    "{capability:?} must declare {} for its browser-session branch",
+                    problem.as_str()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn c1_projection_and_identity_bootstrap_keep_distinct_authority() {
+        assert_eq!(
+            CapabilityKey::AccessIdentityBootstrap.authorization_kind(),
+            AuthorizationKind::LocalOperator
+        );
+        assert_eq!(
+            CapabilityKey::ReadAccessProjection.authorization_kind(),
+            AuthorizationKind::BrowserSession
+        );
+        assert!(CapabilityKey::AccessIdentityBootstrap.is_production_executable());
+        assert!(CapabilityKey::ReadAccessProjection.is_production_executable());
     }
 
     #[test]

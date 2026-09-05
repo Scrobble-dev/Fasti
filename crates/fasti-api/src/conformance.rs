@@ -6,7 +6,7 @@
 
 use axum::{
     extract::{rejection::JsonRejection, DefaultBodyLimit, Path, State},
-    http::{header, HeaderMap, StatusCode},
+    http::{header, HeaderMap},
     response::{sse::Event, sse::Sse, IntoResponse, Response},
     routing::{get, post, put},
     Json, Router,
@@ -14,7 +14,7 @@ use axum::{
 use fasti_application::{
     conformance::B1ConformanceFixture, conformance::FixtureEnrollment,
     conformance::FixtureInitialization, AcceptObservationCommand, AcceptObservationReceipt,
-    CapabilityKey, FastiProblem, ProblemCode, ReplayReceiptQuery, StreamReceiptsQuery, Violation,
+    CapabilityKey, FastiProblem, ReplayReceiptQuery, StreamReceiptsQuery, Violation,
 };
 use fasti_contracts::{
     public_capability_id, AcceptObservationRequest, AcceptObservationResponse,
@@ -35,7 +35,8 @@ use utoipa::{
     Modify, OpenApi,
 };
 
-const DOCUMENTATION_BASE: &str = "https://fasti.scrobble.dev";
+use crate::problem::{application_problem, json_rejection, HttpProblem};
+
 const GENERATED_CAPABILITIES: &str =
     include_str!("../../../contracts/generated/v1/capabilities.json");
 const BEARER_PREFIX: &str = "Bearer ";
@@ -43,22 +44,6 @@ const LAST_EVENT_ID: &str = "last-event-id";
 const MAX_JSON_BODY_BYTES: usize = 4 * 1024;
 
 type HttpResult<T> = Result<Json<T>, HttpProblem>;
-
-struct HttpProblem {
-    status: StatusCode,
-    body: Box<ProblemDetails>,
-}
-
-impl IntoResponse for HttpProblem {
-    fn into_response(self) -> Response {
-        (
-            self.status,
-            [(header::CONTENT_TYPE, "application/problem+json")],
-            Json(self.body),
-        )
-            .into_response()
-    }
-}
 
 #[derive(Default)]
 struct TransportState {
@@ -358,11 +343,14 @@ async fn enroll_first_client(
     responses(
         (status = 200, description = "Capability-bound fixture receipt", body = AcceptObservationResponse),
         (status = 400, description = "Malformed JSON", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 401, description = "Bearer credential is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "Credential or capability grant denied", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "Operation ID reused with different request semantics", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 413, description = "Request body exceeds the fixture bound", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 415, description = "Content-Type is not application/json", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 422, description = "Observation contract rejected", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 500, description = "Durable state failed an integrity check", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 503, description = "Local storage is unavailable", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 507, description = "Bounded fixture operation capacity reached", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
@@ -660,62 +648,11 @@ fn invalid_observation(
     application_problem(Box::new(problem))
 }
 
-fn json_rejection(
-    capability: CapabilityKey,
-    correlation_id: RequestCorrelationId,
-    rejection: JsonRejection,
-) -> HttpProblem {
-    let status = rejection.status();
-    let code = match status {
-        StatusCode::BAD_REQUEST => ProblemCode::MalformedJson,
-        StatusCode::PAYLOAD_TOO_LARGE => ProblemCode::PayloadTooLarge,
-        StatusCode::UNSUPPORTED_MEDIA_TYPE => ProblemCode::UnsupportedMediaType,
-        _ => ProblemCode::ValidationFailed,
-    };
-    let violation_contract = code
-        .representation_violation()
-        .expect("representation problem owns violation metadata");
-    let violation = Violation::try_new(
-        violation_contract.code(),
-        violation_contract.pointer(),
-        violation_contract.reason(),
-        violation_contract.expected(),
-    )
-    .expect("application-owned rejection metadata is valid");
-    let problem = match code {
-        ProblemCode::MalformedJson => {
-            FastiProblem::malformed_json(capability, correlation_id, vec![violation])
-        }
-        ProblemCode::PayloadTooLarge => {
-            FastiProblem::payload_too_large(capability, correlation_id, vec![violation])
-        }
-        ProblemCode::UnsupportedMediaType => {
-            FastiProblem::unsupported_media_type(capability, correlation_id, vec![violation])
-        }
-        ProblemCode::ValidationFailed => {
-            FastiProblem::validation_failed(capability, correlation_id, vec![violation])
-        }
-        _ => unreachable!("only representation problem codes are selected"),
-    }
-    .expect("one static violation is within bounds");
-    application_problem(Box::new(problem))
-}
-
 fn forbidden(capability: CapabilityKey, correlation_id: RequestCorrelationId) -> HttpProblem {
     application_problem(Box::new(FastiProblem::forbidden(
         capability,
         correlation_id,
     )))
-}
-
-fn application_problem(problem: Box<FastiProblem>) -> HttpProblem {
-    let capability_id = public_capability_id(problem.capability());
-    let dto = ProblemDetails::from_application(&problem, capability_id, DOCUMENTATION_BASE);
-    let status = StatusCode::from_u16(dto.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-    HttpProblem {
-        status,
-        body: Box::new(dto),
-    }
 }
 
 fn encode_secret(secret: &[u8; 32]) -> String {
@@ -856,7 +793,7 @@ mod tests {
     use super::*;
     use axum::{
         body::{to_bytes, Body},
-        http::{Request, Response},
+        http::{Request, Response, StatusCode},
     };
     use fasti_contracts::{DurabilityDto, RuntimeAvailabilityDto};
     use fasti_domain::{EvidenceId, OperationId, ReceiptId};

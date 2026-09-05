@@ -2,9 +2,7 @@
 
 Thank you for your interest in contributing to Fasti!
 
-Fasti is an open-source, identity-first local system of record for media activity. Fasti records; players play. We welcome collaboration from developers, designers, archivists, integrators, accessibility practitioners, security researchers, and writers of all experience levels.
-
-> **Discuss before you implement or open a pull request.** Begin or join a GitHub Discussion and align the problem, bounded context, scope, and required review gates first. This is technical and product scope alignment, not legal approval. Fasti does not require a CLA or legal review before community collaboration.
+Fasti is an open-source, identity-first local system of record for media activity. **Fasti records; players play.** We welcome collaboration from developers, designers, archivists, integrators, accessibility practitioners, security researchers, and writers of all experience levels.
 
 ---
 
@@ -18,7 +16,7 @@ To ensure that all contributions can be freely redistributed under our open-sour
 * You sign off on every commit by adding `Signed-off-by: Name <email>` to the commit message.
 
 ### How to Sign Off Commits
-When using Git, simply pass the `-s` or `--signoff` flag:
+When using Git, pass the `-s` or `--signoff` flag:
 
 ```bash
 git commit -s -m "feat(activity): add idempotent deduplication check"
@@ -27,8 +25,8 @@ git commit -s -m "feat(activity): add idempotent deduplication check"
 If you forgot to sign off a commit on a branch:
 ```bash
 git commit --amend --no-edit -s
-# Or for multiple commits:
-git rebase --signoff origin/release
+# Or for multiple commits against dev:
+git rebase --signoff origin/dev
 ```
 
 ### Full DCO 1.1 Text
@@ -76,24 +74,69 @@ Please note the foundational boundary between Fasti and [Scrobble.dev](https://s
 
 ---
 
-## 3. Contribution Lanes
+## 3. Core Domain & Identity Rules
 
-We organize contributions into explicit lanes to set expectations on review requirements:
+Fasti's domain model is governed by explicit identity rules defined in [`contracts/identity/identity-contract-seed.yaml`](contracts/identity/identity-contract-seed.yaml):
 
-| Lane | Scope | Review Requirement |
-|---|---|---|
-| **Documentation & Guides** | Truth corrections, architecture, recovery, examples, and task-first guides | Documentation checks and QA |
-| **Governed Fixtures** | Provenance-labelled media observations, identity cases, and hostile inputs | Domain review and executable schema checks |
-| **Domain & Application** | Invariants, typed values, capabilities, ports, and problems | Meaning-ownership review, dependency checks, contract mutation gates, and QA |
-| **Contracts & SDK** | OpenAPI, AsyncAPI, Schema, JSON-LD, OKF, examples, and generated clients | Deterministic generation, parity checks, and QA |
-| **Delivery & Persistence** | HTTP/SSE, CLI, SQLite/files, OCI, recovery, and performance | Native/OCI tests, fault evidence, and QA |
-| **Design & Accessibility** | Tokens and later media UI, keyboard, screen reader, touch, TV remote, ADHD/AuDHD | Approved design contract, design review, accessibility evidence, and QA |
-| **Provider Patterns** | Neutral manifests, recipes, and conformance fixtures | B5/B6 gate; no compatibility claim or provider-specific code early |
-| **Security** | Access, secrets, limits, container permissions, and cryptography | Threat evidence, private disclosure where needed, and security review |
+1. **Stable Local Record Key**: Every Fasti record has an immutable, opaque local ID (`rec_*`).
+2. **Provider Independence**: No external provider ID (IMDb, TVDB, Trakt, Spotify, MusicBrainz, Steam, AniList) is ever the canonical record key. Provider IDs are typed claims attached to the record (`xid_*`).
+3. **Unresolved Records are Valid Data**: Incomplete, ambiguous, or un-enriched scrobbles are valid, preserved data. Fasti never drops or hides an observation because metadata lookup failed.
+4. **Original Observations are Immutable**: Raw scrobble observations (`obs_*`) are append-only, immutable evidence.
+5. **Metadata is a Disposable Projection**: Enriched details and posters are cached projections. They can be invalidated and recomputed from evidence without data loss.
+6. **Directional Mappings**: Cross-namespace mappings are directional, typed, scoped assertions with clear provenance.
+7. **Absence != Deletion**: Absence of a media item from an upstream provider does not delete history in Fasti.
+8. **Provider Changes Do Not Move History**: Upstream provider ID merges, splits, or renames never rewrite or relocate Fasti chronicle history.
+9. **Explicit Reconciliation**: Irreversible operations (splits, merges, destructive overrides) require preview and stronger evidence receipts.
 
 ---
 
-## 4. Development Workflow
+## 4. Contract-Led Architecture & Schema Supremacy
+
+Fasti is strictly **Contract-Led**. The machine-authored registry at [`contracts/registry/v1/capabilities.yaml`](contracts/registry/v1/capabilities.yaml) is the authoritative ledger for capability IDs, bounded-context ownership, scopes, and problems.
+
+Domain rules own meaning; application services own capabilities; contracts project that meaning into all surfaces:
+
+```
+                  Authored Capability Registry & Seeds
+               (contracts/registry/, contracts/identity/)
+                                  │
+      ┌───────────────────────────┼───────────────────────────┐
+      ▼                           ▼                           ▼
+OpenAPI 3.1                 AsyncAPI 3.x                 JSON-LD 1.1
+REST Operations & DTOs      SSE & Event Channels         Linked Data Vocabulary
+(`fasti-api`, `fastid`)     (`receipt.stream`)           (`contracts/jsonld/`)
+      │                           │                           │
+      ▼                           ▼                           ▼
+JSON Schema 2020-12            OKF 0.2                    TypeScript SDK & CLI
+Archive & Payload Schemas   Operational Knowledge        Generated Client & Parsers
+(`contracts/portability/`)  (`contracts/okf/`)           (`packages/sdk/`, `fasti-cli`)
+```
+
+### Projections vs. Sources of Truth
+* **Never edit generated files directly** (e.g. `contracts/generated/*`, `packages/sdk/src/generated/*`).
+* Modify the authored YAML/JSON contracts in `contracts/registry/`, `contracts/identity/`, `contracts/asyncapi/`, `contracts/jsonld/`, or `contracts/okf/`.
+* Run deterministic generation and verification:
+  ```bash
+  cargo xtask contract generate
+  cargo xtask contract verify --locked
+  ```
+
+---
+
+## 5. Contribution Tiers & Entry Gates
+
+To balance architectural rigor with low contributor friction, Fasti uses a tiered entry model:
+
+| Contribution Tier | Examples | Required Entry | Review Requirement |
+|---|---|---|---|
+| **Tier 1: Fast-Track** | Typo, broken link, documentation clarification, formatting | Direct Pull Request to `dev` | Doc links & truth checks |
+| **Tier 2: Issue-Bound** | Bug fix, test fixture, error diagnostic improvement, CLI command | Claim open GitHub/YouTrack Issue → PR to `dev` | Automated test suite & QA |
+| **Tier 3: Capability & Adapter** | Ingest webhook adapter, storage driver, portability manifest | Claim Issue / RFC draft → PR to `dev` | Contract verification, fault evidence, QA |
+| **Tier 4: Domain, Identity & Schema** | New capability, identity rule, schema mutation, auth/crypto | GitHub Discussion / Architecture RFC before code | Domain ownership review, contract verification, multi-surface parity |
+
+---
+
+## 6. Development Workflow
 
 ### Getting Started
 1. **Fork and clone** the repository:
@@ -101,9 +144,9 @@ We organize contributions into explicit lanes to set expectations on review requ
    git clone https://github.com/<your-username>/Fasti.git
    cd Fasti
    ```
-2. **Create a topic branch**:
+2. **Create a topic branch from `dev`**:
    ```bash
-   git checkout -b feat/my-new-feature
+   git checkout -b feat/my-new-feature origin/dev
    ```
 3. **Verify the environment**:
    ```bash
@@ -115,6 +158,7 @@ We organize contributions into explicit lanes to set expectations on review requ
    pnpm format:check
    pnpm typecheck
    pnpm test
+   pnpm test:ui
 
    bash scripts/check-repository-truth.sh
    bash scripts/check-no-publish.sh
@@ -129,7 +173,7 @@ We organize contributions into explicit lanes to set expectations on review requ
 * `test/<short-description>`: New unit, integration, or chaos fixtures
 
 ### Commit Message Guidelines
-We follow the Conventional Commits format:
+We follow Conventional Commits format with mandatory DCO sign-off:
 ```
 <type>(<scope>): <short summary in imperative mood>
 
@@ -142,17 +186,16 @@ Signed-off-by: Jane Developer <jane@example.com>
 
 ---
 
-## 5. Code Quality & Standards
+## 7. Code Quality & Standards
 
 ### Rust Code (`crates/*`, `apps/fastid`)
 * Format code with `cargo fmt --all`.
 * Ensure `cargo clippy --workspace --all-targets --locked -- -D warnings` passes cleanly.
-* Document public types and traits with clear docstrings and usage examples.
 * Keep domain policy out of adapters and preserve one semantic owner for invariants, capabilities, public types, permissions, and problems.
 * Maintain error transparency: use typed errors for libraries and avoid bare `.unwrap()` in production codepaths.
 
 ### TypeScript (`packages/*`)
-* Keep strict typing enabled and consume generated contract types once B1 establishes them.
+* Keep strict typing enabled and consume generated contract types from `packages/sdk`.
 * Do not redefine domain, permission, error, retry, idempotency, or offline behavior in a client package.
 * Format code with Prettier and verify with `pnpm format:check`, `pnpm typecheck`, and `pnpm test`.
 
@@ -163,22 +206,32 @@ Signed-off-by: Jane Developer <jane@example.com>
 
 ---
 
-## 6. Submitting a Pull Request
+## 8. Submitting a Pull Request
 
-1. Link the GitHub Discussion where the problem, bounded context, scope, and gates were aligned.
-2. Push your branch to your fork:
-   ```bash
-   git push origin feat/my-new-feature
-   ```
-3. Open a Pull Request against `release` unless the linked Discussion names a different integration branch. Repository automation does not publish a release from the pull request.
-4. Complete the provided [Pull Request Template](.github/PULL_REQUEST_TEMPLATE.md), documenting:
-   * The problem being solved.
-   * Behavioral & data-model impact.
-   * Test evidence (unit, integration, or manual verification).
-   * Related issues, pull requests, accepted plans, and relevant upstream work.
-   * Accessibility and security considerations.
-5. Run every gate named by the linked Discussion. QA is mandatory; rendered UI/UX also requires design review.
-6. Ensure all CI checks are green.
-7. Address reviewer feedback constructively.
+1. **Target Branch**: Open all PRs against **`dev`** (our integration branch). `release` is reserved for verified release candidates.
+2. **Link Issues / Discussions**: Reference the claimed issue or linked Discussion (Tier 3/4).
+3. **Run PR Gate**: Execute `cargo xtask test pr` locally before submission to verify all required checks pass.
+4. **Complete the PR Template**: Ensure all invariant checkboxes and DCO sign-offs are completed in [.github/PULL_REQUEST_TEMPLATE.md](.github/PULL_REQUEST_TEMPLATE.md).
+5. **CI & Verification**: All deterministic checks must pass. Automated AI/SaaS tools provide suggestions but do not block PR merges.
 
-Thank you for helping Fasti keep media records trustworthy, portable, and provider-neutral.
+---
+
+## 9. Governance, Roles & Access Continuity
+
+### Governance Model
+Fasti operates as a maintainer-driven open-source project with consensus-seeking review. Architectural proposals and milestone capability decisions follow open discussions in GitHub Discussions and RFC issues before code changes begin.
+
+### Key Project Roles
+* **Project Lead / Core Maintainer**: Ryan Winkler (`@ryan-winkler` / `hi@ryanw.eu`). Responsible for overall system architecture, release tagging, security triage, and contract verification.
+* **Component Reviewers & Maintainers**: Reviewers with commit/approval authority across specific bounded contexts (`domain`, `application`, `store`, `api`, `contracts`, `ui`).
+* **Contributors**: Anyone submitting issues, documentation, code, hardware receipts, or UX improvements under DCO 1.1.
+
+### Access Continuity & Succession
+To ensure continuity if any maintainer is incapacitated or unavailable:
+* All project repositories, DNS, and hosting assets are owned under the **`Scrobble-dev`** GitHub organization.
+* Organization administrator credentials and emergency recovery keys are stored securely in escrow.
+* The governance policy permits designated organization administrators to assume maintenance duties, manage issue queues, accept pull requests, and publish emergency releases within one week of confirmed unavailability.
+
+---
+
+Thank you for helping Fasti keep media records trustworthy, portable, and provider-neutral!

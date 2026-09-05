@@ -10,23 +10,28 @@ description = "HTTP REST API routes, handlers, and JSON contracts for Fasti"
 
 [dependencies]
 axum = { workspace = true }
-fasti-application = { workspace = true, optional = true }
+chrono = { workspace = true }
+fasti-application = { workspace = true }
 fasti-contracts = { workspace = true }
-fasti-domain = { workspace = true, optional = true }
-getrandom = { workspace = true, optional = true }
-serde_json = { workspace = true, optional = true }
-tokio = { workspace = true, optional = true }
+fasti-domain = { workspace = true }
+fasti-provider-runtime = { workspace = true }
+base64 = "=0.22.1"
+getrandom = { workspace = true }
+reqwest = { workspace = true }
+rustix = { workspace = true, features = ["process"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = "0.11.0"
+tokio = { workspace = true }
 tokio-stream = { version = "0.1", optional = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
 utoipa = { workspace = true }
+zeroize = { workspace = true }
 
 [features]
 default = []
 conformance-fixture = [
-  "dep:fasti-application",
-  "dep:fasti-domain",
-  "dep:getrandom",
-  "dep:serde_json",
-  "dep:tokio",
   "dep:tokio-stream",
   "fasti-application/conformance-fixture",
 ]
@@ -37,8 +42,9 @@ path = "src/bin/b1-conformance-server.rs"
 required-features = ["conformance-fixture"]
 
 [dev-dependencies]
-serde = { workspace = true }
-serde_json = { workspace = true }
+fasti-store = { workspace = true }
+rusqlite = { workspace = true }
 static_assertions = { workspace = true }
+tempfile = "3.27.0"
 tokio = { workspace = true }
-tower = { workspace = true }
+tokio-stream = "0.1"

@@ -1,17 +1,25 @@
 # Rust build outputs
-/target/
+target
 **/*.rs.bk
 Cargo.lock.backup
 
 # Node / pnpm / frontend
 node_modules/
 dist/
+.svelte-check/
 !benchmarks/b1/tauri-shell/dist/
 !benchmarks/b1/tauri-shell/dist/index.html
+gen/
+!benchmarks/b1/tauri-shell/src-tauri/gen/
+!apps/desktop/src-tauri/gen/
+apps/desktop/src-tauri/gen/*
+!apps/desktop/src-tauri/gen/android/
+!apps/desktop/src-tauri/gen/android/**
 .pnpm-store/
 .next/
 .turbo/
 build/
+apps/docs/.docusaurus/
 *.tsbuildinfo
 
 # SQLite & local runtime data
@@ -31,6 +39,7 @@ backups/
 .env
 .env.local
 .env.*.local
+.dev-logs/
 
 # OS & Editor artifacts
 .DS_Store
@@ -45,6 +54,9 @@ Thumbs.db
 # Test and coverage artifacts
 coverage/
 lcov.info
+playwright-report/
+.playwright-cli/
+test-results/
 *.profdata
 *.profraw
 /benchmarks/b1/evidence/
@@ -52,8 +64,16 @@ lcov.info
 __pycache__/
 *.py[cod]
 
-
-
 .nx/cache
 .nx/workspace-data
 .nx/migrate-runs
+# Local tools & dev runtime
+.air/
+.codex/
+.gstack/
+.dev-logs/
+.dev-data/
+.dev-run/
+.dev-trailbase/
+.dev-trailbase-backups/
+.gbrain-source

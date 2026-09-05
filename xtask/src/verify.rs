@@ -1,7 +1,6 @@
 use anyhow::{bail, ensure, Context};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::ffi::{OsStr, OsString};
@@ -14,6 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 const RECEIPT_PATH: &str = "target/fasti-receipts/b1-contract-verification.json";
 const GENERATED_REGISTRY_PATH: &str = "contracts/generated/v1/capabilities.json";
 const EXAMPLES_DIRECTORY: &str = "contracts/examples/v1";
+const ORDINARY_BROWSER_RECEIPT_PATH: &str = "target/fasti-receipts/access-c1-ordinary-browser.json";
 const PREFLIGHT_GATES: [&str; 6] = [
     "registry.validate",
     "generation.first",
@@ -430,6 +430,12 @@ fn command_gates(locked: bool) -> Vec<CommandGate> {
             "repair OKF links or UAT ownership so every governed ID resolves exactly once",
         ),
         CommandGate::new(
+            "contracts.integrations",
+            "node",
+            ["scripts/validate-integration-contracts.mjs"],
+            "fix the integration AsyncAPI/OpenAPI drift reported by scripts/validate-integration-contracts.mjs",
+        ),
+        CommandGate::new(
             "javascript.format",
             "pnpm",
             ["run", "format:check"],
@@ -449,9 +455,10 @@ fn command_gates(locked: bool) -> Vec<CommandGate> {
                 "tests/js/authored-contracts.test.mjs",
                 "tests/js/examples.test.mjs",
                 "tests/js/generated-contracts.test.mjs",
+                "tests/js/patched-dependencies.test.mjs",
                 "tests/js/sdk-client.test.mjs",
             ],
-            "fix the failing mutation sentinel or black-box SDK behavior",
+            "fix the failing mutation sentinel, dependency patch, or black-box SDK behavior",
         ),
         CommandGate::new(
             "rust.format",
@@ -565,11 +572,57 @@ fn cargo_args<const N: usize>(locked: bool, args: [&str; N]) -> Vec<OsString> {
     rendered
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 struct SourceState {
     git_commit: String,
     git_tree: String,
     dirty: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OrdinaryBrowserReceipt {
+    schema_version: String,
+    source: SourceState,
+    trailbase_release: String,
+    checks: OrdinaryBrowserChecks,
+    active_browser_sessions: u64,
+    active_administrators: u64,
+    packaged_tauri_authentication: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct OrdinaryBrowserChecks {
+    chromium: String,
+    account_security_surface_loaded: bool,
+    cookies: OrdinaryBrowserCookies,
+    fasti_origin_vendor_credential_storage_absent: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OrdinaryBrowserCookies {
+    session: OrdinaryBrowserCookiePolicy,
+    csrf: OrdinaryBrowserCookiePolicy,
+    distinct: bool,
+}
+
+#[derive(Debug, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct OrdinaryBrowserCookiePolicy {
+    secure: bool,
+    http_only: bool,
+    same_site: String,
+    path: String,
+    domain: String,
+    opaque_hex64: bool,
+}
+
+#[derive(Debug)]
+struct OrdinaryBrowserEvidence {
+    receipt_sha256: String,
 }
 
 fn read_source_state(root: &Path) -> anyhow::Result<SourceState> {
@@ -667,7 +720,7 @@ fn tool_version(root: &Path, gate: &CommandGate) -> anyhow::Result<String> {
 }
 
 fn sha256_bytes(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    crate::evidence::sha256_bytes(bytes)
 }
 
 fn current_ci_metadata() -> anyhow::Result<Value> {
@@ -720,7 +773,27 @@ pub(crate) fn write_gate_suite_receipt(
         !source.dirty,
         "source tree is dirty after gate execution; no suite receipt was emitted"
     );
-    let receipt = json!({
+    let ordinary_browser = if kind == "fasti.access-c1.delivery" {
+        ensure!(
+            gates
+                .iter()
+                .any(|gate| gate.id == "access.ordinary_browser_runtime"),
+            "C1 delivery receipt omits the ordinary-browser runtime gate"
+        );
+        let release: Value = serde_json::from_slice(
+            &fs::read(root.join("third_party/trailbase/release.json"))
+                .context("failed to read the TrailBase release lock")?,
+        )
+        .context("TrailBase release lock is invalid JSON")?;
+        let version = release
+            .get("version")
+            .and_then(Value::as_str)
+            .context("TrailBase release lock omits version")?;
+        Some(validate_ordinary_browser_receipt(root, &source, version)?)
+    } else {
+        None
+    };
+    let mut receipt = json!({
         "receipt_version": "1.0.0",
         "kind": kind,
         "command": command,
@@ -733,6 +806,9 @@ pub(crate) fn write_gate_suite_receipt(
         "gate_count": gates.len(),
         "gates": gates,
     });
+    if let Some(scope) = gate_suite_scope(kind, ordinary_browser.as_ref()) {
+        receipt["scope"] = scope;
+    }
     let path = root.join(relative_path);
     let parent = path
         .parent()
@@ -758,6 +834,111 @@ pub(crate) fn write_gate_suite_receipt(
         .map_err(|error| error.error)
         .with_context(|| format!("failed to atomically publish receipt {}", path.display()))?;
     Ok(path)
+}
+
+fn validate_ordinary_browser_receipt(
+    root: &Path,
+    source: &SourceState,
+    trailbase_release: &str,
+) -> anyhow::Result<OrdinaryBrowserEvidence> {
+    let path = root.join(ORDINARY_BROWSER_RECEIPT_PATH);
+    let bytes = fs::read(&path)
+        .with_context(|| format!("ordinary-browser receipt is missing: {}", path.display()))?;
+    let receipt: OrdinaryBrowserReceipt = serde_json::from_slice(&bytes)
+        .context("ordinary-browser receipt does not match its strict schema")?;
+    ensure!(
+        receipt.schema_version == "fasti.access-ordinary-browser.v1",
+        "ordinary-browser receipt has an unsupported schema"
+    );
+    ensure!(
+        receipt.source == *source,
+        "ordinary-browser receipt is not bound to the current clean commit and tree"
+    );
+    ensure!(
+        receipt.trailbase_release == trailbase_release,
+        "ordinary-browser receipt is not bound to the locked TrailBase release"
+    );
+    ensure!(
+        !receipt.checks.chromium.trim().is_empty(),
+        "ordinary-browser receipt omits the Chromium version"
+    );
+    ensure!(
+        receipt.checks.account_security_surface_loaded,
+        "ordinary-browser receipt did not load Account and Security"
+    );
+    ensure!(
+        receipt.checks.fasti_origin_vendor_credential_storage_absent,
+        "ordinary-browser receipt found vendor credentials in browser storage"
+    );
+    ensure!(
+        receipt.checks.cookies.session
+            == (OrdinaryBrowserCookiePolicy {
+                secure: true,
+                http_only: true,
+                same_site: "Strict".to_owned(),
+                path: "/".to_owned(),
+                domain: "127.0.0.1".to_owned(),
+                opaque_hex64: true,
+            }),
+        "ordinary-browser session cookie policy differs"
+    );
+    ensure!(
+        receipt.checks.cookies.csrf
+            == (OrdinaryBrowserCookiePolicy {
+                secure: true,
+                http_only: false,
+                same_site: "Strict".to_owned(),
+                path: "/".to_owned(),
+                domain: "127.0.0.1".to_owned(),
+                opaque_hex64: true,
+            }),
+        "ordinary-browser CSRF cookie policy differs"
+    );
+    ensure!(
+        receipt.checks.cookies.distinct,
+        "ordinary-browser session and CSRF cookies are not distinct"
+    );
+    ensure!(
+        receipt.active_browser_sessions == 1,
+        "ordinary-browser proof did not leave exactly one active Fasti session"
+    );
+    ensure!(
+        receipt.active_administrators == 1,
+        "ordinary-browser proof did not establish exactly one active administrator"
+    );
+    ensure!(
+        receipt.packaged_tauri_authentication == "deferred_not_exercised",
+        "ordinary-browser receipt misstates the packaged-Tauri deferral"
+    );
+    Ok(OrdinaryBrowserEvidence {
+        receipt_sha256: sha256_bytes(&bytes),
+    })
+}
+
+fn gate_suite_scope(
+    kind: &str,
+    ordinary_browser: Option<&OrdinaryBrowserEvidence>,
+) -> Option<Value> {
+    (kind == "fasti.access-c1.delivery").then(|| {
+        let evidence = ordinary_browser.expect("validated C1 ordinary-browser evidence");
+        json!({
+            "bootstrap_path": "trusted_local_operator_cli",
+            "source_capabilities_delivered": [
+                "trailbase_trust_boundary",
+                "first_administrator_identity",
+                "ordinary_browser_sessions",
+                "account_and_security_projection",
+                "resumable_first_run_projection"
+            ],
+            "runtime_evidence": {
+                "ordinary_browser_sessions": "exact_chromium_runtime_pass",
+                "receipt": ORDINARY_BROWSER_RECEIPT_PATH,
+                "receipt_sha256": evidence.receipt_sha256
+            },
+            "deferred": ["packaged_tauri_authentication"],
+            "packaged_desktop_authentication_claimed": false
+        })
+    })
 }
 
 fn write_receipt(
@@ -910,6 +1091,7 @@ mod tests {
             "contracts.authored",
             "contracts.generated",
             "contracts.okf_uat",
+            "contracts.integrations",
             "javascript.format",
             "javascript.typecheck",
             "javascript.mutation_sdk_tests",
@@ -1088,6 +1270,191 @@ mod tests {
     }
 
     #[test]
+    fn dirty_source_cannot_emit_a_gate_suite_receipt() {
+        let root = tempfile::tempdir().expect("temporary workspace");
+        for args in [
+            vec!["init", "--quiet"],
+            vec!["config", "user.email", "test@example.invalid"],
+            vec!["config", "user.name", "Fasti Test"],
+        ] {
+            assert!(Command::new("git")
+                .args(args)
+                .current_dir(root.path())
+                .status()
+                .expect("run Git")
+                .success());
+        }
+        fs::write(root.path().join("tracked.txt"), "clean\n").expect("write tracked file");
+        assert!(Command::new("git")
+            .args(["add", "tracked.txt"])
+            .current_dir(root.path())
+            .status()
+            .expect("stage tracked file")
+            .success());
+        assert!(Command::new("git")
+            .args(["commit", "--quiet", "-m", "fixture"])
+            .current_dir(root.path())
+            .status()
+            .expect("commit fixture")
+            .success());
+
+        fs::write(root.path().join("tracked.txt"), "dirty\n").expect("modify tracked file");
+        fs::write(root.path().join("untracked.txt"), "dirty\n").expect("write untracked file");
+        let receipt = Path::new("target/fasti-receipts/test-suite.json");
+        let gate = GateRecord {
+            id: "test.pass".to_owned(),
+            execution: "in_process".to_owned(),
+            command: vec!["test".to_owned()],
+            status: "pass".to_owned(),
+            exit_code: Some(0),
+            stdout_sha256: sha256_bytes(b"pass\n"),
+            stderr_sha256: sha256_bytes(&[]),
+            tool_version: "test 1".to_owned(),
+            stdout: "pass\n".to_owned(),
+            stderr: String::new(),
+        };
+
+        let error = write_gate_suite_receipt(
+            root.path(),
+            receipt,
+            "fasti.test.gates",
+            "cargo xtask test",
+            &[gate],
+        )
+        .expect_err("dirty source must fail closed");
+
+        assert!(error.to_string().contains("source tree is dirty"));
+        assert!(!root.path().join(receipt).exists());
+    }
+
+    fn ordinary_browser_fixture(source: &SourceState) -> Value {
+        json!({
+            "schema_version": "fasti.access-ordinary-browser.v1",
+            "source": {
+                "git_commit": source.git_commit,
+                "git_tree": source.git_tree,
+                "dirty": source.dirty,
+            },
+            "trailbase_release": "0.33.5",
+            "checks": {
+                "chromium": "151.0.0.0",
+                "accountSecuritySurfaceLoaded": true,
+                "cookies": {
+                    "session": {"secure": true, "httpOnly": true, "sameSite": "Strict", "path": "/", "domain": "127.0.0.1", "opaqueHex64": true},
+                    "csrf": {"secure": true, "httpOnly": false, "sameSite": "Strict", "path": "/", "domain": "127.0.0.1", "opaqueHex64": true},
+                    "distinct": true,
+                },
+                "fastiOriginVendorCredentialStorageAbsent": true,
+            },
+            "active_browser_sessions": 1,
+            "active_administrators": 1,
+            "packaged_tauri_authentication": "deferred_not_exercised",
+        })
+    }
+
+    fn write_ordinary_browser_fixture(root: &Path, fixture: &Value) {
+        let path = root.join(ORDINARY_BROWSER_RECEIPT_PATH);
+        fs::create_dir_all(path.parent().expect("receipt parent"))
+            .expect("create receipt directory");
+        fs::write(
+            path,
+            serde_json::to_vec_pretty(fixture).expect("serialize receipt"),
+        )
+        .expect("write ordinary-browser receipt");
+    }
+
+    #[test]
+    fn ordinary_browser_receipt_requires_exact_source_and_assertions() {
+        let root = tempfile::tempdir().expect("temporary workspace");
+        let source = SourceState {
+            git_commit: "1".repeat(40),
+            git_tree: "2".repeat(40),
+            dirty: false,
+        };
+        let fixture = ordinary_browser_fixture(&source);
+        write_ordinary_browser_fixture(root.path(), &fixture);
+        let evidence = validate_ordinary_browser_receipt(root.path(), &source, "0.33.5")
+            .expect("validate exact receipt");
+        assert_eq!(evidence.receipt_sha256.len(), 64);
+
+        let mut wrong_head = fixture.clone();
+        wrong_head["source"]["git_commit"] = Value::String("3".repeat(40));
+        write_ordinary_browser_fixture(root.path(), &wrong_head);
+        assert!(
+            validate_ordinary_browser_receipt(root.path(), &source, "0.33.5")
+                .expect_err("wrong head must fail")
+                .to_string()
+                .contains("current clean commit and tree")
+        );
+
+        let mut weak_cookie = fixture.clone();
+        weak_cookie["checks"]["cookies"]["session"]["secure"] = Value::Bool(false);
+        write_ordinary_browser_fixture(root.path(), &weak_cookie);
+        assert!(
+            validate_ordinary_browser_receipt(root.path(), &source, "0.33.5")
+                .expect_err("weak cookie must fail")
+                .to_string()
+                .contains("session cookie policy")
+        );
+
+        let mut wrong_count = fixture;
+        wrong_count["active_administrators"] = Value::from(0);
+        write_ordinary_browser_fixture(root.path(), &wrong_count);
+        assert!(
+            validate_ordinary_browser_receipt(root.path(), &source, "0.33.5")
+                .expect_err("wrong administrator count must fail")
+                .to_string()
+                .contains("exactly one active administrator")
+        );
+    }
+
+    #[test]
+    fn ordinary_browser_receipt_is_required() {
+        let root = tempfile::tempdir().expect("temporary workspace");
+        let source = SourceState {
+            git_commit: "1".repeat(40),
+            git_tree: "2".repeat(40),
+            dirty: false,
+        };
+        assert!(
+            validate_ordinary_browser_receipt(root.path(), &source, "0.33.5")
+                .expect_err("missing receipt must fail")
+                .to_string()
+                .contains("ordinary-browser receipt is missing")
+        );
+    }
+
+    #[test]
+    fn access_delivery_receipt_names_the_cli_path_and_packaged_deferral() {
+        let evidence = OrdinaryBrowserEvidence {
+            receipt_sha256: "a".repeat(64),
+        };
+        let scope =
+            gate_suite_scope("fasti.access-c1.delivery", Some(&evidence)).expect("C1 scope");
+        assert_eq!(
+            scope.pointer("/bootstrap_path").and_then(Value::as_str),
+            Some("trusted_local_operator_cli")
+        );
+        assert_eq!(
+            scope
+                .pointer("/packaged_desktop_authentication_claimed")
+                .and_then(Value::as_bool),
+            Some(false)
+        );
+        assert_eq!(
+            scope.pointer("/deferred/0").and_then(Value::as_str),
+            Some("packaged_tauri_authentication")
+        );
+        assert_eq!(
+            scope
+                .pointer("/runtime_evidence/ordinary_browser_sessions")
+                .and_then(Value::as_str),
+            Some("exact_chromium_runtime_pass")
+        );
+        assert!(gate_suite_scope("fasti.other", None).is_none());
+    }
+
+    #[test]
     fn stale_receipt_is_removed_before_verification() {
         let root = tempfile::tempdir().expect("temporary workspace");
         let receipt = root.path().join(RECEIPT_PATH);
@@ -1096,5 +1463,44 @@ mod tests {
         fs::write(&receipt, "stale\n").expect("write stale receipt");
         clear_receipt(root.path()).expect("clear stale receipt");
         assert!(!receipt.exists());
+    }
+
+    #[test]
+    fn tool_version_always_queries_the_plain_version_flag() {
+        // Prior to the Podman migration, a gate whose program was "docker"
+        // and whose first argument was "buildx" received special-cased
+        // `buildx version` arguments instead of `--version`. That branch has
+        // been removed: every gate must now be queried with a plain
+        // `--version`, regardless of its own arguments. Using "git" here
+        // (rather than "docker") proves the query is unconditional: git has
+        // no "buildx" subcommand, so this only succeeds if the gate's own
+        // arguments were ignored in favor of "--version".
+        let gate = CommandGate::new(
+            "package.arm64_oci_build",
+            "git",
+            ["buildx", "build", "--platform", "linux/arm64"],
+            "fix",
+        );
+        let version = tool_version(Path::new("."), &gate).expect("git --version must succeed");
+        assert!(
+            version.to_lowercase().contains("git"),
+            "unexpected version text: {version}"
+        );
+    }
+
+    #[test]
+    fn tool_version_fails_closed_when_the_program_is_missing() {
+        let gate = CommandGate::new(
+            "package.missing_tool",
+            "definitely-not-a-real-fasti-binary",
+            ["--version"],
+            "install the missing tool",
+        );
+        let error =
+            tool_version(Path::new("."), &gate).expect_err("missing binary must fail closed");
+        assert!(error.to_string().contains("failed to bind"));
+        assert!(error
+            .to_string()
+            .contains("definitely-not-a-real-fasti-binary"));
     }
 }

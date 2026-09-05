@@ -1,31 +1,119 @@
 import {
   B1_CONFORMANCE_OPERATIONS,
+  LOCAL_BOOTSTRAP_OPERATIONS,
+  LOCAL_RUNTIME_OPERATIONS,
   FastiContractParseError,
   parseAcceptObservationRequest,
   parseAcceptObservationResponse,
+  parseAccessProjectionResponse,
+  parseAttachIdentifierRequest,
+  parseAttachIdentifierResponse,
   parseCapabilityDiscoveryResponse,
+  parseClientEnrollmentResponse,
+  parseCreateRecordRequest,
+  parseCreateRecordResponse,
+  parseConfigureProviderCredentialRequest,
+  parseConfigureMetadataProjectionRequest,
+  parseApplyAnimeGroupingPolicyChangeRequest,
+  parseApplyAnimeGroupingPolicyChangeResponse,
+  parseAnimeGroupingPolicyImpactResponse,
+  parseCompleteTrailBaseContinuationRequest,
   parseEnrollFirstClientRequest,
   parseEnrollFirstClientResponse,
   parseHealthResponse,
   parseInitializeNodeRequest,
   parseInitializeNodeResponse,
+  parseListRecordsResponse,
+  parseListBrowserSessionsResponse,
+  parseListProvidersResponse,
+  parseListTrackingDispositionsResponse,
+  parseMetadataProjectionConfigurationResponse,
+  parseMetadataProjectionResponse,
+  parseNuvioCollectionsDocumentDto,
+  parseNuvioCollectionsStateDto,
+  parseNodeInitializationResponse,
   parseProblemDetailsForOperation,
+  parseProviderCapabilityResponse,
+  parseProviderHealthResponse,
+  parseRefreshMetadataClaimsRequest,
+  parseRefreshMetadataClaimsResponse,
+  parseResolveIdentityRouteResponse,
+  parsePreviewAnimeGroupingPolicyChangeRequest,
+  parseReadAnimeGroupingPolicyResponse,
+  parseReadBrowserSessionResponse,
+  parseReadTrailBaseContinuationResponse,
+  parseRevokeBrowserSessionsResponse,
   parseReceiptCommittedEvent,
+  parseRegisterNamespaceRequest,
+  parseRegisterNamespaceResponse,
+  parseSetTrackingDispositionRequest,
+  parseSelectBrowserSessionProfileRequest,
+  parseSelectBrowserSessionProfileResponse,
+  parseStartTrailBaseSignInRequest,
+  parseStartTrailBaseSignInResponse,
+  parseTrackingDispositionStateDto,
   parseReplayReceiptResponse,
+  parseSubmitObservationRequest,
+  parseSubmitObservationResponse,
+  parseRotateBrowserSessionResponse,
   RECEIPT_STREAM_CONTRACT,
   type AcceptObservationRequest,
   type AcceptObservationResponse,
+  type AccessProjectionResponse,
+  type AttachIdentifierRequest,
+  type AttachIdentifierResponse,
   type CapabilityDiscoveryResponse,
   type CapabilityId,
+  type ClientEnrollmentResponse,
+  type CreateRecordRequest,
+  type CreateRecordResponse,
+  type ConfigureProviderCredentialRequest,
+  type ConfigureMetadataProjectionRequest,
+  type ApplyAnimeGroupingPolicyChangeRequest,
+  type ApplyAnimeGroupingPolicyChangeResponse,
+  type AnimeGroupingPolicyImpactResponse,
+  type CompleteTrailBaseContinuationRequest,
   type EnrollFirstClientRequest,
   type EnrollFirstClientResponse,
   type HealthResponse,
   type InitializeNodeRequest,
   type InitializeNodeResponse,
+  type ListRecordsResponse,
+  type ListBrowserSessionsResponse,
+  type ListProvidersResponse,
+  type ListTrackingDispositionsResponse,
+  type MetadataProjectionConfigurationResponse,
+  type MetadataProjectionQueryParameters,
+  type MetadataProjectionResponse,
+  type NuvioCollectionsDocumentDto,
+  type NuvioCollectionsStateDto,
+  type NodeInitializationResponse,
   type ProblemDetails,
   type ProblemCode,
+  type ProviderCapabilityResponse,
+  type ProviderHealthResponse,
+  type RefreshMetadataClaimsRequest,
+  type RefreshMetadataClaimsResponse,
+  type ResolveIdentityRouteResponse,
+  type PreviewAnimeGroupingPolicyChangeRequest,
+  type ReadAnimeGroupingPolicyResponse,
+  type ResolutionIntentDto,
+  type ReadBrowserSessionResponse,
+  type ReadTrailBaseContinuationResponse,
+  type RevokeBrowserSessionsResponse,
   type ReceiptCommittedEnvelope,
+  type RegisterNamespaceRequest,
+  type RegisterNamespaceResponse,
+  type SetTrackingDispositionRequest,
+  type SelectBrowserSessionProfileRequest,
+  type SelectBrowserSessionProfileResponse,
+  type StartTrailBaseSignInRequest,
+  type StartTrailBaseSignInResponse,
   type ReplayReceiptResponse,
+  type SubmitObservationRequest,
+  type SubmitObservationResponse,
+  type RotateBrowserSessionResponse,
+  type TrackingDispositionStateDto,
 } from "./generated.js";
 
 export * from "./generated.js";
@@ -57,11 +145,60 @@ export interface FastiClientOptions {
   readonly fetch?: typeof globalThis.fetch;
 }
 
+export type ConnectionValueSource =
+  "default" | "saved" | "environment" | "build";
+
+export type ConnectionScheme = "http" | "https";
+
+export interface ConnectionEndpoint {
+  readonly url: string;
+  readonly port: number;
+  readonly source: ConnectionValueSource;
+  readonly managed: boolean;
+  readonly scheme: ConnectionScheme;
+  readonly loopbackAliases: readonly string[];
+}
+
+/**
+ * Creates a normalized connection endpoint from a URL string.
+ * @param value - The base URL string to normalize.
+ * @param source - The source of the connection value.
+ * @returns A frozen ConnectionEndpoint object.
+ * @throws {TypeError} If the URL scheme is not http or https, contains credentials,
+ *   includes a query string or fragment, has an application path, has an invalid port
+ *   (must be from 1 to 65535), or if a non-loopback HTTP connection is attempted.
+ */
+export function connectionEndpoint(
+  value: string,
+  source: ConnectionValueSource = "saved",
+): ConnectionEndpoint {
+  const url = normalizeBaseUrl(value);
+  if (url.protocol === "http:" && !isLoopbackHostname(url.hostname)) {
+    throw new TypeError("non-loopback connection endpoints must use https");
+  }
+  return Object.freeze({
+    url: url.origin,
+    port: Number(url.port || (url.protocol === "https:" ? 443 : 80)),
+    source,
+    managed: source === "environment" || source === "build",
+    scheme: url.protocol === "https:" ? "https" : "http",
+    loopbackAliases: loopbackAliases(url),
+  });
+}
 export interface CallOptions {
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number;
   readonly retryPolicy?: Partial<RetryPolicy>;
 }
+
+export interface ResolveIdentityRouteQuery {
+  readonly intent: ResolutionIntentDto;
+  readonly target_provider: string;
+}
+
+export type ReadAnimeGroupingPolicyQuery =
+  | { readonly scope: "profile"; readonly client_id?: null }
+  | { readonly scope: "client"; readonly client_id: string };
 
 export interface ReceiptStreamOptions extends CallOptions {
   /** Last successfully handled SSE cursor. It is sent only as a header. */
@@ -139,11 +276,29 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 const MAX_RETRY_ATTEMPTS = 10;
 const MAX_RETRY_DELAY_MS = 60_000;
 const MAX_JSON_RESPONSE_BYTES = 512 * 1_024;
+const MAX_NUVIO_COLLECTIONS_RESPONSE_BYTES = 4 * 1_024 * 1_024 + 64 * 1_024;
 const MAX_SSE_LINE_BYTES = 64 * 1_024;
 const MAX_SSE_EVENT_BYTES = 256 * 1_024;
 const MAX_SSE_EVENT_LINES = 256;
 const MAX_SSE_CURSOR_CHARACTERS = 512;
 const RECEIPT_ID = /^rcp_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/;
+const RECORD_ID = /^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/;
+const BROWSER_SESSION_ID = /^ses_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/;
+const PROVIDER_PATH_ID = /^[a-z0-9][a-z0-9._-]{0,127}$/;
+const RESOLUTION_INTENTS = new Set([
+  "metadata_search",
+  "metadata_lookup",
+  "metadata_enrichment",
+  "rating_lookup",
+  "catalog_lookup",
+  "display_projection",
+  "nuvio_export",
+  "nuvio_import_attachment",
+  "tracker_read",
+  "tracker_write",
+  "segment_translation",
+  "deduplication_review",
+]);
 const HEALTH_PROBLEM_CONTRACT = {
   capabilityId: "system.health",
   problemCodes: [],
@@ -164,10 +319,11 @@ export class FastiClient {
       "timeoutMs",
     );
     this.#retryPolicy = normalizeRetryPolicy(options.retryPolicy);
-    this.#fetch = options.fetch ?? globalThis.fetch;
-    if (typeof this.#fetch !== "function") {
+    const fetch = options.fetch ?? globalThis.fetch?.bind(globalThis);
+    if (typeof fetch !== "function") {
       throw new TypeError("A Fetch API implementation is required");
     }
+    this.#fetch = fetch;
   }
 
   health(options: CallOptions = {}): Promise<HealthResponse> {
@@ -179,6 +335,52 @@ export class FastiClient {
       retryMode: "safe",
       responseParser: parseHealthResponse,
       responseLabel: "Health response",
+      options,
+    });
+  }
+
+  initializeDurableNode(
+    request: InitializeNodeRequest = {},
+    options: CallOptions = {},
+  ): Promise<NodeInitializationResponse> {
+    const operation = LOCAL_BOOTSTRAP_OPERATIONS.initializeDurableNode;
+    const body = parseOutgoing(
+      parseInitializeNodeRequest,
+      request,
+      "Durable initialize-node request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "never",
+      body,
+      responseParser: parseNodeInitializationResponse,
+      responseLabel: "Durable initialize-node response",
+      options,
+    });
+  }
+
+  enrollDurableFirstClient(
+    request: EnrollFirstClientRequest,
+    options: CallOptions = {},
+  ): Promise<ClientEnrollmentResponse> {
+    const operation = LOCAL_BOOTSTRAP_OPERATIONS.enrollDurableFirstClient;
+    const body = parseOutgoing(
+      parseEnrollFirstClientRequest,
+      request,
+      "Durable first-client enrollment request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "never",
+      body,
+      responseParser: parseClientEnrollmentResponse,
+      responseLabel: "Durable first-client enrollment response",
       options,
     });
   }
@@ -337,6 +539,800 @@ export class FastiClient {
     });
   }
 
+  submitObservation(
+    request: SubmitObservationRequest,
+    options: CallOptions = {},
+  ): Promise<SubmitObservationResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.submitObservation;
+    const body = parseOutgoing(
+      parseSubmitObservationRequest,
+      request,
+      "Submit-observation request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "stable-idempotency",
+      body,
+      responseParser: parseSubmitObservationResponse,
+      responseLabel: "Submit-observation response",
+      options,
+    });
+  }
+
+  createRecord(
+    request: CreateRecordRequest,
+    options: CallOptions = {},
+  ): Promise<CreateRecordResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.createRecord;
+    const body = parseOutgoing(
+      parseCreateRecordRequest,
+      request,
+      "Create-record request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "never",
+      body,
+      responseParser: parseCreateRecordResponse,
+      responseLabel: "Create-record response",
+      options,
+    });
+  }
+
+  listRecords(options: CallOptions = {}): Promise<ListRecordsResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.listRecords;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      responseParser: parseListRecordsResponse,
+      responseLabel: "List-records response",
+      options,
+    });
+  }
+
+  attachIdentifier(
+    request: AttachIdentifierRequest,
+    options: CallOptions = {},
+  ): Promise<AttachIdentifierResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.attachIdentifier;
+    const body = parseOutgoing(
+      parseAttachIdentifierRequest,
+      request,
+      "Attach-identifier request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      body,
+      responseParser: parseAttachIdentifierResponse,
+      responseLabel: "Attach-identifier response",
+      options,
+    });
+  }
+
+  registerNamespace(
+    request: RegisterNamespaceRequest,
+    options: CallOptions = {},
+  ): Promise<RegisterNamespaceResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.registerNamespace;
+    const body = parseOutgoing(
+      parseRegisterNamespaceRequest,
+      request,
+      "Register-namespace request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      body,
+      responseParser: parseRegisterNamespaceResponse,
+      responseLabel: "Register-namespace response",
+      options,
+    });
+  }
+
+  listTrackingDispositions(
+    options: CallOptions = {},
+  ): Promise<ListTrackingDispositionsResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.listTrackingDispositions;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      responseParser: parseListTrackingDispositionsResponse,
+      responseLabel: "List tracking dispositions response",
+      options,
+    });
+  }
+
+  setTrackingDisposition(
+    recordId: string,
+    request: SetTrackingDispositionRequest,
+    options: CallOptions = {},
+  ): Promise<TrackingDispositionStateDto> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.setTrackingDisposition;
+    const safeRecordId = contractPathIdentifier(
+      recordId,
+      RECORD_ID,
+      "recordId",
+    );
+    const body = parseOutgoing(
+      parseSetTrackingDispositionRequest,
+      request,
+      "Set tracking disposition request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path.replace(
+        "{record_id}",
+        encodeURIComponent(safeRecordId),
+      ),
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      body,
+      responseParser: (value) => {
+        const response = parseTrackingDispositionStateDto(value);
+        if (response.record_id !== safeRecordId) {
+          throw new FastiContractParseError(
+            "Tracking disposition response does not match the requested record id",
+          );
+        }
+        return response;
+      },
+      responseLabel: "Set tracking disposition response",
+      options,
+    });
+  }
+
+  getNuvioCollections(
+    options: CallOptions = {},
+  ): Promise<NuvioCollectionsStateDto> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.getNuvioCollections;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      responseParser: parseNuvioCollectionsStateDto,
+      responseLabel: "Nuvio Collections response",
+      maxResponseBytes: MAX_NUVIO_COLLECTIONS_RESPONSE_BYTES,
+      options,
+    });
+  }
+
+  replaceNuvioCollections(
+    request: NuvioCollectionsDocumentDto,
+    options: CallOptions = {},
+  ): Promise<NuvioCollectionsStateDto> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.replaceNuvioCollections;
+    const body = parseOutgoing(
+      parseNuvioCollectionsDocumentDto,
+      request,
+      "Nuvio Collections request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      body,
+      responseParser: parseNuvioCollectionsStateDto,
+      responseLabel: "Nuvio Collections response",
+      maxResponseBytes: MAX_NUVIO_COLLECTIONS_RESPONSE_BYTES,
+      options,
+    });
+  }
+
+  clearNuvioCollections(
+    options: CallOptions = {},
+  ): Promise<NuvioCollectionsStateDto> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.clearNuvioCollections;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      responseParser: parseNuvioCollectionsStateDto,
+      responseLabel: "Nuvio Collections response",
+      maxResponseBytes: MAX_NUVIO_COLLECTIONS_RESPONSE_BYTES,
+      options,
+    });
+  }
+
+  listProviders(options: CallOptions = {}): Promise<ListProvidersResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.listProviders;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      responseParser: parseListProvidersResponse,
+      responseLabel: "Provider list response",
+      options,
+    });
+  }
+
+  configureProviderCredential(
+    providerId: string,
+    capabilityId: string,
+    request: ConfigureProviderCredentialRequest,
+    options: CallOptions = {},
+  ): Promise<ProviderCapabilityResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.configureProviderCredential;
+    const identifiers = providerPathIdentifiers(providerId, capabilityId);
+    const body = parseOutgoing(
+      parseConfigureProviderCredentialRequest,
+      request,
+      "Configure provider credential request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: providerOperationPath(operation.path, identifiers),
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "never",
+      body,
+      responseParser: providerCapabilityParser(identifiers),
+      responseLabel: "Configured provider capability response",
+      options,
+    });
+  }
+
+  removeProviderCredential(
+    providerId: string,
+    capabilityId: string,
+    options: CallOptions = {},
+  ): Promise<ProviderCapabilityResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.removeProviderCredential;
+    const identifiers = providerPathIdentifiers(providerId, capabilityId);
+    return this.#jsonOperation({
+      method: operation.method,
+      path: providerOperationPath(operation.path, identifiers),
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "never",
+      responseParser: providerCapabilityParser(identifiers),
+      responseLabel: "Removed provider credential response",
+      options,
+    });
+  }
+
+  testProviderCredential(
+    providerId: string,
+    capabilityId: string,
+    options: CallOptions = {},
+  ): Promise<ProviderCapabilityResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.testProviderCredential;
+    const identifiers = providerPathIdentifiers(providerId, capabilityId);
+    return this.#jsonOperation({
+      method: operation.method,
+      path: providerOperationPath(operation.path, identifiers),
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "never",
+      responseParser: providerCapabilityParser(identifiers),
+      responseLabel: "Provider credential test response",
+      options,
+    });
+  }
+
+  readProviderHealth(
+    providerId: string,
+    options: CallOptions = {},
+  ): Promise<ProviderHealthResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.readProviderHealth;
+    const identifiers = providerPathIdentifiers(providerId);
+    return this.#jsonOperation({
+      method: operation.method,
+      path: providerOperationPath(operation.path, identifiers),
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      responseParser: (value) => {
+        const response = parseProviderHealthResponse(value);
+        if (response.provider_id !== identifiers.providerId) {
+          throw new FastiContractParseError(
+            "Provider health response does not match the requested provider",
+          );
+        }
+        return response;
+      },
+      responseLabel: "Provider health response",
+      options,
+    });
+  }
+
+  refreshMetadataClaims(
+    request: RefreshMetadataClaimsRequest,
+    options: CallOptions = {},
+  ): Promise<RefreshMetadataClaimsResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.refreshMetadataClaims;
+    const body = parseOutgoing(
+      parseRefreshMetadataClaimsRequest,
+      request,
+      "Refresh metadata claims request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "stable-idempotency",
+      body,
+      responseParser: (value) => {
+        const response = parseRefreshMetadataClaimsResponse(value);
+        if (
+          response.record_id !== body.record_id ||
+          response.provider_id !== body.provider_id
+        ) {
+          throw new FastiContractParseError(
+            "Metadata claim refresh response does not match the requested record and provider",
+          );
+        }
+        return response;
+      },
+      responseLabel: "Refresh metadata claims response",
+      options,
+    });
+  }
+
+  readMetadataProjection(
+    recordId: string,
+    query: MetadataProjectionQueryParameters = {},
+    options: CallOptions = {},
+  ): Promise<MetadataProjectionResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.readMetadataProjection;
+    const safeRecordId = contractPathIdentifier(
+      recordId,
+      RECORD_ID,
+      "recordId",
+    );
+    if (query.offline !== undefined && typeof query.offline !== "boolean") {
+      throw new TypeError("offline must be a boolean");
+    }
+    const path = operation.path.replace(
+      "{record_id}",
+      encodeURIComponent(safeRecordId),
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: query.offline ? `${path}?offline=true` : path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      responseParser: (value) => {
+        const response = parseMetadataProjectionResponse(value);
+        if (response.record_id !== safeRecordId) {
+          throw new FastiContractParseError(
+            "Metadata projection response does not match the requested record id",
+          );
+        }
+        return response;
+      },
+      responseLabel: "Metadata projection response",
+      options,
+    });
+  }
+
+  configureMetadataProjection(
+    request: ConfigureMetadataProjectionRequest,
+    options: CallOptions = {},
+  ): Promise<MetadataProjectionConfigurationResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.configureMetadataProjection;
+    const body = parseOutgoing(
+      parseConfigureMetadataProjectionRequest,
+      request,
+      "Configure metadata projection request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "never",
+      body,
+      responseParser: parseMetadataProjectionConfigurationResponse,
+      responseLabel: "Configure metadata projection response",
+      options,
+    });
+  }
+
+  resolveIdentityRoute(
+    recordId: string,
+    query: ResolveIdentityRouteQuery,
+    options: CallOptions = {},
+  ): Promise<ResolveIdentityRouteResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.resolveIdentityRoute;
+    const safeRecordId = contractPathIdentifier(
+      recordId,
+      RECORD_ID,
+      "recordId",
+    );
+    if (!RESOLUTION_INTENTS.has(query.intent)) {
+      throw new TypeError("intent does not match the generated contract");
+    }
+    const targetProvider = contractPathIdentifier(
+      query.target_provider,
+      PROVIDER_PATH_ID,
+      "targetProvider",
+    );
+    const path = operation.path.replace(
+      "{record_id}",
+      encodeURIComponent(safeRecordId),
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: `${path}?${new URLSearchParams({ intent: query.intent, target_provider: targetProvider })}`,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      responseParser: (value) => {
+        const response = parseResolveIdentityRouteResponse(value);
+        if (
+          response.record_id !== safeRecordId ||
+          response.intent !== query.intent ||
+          response.target_provider !== targetProvider
+        ) {
+          throw new FastiContractParseError(
+            "Identity route response does not match the request",
+          );
+        }
+        return response;
+      },
+      responseLabel: "Identity route response",
+      options,
+    });
+  }
+
+  readAnimeGroupingPolicy(
+    query: ReadAnimeGroupingPolicyQuery,
+    options: CallOptions = {},
+  ): Promise<ReadAnimeGroupingPolicyResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.readAnimeGroupingPolicy;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: `${operation.path}?${animePolicyQuery(query)}`,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      responseParser: parseReadAnimeGroupingPolicyResponse,
+      responseLabel: "Anime grouping policy response",
+      options,
+    });
+  }
+
+  previewAnimeGroupingPolicyChange(
+    request: PreviewAnimeGroupingPolicyChangeRequest,
+    options: CallOptions = {},
+  ): Promise<AnimeGroupingPolicyImpactResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.previewAnimeGroupingPolicyChange;
+    const body = parseOutgoing(
+      parsePreviewAnimeGroupingPolicyChangeRequest,
+      request,
+      "Preview anime grouping policy request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      body,
+      responseParser: parseAnimeGroupingPolicyImpactResponse,
+      responseLabel: "Preview anime grouping policy response",
+      options,
+    });
+  }
+
+  applyAnimeGroupingPolicyChange(
+    request: ApplyAnimeGroupingPolicyChangeRequest,
+    options: CallOptions = {},
+  ): Promise<ApplyAnimeGroupingPolicyChangeResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.applyAnimeGroupingPolicyChange;
+    const body = parseOutgoing(
+      parseApplyAnimeGroupingPolicyChangeRequest,
+      request,
+      "Apply anime grouping policy request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      browserMutation: true,
+      problemContract: operation,
+      retryMode: "stable-idempotency",
+      body,
+      responseParser: parseApplyAnimeGroupingPolicyChangeResponse,
+      responseLabel: "Apply anime grouping policy response",
+      options,
+    });
+  }
+
+  startTrailBaseSignIn(
+    request: StartTrailBaseSignInRequest,
+    options: CallOptions = {},
+  ): Promise<StartTrailBaseSignInResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.startTrailBaseSignIn;
+    const body = parseOutgoing(
+      parseStartTrailBaseSignInRequest,
+      request,
+      "TrailBase sign-in request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "never",
+      body,
+      responseParser: parseStartTrailBaseSignInResponse,
+      responseLabel: "TrailBase sign-in response",
+      options,
+    });
+  }
+
+  readTrailBaseContinuation(
+    options: CallOptions = {},
+  ): Promise<ReadTrailBaseContinuationResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.readTrailBaseContinuation;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      responseParser: parseReadTrailBaseContinuationResponse,
+      responseLabel: "TrailBase sign-in continuation response",
+      options,
+    });
+  }
+
+  completeTrailBaseContinuation(
+    request: CompleteTrailBaseContinuationRequest,
+    options: CallOptions = {},
+  ): Promise<void> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.completeTrailBaseContinuation;
+    const body = parseOutgoing(
+      parseCompleteTrailBaseContinuationRequest,
+      request,
+      "Complete TrailBase sign-in continuation request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "never",
+      body,
+      responseLabel: "Complete TrailBase sign-in continuation response",
+      options,
+    });
+  }
+
+  cancelTrailBaseContinuation(options: CallOptions = {}): Promise<void> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.cancelTrailBaseContinuation;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "never",
+      responseLabel: "Cancel TrailBase sign-in continuation response",
+      options,
+    });
+  }
+
+  readAccessProjection(
+    options: CallOptions = {},
+  ): Promise<AccessProjectionResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.readAccessProjection;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      responseParser: parseAccessProjectionResponse,
+      responseLabel: "Access projection response",
+      options,
+    });
+  }
+
+  readBrowserSession(
+    options: CallOptions = {},
+  ): Promise<ReadBrowserSessionResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.readBrowserSession;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      responseParser: parseReadBrowserSessionResponse,
+      responseLabel: "Browser session response",
+      options,
+    });
+  }
+
+  endBrowserSession(options: CallOptions = {}): Promise<void> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.endBrowserSession;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      browserMutation: true,
+      problemContract: operation,
+      retryMode: "never",
+      responseLabel: "End browser session response",
+      options,
+    });
+  }
+
+  listBrowserSessions(
+    options: CallOptions = {},
+  ): Promise<ListBrowserSessionsResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.listBrowserSessions;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      responseParser: parseListBrowserSessionsResponse,
+      responseLabel: "Browser session inventory response",
+      options,
+    });
+  }
+
+  revokeBrowserSession(
+    browserSessionId: string,
+    options: CallOptions = {},
+  ): Promise<RevokeBrowserSessionsResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.revokeBrowserSession;
+    const safeBrowserSessionId = contractPathIdentifier(
+      browserSessionId,
+      BROWSER_SESSION_ID,
+      "browserSessionId",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path.replace(
+        "{browser_session_id}",
+        encodeURIComponent(safeBrowserSessionId),
+      ),
+      authenticated: operation.authenticated,
+      browserMutation: true,
+      problemContract: operation,
+      retryMode: "never",
+      responseParser: parseRevokeBrowserSessionsResponse,
+      responseLabel: "Browser session revocation response",
+      options,
+    });
+  }
+
+  revokeOtherBrowserSessions(
+    options: CallOptions = {},
+  ): Promise<RevokeBrowserSessionsResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.revokeOtherBrowserSessions;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      browserMutation: true,
+      problemContract: operation,
+      retryMode: "never",
+      responseParser: parseRevokeBrowserSessionsResponse,
+      responseLabel: "Other browser session revocation response",
+      options,
+    });
+  }
+
+  revokeAllBrowserSessions(
+    options: CallOptions = {},
+  ): Promise<RevokeBrowserSessionsResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.revokeAllBrowserSessions;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      browserMutation: true,
+      problemContract: operation,
+      retryMode: "never",
+      responseParser: parseRevokeBrowserSessionsResponse,
+      responseLabel: "All browser session revocation response",
+      options,
+    });
+  }
+
+  rotateBrowserSession(
+    options: CallOptions = {},
+  ): Promise<RotateBrowserSessionResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.rotateBrowserSession;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      browserMutation: true,
+      problemContract: operation,
+      retryMode: "never",
+      responseParser: parseRotateBrowserSessionResponse,
+      responseLabel: "Browser session rotation response",
+      options,
+    });
+  }
+
+  selectBrowserSessionProfile(
+    request: SelectBrowserSessionProfileRequest,
+    options: CallOptions = {},
+  ): Promise<SelectBrowserSessionProfileResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.selectBrowserSessionProfile;
+    const body = parseOutgoing(
+      parseSelectBrowserSessionProfileRequest,
+      request,
+      "Browser session profile selection request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      browserMutation: true,
+      problemContract: operation,
+      retryMode: "never",
+      body,
+      responseParser: parseSelectBrowserSessionProfileResponse,
+      responseLabel: "Browser session profile selection response",
+      options,
+    });
+  }
+
+  listIntegrations(
+    options: CallOptions = {},
+  ): Promise<{ integrations: Array<Record<string, unknown>> }> {
+    return this.#jsonOperation({
+      method: "GET",
+      path: "/api/v1/integrations",
+      authenticated: false,
+      problemContract: HEALTH_PROBLEM_CONTRACT,
+      retryMode: "safe",
+      responseParser: (value) => {
+        if (
+          typeof value !== "object" ||
+          value === null ||
+          !("integrations" in value) ||
+          !Array.isArray((value as { integrations: unknown }).integrations)
+        ) {
+          throw new FastiContractParseError(
+            "Integration status response did not match the supported contract.",
+          );
+        }
+        return value as { integrations: Array<Record<string, unknown>> };
+      },
+      responseLabel: "Integration status response",
+      options,
+    });
+  }
+
   /**
    * Opens the governed receipt SSE fixture and performs bounded reconnects.
    * This never persists or queues events, and only reconnects the safe stream.
@@ -367,7 +1363,12 @@ export class FastiClient {
         try {
           response = await this.#fetch(
             this.#url(RECEIPT_STREAM_CONTRACT.path),
-            { method: "GET", headers, signal: scope.signal },
+            {
+              method: "GET",
+              headers,
+              signal: scope.signal,
+              credentials: "same-origin",
+            },
           );
         } catch {
           throw new NetworkRequestError();
@@ -500,14 +1501,16 @@ export class FastiClient {
   }
 
   async #jsonOperation<T>(input: {
-    readonly method: "GET" | "POST" | "PUT";
+    readonly method: "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
     readonly path: string;
     readonly authenticated: boolean;
+    readonly browserMutation?: boolean;
     readonly problemContract: ProblemContractBinding;
     readonly retryMode: RetryMode;
     readonly body?: unknown;
-    readonly responseParser: JsonParser<T>;
+    readonly responseParser?: JsonParser<T>;
     readonly responseLabel: string;
+    readonly maxResponseBytes?: number;
     readonly options: CallOptions;
   }): Promise<T> {
     const retryPolicy = normalizeRetryPolicy(
@@ -533,6 +1536,9 @@ export class FastiClient {
         if (serializedBody !== undefined) {
           headers.set("Content-Type", "application/json");
         }
+        if (input.browserMutation && !headers.has("Authorization")) {
+          headers.set("X-CSRF-Token", browserCsrfToken());
+        }
 
         let response: Response;
         try {
@@ -541,6 +1547,7 @@ export class FastiClient {
             headers,
             body: serializedBody,
             signal: scope.signal,
+            credentials: "same-origin",
           });
         } catch {
           throw new NetworkRequestError();
@@ -550,6 +1557,18 @@ export class FastiClient {
           retryPolicy.transientStatusCodes.includes(response.status) &&
           attempt < maximumAttempts
         ) {
+          if (contentTypeIs(response, "application/problem+json")) {
+            const error = await problemOrTransportError(
+              response,
+              input.problemContract,
+            );
+            if (
+              !(error instanceof FastiProblemError) ||
+              error.problem.retryability !== "retry_safe"
+            ) {
+              throw error;
+            }
+          }
           const retryAfter = retryAfterMs(response, retryPolicy.maxDelayMs);
           await response.body?.cancel();
           scope.dispose();
@@ -562,12 +1581,29 @@ export class FastiClient {
         if (!response.ok) {
           throw await problemOrTransportError(response, input.problemContract);
         }
+        if (input.responseParser === undefined) {
+          if (response.status !== 204) {
+            await response.body?.cancel();
+            throw new FastiProtocolError(
+              `${input.responseLabel} must use status 204`,
+            );
+          }
+          return undefined as T;
+        }
+        if (response.status === 204) {
+          throw new FastiProtocolError(
+            `${input.responseLabel} must contain generated JSON`,
+          );
+        }
         if (!contentTypeIs(response, "application/json")) {
           throw new FastiProtocolError(
             `${input.responseLabel} must use application/json`,
           );
         }
-        const value = await parseJson(response);
+        const value = await parseJson(
+          response,
+          input.maxResponseBytes ?? MAX_JSON_RESPONSE_BYTES,
+        );
         try {
           return input.responseParser(value);
         } catch (error) {
@@ -630,6 +1666,14 @@ export class FastiClient {
   }
 }
 
+/**
+ * Parses outgoing request data against the generated contract schema.
+ * @param parser - The JSON schema parser function.
+ * @param value - The value to parse.
+ * @param label - A label for error reporting.
+ * @returns The parsed and validated value.
+ * @throws {FastiProtocolError} If parsing fails.
+ */
 function parseOutgoing<T>(
   parser: JsonParser<T>,
   value: unknown,
@@ -642,13 +1686,44 @@ function parseOutgoing<T>(
   }
 }
 
+function browserCsrfToken(): string {
+  if (typeof document === "undefined") {
+    throw new FastiProtocolError(
+      "Browser session mutations require a browser CSRF cookie",
+    );
+  }
+  const values = document.cookie
+    .split(";")
+    .map((pair) => pair.trim().split("=", 2))
+    .filter(([name]) => name === "__Host-fasti_csrf")
+    .map(([, value]) => value);
+  if (values.length !== 1 || !/^[0-9a-f]{64}$/.test(values[0] ?? "")) {
+    throw new FastiProtocolError(
+      "Browser session mutations require one valid CSRF cookie",
+    );
+  }
+  return values[0];
+}
+
+/**
+ * Rejects successful responses for bindings that define only problem responses.
+ *
+ * @throws FastiProtocolError Always throws a protocol error.
+ */
 function unexpectedProblemOnlySuccess(_value: unknown): never {
   throw new FastiProtocolError(
     "Problem-only fixture binding returned an undocumented success",
   );
 }
 
-function normalizeBaseUrl(value: string): URL {
+/**
+ * Normalizes and validates a base URL for Fasti client connections.
+ *
+ * @param value - The URL string to validate.
+ * @returns A validated HTTP or HTTPS origin URL.
+ * @throws {TypeError} If the URL is invalid or contains credentials, a path, query, fragment, or invalid port.
+ */
+export function normalizeBaseUrl(value: string): URL {
   const url = new URL(value);
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new TypeError("baseUrl must use http or https");
@@ -664,9 +1739,47 @@ function normalizeBaseUrl(value: string): URL {
       "baseUrl must be an origin URL without an application path",
     );
   }
+  if (url.port === "0") {
+    throw new TypeError("baseUrl port must be from 1 to 65535");
+  }
   return url;
 }
 
+/**
+ * Determines whether a hostname identifies a loopback address.
+ *
+ * @param hostname - The hostname to check.
+ * @returns `true` for `localhost`, `127.0.0.1`, or `[::1]`, `false` otherwise.
+ */
+function isLoopbackHostname(hostname: string): boolean {
+  return ["localhost", "127.0.0.1", "[::1]"].includes(hostname.toLowerCase());
+}
+
+/**
+ * Generates equivalent loopback origins for a URL.
+ *
+ * @param url - The URL whose loopback hostname and port determine the aliases.
+ * @returns Loopback origin aliases, or an empty array if the hostname is not loopback.
+ */
+function loopbackAliases(url: URL): readonly string[] {
+  if (!isLoopbackHostname(url.hostname)) return Object.freeze([]);
+  const port = url.port === "" ? "" : `:${url.port}`;
+  if (url.hostname.toLowerCase() === "[::1]") {
+    return Object.freeze([`${url.protocol}//[::1]${port}`]);
+  }
+  return Object.freeze([
+    `${url.protocol}//localhost${port}`,
+    `${url.protocol}//127.0.0.1${port}`,
+  ]);
+}
+
+/**
+ * Normalizes retry policy options with validation and defaults.
+ * @param override - Partial retry policy to override defaults.
+ * @param fallback - The fallback retry policy to use for missing values.
+ * @returns A complete, frozen retry policy.
+ * @throws {RangeError} If policy values are invalid.
+ */
 function normalizeRetryPolicy(
   override?: Partial<RetryPolicy>,
   fallback: RetryPolicy = DEFAULT_RETRY_POLICY,
@@ -818,7 +1931,10 @@ async function problemOrTransportError(
   );
 }
 
-async function parseJson(response: Response): Promise<unknown> {
+async function parseJson(
+  response: Response,
+  maxBytes = MAX_JSON_RESPONSE_BYTES,
+): Promise<unknown> {
   if (response.body === null) {
     throw new FastiProtocolError("JSON response has no body");
   }
@@ -826,7 +1942,7 @@ async function parseJson(response: Response): Promise<unknown> {
   if (
     contentLength !== null &&
     /^\d+$/.test(contentLength) &&
-    Number(contentLength) > MAX_JSON_RESPONSE_BYTES
+    Number(contentLength) > maxBytes
   ) {
     await response.body.cancel().catch(() => undefined);
     throw new FastiProtocolError("JSON response exceeds the bounded body size");
@@ -844,7 +1960,7 @@ async function parseJson(response: Response): Promise<unknown> {
       }
       if (result.done) break;
       totalBytes += result.value.byteLength;
-      if (totalBytes > MAX_JSON_RESPONSE_BYTES) {
+      if (totalBytes > maxBytes) {
         throw new FastiProtocolError(
           "JSON response exceeds the bounded body size",
         );
@@ -1100,6 +2216,85 @@ function contractPathIdentifier(
     throw new TypeError(`${label} does not match the generated contract`);
   }
   return value;
+}
+
+function animePolicyQuery(
+  query: ReadAnimeGroupingPolicyQuery,
+): URLSearchParams {
+  if (query.scope !== "profile" && query.scope !== "client") {
+    throw new TypeError("scope does not match the generated contract");
+  }
+  if (query.scope === "profile" && query.client_id != null) {
+    throw new TypeError("profile scope must not include client_id");
+  }
+  if (query.scope === "client" && !query.client_id) {
+    throw new TypeError("client scope requires client_id");
+  }
+  const params = new URLSearchParams({ scope: query.scope });
+  if (query.scope === "client") params.set("client_id", query.client_id);
+  return params;
+}
+
+interface ProviderPathIdentifiers {
+  readonly providerId: string;
+  readonly capabilityId?: string;
+}
+
+function providerPathIdentifiers(
+  providerId: string,
+  capabilityId?: string,
+): ProviderPathIdentifiers {
+  return {
+    providerId: contractPathIdentifier(
+      providerId,
+      PROVIDER_PATH_ID,
+      "providerId",
+    ),
+    capabilityId:
+      capabilityId === undefined
+        ? undefined
+        : contractPathIdentifier(
+            capabilityId,
+            PROVIDER_PATH_ID,
+            "capabilityId",
+          ),
+  };
+}
+
+function providerOperationPath(
+  template: string,
+  identifiers: ProviderPathIdentifiers,
+): string {
+  let path = template.replace(
+    "{provider_id}",
+    encodeURIComponent(identifiers.providerId),
+  );
+  if (identifiers.capabilityId !== undefined) {
+    path = path.replace(
+      "{capability_id}",
+      encodeURIComponent(identifiers.capabilityId),
+    );
+  }
+  return path;
+}
+
+function providerCapabilityParser(
+  identifiers: ProviderPathIdentifiers,
+): JsonParser<ProviderCapabilityResponse> {
+  return (value) => {
+    const response = parseProviderCapabilityResponse(value);
+    if (
+      response.provider_id !== identifiers.providerId ||
+      !response.capabilities.some(
+        (capability) => capability.capability_id === identifiers.capabilityId,
+      )
+    ) {
+      throw new FastiContractParseError(
+        "Provider capability response does not match the requested path",
+      );
+    }
+    return response;
+  };
 }
 
 function positiveInteger(value: number, label: string): number {

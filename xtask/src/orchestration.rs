@@ -1,7 +1,223 @@
 use crate::verify::{run_additional_gates, write_gate_suite_receipt, CommandGate};
 use anyhow::{ensure, Context};
+use std::fs;
 use std::path::Path;
 use std::process::Command;
+
+pub(crate) fn run_access_b(root: &Path) -> anyhow::Result<()> {
+    let receipt = root.join("target/fasti-receipts/access-b.json");
+    match fs::remove_file(&receipt) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("failed to remove stale receipt {}", receipt.display()));
+        }
+    }
+    let source_before = git_status(root)?;
+    let gates = access_b_gates();
+    let records = run_additional_gates(root, &gates)?;
+    let source_after = git_status(root)?;
+    ensure!(
+        source_after == source_before,
+        "Access B gates changed the Git worktree; before={source_before:?}, after={source_after:?}"
+    );
+    write_gate_suite_receipt(
+        root,
+        Path::new("target/fasti-receipts/access-b.json"),
+        "fasti.access-b.gates",
+        "cargo xtask test milestone --body B",
+        &records,
+    )?;
+    Ok(())
+}
+
+pub(crate) fn run_access_c1(root: &Path) -> anyhow::Result<()> {
+    let receipt = root.join("target/fasti-receipts/access-c1.json");
+    match fs::remove_file(&receipt) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("failed to remove stale receipt {}", receipt.display()));
+        }
+    }
+    let source_before = git_status(root)?;
+    let gates = access_c1_gates();
+    let records = run_additional_gates(root, &gates)?;
+    let source_after = git_status(root)?;
+    ensure!(
+        source_after == source_before,
+        "Access C1 gates changed the Git worktree; before={source_before:?}, after={source_after:?}"
+    );
+    write_gate_suite_receipt(
+        root,
+        Path::new("target/fasti-receipts/access-c1.json"),
+        "fasti.access-c1.delivery",
+        "cargo xtask test milestone --body C1",
+        &records,
+    )?;
+    Ok(())
+}
+
+pub(crate) fn access_c1_gates() -> [CommandGate; 8] {
+    [
+        CommandGate::new(
+            "access.prepared_machine",
+            "cargo",
+            ["xtask", "test", "milestone", "--body", "B"],
+            "prepare the exact TrailBase assets and repair the native/OCI account-service gate",
+        ),
+        CommandGate::new(
+            "access.contract_profile",
+            "cargo",
+            ["xtask", "contract", "verify", "--locked"],
+            "repair the generated Access contract, SDK, package, and no-secret surfaces",
+        ),
+        CommandGate::new(
+            "access.operator_cli",
+            "cargo",
+            [
+                "test",
+                "--locked",
+                "--offline",
+                "-p",
+                "fasti-cli",
+            ],
+            "repair the trusted first-administrator command and its bounded input contract",
+        ),
+        CommandGate::new(
+            "access.operator_orchestration",
+            "cargo",
+            [
+                "test",
+                "--locked",
+                "--offline",
+                "-p",
+                "fasti-api",
+                "operator_bootstrap",
+            ],
+            "repair the exact TrailBase operator exchange and cleanup sequence",
+        ),
+        CommandGate::new(
+            "access.operator_transaction",
+            "cargo",
+            [
+                "test",
+                "--locked",
+                "--offline",
+                "-p",
+                "fasti-store",
+                "operator_bootstrap",
+            ],
+            "repair the atomic first-administrator transaction and leave no active browser session",
+        ),
+        CommandGate::new(
+            "access.desktop_host",
+            "cargo",
+            [
+                "test",
+                "--locked",
+                "--offline",
+                "--manifest-path",
+                "apps/desktop/src-tauri/Cargo.toml",
+            ],
+            "install the locked desktop prerequisites and repair the trusted-host Access source boundary",
+        ),
+        CommandGate::new(
+            "access.ordinary_browser_runtime",
+            "python3",
+            [
+                "-B",
+                "scripts/smoke-access-browser.py",
+                "--root",
+                ".dev-trailbase",
+                "--receipt",
+                "target/fasti-receipts/access-c1-ordinary-browser.json",
+            ],
+            "free exact loopback ports and repair the ordinary-browser TrailBase-to-Fasti session flow",
+        ),
+        CommandGate::new(
+            "access.browser_fixture",
+            "pnpm",
+            [
+                "exec",
+                "playwright",
+                "test",
+                "tests/e2e/access-c1.spec.ts",
+                "--project=chrome",
+            ],
+            "repair the approved Account and Security plus resumable first-run browser journey",
+        ),
+    ]
+}
+
+pub(crate) fn access_b_gates() -> [CommandGate; 8] {
+    [
+        CommandGate::new(
+            "trailbase.release_lock",
+            "python3",
+            ["-B", "scripts/trailbase_runtime.py", "verify-release"],
+            "repair the exact TrailBase native and OCI release lock",
+        ),
+        CommandGate::new(
+            "trailbase.runtime_mutation_sentinels",
+            "python3",
+            ["-B", "scripts/trailbase_runtime.py", "self-test"],
+            "restore fail-closed TrailBase release, backup, and restore validation",
+        ),
+        CommandGate::new(
+            "trailbase.launcher_syntax",
+            "bash",
+            ["-n", "scripts/dev.sh"],
+            "repair the sole development launcher",
+        ),
+        CommandGate::new(
+            "trailbase.launcher_invariants",
+            "bash",
+            ["scripts/dev.sh", "--self-test"],
+            "repair the development launcher lifecycle and safety invariants",
+        ),
+        CommandGate::new(
+            "trailbase.oci_conformance",
+            "bash",
+            ["scripts/smoke-trailbase-oci.sh"],
+            "prepare the exact Podman image and repair the OCI lifecycle or isolation policy",
+        ),
+        CommandGate::new(
+            "trailbase.combined_binary",
+            "cargo",
+            ["build", "-p", "fastid", "--locked", "--offline"],
+            "prepare the exact Fasti daemon used by the combined resource probe",
+        ),
+        CommandGate::new(
+            "trailbase.combined_resource_envelope",
+            "bash",
+            [
+                "scripts/bench-envelope.sh",
+                "--target",
+                "ceiling",
+                "--",
+                "bash",
+                "scripts/smoke-trailbase-combined.sh",
+            ],
+            "repair combined Fasti and TrailBase startup without raising the 192 MiB ceiling",
+        ),
+        CommandGate::new(
+            "trailbase.account_conformance",
+            "python3",
+            [
+                "-B",
+                "scripts/smoke-trailbase.py",
+                "--root",
+                ".dev-trailbase",
+                "--receipt",
+                "target/fasti-receipts/trailbase-conformance.json",
+            ],
+            "prepare the exact native TrailBase depot and repair the account-lifecycle fixture",
+        ),
+    ]
+}
 
 pub(crate) fn run_portable_b1(root: &Path) -> anyhow::Result<()> {
     let source_before = git_status(root)?;
@@ -178,18 +394,38 @@ pub(crate) fn deep_b1_gates() -> [CommandGate; 3] {
     ]
 }
 
-fn git_status(root: &Path) -> anyhow::Result<String> {
-    let output = Command::new("git")
-        .args(["status", "--porcelain=v1", "--untracked-files=all"])
-        .current_dir(root)
-        .output()
-        .context("failed to start git while checking portable-gate cleanliness")?;
-    ensure!(
-        output.status.success(),
-        "git status failed while checking portable-gate cleanliness: {}",
-        String::from_utf8_lossy(&output.stderr).trim()
-    );
-    String::from_utf8(output.stdout).context("git status emitted non-UTF-8 output")
+#[derive(Debug, Eq, PartialEq)]
+struct GitSnapshot {
+    commit: String,
+    tree: String,
+    status: String,
+}
+
+fn git_status(root: &Path) -> anyhow::Result<GitSnapshot> {
+    fn output(root: &Path, arguments: &[&str]) -> anyhow::Result<String> {
+        let result = Command::new("git")
+            .args(arguments)
+            .current_dir(root)
+            .output()
+            .context("failed to start git while binding gate source state")?;
+        ensure!(
+            result.status.success(),
+            "git {} failed while binding gate source state: {}",
+            arguments.join(" "),
+            String::from_utf8_lossy(&result.stderr).trim()
+        );
+        String::from_utf8(result.stdout).context("git emitted non-UTF-8 source state")
+    }
+
+    Ok(GitSnapshot {
+        commit: output(root, &["rev-parse", "--verify", "HEAD"])?
+            .trim()
+            .to_owned(),
+        tree: output(root, &["rev-parse", "HEAD^{tree}"])?
+            .trim()
+            .to_owned(),
+        status: output(root, &["status", "--porcelain=v1", "--untracked-files=all"])?,
+    })
 }
 
 #[cfg(test)]
@@ -197,19 +433,146 @@ mod tests {
     use super::*;
 
     #[test]
+    fn access_b_has_one_canonical_prepared_machine_gate() {
+        let gates = access_b_gates();
+        assert_eq!(
+            gates.iter().map(CommandGate::id).collect::<Vec<_>>(),
+            [
+                "trailbase.release_lock",
+                "trailbase.runtime_mutation_sentinels",
+                "trailbase.launcher_syntax",
+                "trailbase.launcher_invariants",
+                "trailbase.oci_conformance",
+                "trailbase.combined_binary",
+                "trailbase.combined_resource_envelope",
+                "trailbase.account_conformance",
+            ]
+        );
+        assert!(gates[6]
+            .display()
+            .contains("scripts/smoke-trailbase-combined.sh"));
+        assert!(gates[7].display().contains("scripts/smoke-trailbase.py"));
+        assert!(gates[7].display().contains(".dev-trailbase"));
+    }
+
+    #[test]
+    fn access_c1_reuses_prepared_contract_host_and_browser_gates() {
+        let gates = access_c1_gates();
+        assert_eq!(
+            gates.iter().map(CommandGate::id).collect::<Vec<_>>(),
+            [
+                "access.prepared_machine",
+                "access.contract_profile",
+                "access.operator_cli",
+                "access.operator_orchestration",
+                "access.operator_transaction",
+                "access.desktop_host",
+                "access.ordinary_browser_runtime",
+                "access.browser_fixture",
+            ]
+        );
+        assert_eq!(
+            gates[0].display(),
+            "\"cargo\" \"xtask\" \"test\" \"milestone\" \"--body\" \"B\""
+        );
+        assert_eq!(
+            gates[1].display(),
+            "\"cargo\" \"xtask\" \"contract\" \"verify\" \"--locked\""
+        );
+        assert!(gates[2].display().contains("fasti-cli"));
+        assert!(gates[3].display().contains("operator_bootstrap"));
+        assert!(gates[4].display().contains("operator_bootstrap"));
+        assert!(gates[5]
+            .display()
+            .contains("apps/desktop/src-tauri/Cargo.toml"));
+        assert!(gates[6]
+            .display()
+            .contains("scripts/smoke-access-browser.py"));
+        assert!(gates[6]
+            .display()
+            .contains("access-c1-ordinary-browser.json"));
+        assert!(gates[7].display().contains("tests/e2e/access-c1.spec.ts"));
+        assert!(gates[7].display().contains("--project=chrome"));
+    }
+
+    #[test]
     fn worktree_snapshot_detects_new_untracked_files() {
         let root = tempfile::tempdir().expect("temporary workspace");
-        let status = Command::new("git")
-            .args(["init", "--quiet"])
+        for arguments in [
+            vec!["init", "--quiet"],
+            vec!["config", "user.email", "test@example.invalid"],
+            vec!["config", "user.name", "Fasti Test"],
+        ] {
+            assert!(Command::new("git")
+                .args(arguments)
+                .current_dir(root.path())
+                .status()
+                .expect("configure Git repository")
+                .success());
+        }
+        std::fs::write(root.path().join("tracked.txt"), b"one\n").expect("write tracked fixture");
+        assert!(Command::new("git")
+            .args(["add", "tracked.txt"])
             .current_dir(root.path())
             .status()
-            .expect("initialize Git repository");
-        assert!(status.success());
+            .expect("stage tracked fixture")
+            .success());
+        assert!(Command::new("git")
+            .args(["commit", "--quiet", "-m", "fixture"])
+            .current_dir(root.path())
+            .status()
+            .expect("commit tracked fixture")
+            .success());
         let before = git_status(root.path()).expect("initial status");
         std::fs::write(root.path().join("generated.pyc"), b"cache").expect("write generated cache");
         let after = git_status(root.path()).expect("changed status");
         assert_ne!(before, after);
-        assert!(after.contains("generated.pyc"));
+        assert!(after.status.contains("generated.pyc"));
+    }
+
+    #[test]
+    fn worktree_snapshot_detects_a_clean_head_advance() {
+        let root = tempfile::tempdir().expect("temporary workspace");
+        for arguments in [
+            vec!["init", "--quiet"],
+            vec!["config", "user.email", "test@example.invalid"],
+            vec!["config", "user.name", "Fasti Test"],
+        ] {
+            assert!(Command::new("git")
+                .args(arguments)
+                .current_dir(root.path())
+                .status()
+                .expect("configure Git repository")
+                .success());
+        }
+        std::fs::write(root.path().join("tracked.txt"), b"one\n").expect("write tracked fixture");
+        for arguments in [
+            vec!["add", "tracked.txt"],
+            vec!["commit", "--quiet", "-m", "first"],
+        ] {
+            assert!(Command::new("git")
+                .args(arguments)
+                .current_dir(root.path())
+                .status()
+                .expect("commit fixture")
+                .success());
+        }
+        let before = git_status(root.path()).expect("first snapshot");
+        std::fs::write(root.path().join("tracked.txt"), b"two\n").expect("update tracked fixture");
+        for arguments in [
+            vec!["add", "tracked.txt"],
+            vec!["commit", "--quiet", "-m", "second"],
+        ] {
+            assert!(Command::new("git")
+                .args(arguments)
+                .current_dir(root.path())
+                .status()
+                .expect("advance fixture")
+                .success());
+        }
+        let after = git_status(root.path()).expect("second snapshot");
+        assert!(before.status.is_empty() && after.status.is_empty());
+        assert_ne!(before, after);
     }
 
     #[test]
@@ -228,5 +591,27 @@ mod tests {
         assert!(gates[2].display().contains("scripts/smoke-oci.sh"));
         assert!(gates[2].display().contains("arm64"));
         assert!(gates[2].display().contains("podman"));
+    }
+
+    #[test]
+    fn arm64_build_gate_no_longer_uses_docker_buildx_flags() {
+        let gates = deep_b1_gates();
+        let build_gate_display = gates[1].display();
+        assert!(!build_gate_display.contains("buildx"));
+        assert!(!build_gate_display.contains("--load"));
+        assert!(!build_gate_display.contains("\"docker\""));
+        assert_eq!(
+            build_gate_display,
+            "\"podman\" \"build\" \"--platform\" \"linux/arm64\" \"--tag\" \"fasti:deep-arm64\" \".\""
+        );
+    }
+
+    #[test]
+    fn arm64_smoke_gate_passes_the_runtime_argument_in_the_expected_order() {
+        let gates = deep_b1_gates();
+        assert_eq!(
+            gates[2].display(),
+            "\"bash\" \"scripts/smoke-oci.sh\" \"fasti:deep-arm64\" \"arm64\" \"podman\""
+        );
     }
 }

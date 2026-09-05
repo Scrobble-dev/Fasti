@@ -27,6 +27,7 @@ cleanup() {
 trap cleanup EXIT
 
 export FASTI_LISTEN=127.0.0.1:8421
+export FASTI_INTEGRATION_LISTEN=127.0.0.1:8422
 export FASTI_DATA_ROOT="${work_dir}/data"
 
 "$daemon" >"${work_dir}/daemon.log" 2>&1 &
@@ -38,6 +39,9 @@ for _ in $(seq 1 30); do
       exec 3<>/dev/tcp/127.0.0.1/8421 || exit 1
       printf "GET /api/v1/health HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n" >&3
       grep -q "\"status\":\"healthy\"" <&3
+      exec 4<>/dev/tcp/127.0.0.1/8422 || exit 1
+      printf "GET /api/v1/health HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n" >&4
+      grep -q "\"status\":\"healthy\"" <&4
     ' 2>/dev/null; then
     healthy=1
     break
@@ -61,4 +65,4 @@ if ! kill -0 "$daemon_pid" 2>/dev/null; then
   exit 1
 fi
 
-echo "daemon served health and settled for ${settle_seconds}s"
+echo "daemon served primary and integration health and settled for ${settle_seconds}s"

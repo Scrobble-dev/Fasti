@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-loopback",
+  "description": "Allows the packaged main WebView to call the existing trusted-host commands from Fasti's fixed numeric-loopback origin.",
+  "platforms": ["linux", "macOS", "windows"],
+  "local": false,
+  "windows": ["main"],
+  "remote": {
+    "urls": ["http://127.0.0.1:8420/*"]
+  },
+  "permissions": ["main-runtime"]
+}

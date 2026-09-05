@@ -10,6 +10,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import socket
 import stat
 import subprocess  # nosec B404 -- every subprocess.run call in this test file uses a fully literal argv (e.g. ["git", "init", "-q"]), no shell.
@@ -30,6 +31,8 @@ SPEC.loader.exec_module(benchmark)
 
 
 class HardwareProfileTests(unittest.TestCase):
+    """Test cases for hardware profile detection and temperature sensor parsing."""
+
     def test_temperature_falls_back_to_cpu_hwmon(self) -> None:
         with tempfile.TemporaryDirectory() as temp_name:
             root = Path(temp_name)
@@ -54,6 +57,105 @@ class HardwareProfileTests(unittest.TestCase):
 
         self.assertEqual(reading["sensor"], "k10temp:Tctl")
         self.assertEqual(reading["celsius"], 91.25)
+
+    def test_temperature_prefers_named_cpu_zone_over_generic_zone(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_name:
+            root = Path(temp_name)
+            thermal_root = root / "thermal"
+            generic = thermal_root / "thermal_zone0"
+            generic.mkdir(parents=True)
+            (generic / "type").write_text("acpitz\n", encoding="ascii")
+            (generic / "temp").write_text("30000\n", encoding="ascii")
+            pkg = thermal_root / "thermal_zone1"
+            pkg.mkdir()
+            (pkg / "type").write_text("x86_pkg_temp\n", encoding="ascii")
+            (pkg / "temp").write_text("55000\n", encoding="ascii")
+            hwmon_root = root / "hwmon"
+
+            reading = benchmark.parse_temperature(thermal_root, hwmon_root)
+
+        self.assertEqual(reading["sensor"], "x86_pkg_temp")
+        self.assertEqual(reading["celsius"], 55.0)
+
+    def test_temperature_ignores_hwmon_chips_outside_the_cpu_allowlist(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_name:
+            root = Path(temp_name)
+            thermal_root = root / "thermal"
+            hwmon_root = root / "hwmon"
+            unrelated = hwmon_root / "hwmon0"
+            unrelated.mkdir(parents=True)
+            (unrelated / "name").write_text("nvme\n", encoding="ascii")
+            (unrelated / "temp1_input").write_text("41000\n", encoding="ascii")
+
+            with self.assertRaisesRegex(
+                benchmark.CaptureError,
+                r"no plausible CPU/SoC thermal reading",
+            ):
+                benchmark.parse_temperature(thermal_root, hwmon_root)
+
+    def test_temperature_falls_back_to_the_raw_input_name_without_a_label_file(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_name:
+            root = Path(temp_name)
+            thermal_root = root / "thermal"
+            hwmon_root = root / "hwmon"
+            cpu = hwmon_root / "hwmon0"
+            cpu.mkdir(parents=True)
+            (cpu / "name").write_text("coretemp\n", encoding="ascii")
+            (cpu / "temp2_input").write_text("62500\n", encoding="ascii")
+
+            reading = benchmark.parse_temperature(thermal_root, hwmon_root)
+
+        self.assertEqual(reading["sensor"], "coretemp:temp2")
+        self.assertEqual(reading["celsius"], 62.5)
+
+    def test_temperature_skips_out_of_range_readings_for_a_plausible_candidate(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_name:
+            root = Path(temp_name)
+            thermal_root = root / "thermal"
+            hwmon_root = root / "hwmon"
+            cpu = hwmon_root / "hwmon0"
+            cpu.mkdir(parents=True)
+            (cpu / "name").write_text("coretemp\n", encoding="ascii")
+            (cpu / "temp1_label").write_text("AAA\n", encoding="ascii")
+            (cpu / "temp1_input").write_text("300000\n", encoding="ascii")
+            (cpu / "temp2_label").write_text("ZZZ\n", encoding="ascii")
+            (cpu / "temp2_input").write_text("42000\n", encoding="ascii")
+
+            reading = benchmark.parse_temperature(thermal_root, hwmon_root)
+
+        self.assertEqual(reading["sensor"], "coretemp:ZZZ")
+        self.assertEqual(reading["celsius"], 42.0)
+
+    def test_temperature_raises_when_no_thermal_or_hwmon_evidence_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_name:
+            root = Path(temp_name)
+            thermal_root = root / "thermal"
+            hwmon_root = root / "hwmon"
+
+            with self.assertRaisesRegex(
+                benchmark.CaptureError,
+                r"/sys/class/\{thermal,hwmon\}",
+            ):
+                benchmark.parse_temperature(thermal_root, hwmon_root)
+
+    def test_temperature_treats_small_raw_values_as_already_in_celsius(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_name:
+            root = Path(temp_name)
+            thermal_root = root / "thermal"
+            zone = thermal_root / "thermal_zone0"
+            zone.mkdir(parents=True)
+            (zone / "type").write_text("soc_thermal\n", encoding="ascii")
+            (zone / "temp").write_text("45\n", encoding="ascii")
+            hwmon_root = root / "hwmon"
+
+            reading = benchmark.parse_temperature(thermal_root, hwmon_root)
+
+        self.assertEqual(reading["sensor"], "soc_thermal")
+        self.assertEqual(reading["celsius"], 45.0)
 
     def test_profiles_are_derived_from_observed_fingerprint(self) -> None:
         self.assertEqual(
@@ -128,6 +230,8 @@ class HardwareProfileTests(unittest.TestCase):
 
 
 class DockerLocalityTests(unittest.TestCase):
+    """Test cases for Docker socket locality validation and security boundaries."""
+
     def test_remote_endpoint_is_refused_before_pid_measurement(self) -> None:
         with self.assertRaisesRegex(benchmark.CaptureError, "local Unix socket"):
             benchmark.local_docker_socket_path("tcp://benchmark.example:2376")
@@ -164,6 +268,8 @@ class DockerLocalityTests(unittest.TestCase):
 
 
 class ImmutableSourceTests(unittest.TestCase):
+    """Test cases for immutable source identity validation and OCI image labels."""
+
     def setUp(self) -> None:
         self.commit = "1" * 40
         self.tree = "2" * 40
@@ -256,6 +362,7 @@ class ImmutableSourceTests(unittest.TestCase):
         ]
 
         def descriptor(payload: bytes, media_type: str, size_delta: int = 0) -> dict[str, object]:
+            """Create an OCI descriptor for the given payload and media type."""
             return {
                 "mediaType": media_type,
                 "digest": "sha256:" + hashlib.sha256(payload).hexdigest(),
@@ -310,6 +417,7 @@ class ImmutableSourceTests(unittest.TestCase):
         )
 
         def path(item: dict[str, object]) -> str:
+            """Convert a descriptor to its OCI blob path."""
             return "blobs/sha256/" + str(item["digest"]).removeprefix("sha256:")
 
         config_path = path(config_descriptor)
@@ -765,6 +873,7 @@ class ImmutableSourceTests(unittest.TestCase):
         config_path = image_id.removeprefix("sha256:") + ".json"
 
         def manifest(layers: list[str]) -> tuple[str, bytes, bytes]:
+            """Create a Docker manifest.json member with the given layer list."""
             return (
                 "manifest.json",
                 json.dumps([{"Config": config_path, "Layers": layers}]).encode(),
@@ -1020,15 +1129,21 @@ class ImmutableSourceTests(unittest.TestCase):
 
 
 class IdleGateTests(unittest.TestCase):
+    """Test cases for idle CPU measurement window and sampling logic."""
+
     def test_idle_wait_extends_until_raw_samples_span_the_locked_window(self) -> None:
         class PhaseOffsetSampler:
+            """Mock sampler that simulates phase offset between samples."""
+
             interval_seconds = 1.0
             error = None
 
             def __init__(self) -> None:
+                """Initialize the mock sampler with zero calls."""
                 self.calls = 0
 
             def records_snapshot(self) -> list[dict[str, int]]:
+                """Return mock sample records with increasing time spans."""
                 self.calls += 1
                 final = 900_000_000_000 if self.calls == 1 else 900_800_000_000
                 return [
@@ -1037,6 +1152,7 @@ class IdleGateTests(unittest.TestCase):
                 ]
 
             def is_running(self) -> bool:
+                """Return True to indicate the sampler is still running."""
                 return True
 
         sampler = PhaseOffsetSampler()
@@ -1154,7 +1270,10 @@ class IdleGateTests(unittest.TestCase):
 
 
 class LockedProfileTests(unittest.TestCase):
+    """Test cases for hardware profile validation and requirement enforcement."""
+
     def valid_storage(self) -> dict[str, object]:
+        """Return a valid storage configuration for profile validation."""
         return {
             "transport": "sata",
             "storage_class": "ssd",
@@ -1284,6 +1403,8 @@ class LockedProfileTests(unittest.TestCase):
 
 
 class ProvenanceAndStorageTests(unittest.TestCase):
+    """Test cases for build provenance, storage fingerprinting, and artifact integrity."""
+
     def test_contract_sdk_build_uses_supported_pnpm_run_options(self) -> None:
         self.assertEqual(
             benchmark.CONTRACT_SDK_BUILD_COMMAND,
@@ -1294,6 +1415,7 @@ class ProvenanceAndStorageTests(unittest.TestCase):
         commands: list[list[str]] = []
 
         def fake_run(args: list[str], **_kwargs: object) -> str:
+            """Mock run_checked to capture executed commands."""
             commands.append(args)
             if args[0] == "findmnt":
                 return "/dev/sda1 ext4 rw,noatime"
@@ -1555,6 +1677,8 @@ class ProvenanceAndStorageTests(unittest.TestCase):
 
 
 class EvidenceInputTests(unittest.TestCase):
+    """Test cases for evidence input validation and placeholder rejection."""
+
     def test_placeholders_are_rejected(self) -> None:
         for value in ["TBD", "placeholder runner", "unassigned", "example"]:
             with self.subTest(value=value), self.assertRaises(benchmark.CaptureError):
@@ -1613,6 +1737,38 @@ class EvidenceInputTests(unittest.TestCase):
         self.assertEqual(statuses["oci_image_compressed"], "pass")
         self.assertEqual(statuses["oci_image_unpacked"], "fail")
         self.assertEqual(statuses["contract_pack_compressed"], "pass")
+
+
+class ThermalReadingSchemaTests(unittest.TestCase):
+    """The evidence schema's thermalReading.source pattern must admit hwmon
+    paths (the new fallback capture path) while still admitting thermal_zone
+    paths and rejecting unrelated sysfs classes."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        """Load the thermal reading source pattern from the evidence schema."""
+        schema_path = ROOT / "benchmarks" / "b1" / "evidence.schema.json"
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        cls.pattern = schema["$defs"]["thermalReading"]["properties"]["source"]["pattern"]
+
+    def test_pattern_admits_thermal_zone_sources(self) -> None:
+        self.assertIsNotNone(
+            re.match(self.pattern, "/sys/class/thermal/thermal_zone0/temp")
+        )
+
+    def test_pattern_admits_hwmon_sources(self) -> None:
+        self.assertIsNotNone(
+            re.match(self.pattern, "/sys/class/hwmon/hwmon1/temp1_input")
+        )
+
+    def test_pattern_rejects_unrelated_sysfs_classes(self) -> None:
+        for source in [
+            "/sys/class/power_supply/BAT0/temp",
+            "/proc/thermal/thermal_zone0/temp",
+            "/sys/classy/thermal/thermal_zone0/temp",
+        ]:
+            with self.subTest(source=source):
+                self.assertIsNone(re.match(self.pattern, source))
 
 
 if __name__ == "__main__":

@@ -1,0 +1,98 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--fasti-background);
+  color: var(--fasti-foreground);
+  font-family: var(--fasti-font-body);
+  font-size: 1rem;
+  line-height: 1.5;
+  text-rendering: optimizelegibility;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+:where(button, input:not([type="checkbox"], [type="radio"]), select, textarea) {
+  min-height: var(--fasti-touch-target-min);
+}
+
+:where(button) {
+  min-width: var(--fasti-touch-target-min);
+}
+
+.btn-primary:disabled {
+  opacity: 1;
+}
+
+select option {
+  background-color: var(--fasti-surface-paper, #ffffff) !important;
+  color: var(--fasti-text-primary, #181716) !important;
+}
+
+.dropdown-menu,
+.form-select,
+.form-control {
+  background-color: var(--fasti-surface-paper, #ffffff) !important;
+  color: var(--fasti-text-primary, #181716) !important;
+  border-color: var(--fasti-border, rgba(0, 0, 0, 0.2)) !important;
+}
+
+::selection {
+  background: var(--fasti-brand-mark);
+  color: var(--fasti-brand-contrast);
+}
+
+.skip-link {
+  position: fixed;
+  inset-block-start: 8px;
+  inset-inline-start: 8px;
+  z-index: 1000;
+  min-height: var(--fasti-touch-target-min);
+  padding: 10px 14px;
+  border: 2px solid var(--fasti-action);
+  background: var(--fasti-panel);
+  color: var(--fasti-action);
+  transform: translateY(-160%);
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 3px solid var(--fasti-focus);
+  outline-offset: 2px;
+}
+
+@media (forced-colors: active) {
+  :where(a, button, input, select, textarea, [tabindex]):focus-visible {
+    outline-color: Highlight;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -1,6 +1,7 @@
 use crate::kernel::{
-    authorize_transaction, digest_secret, load_access_snapshot, map_sql, now, problem,
-    random_secret, scope_storage_key, timestamp, verify_digest, SqliteKernel,
+    authorize_transaction, digest_secret, harden_private_regular_file, load_access_snapshot,
+    map_sql, now, problem, random_secret, scope_storage_key, timestamp, verify_digest,
+    SqliteKernel,
 };
 use chrono::{DateTime, Duration, Utc};
 use fasti_application::{
@@ -11,13 +12,15 @@ use fasti_application::{
     InitializeNodeOutcome, ListenerConfiguration, PortabilityFailureReceipt, PortabilityResult,
     PrepareRecoveryBootstrapOutcome, PrepareRecoveryBootstrapRequest, ProblemCode,
     ProfileSelectionOutcome, RequestAccessContext, RevokeCredentialCommand,
-    RotateCredentialCommand, RotateCredentialOutcome, ScopeKey,
+    RotateCredentialCommand, RotateCredentialOutcome, ScopeKey, SecretMaterial,
 };
 use fasti_domain::{ClientId, CredentialId, ProfileGrantId, ProfileId, WorkspaceId};
 use rusqlite::{params, OptionalExtension, Transaction, TransactionBehavior};
+use std::fs::OpenOptions;
+use std::io::{Read, Write};
 
 const INITIALIZATION_LIFETIME_MINUTES: i64 = 10;
-const FULL_ADMIN_SCOPES: &[ScopeKey] = &[
+pub(crate) const FULL_ADMIN_SCOPES: &[ScopeKey] = &[
     ScopeKey::CapabilityRead,
     ScopeKey::ProfileSelect,
     ScopeKey::CredentialManage,
@@ -25,6 +28,28 @@ const FULL_ADMIN_SCOPES: &[ScopeKey] = &[
     ScopeKey::ObservationAccept,
     ScopeKey::ReceiptRead,
     ScopeKey::IdentityWrite,
+    ScopeKey::IdentityRead,
+    ScopeKey::ProfileStateRead,
+    ScopeKey::ProfileStateWrite,
+    ScopeKey::ProviderRead,
+    ScopeKey::ProviderCredentialManage,
+    ScopeKey::MetadataClaimRefresh,
+    ScopeKey::MetadataProjectionRead,
+    ScopeKey::MetadataProjectionConfigure,
+    ScopeKey::ReviewRead,
+    ScopeKey::ReviewWrite,
+    ScopeKey::CorrectionRead,
+    ScopeKey::CorrectionWrite,
+    ScopeKey::WorkspaceExport,
+    ScopeKey::WorkspaceVerify,
+];
+
+pub(crate) const V11_NODE_OWNER_SCOPE_BACKFILL: &[ScopeKey] =
+    &[ScopeKey::ProviderRead, ScopeKey::ProviderCredentialManage];
+
+pub(crate) const V8_NODE_OWNER_SCOPE_BACKFILL: &[ScopeKey] = &[
+    ScopeKey::ProfileStateRead,
+    ScopeKey::ProfileStateWrite,
     ScopeKey::ReviewRead,
     ScopeKey::ReviewWrite,
     ScopeKey::CorrectionRead,
@@ -340,6 +365,117 @@ fn require_one_row(
 }
 
 impl AccessAdministrationPort for SqliteKernel {
+    fn ensure_bootstrap_secret(&self) -> ApplicationResult<SecretMaterial> {
+        let capability = CapabilityKey::InitializeNode;
+        let correlation_id = fasti_domain::RequestCorrelationId::new_v7();
+        // Serializes the whole read-validate-recover sequence below: without
+        // it, two concurrent callers can each observe the same malformed
+        // file, and the loser can delete a secret the winner just published
+        // and republish a different one, leaving them disagreeing about the
+        // secret's value.
+        let _bootstrap_secret_guard = self.lock_bootstrap_secret(capability, correlation_id)?;
+        let path = self.data_root().join("bootstrap.secret");
+        let unavailable = || {
+            Box::new(FastiProblem::storage_unavailable(
+                capability,
+                correlation_id,
+            ))
+        };
+
+        // The stored value is always exactly 64 hex characters -- bounded so
+        // a corrupted or hostile file can't make this read unbounded.
+        let read_existing = || -> std::io::Result<String> {
+            let mut contents = String::new();
+            std::fs::File::open(&path)?
+                .take(128)
+                .read_to_string(&mut contents)?;
+            Ok(contents)
+        };
+        let is_valid = |contents: &str| SecretMaterial::try_from_hex(contents.trim()).is_ok();
+
+        let stored_hex = match read_existing() {
+            Ok(contents) if is_valid(&contents) => {
+                // A valid file can still be group- or world-readable -- from
+                // a pre-hardening version of this code, a restore, or a
+                // umask that didn't apply -- and this value authorizes
+                // /api/v1/node/initialization, so reusing it without
+                // re-hardening would let another local account read it and
+                // initialize the node. Tighten it every time it's read, not
+                // only when it's created.
+                harden_private_regular_file(&path).map_err(|_| unavailable())?;
+                contents
+            }
+            // Absent, unreadable, or empty (including a file left
+            // zero-length by a prior write that never reached disk before a
+            // crash) -- (re)publish through a unique temporary file in the
+            // target's directory so concurrent callers don't collide, fsync
+            // before publishing so a crash after this point still leaves
+            // either a complete file or none, and use no-replace semantics
+            // (hard link, not rename, which silently overwrites) so a
+            // concurrent legitimate publish is never clobbered. Bounded to
+            // two attempts: a hard link can only fail because the
+            // destination already exists, and that existing file is either
+            // a winning concurrent publish (read and use it) or the exact
+            // stale/invalid file that put us in this branch to begin with
+            // (remove it and retry once, so this can't loop forever
+            // refusing to replace it).
+            _ => {
+                let parent = path.parent().ok_or_else(unavailable)?;
+                let secret = random_secret(capability, correlation_id)?;
+                let hex = secret.expose_hex();
+                let mut published_hex = None;
+                for attempt in 0..2 {
+                    let temporary =
+                        parent.join(format!("bootstrap.secret.tmp.{correlation_id}.{attempt}"));
+                    let published = (|| -> std::io::Result<()> {
+                        let mut file = OpenOptions::new()
+                            .write(true)
+                            .create(true)
+                            .truncate(true)
+                            .open(&temporary)?;
+                        harden_private_regular_file(&temporary).map_err(|_| {
+                            std::io::Error::other("hardening the secret file failed")
+                        })?;
+                        file.write_all(hex.as_bytes())?;
+                        file.sync_all()?;
+                        drop(file);
+                        #[cfg(unix)]
+                        {
+                            std::fs::hard_link(&temporary, &path)
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            std::fs::rename(&temporary, &path)
+                        }
+                    })();
+                    let _ = std::fs::remove_file(&temporary);
+
+                    match published {
+                        Ok(()) => {
+                            published_hex = Some(hex.clone());
+                            break;
+                        }
+                        Err(_) => match read_existing() {
+                            Ok(contents) if is_valid(&contents) => {
+                                published_hex = Some(contents);
+                                break;
+                            }
+                            _ => {
+                                // Still invalid: a stale leftover, not a
+                                // concurrent legitimate publish. Clear it and
+                                // let the loop retry the hard link.
+                                let _ = std::fs::remove_file(&path);
+                            }
+                        },
+                    }
+                }
+                published_hex.ok_or_else(unavailable)?
+            }
+        };
+
+        SecretMaterial::try_from_hex(stored_hex.trim()).map_err(|_| unavailable())
+    }
+
     fn initialize_node(
         &self,
         command: InitializeNodeCommand,
@@ -742,7 +878,7 @@ impl AccessAdministrationPort for SqliteKernel {
         query: AuthenticateCredentialQuery,
     ) -> ApplicationResult<RequestAccessContext> {
         let correlation_id = query.correlation_id();
-        let capability = CapabilityKey::DiscoverCapabilities;
+        let capability = query.capability();
         let digest = digest_secret(query.credential());
         let connection = self.lock_connection(capability, correlation_id)?;
         let mut statement = map_sql(
@@ -1498,6 +1634,7 @@ mod tests {
             self.kernel
                 .authenticate_credential(AuthenticateCredentialQuery::new(
                     RequestCorrelationId::new_v7(),
+                    CapabilityKey::DiscoverCapabilities,
                     credential,
                 ))
         }
@@ -2216,6 +2353,7 @@ mod tests {
             .kernel
             .authenticate_credential(AuthenticateCredentialQuery::new(
                 RequestCorrelationId::new_v7(),
+                CapabilityKey::DiscoverCapabilities,
                 SecretMaterial::try_from_hex(&credential_hex).expect("authenticate final secret"),
             ))
             .expect("final caller-owned credential authenticates");
@@ -2360,13 +2498,22 @@ mod tests {
 
         let authentication_proof = SecretMaterial::try_from_hex(&node.initialization_proof_hex)
             .expect("copy consumed proof for authentication");
-        assert!(node
+        let authentication_error = node
             .kernel
             .authenticate_credential(AuthenticateCredentialQuery::new(
                 RequestCorrelationId::new_v7(),
+                CapabilityKey::InspectReview,
                 authentication_proof,
             ))
-            .is_err());
+            .expect_err("consumed proof must not authenticate");
+        assert_eq!(
+            authentication_error.code(),
+            ProblemCode::AuthenticationFailed
+        );
+        assert_eq!(
+            authentication_error.capability(),
+            CapabilityKey::InspectReview
+        );
 
         let connection = node
             .kernel
@@ -2444,6 +2591,173 @@ mod tests {
         node.insert_profile_and_grant(node.workspace_id, ProfileId::new_v7());
 
         assert!(node.authenticate().is_err());
+    }
+
+    #[test]
+    fn bootstrap_secret_recovers_from_a_zero_length_file_left_by_a_crashed_write() {
+        let root = tempfile::tempdir().expect("temporary data root");
+        // A write that reached open()/create_new() but crashed before
+        // write_all() completed -- exactly what the old non-atomic
+        // create-then-write left behind, and what would have permanently
+        // wedged every future startup without an atomic publish.
+        std::fs::write(root.path().join("bootstrap.secret"), b"")
+            .expect("seed a zero-length secret file");
+
+        let kernel = SqliteKernel::open(root.path()).expect("SQLite kernel");
+        let secret = kernel
+            .ensure_bootstrap_secret()
+            .expect("a zero-length prior file must not be treated as durably published");
+
+        let republished = std::fs::read_to_string(root.path().join("bootstrap.secret"))
+            .expect("bootstrap secret file readable after recovery");
+        assert_eq!(republished.trim(), secret.expose_hex());
+        assert!(
+            !root.path().join("bootstrap.secret.tmp").exists(),
+            "the temporary publish file must not linger after a successful rename"
+        );
+    }
+
+    #[test]
+    fn bootstrap_secret_is_stable_across_repeated_calls() {
+        let root = tempfile::tempdir().expect("temporary data root");
+        let kernel = SqliteKernel::open(root.path()).expect("SQLite kernel");
+
+        let first = kernel
+            .ensure_bootstrap_secret()
+            .expect("first bootstrap secret");
+        let second = kernel
+            .ensure_bootstrap_secret()
+            .expect("second bootstrap secret");
+
+        assert_eq!(first.expose_hex(), second.expose_hex());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ensure_bootstrap_secret_hardens_an_existing_valid_file_before_reuse() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().expect("temporary data root");
+        let path = root.path().join("bootstrap.secret");
+        let hex = SecretMaterial::from_bytes([9_u8; 32]).expose_hex();
+        std::fs::write(&path, &hex).expect("seed a valid but loosely-permissioned secret file");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))
+            .expect("relax permissions to simulate a pre-hardening file");
+
+        let kernel = SqliteKernel::open(root.path()).expect("SQLite kernel");
+        let secret = kernel
+            .ensure_bootstrap_secret()
+            .expect("existing valid secret is accepted");
+        assert_eq!(secret.expose_hex(), hex);
+
+        let mode = std::fs::metadata(&path)
+            .expect("bootstrap secret metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(
+            mode, 0o600,
+            "an existing valid secret must be hardened to owner-only before reuse, \
+             not left at whatever permissions it already had"
+        );
+    }
+
+    #[test]
+    fn concurrent_bootstrap_secret_publishers_agree_on_one_value() {
+        // `SqliteKernel::open` takes an exclusive OS-level lock on the data
+        // root (StoreOpenError::DataRootLocked), so two *processes* (two
+        // separate `open()` calls) can never race to publish this file --
+        // only one can ever hold an open kernel against a given data root.
+        // The scenario worth guarding is concurrent *callers sharing one
+        // already-open kernel* (e.g. multiple threads before the code that
+        // primes this at startup is known to run exactly once) -- this
+        // exercises that instead of racing separate `open()` calls, which
+        // would just deadlock on the data-root lock rather than test
+        // anything about the publish logic itself.
+        let root = tempfile::tempdir().expect("temporary data root");
+        let kernel = SqliteKernel::open(root.path()).expect("SQLite kernel");
+        let barrier = Barrier::new(8);
+
+        let results: Vec<String> = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..8)
+                .map(|_| {
+                    let kernel = &kernel;
+                    let barrier = &barrier;
+                    scope.spawn(move || {
+                        barrier.wait();
+                        kernel
+                            .ensure_bootstrap_secret()
+                            .expect("bootstrap secret")
+                            .expose_hex()
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|handle| handle.join().expect("publisher thread panicked"))
+                .collect()
+        });
+
+        let persisted = std::fs::read_to_string(root.path().join("bootstrap.secret"))
+            .expect("bootstrap secret file readable after concurrent publishing");
+        for result in &results {
+            assert_eq!(
+                result,
+                persisted.trim(),
+                "every concurrent caller must return the value that was actually persisted, \
+                 never a value only it generated but lost the publish race for"
+            );
+        }
+    }
+
+    #[test]
+    fn concurrent_recovery_from_a_pre_existing_malformed_secret_agrees_on_one_value() {
+        // Same threat model as concurrent_bootstrap_secret_publishers_agree_on_one_value,
+        // but starting from a malformed (not missing) file, so every caller
+        // enters the "invalid -> remove stale -> republish" recovery branch
+        // together, instead of the plain "no file yet" branch. Without
+        // bootstrap_secret serializing this sequence, a caller whose
+        // validity check ran before a sibling's publish can go on to delete
+        // that sibling's freshly-published valid secret and republish a
+        // different one, leaving callers disagreeing about which secret is
+        // actually persisted.
+        let root = tempfile::tempdir().expect("temporary data root");
+        std::fs::write(root.path().join("bootstrap.secret"), b"not-a-valid-secret")
+            .expect("seed a malformed secret file");
+        let kernel = SqliteKernel::open(root.path()).expect("SQLite kernel");
+        let barrier = Barrier::new(8);
+
+        let results: Vec<String> = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..8)
+                .map(|_| {
+                    let kernel = &kernel;
+                    let barrier = &barrier;
+                    scope.spawn(move || {
+                        barrier.wait();
+                        kernel
+                            .ensure_bootstrap_secret()
+                            .expect("bootstrap secret")
+                            .expose_hex()
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|handle| handle.join().expect("publisher thread panicked"))
+                .collect()
+        });
+
+        let persisted = std::fs::read_to_string(root.path().join("bootstrap.secret"))
+            .expect("bootstrap secret file readable after concurrent recovery");
+        for result in &results {
+            assert_eq!(
+                result,
+                persisted.trim(),
+                "every concurrent caller recovering from the same malformed file must return \
+                 the value that was actually persisted, never a value only it generated but \
+                 lost the recovery race for"
+            );
+        }
     }
 
     #[test]

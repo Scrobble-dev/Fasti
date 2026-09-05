@@ -128,6 +128,236 @@ if payload.get("status") != "healthy" or not payload.get("version"):
     raise SystemExit(f"Unexpected network-denied health payload: {payload!r}")
 PY
 
+# 4. Prove the shipped loopback daemon can perform durable one-time bootstrap.
+# Secrets stay inside this process and are never written to logs or URLs. The
+# bootstrap secret proves the caller can read a file the daemon'"'"'s OS user
+# owns -- the same local-filesystem trust boundary the data root lock assumes.
+python3 - "${work_dir}/data/bootstrap.secret" <<'"'"'PY'"'"'
+import http.client
+import json
+import re
+import sys
+
+bootstrap_secret = open(sys.argv[1]).read().strip()
+
+def post(path, payload, bearer=None):
+    connection = http.client.HTTPConnection("127.0.0.1", 8420, timeout=5)
+    headers = {"content-type": "application/json"}
+    if bearer is not None:
+        headers["authorization"] = f"Bearer {bearer}"
+    connection.request("POST", path, body=json.dumps(payload), headers=headers)
+    response = connection.getresponse()
+    body = json.loads(response.read())
+    connection.close()
+    return response.status, body
+
+def put(path, payload, bearer):
+    connection = http.client.HTTPConnection("127.0.0.1", 8420, timeout=5)
+    connection.request(
+        "PUT",
+        path,
+        body=json.dumps(payload),
+        headers={
+            "content-type": "application/json",
+            "authorization": f"Bearer {bearer}",
+        },
+    )
+    response = connection.getresponse()
+    body = json.loads(response.read())
+    connection.close()
+    return response.status, body
+
+def get(path, bearer):
+    connection = http.client.HTTPConnection("127.0.0.1", 8420, timeout=5)
+    connection.request("GET", path, headers={"authorization": f"Bearer {bearer}"})
+    response = connection.getresponse()
+    body = json.loads(response.read())
+    connection.close()
+    return response.status, body
+
+status, initialized = post("/api/v1/node/initialization", {}, bearer=bootstrap_secret)
+if status != 200 or not re.fullmatch(r"[0-9a-f]{64}", initialized.get("initialization_proof", "")):
+    raise SystemExit("Durable node initialization failed")
+
+status, enrolled = post(
+    "/api/v1/client-enrollments",
+    {"initialization_proof": initialized["initialization_proof"]},
+)
+if (
+    status != 200
+    or enrolled.get("credential_scheme") != "Bearer"
+    or not re.fullmatch(r"[0-9a-f]{64}", enrolled.get("credential", ""))
+):
+    raise SystemExit("Durable first-client enrollment failed")
+
+status, providers = get("/api/v1/providers", enrolled["credential"])
+provider_rows = providers.get("providers", [])
+provider_capabilities = {
+    row.get("provider_id"): row.get("capabilities", [])
+    for row in provider_rows
+}
+active_providers = {"tmdb", "google-books"}
+if (
+    status != 200
+    or len(provider_rows) != 12
+    or any(
+        len(capabilities) != 2
+        or {capability.get("state") for capability in capabilities} != {"unavailable"}
+        or any(capability.get("credential_state") != "missing" for capability in capabilities)
+        or any(not capability.get("writable") for capability in capabilities)
+        or any(not capability.get("testable") for capability in capabilities)
+        for provider_id, capabilities in provider_capabilities.items()
+        if provider_id in active_providers
+    )
+    or any(
+        len(capabilities) != 2
+        or {capability.get("state") for capability in capabilities} != {"unavailable"}
+        or any(capability.get("writable") for capability in capabilities)
+        or any(capability.get("testable") for capability in capabilities)
+        for provider_id, capabilities in provider_capabilities.items()
+        if provider_id not in active_providers
+    )
+):
+    raise SystemExit("Packaged provider registry did not report the governed runtime boundary")
+
+status, created = post(
+    "/api/v1/records",
+    {"grain": "film"},
+    bearer=enrolled["credential"],
+)
+record_id = created.get("record_id")
+if status != 200 or not isinstance(record_id, str):
+    raise SystemExit("Packaged metadata smoke could not create its local Record")
+
+status, namespace = post(
+    "/api/v1/namespaces",
+    {
+        "namespace": "tmdb.movie",
+        "label": "TMDB Movie",
+        "grains": ["film"],
+        "id_pattern": "^[1-9][0-9]*$",
+        "normalization": "identity",
+        "licence_posture": "identifiers_only",
+    },
+    bearer=enrolled["credential"],
+)
+if status != 200 or namespace.get("namespace") != "tmdb.movie":
+    raise SystemExit("Packaged metadata smoke could not register its provider namespace")
+
+status, attached = post(
+    "/api/v1/records/identifiers",
+    {
+        "record_id": record_id,
+        "namespace": "tmdb.movie",
+        "grain": "film",
+        "value": "550",
+    },
+    bearer=enrolled["credential"],
+)
+if status != 200 or attached.get("record_id") != record_id:
+    raise SystemExit("Packaged metadata smoke could not attach its provider route")
+
+status, projection = get(
+    f"/api/v1/records/{record_id}/metadata-projection?offline=true",
+    enrolled["credential"],
+)
+if (
+    status != 200
+    or projection.get("record_id") != record_id
+    or projection.get("fields") != []
+    or not projection.get("policy", {}).get("profile_id")
+):
+    raise SystemExit(
+        f"Empty metadata projection did not retain its editable profile policy: {status} {projection!r}"
+    )
+
+status, configured = put(
+    "/api/v1/profile/metadata-projection",
+    {
+        "preferred_provider_id": "tmdb",
+        "preferred_locale": "en-IE",
+        "original_locale": None,
+        "allow_english_fallback": True,
+        "last_known_good": "allow",
+        "region": "IE",
+        "enabled_field_groups": ["basic_info"],
+        "overrides": [],
+    },
+    enrolled["credential"],
+)
+if (
+    status != 200
+    or configured.get("policy", {}).get("enabled_field_groups") != ["basic_info"]
+):
+    raise SystemExit("Packaged metadata smoke could not configure its profile policy")
+
+status, refresh = post(
+    "/api/v1/metadata/claims/refresh",
+    {
+        "operation_id": "op_018f0e0e7f7b70008000000000000005",
+        "record_id": record_id,
+        "provider_id": "tmdb",
+        "field_groups": ["basic_info"],
+        "locale": "en-IE",
+        "region": "IE",
+        "mode": "revalidate",
+    },
+    bearer=enrolled["credential"],
+)
+if status != 409 or refresh.get("code") != "metadata_claim_stale":
+    raise SystemExit("Offline provider refresh did not retain the governed last-known-good state")
+
+status, route = get(
+    f"/api/v1/records/{record_id}/identity-route?intent=metadata_lookup&target_provider=tmdb",
+    enrolled["credential"],
+)
+if (
+    status != 200
+    or route.get("status") != "selected"
+    or route.get("selected_route", {}).get("identifier", {}).get("value") != "550"
+):
+    raise SystemExit("Packaged identity routing did not select the local provider identifier")
+
+status, policy = get(
+    "/api/v1/profile/anime-grouping-policy?scope=profile",
+    enrolled["credential"],
+)
+if status != 200 or policy.get("policy", {}).get("preference") != "automatic":
+    raise SystemExit("Packaged anime policy did not expose its durable profile default")
+
+policy_change = {
+    "scope": {"kind": "profile", "client_id": None},
+    "change": {"kind": "set", "preference": "group_by_tv_work"},
+}
+status, preview = post(
+    "/api/v1/profile/anime-grouping-policy/preview",
+    {**policy_change, "after_record_id": None, "limit": 100},
+    bearer=enrolled["credential"],
+)
+if status != 200 or preview.get("proposed_preference") != "group_by_tv_work":
+    raise SystemExit("Packaged anime policy preview did not evaluate the requested change")
+
+status, applied = put(
+    "/api/v1/profile/anime-grouping-policy",
+    {
+        **policy_change,
+        "operation_id": "op_018f0e0e7f7b70008000000000000006",
+        "expected_revision": 0,
+    },
+    enrolled["credential"],
+)
+if (
+    status != 200
+    or applied.get("policy", {}).get("preference") != "group_by_tv_work"
+    or applied.get("policy", {}).get("revision") != 1
+):
+    raise SystemExit("Packaged anime policy change did not commit an immutable receipt")
+
+status, problem = post("/api/v1/node/initialization", {}, bearer=bootstrap_secret)
+if status != 409 or problem.get("code") != "already_initialized":
+    raise SystemExit("One-time node initialization did not close after enrollment")
+PY
+
 # Idle memory. scripts/smoke-oci.sh already holds the container path to this
 # budget; the native path was unbounded, so the readiness gate could pass with a
 # daemon over the 64 MiB idle target. Measured from /proc rather than enforced
@@ -147,5 +377,5 @@ if (( rss_kib > idle_limit_mib * 1024 )); then
   exit 1
 fi
 
-echo "native offline smoke: CLI guard, daemon health, and ${rss_mib} MiB idle memory all pass with no network"
+echo "native offline smoke: CLI guard, durable bootstrap, provider registry, metadata and identity safe states, daemon health, and ${rss_mib} MiB idle memory all pass with no network"
 ' _ "$work_dir" "$(realpath "$daemon")" "$(realpath "$cli")" "$idle_limit_mib"

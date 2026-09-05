@@ -23,6 +23,7 @@ pub(crate) enum CliFailure {
     Capability {
         code: &'static str,
         capability_id: &'static str,
+        safe_state: &'static str,
         detail: String,
         next_action: String,
     },
@@ -43,6 +44,23 @@ impl CliFailure {
         Self::Capability {
             code,
             capability_id,
+            safe_state: "no_mutation",
+            detail: detail.into(),
+            next_action: next_action.into(),
+        }
+    }
+
+    pub(crate) fn operation(
+        code: &'static str,
+        capability_id: &'static str,
+        safe_state: &'static str,
+        detail: impl Into<String>,
+        next_action: impl Into<String>,
+    ) -> Self {
+        Self::Capability {
+            code,
+            capability_id,
+            safe_state,
             detail: detail.into(),
             next_action: next_action.into(),
         }
@@ -75,11 +93,12 @@ impl fmt::Display for CliFailure {
             Self::Capability {
                 code,
                 capability_id,
+                safe_state,
                 detail,
                 next_action,
             } => write!(
                 formatter,
-                "code={code} capability_id={capability_id} safe_state=no_mutation detail={detail:?} next_action={next_action:?}"
+                "code={code} capability_id={capability_id} safe_state={safe_state} detail={detail:?} next_action={next_action:?}"
             ),
             Self::Local {
                 diagnostic,

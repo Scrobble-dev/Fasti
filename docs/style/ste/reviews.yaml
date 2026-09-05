@@ -1,0 +1,7 @@
+version: 1
+standard: ASD-STE100 Issue 9
+review_policy:
+  machine_labels: [draft, machine_checked, needs_revision]
+  human_label: human_reviewed
+  certification_claim_allowed: false
+reviews: []

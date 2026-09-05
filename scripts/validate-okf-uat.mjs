@@ -18,6 +18,10 @@ const uatOwnershipPath = resolve(
   repositoryRoot,
   "tests/conformance/uat-ownership.v1.json",
 );
+const nuvioMetadataPreviewPath = resolve(
+  repositoryRoot,
+  "contracts/registry/v1/nuvio-metadata-programme-preview.yaml",
+);
 const identityUatCsvPath = resolve(
   repositoryRoot,
   "tests/conformance/identity-uat-matrix.v1.csv",
@@ -28,6 +32,8 @@ const ALLOWED_OKF_STATUS = new Set(["draft", "stable", "deprecated"]);
 const ALLOWED_UAT_STATUS = new Set([
   "executable-b1",
   "contract-b1",
+  "executable-m3",
+  "contract-m3",
   "deferred",
 ]);
 const IDENTITY_UAT_HEADER = [
@@ -43,6 +49,23 @@ const IDENTITY_UAT_HEADER = [
   "source_basis",
 ];
 const IDENTITY_UAT_ROW_COUNT = 126;
+const LEGACY_UAT_ROW_COUNT = 80;
+const NUVIO_METADATA_UAT_ROW_COUNT = 60;
+const NUVIO_METADATA_NO_RUNTIME_CLAIM =
+  "This preview reserves ownership and names only; it does not claim any listed capability is implemented.";
+const NUVIO_METADATA_TRANSPORT_SURFACES = [
+  "cli",
+  "http_openapi",
+  "json_ld",
+  "json_schema",
+  "knowledge",
+  "native_nuvio_clients",
+  "okf",
+  "package_smoke",
+  "sdk",
+  "sse_asyncapi",
+  "ui",
+];
 const ALLOWED_IDENTITY_CATEGORIES = new Set([
   "stable_entity",
   "partial_identity",
@@ -89,12 +112,27 @@ const ALLOWED_BODIES = new Set([
   "b7",
   "b8",
   "post-b8",
+  "m1",
+  "m2",
+  "m3",
 ]);
 
+/**
+ * Computes the set difference (elements in left but not in right).
+ * @param {Set} left - The left set.
+ * @param {Set} right - The right set.
+ * @returns {Array} Sorted array of elements in left but not in right.
+ */
 function setDifference(left, right) {
   return [...left].filter((value) => !right.has(value)).sort();
 }
 
+/**
+ * Verifies that two iterables contain the same unique identifiers.
+ * @param {Iterable} actualValues - The actual identifiers.
+ * @param {Iterable} expectedValues - The expected identifiers.
+ * @param {string} label - A label used in assertion messages.
+ */
 function assertSameSet(actualValues, expectedValues, label) {
   const actualList = [...actualValues];
   const expectedList = [...expectedValues];
@@ -117,6 +155,13 @@ function assertSameSet(actualValues, expectedValues, label) {
   );
 }
 
+/**
+ * Parses YAML frontmatter from a Markdown document.
+ * @param {string} source - The Markdown source content.
+ * @param {string} label - A label for error reporting.
+ * @returns {Object} An object with frontmatter and body properties.
+ * @throws {AssertionError} If frontmatter is missing or malformed.
+ */
 function parseFrontmatter(source, label) {
   const match = source.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u);
   assert.ok(match, `${label} must begin with YAML frontmatter`);
@@ -197,6 +242,12 @@ async function assertLocalTargetExists(sourcePath, target) {
   );
 }
 
+/**
+ * Asserts that a value is a non-empty array of non-blank strings.
+ * @param {*} value - The value to validate.
+ * @param {string} label - A label for error reporting.
+ * @throws {AssertionError} If the value is not a valid string list.
+ */
 function assertStringList(value, label) {
   assert.ok(Array.isArray(value), `${label} must be a YAML list`);
   assert.ok(value.length > 0, `${label} must not be empty`);
@@ -206,8 +257,85 @@ function assertStringList(value, label) {
   }
 }
 
+/** Validates the planning preview fields that must fail closed before counting. */
+function assertNuvioMetadataPreviewShape(preview) {
+  assert.equal(
+    preview.implementation_rule?.no_runtime_claim,
+    NUVIO_METADATA_NO_RUNTIME_CLAIM,
+    "programme preview must preserve its exact no-runtime claim",
+  );
+  assert.ok(
+    preview.capability_groups &&
+      typeof preview.capability_groups === "object" &&
+      !Array.isArray(preview.capability_groups),
+    "programme capability groups must be a YAML map",
+  );
+  for (const [group, { ids } = {}] of Object.entries(
+    preview.capability_groups,
+  )) {
+    assertStringList(ids, `programme capability group ${group} ids`);
+  }
+  assertStringList(preview.stable_problems, "programme stable problems");
+  assertStringList(preview.events, "programme events");
+
+  assert.ok(
+    preview.transport_disposition &&
+      typeof preview.transport_disposition === "object" &&
+      !Array.isArray(preview.transport_disposition),
+    "programme transport dispositions must be a YAML map",
+  );
+  assert.deepEqual(
+    Object.keys(preview.transport_disposition).sort(),
+    NUVIO_METADATA_TRANSPORT_SURFACES,
+    "programme transport dispositions must cover every governed surface",
+  );
+  for (const [surface, disposition] of Object.entries(
+    preview.transport_disposition,
+  )) {
+    if (typeof disposition === "string") {
+      assert.ok(disposition.trim(), `${surface} disposition must not be blank`);
+      assert.notEqual(
+        disposition,
+        "not_applicable",
+        `${surface} not_applicable disposition must include a reason`,
+      );
+      continue;
+    }
+    assert.equal(
+      disposition?.disposition,
+      "not_applicable",
+      `${surface} object disposition must be not_applicable`,
+    );
+    assert.ok(
+      typeof disposition.reason === "string" && disposition.reason.trim(),
+      `${surface} not_applicable disposition must include a reason`,
+    );
+  }
+}
+
+/** Returns true for a lower-case dotted identifier without regular-expression backtracking. */
+function isDottedIdentifier(value) {
+  const segments = value.split(".");
+  return (
+    segments.length > 1 &&
+    segments.every(
+      (segment) =>
+        segment.length > 0 &&
+        segment[0] >= "a" &&
+        segment[0] <= "z" &&
+        [...segment].every(
+          (character) =>
+            (character >= "a" && character <= "z") ||
+            (character >= "0" && character <= "9") ||
+            character === "_",
+        ),
+    )
+  );
+}
+
 /**
- * Validates the OKF catalogue against repository structure and finalized B1 registry data.
+ * Validates the OKF catalogue against repository structure and finalized
+ * contract bodies that publish through the shared capability catalogue.
  * @param {object} registry - Capability registry used to verify catalogue identifiers and authorization metadata.
  * @return {Promise<{conceptCount: number}>} The number of validated concept files.
  */
@@ -322,27 +450,30 @@ async function validateOkf(registry) {
     .map((target) => resolve(okfRoot, target));
   assertSameSet(indexTargets, concepts, "OKF root index concept links");
 
-  const finalizedB1 = registry.capabilities.filter(
+  const finalizedCatalog = registry.capabilities.filter(
     ({ contract_body: contractBody, lifecycle }) =>
-      contractBody === "b1" && lifecycle.contract_state === "finalized",
+      ["b1", "b2", "c1", "m1", "m2", "m3"].includes(contractBody) &&
+      lifecycle.contract_state === "finalized",
   );
   const catalogueDefinitions = [
     {
       name: "capabilities.md",
       key: "identifiers",
-      values: finalizedB1.map(({ id }) => id),
+      values: finalizedCatalog.map(({ id }) => id),
     },
     {
       name: "problems.md",
       key: "identifiers",
       values: [
-        ...new Set(finalizedB1.flatMap(({ problems }) => problems)),
+        ...new Set(finalizedCatalog.flatMap(({ problems }) => problems)),
       ].sort(),
     },
     {
       name: "scopes.md",
       key: "identifiers",
-      values: [...new Set(finalizedB1.flatMap(({ scopes }) => scopes))].sort(),
+      values: [
+        ...new Set(finalizedCatalog.flatMap(({ scopes }) => scopes)),
+      ].sort(),
     },
     {
       name: "lifecycle.md",
@@ -405,7 +536,7 @@ async function validateOkf(registry) {
     resolve(okfRoot, "capabilities.md"),
   );
   const governedAuthorization = Object.fromEntries(
-    finalizedB1.map(({ id, authorization }) => [id, authorization]),
+    finalizedCatalog.map(({ id, authorization }) => [id, authorization]),
   );
   assertSameSet(
     capabilityCatalogue.frontmatter.authorization_postures,
@@ -415,7 +546,7 @@ async function validateOkf(registry) {
   assert.deepEqual(
     capabilityCatalogue.frontmatter.authorization_assignments,
     governedAuthorization,
-    "capabilities.md authorization assignments must exactly match finalized B1 registry capabilities",
+    "capabilities.md authorization assignments must exactly match finalized catalogue capabilities",
   );
   for (const [id, authorization] of Object.entries(governedAuthorization)) {
     // Scope the posture to the capability's own row. A global substring test
@@ -481,6 +612,11 @@ function parseCsv(source) {
   return rows;
 }
 
+/**
+ * Validates the product UAT matrix and its ownership mappings.
+ * @param {Object} registry - The capability registry containing UAT trace identifiers.
+ * @return {Promise<Object>} Counts of total, promoted, and deferred cases.
+ */
 async function validateUat(registry) {
   const rows = parseCsv(await readFile(uatCsvPath, "utf8"));
   assert.deepEqual(rows[0], [
@@ -493,20 +629,76 @@ async function validateUat(registry) {
     "Test type",
   ]);
   const sourceRows = rows.slice(1);
-  assert.equal(sourceRows.length, 80, "source UAT matrix must contain 80 rows");
+  assert.equal(
+    sourceRows.length,
+    LEGACY_UAT_ROW_COUNT + NUVIO_METADATA_UAT_ROW_COUNT,
+    `source UAT matrix must contain ${LEGACY_UAT_ROW_COUNT} legacy and ${NUVIO_METADATA_UAT_ROW_COUNT} Nuvio metadata programme rows`,
+  );
   assert.ok(
     sourceRows.every((row) => row.length === rows[0].length),
     "every source UAT row must have the header field count",
   );
-  const expectedIds = Array.from(
-    { length: 80 },
+  const legacyExpectedIds = Array.from(
+    { length: LEGACY_UAT_ROW_COUNT },
     (_, index) => `ID-${String(index + 1).padStart(3, "0")}`,
+  );
+  const programmeExpectedIds = Array.from(
+    { length: NUVIO_METADATA_UAT_ROW_COUNT },
+    (_, index) => `MDN-${String(index + 1).padStart(3, "0")}`,
   );
   assert.deepEqual(
     sourceRows.map(([id]) => id),
-    expectedIds,
-    "source UAT IDs must be the complete ordered ID-001 through ID-080 set",
+    [...legacyExpectedIds, ...programmeExpectedIds],
+    `source UAT IDs must be ordered ${legacyExpectedIds[0]} through ${legacyExpectedIds.at(-1)} then ${programmeExpectedIds[0]} through ${programmeExpectedIds.at(-1)}`,
   );
+
+  const preview = parseYaml(await readFile(nuvioMetadataPreviewPath, "utf8"));
+  assert.equal(preview.preview_version, 1);
+  assert.equal(preview.status, "approved_for_implementation");
+  assertNuvioMetadataPreviewShape(preview);
+  assert.throws(
+    () =>
+      assertNuvioMetadataPreviewShape({
+        ...preview,
+        events: "not-a-list",
+      }),
+    /programme events must be a YAML list/u,
+  );
+  assert.throws(
+    () =>
+      assertNuvioMetadataPreviewShape({
+        ...preview,
+        stable_problems: "not-a-list",
+      }),
+    /programme stable problems must be a YAML list/u,
+  );
+  assert.throws(
+    () =>
+      assertNuvioMetadataPreviewShape({
+        ...preview,
+        capability_groups: {
+          ...preview.capability_groups,
+          M1: { ...preview.capability_groups.M1, ids: "provider.list" },
+        },
+      }),
+    /programme capability group M1 ids must be a YAML list/u,
+  );
+  const previewCapabilities = Object.values(preview.capability_groups).flatMap(
+    ({ ids }) => ids,
+  );
+  assert.equal(previewCapabilities.length, 55);
+  assert.equal(new Set(previewCapabilities).size, previewCapabilities.length);
+  assert.ok(
+    previewCapabilities.every(isDottedIdentifier),
+    "programme capability IDs must use the governed dotted identifier shape",
+  );
+  assert.equal(preview.stable_problems.length, 34);
+  assert.equal(
+    new Set(preview.stable_problems).size,
+    preview.stable_problems.length,
+  );
+  assert.equal(preview.events.length, 8);
+  assert.equal(new Set(preview.events).size, preview.events.length);
 
   const ownership = await readStrictJson(uatOwnershipPath);
   assert.match(ownership.version, /^\d+\.\d+\.\d+$/u);
@@ -515,15 +707,16 @@ async function validateUat(registry) {
     Array.isArray(ownership.cases),
     "UAT ownership cases must be a list",
   );
+  const promotedProgrammeIds = ["MDN-001", "MDN-002", "MDN-018"];
   assert.equal(
     ownership.cases.length,
-    80,
-    "UAT ownership must contain 80 cases",
+    LEGACY_UAT_ROW_COUNT + promotedProgrammeIds.length,
+    "runtime UAT ownership must retain legacy cases and each promoted programme case",
   );
   assert.deepEqual(
     ownership.cases.map(({ id }) => id),
-    expectedIds,
-    "UAT ownership must map every source ID exactly once and in source order",
+    [...legacyExpectedIds, ...promotedProgrammeIds],
+    "runtime UAT ownership must map legacy and promoted programme IDs once in source order",
   );
 
   for (const entry of ownership.cases) {
@@ -559,29 +752,48 @@ async function validateUat(registry) {
       );
       assertStringList(entry.evidence, `${entry.id} executable evidence`);
     }
+    if (entry.status === "executable-m3") {
+      assert.equal(
+        entry.owner_body,
+        "m3",
+        `${entry.id} executable M3 owner must be M3`,
+      );
+      assertStringList(entry.evidence, `${entry.id} executable evidence`);
+    }
   }
 
   const registryUatIds = new Set(
     registry.capabilities.flatMap(({ uat }) => uat.map(({ id }) => id)),
   );
-  const b1TraceIds = ownership.cases
+  const traceIds = ownership.cases
     .filter(
-      ({ status }) => status === "contract-b1" || status === "executable-b1",
+      ({ status }) =>
+        status === "contract-b1" ||
+        status === "executable-b1" ||
+        status === "contract-m3" ||
+        status === "executable-m3",
     )
     .map(({ id }) => id);
   assertSameSet(
-    b1TraceIds,
+    traceIds,
     registryUatIds,
-    "B1 UAT ownership and capability-registry trace IDs",
+    "promoted UAT ownership and capability-registry trace IDs",
   );
 
   return {
-    caseCount: ownership.cases.length,
+    caseCount: sourceRows.length,
+    plannedCount: programmeExpectedIds.length,
     executableCount: ownership.cases.filter(
       ({ status }) => status === "executable-b1",
     ).length,
     contractCount: ownership.cases.filter(
       ({ status }) => status === "contract-b1",
+    ).length,
+    executableM3Count: ownership.cases.filter(
+      ({ status }) => status === "executable-m3",
+    ).length,
+    contractM3Count: ownership.cases.filter(
+      ({ status }) => status === "contract-m3",
     ).length,
     deferredCount: ownership.cases.filter(({ status }) => status === "deferred")
       .length,
@@ -683,5 +895,5 @@ const [okf, uat, identityUat] = await Promise.all([
 ]);
 
 console.log(
-  `PASS: OKF 0.2 catalogue concepts=${okf.conceptCount}; UAT cases=${uat.caseCount} executable-b1=${uat.executableCount} contract-b1=${uat.contractCount} deferred=${uat.deferredCount}; identity UAT cases=${identityUat.caseCount} critical=${identityUat.criticalCount} phases=${identityUat.phaseCount}`,
+  `PASS: OKF 0.2 catalogue concepts=${okf.conceptCount}; UAT cases=${uat.caseCount} planned-nuvio-metadata=${uat.plannedCount} executable-b1=${uat.executableCount} contract-b1=${uat.contractCount} executable-m3=${uat.executableM3Count} contract-m3=${uat.contractM3Count} deferred=${uat.deferredCount}; identity UAT cases=${identityUat.caseCount} critical=${identityUat.criticalCount} phases=${identityUat.phaseCount}`,
 );

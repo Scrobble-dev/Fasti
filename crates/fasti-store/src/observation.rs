@@ -2,14 +2,14 @@ use crate::crypto::{sha256_hex, sha256_reader};
 use crate::evidence::{canonical_digest_hex, path_to_storage_value, relative_evidence_path};
 use crate::identity::matching_record_ids;
 use crate::kernel::{
-    authorize_connection, authorize_transaction, map_json, map_sql, now, parse_timestamp,
-    reject_unsafe_existing_file, timestamp, SqliteKernel,
+    authorize_application_connection, authorize_application_transaction, authorize_transaction,
+    map_json, map_sql, now, parse_timestamp, timestamp, SqliteKernel,
 };
 use fasti_application::{
     AcceptObservationCommand, AcceptObservationOutcome, AcceptObservationReceipt,
-    ApplicationResult, CapabilityKey, FastiProblem, ObservationAcceptancePort, ReceiptStreamBatch,
-    ReceiptStreamEvent, ReceiptStreamPort, ReplayReceiptQuery, StreamReceiptsQuery,
-    MAX_IDENTITY_CLAIMS, MAX_RECEIPT_STREAM_REPLAY,
+    ApplicationResult, AuthorizedApplicationAccess, CapabilityKey, FastiProblem,
+    ObservationAcceptancePort, ReceiptStreamBatch, ReceiptStreamEvent, ReceiptStreamPort,
+    ReplayReceiptQuery, StreamReceiptsQuery, MAX_IDENTITY_CLAIMS, MAX_RECEIPT_STREAM_REPLAY,
 };
 use fasti_domain::{
     ClientId, CommittedAt, EvidenceId, EvidenceReference, ExternalIdentifierClaim, Grain,
@@ -20,7 +20,6 @@ use fasti_domain::{
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde_json::json;
 use std::collections::BTreeSet;
-use std::fs::File;
 
 impl ObservationAcceptancePort for SqliteKernel {
     fn authorize_and_accept(
@@ -38,7 +37,6 @@ impl ObservationAcceptancePort for SqliteKernel {
         }
         let canonical_clues = canonical_identity_clues(command.identity_clues());
         let evidence = validate_prepared_evidence(self, &command)?;
-        let semantic_digest = semantic_digest(&command, &canonical_clues)?;
 
         let mut connection = self.lock_connection(capability, correlation_id)?;
         let transaction = map_sql(
@@ -46,8 +44,21 @@ impl ObservationAcceptancePort for SqliteKernel {
             capability,
             correlation_id,
         )?;
-        authorize_transaction(&transaction, capability, command.access(), correlation_id)?;
-        verify_evidence_row(&transaction, &command, capability)?;
+        let authorized = authorize_application_transaction(
+            &transaction,
+            capability,
+            command.access(),
+            correlation_id,
+        )?;
+        let semantic_digest = semantic_digest(&command, &canonical_clues, authorized)?;
+        verify_evidence_row(
+            &transaction,
+            &command,
+            authorized.workspace_id(),
+            capability,
+        )?;
+        let source_client_id = authorized.attribution_client_id();
+        let operation_id = command.resolve_operation_id(source_client_id);
 
         let existing = map_sql(
             transaction
@@ -58,9 +69,9 @@ impl ObservationAcceptancePort for SqliteKernel {
                     WHERE workspace_id = ?1 AND client_id = ?2 AND operation_id = ?3
                     "#,
                     params![
-                        command.access().workspace_id().to_string(),
-                        command.access().client_id().to_string(),
-                        command.operation_id().to_string()
+                        authorized.workspace_id().to_string(),
+                        source_client_id.to_string(),
+                        operation_id.to_string()
                     ],
                     |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
                 )
@@ -81,9 +92,9 @@ impl ObservationAcceptancePort for SqliteKernel {
             let receipt = load_receipt(
                 &transaction,
                 receipt_id,
-                command.access().workspace_id(),
-                command.access().profile_id(),
-                command.access().client_id(),
+                authorized.workspace_id(),
+                authorized.profile_id(),
+                source_client_id,
                 capability,
                 correlation_id,
             )?;
@@ -93,7 +104,7 @@ impl ObservationAcceptancePort for SqliteKernel {
         let selected_claims = selected_claims(command.target_grain(), &canonical_clues);
         let matches = matching_record_ids(
             &transaction,
-            command.access().workspace_id(),
+            authorized.workspace_id(),
             &selected_claims,
             capability,
             correlation_id,
@@ -111,9 +122,9 @@ impl ObservationAcceptancePort for SqliteKernel {
         let review_item_id = matches.len().gt(&1).then(ReviewItemId::new_v7);
         let (observation, _) = Observation::new_unresolved(
             observation_id,
-            command.access().workspace_id(),
-            command.access().profile_id(),
-            command.access().client_id(),
+            authorized.workspace_id(),
+            authorized.profile_id(),
+            source_client_id,
             evidence.clone(),
             command.occurred_at().cloned(),
             command.observed_at().clone(),
@@ -140,9 +151,9 @@ impl ObservationAcceptancePort for SqliteKernel {
                 "#,
                 params![
                     observation_id.to_string(),
-                    command.access().workspace_id().to_string(),
-                    command.access().profile_id().to_string(),
-                    command.access().client_id().to_string(),
+                    authorized.workspace_id().to_string(),
+                    authorized.profile_id().to_string(),
+                    source_client_id.to_string(),
                     evidence.evidence_id().to_string(),
                     occurred_json,
                     observed_json,
@@ -183,8 +194,8 @@ impl ObservationAcceptancePort for SqliteKernel {
                 "#,
                 params![
                     occurrence_id.to_string(),
-                    command.access().workspace_id().to_string(),
-                    command.access().profile_id().to_string(),
+                    authorized.workspace_id().to_string(),
+                    authorized.profile_id().to_string(),
                     observation_id.to_string(),
                     record_id.map(|value| value.to_string()),
                     occurred_json,
@@ -225,8 +236,8 @@ impl ObservationAcceptancePort for SqliteKernel {
                     "#,
                     params![
                         review_item_id.to_string(),
-                        command.access().workspace_id().to_string(),
-                        command.access().profile_id().to_string(),
+                        authorized.workspace_id().to_string(),
+                        authorized.profile_id().to_string(),
                         observation_id.to_string(),
                         interpretation_id.to_string(),
                         created_at
@@ -251,7 +262,7 @@ impl ObservationAcceptancePort for SqliteKernel {
         let committed_at = CommittedAt::from_durability_boundary(now());
         let receipt = AcceptObservationReceipt::from_committed(
             receipt_id,
-            command.operation_id(),
+            operation_id,
             &observation,
             Some(occurrence_id),
             Some(interpretation_id),
@@ -273,10 +284,10 @@ impl ObservationAcceptancePort for SqliteKernel {
                 "#,
                 params![
                     receipt_id.to_string(),
-                    command.operation_id().to_string(),
-                    command.access().workspace_id().to_string(),
-                    command.access().profile_id().to_string(),
-                    command.access().client_id().to_string(),
+                    operation_id.to_string(),
+                    authorized.workspace_id().to_string(),
+                    authorized.profile_id().to_string(),
+                    source_client_id.to_string(),
                     observation_id.to_string(),
                     occurrence_id.to_string(),
                     interpretation_id.to_string(),
@@ -302,9 +313,9 @@ impl ObservationAcceptancePort for SqliteKernel {
                 ) VALUES (?1, ?2, ?3, 'accept_observation', ?4, ?5, ?6)
                 "#,
                 params![
-                    command.access().workspace_id().to_string(),
-                    command.access().client_id().to_string(),
-                    command.operation_id().to_string(),
+                    authorized.workspace_id().to_string(),
+                    source_client_id.to_string(),
+                    operation_id.to_string(),
                     semantic_digest,
                     receipt_id.to_string(),
                     created_at
@@ -449,7 +460,12 @@ fn validate_prepared_evidence(
     let capability = CapabilityKey::AcceptObservation;
     let (digest, size, path) = {
         let connection = kernel.lock_connection(capability, correlation_id)?;
-        authorize_connection(&connection, capability, command.access(), correlation_id)?;
+        let authorized = authorize_application_connection(
+            &connection,
+            capability,
+            command.access(),
+            correlation_id,
+        )?;
         map_sql(
             connection
                 .query_row(
@@ -459,7 +475,7 @@ fn validate_prepared_evidence(
                     "#,
                     params![
                         command.prepared_evidence().evidence_id().to_string(),
-                        command.access().workspace_id().to_string()
+                        authorized.workspace_id().to_string()
                     ],
                     |row| {
                         Ok((
@@ -494,10 +510,8 @@ fn validate_prepared_evidence(
             correlation_id,
         )));
     }
-    let full_path = kernel.inner.current_root.join(expected_relative_path);
-    reject_unsafe_existing_file(&full_path)
-        .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
-    let file = File::open(full_path)
+    let file = kernel
+        .open_evidence_file(digest_hex)
         .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
     let (observed_digest, observed_size) = sha256_reader(file)
         .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
@@ -514,6 +528,7 @@ fn validate_prepared_evidence(
 fn verify_evidence_row(
     connection: &Connection,
     command: &AcceptObservationCommand,
+    workspace_id: WorkspaceId,
     capability: CapabilityKey,
 ) -> ApplicationResult<()> {
     let correlation_id = command.correlation_id();
@@ -528,7 +543,7 @@ fn verify_evidence_row(
             "#,
             params![
                 command.prepared_evidence().evidence_id().to_string(),
-                command.access().workspace_id().to_string(),
+                workspace_id.to_string(),
                 command.prepared_evidence().digest().to_string(),
                 i64::try_from(command.prepared_evidence().byte_length()).unwrap_or(i64::MAX)
             ],
@@ -565,6 +580,7 @@ fn canonical_identity_clues(
 fn semantic_digest(
     command: &AcceptObservationCommand,
     canonical_clues: &[ExternalIdentifierClaim],
+    authorized: AuthorizedApplicationAccess,
 ) -> ApplicationResult<String> {
     let capability = CapabilityKey::AcceptObservation;
     let correlation_id = command.correlation_id();
@@ -580,8 +596,8 @@ fn semantic_digest(
         .collect::<Vec<_>>();
     let value = json!({
         "capability": "accept_observation",
-        "workspace_id": command.access().workspace_id().to_string(),
-        "profile_id": command.access().profile_id().to_string(),
+        "workspace_id": authorized.workspace_id().to_string(),
+        "profile_id": authorized.profile_id().to_string(),
         "evidence": command.prepared_evidence().digest().as_str(),
         "occurred_at": command.occurred_at(),
         "observed_at": command.observed_at(),

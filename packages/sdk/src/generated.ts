@@ -50,6 +50,4629 @@ export interface ReceiptCommittedEnvelope {
   readonly data: ReceiptCommittedEvent;
 }
 
+export interface ClientEnrollmentResponse {
+  readonly credential: string;
+  readonly credential_scheme: CredentialSchemeDto;
+}
+
+export interface NodeInitializationResponse {
+  readonly initialization_proof: string;
+}
+
+// prettier-ignore
+export const LOCAL_BOOTSTRAP_OPERATIONS = {
+  initializeDurableNode: { operationId: "initialize_node", method: "POST", path: "/api/v1/node/initialization", capabilityId: "node.initialize", authorization: "bootstrap_only", requiredScopes: [], problemCodes: ["already_initialized","forbidden","integrity_failed","malformed_json","payload_too_large","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["node.initialize.validation_failed"], authenticated: false, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "InitializeNodeRequest", responseSchema: "NodeInitializationResponse" },
+  enrollDurableFirstClient: { operationId: "enroll_first_client", method: "POST", path: "/api/v1/client-enrollments", capabilityId: "client.enroll", authorization: "scoped", requiredScopes: ["client_enroll"], problemCodes: ["bootstrap_closed","forbidden","integrity_failed","malformed_json","payload_too_large","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["client.enroll.forbidden"], authenticated: false, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "EnrollFirstClientRequest", responseSchema: "ClientEnrollmentResponse" },
+} as const;
+
+// prettier-ignore
+const PRODUCTION_SCHEMAS = {
+  "AcceptedIdentityRouteAssertionDto": {
+    "additionalProperties": false,
+    "properties": {
+      "assertion_id": {
+        "type": "string"
+      },
+      "record_id": {
+        "type": "string"
+      },
+      "relation": {
+        "$ref": "#/components/schemas/IdentityAssertionRelationDto"
+      },
+      "source_grain": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "assertion_id",
+      "record_id",
+      "source_grain",
+      "relation"
+    ],
+    "type": "object"
+  },
+  "AccessAuthenticationMethodDto": {
+    "enum": [
+      "trail_base_password",
+      "trail_base_social"
+    ],
+    "type": "string"
+  },
+  "AccessCeremonyFailureDto": {
+    "enum": [
+      "verifier_lost_on_restart",
+      "exchange_outcome_uncertain",
+      "exchange_failed",
+      "status_rejected",
+      "logout_uncertain",
+      "local_authorization_denied",
+      "local_persistence_failed",
+      "trust_unavailable"
+    ],
+    "type": "string"
+  },
+  "AccessCeremonyStateDto": {
+    "enum": [
+      "pending",
+      "claimed",
+      "selection_required",
+      "completed",
+      "cancelled",
+      "failed",
+      "cleanup_uncertain",
+      "expired"
+    ],
+    "type": "string"
+  },
+  "AccessEvidenceDto": {
+    "additionalProperties": false,
+    "properties": {
+      "ceremony_state": {
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "$ref": "#/components/schemas/AccessCeremonyStateDto"
+          }
+        ]
+      },
+      "correlation_id": {
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^req_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      },
+      "failure": {
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "$ref": "#/components/schemas/AccessCeremonyFailureDto"
+          }
+        ]
+      },
+      "kind": {
+        "$ref": "#/components/schemas/AccessEvidenceKindDto"
+      },
+      "occurred_at": {
+        "format": "date-time",
+        "maxLength": 35,
+        "minLength": 20,
+        "type": "string"
+      },
+      "operation_id": {
+        "maxLength": 35,
+        "minLength": 35,
+        "pattern": "^op_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      },
+      "state": {
+        "$ref": "#/components/schemas/AccessEvidenceStateDto"
+      }
+    },
+    "required": [
+      "kind",
+      "state",
+      "operation_id",
+      "correlation_id",
+      "occurred_at"
+    ],
+    "type": "object"
+  },
+  "AccessEvidenceKindDto": {
+    "enum": [
+      "current_session_issued",
+      "first_administrator_bootstrap"
+    ],
+    "type": "string"
+  },
+  "AccessEvidenceStateDto": {
+    "enum": [
+      "loading",
+      "empty",
+      "unavailable",
+      "needs_attention",
+      "failed_safely",
+      "verified"
+    ],
+    "type": "string"
+  },
+  "AccessFirstRunStepDto": {
+    "additionalProperties": false,
+    "properties": {
+      "key": {
+        "$ref": "#/components/schemas/AccessFirstRunStepKeyDto"
+      },
+      "state": {
+        "$ref": "#/components/schemas/AccessEvidenceStateDto"
+      }
+    },
+    "required": [
+      "key",
+      "state"
+    ],
+    "type": "object"
+  },
+  "AccessFirstRunStepKeyDto": {
+    "enum": [
+      "account_confirmed",
+      "strong_sign_in",
+      "recovery",
+      "devices_and_clients",
+      "external_identity"
+    ],
+    "type": "string"
+  },
+  "AccessMembershipDto": {
+    "additionalProperties": false,
+    "properties": {
+      "created_at": {
+        "format": "date-time",
+        "maxLength": 35,
+        "minLength": 20,
+        "type": "string"
+      },
+      "lifecycle": {
+        "$ref": "#/components/schemas/AccessMembershipLifecycleDto"
+      },
+      "membership_id": {
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^mem_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      },
+      "role": {
+        "$ref": "#/components/schemas/AccessWorkspaceRoleDto"
+      },
+      "updated_at": {
+        "format": "date-time",
+        "maxLength": 35,
+        "minLength": 20,
+        "type": "string"
+      },
+      "workspace_id": {
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^wsp_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "membership_id",
+      "workspace_id",
+      "lifecycle",
+      "role",
+      "created_at",
+      "updated_at"
+    ],
+    "type": "object"
+  },
+  "AccessMembershipLifecycleDto": {
+    "enum": [
+      "invited",
+      "pending_approval",
+      "active",
+      "suspended",
+      "removed"
+    ],
+    "type": "string"
+  },
+  "AccessProfileGrantDto": {
+    "additionalProperties": false,
+    "properties": {
+      "owner_client_id": {
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^cli_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      },
+      "profile_grant_id": {
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^grt_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      },
+      "profile_id": {
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^prf_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      },
+      "selected": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "profile_grant_id",
+      "profile_id",
+      "owner_client_id",
+      "selected"
+    ],
+    "type": "object"
+  },
+  "AccessProjectionResponse": {
+    "additionalProperties": false,
+    "description": "One server-derived source for the permanent Account and security surface\nand the separate resumable first-run journey.",
+    "properties": {
+      "authentication": {
+        "$ref": "#/components/schemas/AccessSessionAuthenticationDto"
+      },
+      "current_session": {
+        "$ref": "#/components/schemas/BrowserSessionDto"
+      },
+      "evidence": {
+        "items": {
+          "$ref": "#/components/schemas/AccessEvidenceDto"
+        },
+        "maxItems": 16,
+        "type": "array"
+      },
+      "evidence_truncated": {
+        "type": "boolean"
+      },
+      "first_run_steps": {
+        "items": {
+          "$ref": "#/components/schemas/AccessFirstRunStepDto"
+        },
+        "type": "array"
+      },
+      "generated_at": {
+        "format": "date-time",
+        "maxLength": 35,
+        "minLength": 20,
+        "type": "string"
+      },
+      "membership": {
+        "$ref": "#/components/schemas/AccessMembershipDto"
+      },
+      "profile_grants": {
+        "items": {
+          "$ref": "#/components/schemas/AccessProfileGrantDto"
+        },
+        "maxItems": 64,
+        "type": "array"
+      },
+      "profile_grants_truncated": {
+        "type": "boolean"
+      },
+      "session_policy": {
+        "$ref": "#/components/schemas/BrowserSessionPolicyDto"
+      },
+      "sessions": {
+        "items": {
+          "$ref": "#/components/schemas/BrowserSessionDto"
+        },
+        "maxItems": 32,
+        "type": "array"
+      },
+      "sessions_truncated": {
+        "type": "boolean"
+      },
+      "subject": {
+        "$ref": "#/components/schemas/AccessSubjectDto"
+      },
+      "trailbase": {
+        "$ref": "#/components/schemas/TrailBaseActivationDto"
+      }
+    },
+    "required": [
+      "generated_at",
+      "subject",
+      "membership",
+      "current_session",
+      "sessions",
+      "sessions_truncated",
+      "profile_grants",
+      "profile_grants_truncated",
+      "session_policy",
+      "authentication",
+      "trailbase",
+      "first_run_steps",
+      "evidence",
+      "evidence_truncated"
+    ],
+    "type": "object"
+  },
+  "AccessSessionAuthenticationDto": {
+    "additionalProperties": false,
+    "properties": {
+      "activation_generation": {
+        "format": "int64",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "method": {
+        "$ref": "#/components/schemas/AccessAuthenticationMethodDto"
+      },
+      "recent_authentication": {
+        "$ref": "#/components/schemas/RecentAuthenticationDto"
+      },
+      "verified_at": {
+        "format": "date-time",
+        "maxLength": 35,
+        "minLength": 20,
+        "type": "string"
+      }
+    },
+    "required": [
+      "method",
+      "verified_at",
+      "activation_generation",
+      "recent_authentication"
+    ],
+    "type": "object"
+  },
+  "AccessSubjectDto": {
+    "additionalProperties": false,
+    "properties": {
+      "auth_subject_id": {
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^sub_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      },
+      "created_at": {
+        "format": "date-time",
+        "maxLength": 35,
+        "minLength": 20,
+        "type": "string"
+      },
+      "lifecycle": {
+        "$ref": "#/components/schemas/AccessSubjectLifecycleDto"
+      },
+      "updated_at": {
+        "format": "date-time",
+        "maxLength": 35,
+        "minLength": 20,
+        "type": "string"
+      }
+    },
+    "required": [
+      "auth_subject_id",
+      "lifecycle",
+      "created_at",
+      "updated_at"
+    ],
+    "type": "object"
+  },
+  "AccessSubjectLifecycleDto": {
+    "enum": [
+      "active",
+      "disabled",
+      "deleted",
+      "recovery_pending"
+    ],
+    "type": "string"
+  },
+  "AccessWorkspaceRoleDto": {
+    "enum": [
+      "member",
+      "administrator"
+    ],
+    "type": "string"
+  },
+  "AnimeGroupingPolicyChangeDto": {
+    "oneOf": [
+      {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "set"
+            ],
+            "type": "string"
+          },
+          "preference": {
+            "$ref": "#/components/schemas/AnimeGroupingPreferenceDto"
+          }
+        },
+        "required": [
+          "preference",
+          "kind"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "inherit_profile"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "applied_operation_id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "rollback"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "applied_operation_id",
+          "kind"
+        ],
+        "type": "object"
+      }
+    ]
+  },
+  "AnimeGroupingPolicyDto": {
+    "additionalProperties": false,
+    "properties": {
+      "preference": {
+        "$ref": "#/components/schemas/AnimeGroupingPreferenceDto"
+      },
+      "profile_id": {
+        "type": "string"
+      },
+      "revision": {
+        "format": "int64",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "scope": {
+        "$ref": "#/components/schemas/AnimeGroupingPolicyScopeDto"
+      },
+      "source": {
+        "$ref": "#/components/schemas/AnimeGroupingPolicySourceDto"
+      }
+    },
+    "required": [
+      "profile_id",
+      "scope",
+      "source",
+      "preference",
+      "revision"
+    ],
+    "type": "object"
+  },
+  "AnimeGroupingPolicyImpactResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "affected_records": {
+        "format": "int64",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "next_after_record_id": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "policy": {
+        "$ref": "#/components/schemas/AnimeGroupingPolicyDto"
+      },
+      "possible_season_regroupings": {
+        "format": "int64",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "proposed_preference": {
+        "$ref": "#/components/schemas/AnimeGroupingPreferenceDto"
+      },
+      "proposed_source": {
+        "$ref": "#/components/schemas/AnimeGroupingPolicySourceDto"
+      },
+      "records": {
+        "items": {
+          "$ref": "#/components/schemas/AnimeGroupingRecordPreviewDto"
+        },
+        "type": "array"
+      },
+      "total_records": {
+        "format": "int64",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "unresolved_routes": {
+        "format": "int64",
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "policy",
+      "proposed_preference",
+      "proposed_source",
+      "total_records",
+      "affected_records",
+      "unresolved_routes",
+      "possible_season_regroupings",
+      "records"
+    ],
+    "type": "object"
+  },
+  "AnimeGroupingPolicyScopeDto": {
+    "additionalProperties": false,
+    "properties": {
+      "client_id": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "kind": {
+        "$ref": "#/components/schemas/AnimeGroupingPolicyScopeKindDto"
+      }
+    },
+    "required": [
+      "kind"
+    ],
+    "type": "object"
+  },
+  "AnimeGroupingPolicyScopeKindDto": {
+    "enum": [
+      "profile",
+      "client"
+    ],
+    "type": "string"
+  },
+  "AnimeGroupingPolicySourceDto": {
+    "enum": [
+      "profile_default",
+      "client_override"
+    ],
+    "type": "string"
+  },
+  "AnimeGroupingPreferenceDto": {
+    "enum": [
+      "automatic",
+      "group_by_tv_work",
+      "keep_mal_releases_separate",
+      "keep_kitsu_releases_separate"
+    ],
+    "type": "string"
+  },
+  "AnimeGroupingRecordPreviewDto": {
+    "additionalProperties": false,
+    "properties": {
+      "possible_season_regrouping": {
+        "type": "boolean"
+      },
+      "previous_preference": {
+        "$ref": "#/components/schemas/AnimeGroupingPreferenceDto"
+      },
+      "previous_route": {
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "$ref": "#/components/schemas/IdentityRouteDto"
+          }
+        ]
+      },
+      "previous_status": {
+        "$ref": "#/components/schemas/IdentityRouteStatusDto"
+      },
+      "proposed_preference": {
+        "$ref": "#/components/schemas/AnimeGroupingPreferenceDto"
+      },
+      "proposed_route": {
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "$ref": "#/components/schemas/IdentityRouteDto"
+          }
+        ]
+      },
+      "proposed_status": {
+        "$ref": "#/components/schemas/IdentityRouteStatusDto"
+      },
+      "record_id": {
+        "type": "string"
+      },
+      "route_changed": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "record_id",
+      "previous_preference",
+      "proposed_preference",
+      "previous_status",
+      "proposed_status",
+      "route_changed",
+      "possible_season_regrouping"
+    ],
+    "type": "object"
+  },
+  "ApplyAnimeGroupingPolicyChangeRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "change": {
+        "$ref": "#/components/schemas/AnimeGroupingPolicyChangeDto"
+      },
+      "expected_revision": {
+        "format": "int64",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "operation_id": {
+        "type": "string"
+      },
+      "scope": {
+        "$ref": "#/components/schemas/AnimeGroupingPolicyScopeDto"
+      }
+    },
+    "required": [
+      "operation_id",
+      "scope",
+      "expected_revision",
+      "change"
+    ],
+    "type": "object"
+  },
+  "ApplyAnimeGroupingPolicyChangeResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "affected_records": {
+        "format": "int64",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "change": {
+        "$ref": "#/components/schemas/AnimeGroupingPolicyChangeDto"
+      },
+      "operation_id": {
+        "type": "string"
+      },
+      "policy": {
+        "$ref": "#/components/schemas/AnimeGroupingPolicyDto"
+      },
+      "possible_season_regroupings": {
+        "format": "int64",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "previous_preference": {
+        "$ref": "#/components/schemas/AnimeGroupingPreferenceDto"
+      },
+      "previous_source": {
+        "$ref": "#/components/schemas/AnimeGroupingPolicySourceDto"
+      },
+      "rolled_back_operation_id": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "unresolved_routes": {
+        "format": "int64",
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "operation_id",
+      "change",
+      "previous_preference",
+      "previous_source",
+      "policy",
+      "affected_records",
+      "unresolved_routes",
+      "possible_season_regroupings"
+    ],
+    "type": "object"
+  },
+  "AttachIdentifierRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "grain": {
+        "maxLength": 64,
+        "minLength": 1,
+        "type": "string"
+      },
+      "namespace": {
+        "maxLength": 64,
+        "minLength": 1,
+        "type": "string"
+      },
+      "record_id": {
+        "maxLength": 64,
+        "minLength": 1,
+        "type": "string"
+      },
+      "value": {
+        "maxLength": 512,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "record_id",
+      "namespace",
+      "grain",
+      "value"
+    ],
+    "type": "object"
+  },
+  "AttachIdentifierResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "created": {
+        "type": "boolean"
+      },
+      "external_identifier_id": {
+        "type": "string"
+      },
+      "record_id": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "external_identifier_id",
+      "record_id",
+      "created"
+    ],
+    "type": "object"
+  },
+  "BrowserSessionDto": {
+    "additionalProperties": false,
+    "properties": {
+      "absolute_expires_at": {
+        "format": "date-time",
+        "maxLength": 35,
+        "minLength": 20,
+        "type": "string"
+      },
+      "browser_session_id": {
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^ses_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      },
+      "created_at": {
+        "format": "date-time",
+        "maxLength": 35,
+        "minLength": 20,
+        "type": "string"
+      },
+      "idle_expires_at": {
+        "format": "date-time",
+        "maxLength": 35,
+        "minLength": 20,
+        "type": "string"
+      },
+      "is_current": {
+        "type": "boolean"
+      },
+      "last_seen_at": {
+        "format": "date-time",
+        "maxLength": 35,
+        "minLength": 20,
+        "type": "string"
+      },
+      "rotation_generation": {
+        "format": "int64",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "selected_profile_grant_id": {
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^grt_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      },
+      "workspace_id": {
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^wsp_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "browser_session_id",
+      "workspace_id",
+      "selected_profile_grant_id",
+      "is_current",
+      "created_at",
+      "last_seen_at",
+      "idle_expires_at",
+      "absolute_expires_at",
+      "rotation_generation"
+    ],
+    "type": "object"
+  },
+  "BrowserSessionPolicyDto": {
+    "additionalProperties": false,
+    "properties": {
+      "browser_lifetime_seconds": {
+        "format": "int64",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "idle_timeout_seconds": {
+        "format": "int64",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "last_seen_write_interval_seconds": {
+        "format": "int64",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "remembered_browser_lifetime_seconds": {
+        "format": "int64",
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "idle_timeout_seconds",
+      "browser_lifetime_seconds",
+      "remembered_browser_lifetime_seconds",
+      "last_seen_write_interval_seconds"
+    ],
+    "type": "object"
+  },
+  "ClaimedPrecisionDto": {
+    "enum": [
+      "date",
+      "second",
+      "millisecond",
+      "microsecond",
+      "nanosecond"
+    ],
+    "type": "string"
+  },
+  "ClaimedTrustDto": {
+    "enum": [
+      "source_claim",
+      "device_observed",
+      "user_entered",
+      "inferred"
+    ],
+    "type": "string"
+  },
+  "ClientEnrollmentResponse": {
+    "additionalProperties": false,
+    "description": "One-time credential returned by durable first-client enrollment.\n\nDeliberately omits `Debug` and `Clone` so diagnostics cannot print the\nsecret accidentally.",
+    "properties": {
+      "credential": {
+        "format": "opaque-secret",
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "credential_scheme": {
+        "$ref": "#/components/schemas/CredentialSchemeDto"
+      }
+    },
+    "required": [
+      "credential_scheme",
+      "credential"
+    ],
+    "type": "object"
+  },
+  "CompleteTrailBaseContinuationRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "candidate_revision": {
+        "description": "Candidate revision returned by the continuation read, echoed unchanged.",
+        "maxLength": 71,
+        "minLength": 71,
+        "pattern": "^sha256:[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "choice_ordinal": {
+        "description": "Zero-based opaque choice submitted with the unchanged candidate revision.",
+        "format": "int32",
+        "maximum": 63,
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "choice_ordinal",
+      "candidate_revision"
+    ],
+    "type": "object"
+  },
+  "ConfigureMetadataProjectionRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "allow_english_fallback": {
+        "type": "boolean"
+      },
+      "enabled_field_groups": {
+        "items": {
+          "$ref": "#/components/schemas/MetadataFieldGroupDto"
+        },
+        "maxItems": 32,
+        "type": "array"
+      },
+      "last_known_good": {
+        "$ref": "#/components/schemas/LastKnownGoodPolicyDto"
+      },
+      "original_locale": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "overrides": {
+        "items": {
+          "$ref": "#/components/schemas/MetadataOverrideMutationDto"
+        },
+        "maxItems": 64,
+        "type": "array"
+      },
+      "preferred_locale": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "preferred_provider_id": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "region": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "allow_english_fallback",
+      "last_known_good",
+      "enabled_field_groups",
+      "overrides"
+    ],
+    "type": "object"
+  },
+  "ConfigureProviderCredentialRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "secret": {
+        "maxLength": 4096,
+        "minLength": 1,
+        "type": "string",
+        "writeOnly": true
+      }
+    },
+    "required": [
+      "secret"
+    ],
+    "type": "object"
+  },
+  "CreateRecordRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "grain": {
+        "maxLength": 64,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "grain"
+    ],
+    "type": "object"
+  },
+  "CreateRecordResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "grain": {
+        "type": "string"
+      },
+      "record_id": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "record_id",
+      "grain"
+    ],
+    "type": "object"
+  },
+  "CredentialRequirementDto": {
+    "enum": [
+      "none",
+      "optional_api_key",
+      "api_key",
+      "bearer_token",
+      "basic_auth",
+      "oauth2",
+      "user_agent_only",
+      "custom_header",
+      "operator_secret_mount"
+    ],
+    "type": "string"
+  },
+  "CredentialSchemeDto": {
+    "enum": [
+      "Bearer"
+    ],
+    "type": "string"
+  },
+  "EnrichmentPolicyDto": {
+    "additionalProperties": false,
+    "properties": {
+      "allow_english_fallback": {
+        "type": "boolean"
+      },
+      "enabled_field_groups": {
+        "items": {
+          "$ref": "#/components/schemas/MetadataFieldGroupDto"
+        },
+        "maxItems": 32,
+        "type": "array"
+      },
+      "last_known_good": {
+        "$ref": "#/components/schemas/LastKnownGoodPolicyDto"
+      },
+      "original_locale": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "preferred_locale": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "preferred_provider_id": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "profile_id": {
+        "type": "string"
+      },
+      "region": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "profile_id",
+      "allow_english_fallback",
+      "last_known_good",
+      "enabled_field_groups"
+    ],
+    "type": "object"
+  },
+  "EnrollFirstClientRequest": {
+    "additionalProperties": false,
+    "description": "Bootstrap proof is body-only. It must never be placed in a URL or log.",
+    "properties": {
+      "initialization_proof": {
+        "format": "opaque-secret",
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "initialization_proof"
+    ],
+    "type": "object"
+  },
+  "HealthResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "version": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "status",
+      "version"
+    ],
+    "type": "object"
+  },
+  "IdentityAssertionRelationDto": {
+    "enum": [
+      "exact",
+      "subset_of",
+      "superset_of",
+      "overlaps",
+      "alternate_cut_of",
+      "related",
+      "not_same_as"
+    ],
+    "type": "string"
+  },
+  "IdentityIdentifierDto": {
+    "additionalProperties": false,
+    "properties": {
+      "grain": {
+        "type": "string"
+      },
+      "namespace": {
+        "type": "string"
+      },
+      "value": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "namespace",
+      "grain",
+      "value"
+    ],
+    "type": "object"
+  },
+  "IdentityRouteDto": {
+    "additionalProperties": false,
+    "properties": {
+      "accepted_assertions": {
+        "items": {
+          "$ref": "#/components/schemas/AcceptedIdentityRouteAssertionDto"
+        },
+        "type": "array"
+      },
+      "identifier": {
+        "$ref": "#/components/schemas/IdentityIdentifierDto"
+      },
+      "kind": {
+        "$ref": "#/components/schemas/IdentityRouteKindDto"
+      }
+    },
+    "required": [
+      "identifier",
+      "kind",
+      "accepted_assertions"
+    ],
+    "type": "object"
+  },
+  "IdentityRouteKindDto": {
+    "enum": [
+      "provider_native",
+      "verified_alias",
+      "accepted_crosswalk"
+    ],
+    "type": "string"
+  },
+  "IdentityRouteStatusDto": {
+    "enum": [
+      "selected",
+      "missing",
+      "ambiguous"
+    ],
+    "type": "string"
+  },
+  "InitializeNodeRequest": {
+    "additionalProperties": false,
+    "type": "object"
+  },
+  "IntegrationObservationRequest": {
+    "additionalProperties": false,
+    "description": "Provider-neutral webhook body used by integrations that support a custom\nJSON template (Tautulli and the Jellyfin Webhook plugin, for example).\n\nThis is transport evidence. Fasti still derives durable identity and the\nsource client from the authenticated credential and provider-specific\nadapter route.",
+    "properties": {
+      "completed": {
+        "description": "Chronicle ingress currently accepts only complete occurrences.",
+        "type": "boolean"
+      },
+      "device_id": {
+        "maxLength": 128,
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "duration_seconds": {
+        "format": "int64",
+        "minimum": 0,
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "episode_number": {
+        "format": "int32",
+        "minimum": 0,
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "item_type": {
+        "description": "`movie`, `episode`, `track`, or another adapter-supported item kind.",
+        "maxLength": 32,
+        "minLength": 1,
+        "type": "string"
+      },
+      "observed_at": {
+        "description": "RFC 3339 time at which the adapter observed the event.",
+        "type": "string"
+      },
+      "occurred_at": {
+        "description": "Optional provider-claimed event time.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "position_seconds": {
+        "format": "int64",
+        "minimum": 0,
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "provider_ids": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "description": "Provider IDs for the observed item. Keys are lower-case provider names\nsuch as `imdb`, `tmdb`, `tvdb`, `musicbrainz`, or `jellyfin`. Bounded\nto 16 here per-field, but `normalize_template_request` additionally\nrejects `provider_ids` and `series_provider_ids` combined exceeding\n16 (a bounded-work guard, not expressible as a JSON Schema constraint\nacross two sibling properties) -- a request with both maps near this\nper-field limit can be schema-valid and still receive a runtime 422.",
+        "propertyNames": {
+          "type": "string"
+        },
+        "type": "object"
+      },
+      "season_number": {
+        "format": "int32",
+        "minimum": 0,
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "series_provider_ids": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "description": "Provider IDs for the parent series when `item_type` is `episode`. See\n`provider_ids`'s doc comment for the combined-with-`provider_ids`\nruntime bound this per-field schema limit doesn't capture.",
+        "propertyNames": {
+          "type": "string"
+        },
+        "type": "object"
+      },
+      "series_title": {
+        "description": "Optional series title retained as evidence for episode observations.",
+        "maxLength": 512,
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "server_id": {
+        "description": "Safe source binding clues. They are recorded as evidence and can also be\nchecked by a configured adapter before mutation.",
+        "maxLength": 128,
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "source_event_id": {
+        "description": "Stable provider event identity. Retries must reuse this value.",
+        "maxLength": 256,
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": {
+        "description": "Human-readable evidence only. It is never used as an irreversible\nidentity key.",
+        "maxLength": 512,
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "user_id": {
+        "maxLength": 128,
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "source_event_id",
+      "observed_at",
+      "item_type",
+      "completed"
+    ],
+    "type": "object"
+  },
+  "IntegrationStatusDto": {
+    "additionalProperties": false,
+    "description": "Runtime status exposed to the trusted workbench. It intentionally excludes\ncredentials and raw provider payloads.",
+    "properties": {
+      "available": {
+        "type": "boolean"
+      },
+      "detail": {
+        "type": "string"
+      },
+      "endpoint_ready": {
+        "type": "boolean"
+      },
+      "id": {
+        "type": "string"
+      },
+      "label": {
+        "type": "string"
+      },
+      "setup_action": {
+        "type": "string"
+      },
+      "state": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "label",
+      "state",
+      "available",
+      "endpoint_ready",
+      "setup_action",
+      "detail"
+    ],
+    "type": "object"
+  },
+  "IntegrationStatusListResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "integrations": {
+        "items": {
+          "$ref": "#/components/schemas/IntegrationStatusDto"
+        },
+        "maxItems": 16,
+        "type": "array"
+      }
+    },
+    "required": [
+      "integrations"
+    ],
+    "type": "object"
+  },
+  "LastKnownGoodPolicyDto": {
+    "enum": [
+      "allow",
+      "deny"
+    ],
+    "type": "string"
+  },
+  "ListBrowserSessionsResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "sessions": {
+        "items": {
+          "$ref": "#/components/schemas/BrowserSessionDto"
+        },
+        "maxItems": 32,
+        "type": "array"
+      },
+      "truncated": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "sessions",
+      "truncated"
+    ],
+    "type": "object"
+  },
+  "ListProvidersResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "providers": {
+        "items": {
+          "$ref": "#/components/schemas/ProviderDescriptorDto"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "providers"
+    ],
+    "type": "object"
+  },
+  "ListRecordsResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "records": {
+        "items": {
+          "$ref": "#/components/schemas/RecordSummaryDto"
+        },
+        "type": "array"
+      },
+      "truncated": {
+        "description": "`true` when more active Records exist in this workspace beyond the\nbounded page returned here (see `ListTrackingDispositionsResponse`\nfor the same pattern on a sibling listing capability).",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "records",
+      "truncated"
+    ],
+    "type": "object"
+  },
+  "ListTrackingDispositionsResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "states": {
+        "items": {
+          "$ref": "#/components/schemas/TrackingDispositionStateDto"
+        },
+        "type": "array"
+      },
+      "truncated": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "states",
+      "truncated"
+    ],
+    "type": "object"
+  },
+  "MetadataAttributionDto": {
+    "additionalProperties": false,
+    "properties": {
+      "documentation_url": {
+        "type": "string"
+      },
+      "provider_id": {
+        "type": "string"
+      },
+      "text": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "provider_id",
+      "text",
+      "documentation_url"
+    ],
+    "type": "object"
+  },
+  "MetadataCacheEntryDto": {
+    "additionalProperties": false,
+    "properties": {
+      "claim_ids": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "created_at": {
+        "type": "string"
+      },
+      "fresh_until": {
+        "type": "string"
+      },
+      "invalidation": {
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "$ref": "#/components/schemas/MetadataCacheInvalidationDto"
+          }
+        ]
+      },
+      "key": {
+        "$ref": "#/components/schemas/MetadataCacheKeyDto"
+      },
+      "read_state": {
+        "$ref": "#/components/schemas/MetadataCacheReadStateDto"
+      },
+      "stale_on_error_until": {
+        "type": "string"
+      },
+      "stale_while_refreshing_until": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "key",
+      "claim_ids",
+      "created_at",
+      "fresh_until",
+      "stale_while_refreshing_until",
+      "stale_on_error_until",
+      "read_state"
+    ],
+    "type": "object"
+  },
+  "MetadataCacheInvalidationDto": {
+    "additionalProperties": false,
+    "properties": {
+      "invalidated_at": {
+        "type": "string"
+      },
+      "reason": {
+        "$ref": "#/components/schemas/MetadataCacheInvalidationReasonDto"
+      }
+    },
+    "required": [
+      "reason",
+      "invalidated_at"
+    ],
+    "type": "object"
+  },
+  "MetadataCacheInvalidationReasonDto": {
+    "enum": [
+      "provider_configuration_changed",
+      "credential_rotated",
+      "projection_policy_changed",
+      "terms_changed",
+      "explicit_retraction"
+    ],
+    "type": "string"
+  },
+  "MetadataCacheKeyDto": {
+    "additionalProperties": false,
+    "properties": {
+      "classification": {
+        "$ref": "#/components/schemas/MetadataDataClassificationDto"
+      },
+      "configuration_digest": {
+        "pattern": "^sha256:[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "credential_reference_version": {
+        "format": "int64",
+        "minimum": 0,
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "field_group": {
+        "$ref": "#/components/schemas/MetadataFieldGroupDto"
+      },
+      "grain": {
+        "type": "string"
+      },
+      "locale": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "provider_id": {
+        "type": "string"
+      },
+      "purpose": {
+        "$ref": "#/components/schemas/MetadataCachePurposeDto"
+      },
+      "record_id": {
+        "type": "string"
+      },
+      "region": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "resolved_provider_route": {
+        "type": "string"
+      },
+      "schema_version": {
+        "format": "int32",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "settings_fingerprint": {
+        "pattern": "^sha256:[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "source_identifier": {
+        "type": "string"
+      },
+      "source_namespace": {
+        "type": "string"
+      },
+      "terms_revision": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "provider_id",
+      "record_id",
+      "resolved_provider_route",
+      "grain",
+      "source_namespace",
+      "source_identifier",
+      "field_group",
+      "settings_fingerprint",
+      "configuration_digest",
+      "schema_version",
+      "purpose",
+      "terms_revision",
+      "classification"
+    ],
+    "type": "object"
+  },
+  "MetadataCachePurposeDto": {
+    "enum": [
+      "metadata_enrichment",
+      "display_projection",
+      "rating_lookup",
+      "offline_read"
+    ],
+    "type": "string"
+  },
+  "MetadataCacheReadStateDto": {
+    "enum": [
+      "fresh",
+      "stale_while_refreshing",
+      "stale_on_error",
+      "expired",
+      "invalidated",
+      "partition_denied"
+    ],
+    "type": "string"
+  },
+  "MetadataClaimDto": {
+    "additionalProperties": false,
+    "properties": {
+      "claim_id": {
+        "type": "string"
+      },
+      "field_key": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "provenance": {
+        "$ref": "#/components/schemas/MetadataClaimProvenanceDto"
+      },
+      "record_id": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "value": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "claim_id",
+      "value",
+      "provenance"
+    ],
+    "type": "object"
+  },
+  "MetadataClaimProvenanceDto": {
+    "additionalProperties": false,
+    "properties": {
+      "claim_id": {
+        "type": "string"
+      },
+      "evidence_digest": {
+        "pattern": "^sha256:[0-9a-f]{64}$",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "expires_at": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "fetched_at": {
+        "type": "string"
+      },
+      "field_key": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "locale": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "provider_id": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "record_id": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "region": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "source_identifier": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "source_namespace": {
+        "type": "string"
+      },
+      "source_version": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "status": {
+        "$ref": "#/components/schemas/MetadataClaimStatusDto"
+      }
+    },
+    "required": [
+      "claim_id",
+      "source_namespace",
+      "fetched_at",
+      "status"
+    ],
+    "type": "object"
+  },
+  "MetadataClaimStatusDto": {
+    "enum": [
+      "fresh",
+      "stale",
+      "invalid",
+      "revoked",
+      "superseded",
+      "unavailable"
+    ],
+    "type": "string"
+  },
+  "MetadataDataClassificationDto": {
+    "enum": [
+      "public",
+      "internal",
+      "confidential",
+      "restricted"
+    ],
+    "type": "string"
+  },
+  "MetadataFieldGroupDto": {
+    "enum": [
+      "artwork",
+      "basic_info",
+      "details",
+      "release_dates",
+      "credits",
+      "production_companies",
+      "networks",
+      "episodes",
+      "season_artwork",
+      "recommendations",
+      "collections",
+      "trailers",
+      "watch_providers"
+    ],
+    "type": "string"
+  },
+  "MetadataOverrideMutationDto": {
+    "oneOf": [
+      {
+        "additionalProperties": false,
+        "properties": {
+          "field_key": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$",
+            "type": "string"
+          },
+          "operation": {
+            "enum": [
+              "set"
+            ],
+            "type": "string"
+          },
+          "record_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          },
+          "value": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "record_id",
+          "field_key",
+          "value",
+          "operation"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "field_key": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$",
+            "type": "string"
+          },
+          "operation": {
+            "enum": [
+              "clear"
+            ],
+            "type": "string"
+          },
+          "record_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "record_id",
+          "field_key",
+          "operation"
+        ],
+        "type": "object"
+      }
+    ]
+  },
+  "MetadataProjectedFieldDto": {
+    "additionalProperties": false,
+    "properties": {
+      "field_key": {
+        "type": "string"
+      },
+      "is_stale": {
+        "type": "boolean"
+      },
+      "profile_id": {
+        "type": "string"
+      },
+      "projected_at": {
+        "type": "string"
+      },
+      "provenance": {
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "$ref": "#/components/schemas/MetadataClaimProvenanceDto"
+          }
+        ]
+      },
+      "record_id": {
+        "type": "string"
+      },
+      "source_namespace": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "tier": {
+        "$ref": "#/components/schemas/MetadataProjectionTierDto"
+      },
+      "value": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "profile_id",
+      "record_id",
+      "field_key",
+      "tier",
+      "is_stale",
+      "projected_at"
+    ],
+    "type": "object"
+  },
+  "MetadataProjectionConfigurationResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "invalidated_cache_entries": {
+        "format": "int32",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "policy": {
+        "$ref": "#/components/schemas/EnrichmentPolicyDto"
+      }
+    },
+    "required": [
+      "policy",
+      "invalidated_cache_entries"
+    ],
+    "type": "object"
+  },
+  "MetadataProjectionQueryParameters": {
+    "additionalProperties": false,
+    "properties": {
+      "offline": {
+        "description": "Permit a policy-bounded stale-on-error cache partition when the host is\nexplicitly operating offline. This never permits an expired,\ninvalidated, or classification-denied partition.",
+        "type": "boolean"
+      }
+    },
+    "type": "object"
+  },
+  "MetadataProjectionResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "attributions": {
+        "items": {
+          "$ref": "#/components/schemas/MetadataAttributionDto"
+        },
+        "type": "array"
+      },
+      "cache_entries": {
+        "items": {
+          "$ref": "#/components/schemas/MetadataCacheEntryDto"
+        },
+        "type": "array"
+      },
+      "fields": {
+        "items": {
+          "$ref": "#/components/schemas/MetadataProjectedFieldDto"
+        },
+        "type": "array"
+      },
+      "policy": {
+        "$ref": "#/components/schemas/EnrichmentPolicyDto"
+      },
+      "profile_id": {
+        "type": "string"
+      },
+      "ratings": {
+        "items": {
+          "$ref": "#/components/schemas/RatingClaimDto"
+        },
+        "type": "array"
+      },
+      "record_id": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "profile_id",
+      "record_id",
+      "policy",
+      "fields",
+      "ratings",
+      "cache_entries",
+      "attributions"
+    ],
+    "type": "object"
+  },
+  "MetadataProjectionTierDto": {
+    "enum": [
+      "user_override",
+      "preferred_provider_claim",
+      "fallback_provider_claim",
+      "last_known_good",
+      "empty"
+    ],
+    "type": "string"
+  },
+  "MetadataRefreshModeDto": {
+    "enum": [
+      "prefer_cache",
+      "revalidate"
+    ],
+    "type": "string"
+  },
+  "NodeInitializationResponse": {
+    "additionalProperties": false,
+    "description": "One-time proof returned by durable node initialization.\n\nDeliberately omits `Debug` and `Clone` so diagnostics cannot print the\nsecret accidentally.",
+    "properties": {
+      "initialization_proof": {
+        "format": "opaque-secret",
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "initialization_proof"
+    ],
+    "type": "object"
+  },
+  "NuvioCatalogSourceDto": {
+    "additionalProperties": {},
+    "properties": {
+      "addonId": {},
+      "catalogId": {},
+      "genre": {},
+      "type": {}
+    },
+    "type": "object"
+  },
+  "NuvioCollectionDto": {
+    "additionalProperties": {},
+    "properties": {
+      "backdropImageUrl": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "focusGlowEnabled": {
+        "type": [
+          "boolean",
+          "null"
+        ]
+      },
+      "folders": {
+        "items": {
+          "$ref": "#/components/schemas/NuvioCollectionFolderDto"
+        },
+        "maxItems": 256,
+        "type": "array"
+      },
+      "id": {
+        "maxLength": 8192,
+        "minLength": 1,
+        "type": "string"
+      },
+      "pinToTop": {
+        "type": [
+          "boolean",
+          "null"
+        ]
+      },
+      "showAllTab": {
+        "type": [
+          "boolean",
+          "null"
+        ]
+      },
+      "title": {
+        "maxLength": 8192,
+        "type": "string"
+      },
+      "viewMode": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "id",
+      "title",
+      "folders"
+    ],
+    "type": "object"
+  },
+  "NuvioCollectionFolderDto": {
+    "additionalProperties": {},
+    "properties": {
+      "catalogSources": {
+        "items": {
+          "$ref": "#/components/schemas/NuvioCatalogSourceDto"
+        },
+        "maxItems": 128,
+        "type": [
+          "array",
+          "null"
+        ]
+      },
+      "coverEmoji": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "coverImageUrl": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "focusGifEnabled": {
+        "type": [
+          "boolean",
+          "null"
+        ]
+      },
+      "focusGifUrl": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "heroBackdropUrl": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "heroVideoUrl": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "hideTitle": {
+        "type": [
+          "boolean",
+          "null"
+        ]
+      },
+      "id": {
+        "maxLength": 8192,
+        "minLength": 1,
+        "type": "string"
+      },
+      "sources": {
+        "items": {
+          "$ref": "#/components/schemas/NuvioCollectionSourceDto"
+        },
+        "maxItems": 128,
+        "type": [
+          "array",
+          "null"
+        ]
+      },
+      "tileShape": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "title": {
+        "maxLength": 8192,
+        "type": "string"
+      },
+      "titleLogoUrl": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "id",
+      "title"
+    ],
+    "type": "object"
+  },
+  "NuvioCollectionSourceDto": {
+    "additionalProperties": {},
+    "properties": {
+      "addonId": {},
+      "catalogId": {},
+      "filters": {},
+      "genre": {},
+      "id": {},
+      "mediaType": {},
+      "name": {},
+      "provider": {},
+      "sortBy": {},
+      "sortHow": {},
+      "title": {},
+      "tmdbId": {},
+      "tmdbSourceType": {},
+      "traktListId": {},
+      "type": {}
+    },
+    "type": "object"
+  },
+  "NuvioCollectionsDocumentDto": {
+    "items": {
+      "$ref": "#/components/schemas/NuvioCollectionDto"
+    },
+    "type": "array"
+  },
+  "NuvioCollectionsStateDto": {
+    "additionalProperties": false,
+    "properties": {
+      "document": {
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "$ref": "#/components/schemas/NuvioCollectionsDocumentDto"
+          }
+        ]
+      }
+    },
+    "type": "object"
+  },
+  "ObservationIdentifierInput": {
+    "additionalProperties": false,
+    "properties": {
+      "grain": {
+        "maxLength": 64,
+        "minLength": 1,
+        "type": "string"
+      },
+      "namespace": {
+        "maxLength": 64,
+        "minLength": 1,
+        "type": "string"
+      },
+      "value": {
+        "maxLength": 512,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "namespace",
+      "grain",
+      "value"
+    ],
+    "type": "object"
+  },
+  "ObservationIngressKind": {
+    "enum": [
+      "consumption_occurrence"
+    ],
+    "type": "string"
+  },
+  "OccurredTimeDto": {
+    "additionalProperties": false,
+    "properties": {
+      "original": {
+        "format": "iso-date-or-rfc3339",
+        "maxLength": 35,
+        "minLength": 10,
+        "pattern": "^(?:[0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,9})?(?:Z|[+-][0-9]{2}:[0-9]{2}))$",
+        "type": "string"
+      },
+      "precision": {
+        "$ref": "#/components/schemas/ClaimedPrecisionDto"
+      },
+      "trust": {
+        "$ref": "#/components/schemas/ClaimedTrustDto"
+      }
+    },
+    "required": [
+      "original",
+      "precision",
+      "trust"
+    ],
+    "type": "object"
+  },
+  "PreviewAnimeGroupingPolicyChangeRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "after_record_id": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "change": {
+        "$ref": "#/components/schemas/AnimeGroupingPolicyChangeDto"
+      },
+      "limit": {
+        "format": "int32",
+        "maximum": 100,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "scope": {
+        "$ref": "#/components/schemas/AnimeGroupingPolicyScopeDto"
+      }
+    },
+    "required": [
+      "scope",
+      "change",
+      "limit"
+    ],
+    "type": "object"
+  },
+  "ProblemActionDto": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "type": "string"
+      },
+      "label": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "label"
+    ],
+    "type": "object"
+  },
+  "ProblemDetails": {
+    "additionalProperties": false,
+    "description": "RFC 9457 representation of the one application problem model.",
+    "properties": {
+      "actual": {
+        "type": "null"
+      },
+      "capability_id": {
+        "type": "string"
+      },
+      "code": {
+        "type": "string"
+      },
+      "correlation_id": {
+        "pattern": "^req_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      },
+      "detail": {
+        "type": "string"
+      },
+      "next_actions": {
+        "items": {
+          "$ref": "#/components/schemas/ProblemActionDto"
+        },
+        "maxItems": 1,
+        "minItems": 1,
+        "type": "array"
+      },
+      "param": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "retryability": {
+        "type": "string"
+      },
+      "safe_state": {
+        "type": "string"
+      },
+      "status": {
+        "format": "uint16",
+        "maximum": 65535,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "title": {
+        "type": "string"
+      },
+      "type": {
+        "type": "string"
+      },
+      "violations": {
+        "items": {
+          "$ref": "#/components/schemas/ViolationDto"
+        },
+        "maxItems": 32,
+        "type": "array"
+      }
+    },
+    "required": [
+      "type",
+      "title",
+      "status",
+      "detail",
+      "code",
+      "capability_id",
+      "safe_state",
+      "retryability",
+      "next_actions",
+      "correlation_id",
+      "actual",
+      "violations"
+    ],
+    "type": "object"
+  },
+  "ProviderCapabilityDto": {
+    "additionalProperties": false,
+    "properties": {
+      "capability_id": {
+        "type": "string"
+      },
+      "credential_requirement": {
+        "$ref": "#/components/schemas/CredentialRequirementDto"
+      },
+      "credential_source": {
+        "$ref": "#/components/schemas/ProviderCredentialSourceDto"
+      },
+      "credential_state": {
+        "$ref": "#/components/schemas/ProviderCredentialStateDto"
+      },
+      "credential_test": {
+        "$ref": "#/components/schemas/ProviderCheckDto"
+      },
+      "health": {
+        "$ref": "#/components/schemas/ProviderCheckDto"
+      },
+      "purpose": {
+        "type": "string"
+      },
+      "state": {
+        "$ref": "#/components/schemas/ProviderCapabilityStateDto"
+      },
+      "testable": {
+        "type": "boolean"
+      },
+      "version": {
+        "format": "int64",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "writable": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "capability_id",
+      "purpose",
+      "credential_requirement",
+      "credential_state",
+      "credential_source",
+      "state",
+      "version",
+      "writable",
+      "testable",
+      "health",
+      "credential_test"
+    ],
+    "type": "object"
+  },
+  "ProviderCapabilityResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "capabilities": {
+        "items": {
+          "$ref": "#/components/schemas/ProviderCapabilityDto"
+        },
+        "maxItems": 32,
+        "minItems": 1,
+        "type": "array"
+      },
+      "provider_id": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "provider_id",
+      "capabilities"
+    ],
+    "type": "object"
+  },
+  "ProviderCapabilityStateDto": {
+    "enum": [
+      "available",
+      "degraded",
+      "unavailable",
+      "disabled"
+    ],
+    "type": "string"
+  },
+  "ProviderCheckDto": {
+    "additionalProperties": false,
+    "properties": {
+      "checked_at": {
+        "format": "date-time",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "safe_problem_code": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "state": {
+        "$ref": "#/components/schemas/ProviderCheckStateDto"
+      }
+    },
+    "required": [
+      "state"
+    ],
+    "type": "object"
+  },
+  "ProviderCheckStateDto": {
+    "enum": [
+      "never_run",
+      "passed",
+      "failed",
+      "unavailable"
+    ],
+    "type": "string"
+  },
+  "ProviderCredentialSourceDto": {
+    "enum": [
+      "none",
+      "environment",
+      "credential_store",
+      "operator_secret_mount"
+    ],
+    "type": "string"
+  },
+  "ProviderCredentialStateDto": {
+    "enum": [
+      "not_required",
+      "optional",
+      "missing",
+      "stored_unverified",
+      "valid",
+      "invalid",
+      "expired",
+      "unavailable",
+      "revoked"
+    ],
+    "type": "string"
+  },
+  "ProviderDescriptorDto": {
+    "additionalProperties": false,
+    "properties": {
+      "attribution": {
+        "type": "string"
+      },
+      "capabilities": {
+        "items": {
+          "$ref": "#/components/schemas/ProviderCapabilityDto"
+        },
+        "type": "array"
+      },
+      "display_name": {
+        "type": "string"
+      },
+      "documentation_url": {
+        "type": "string"
+      },
+      "identity_namespaces": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "locale_support": {
+        "type": "boolean"
+      },
+      "network_hosts": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "provider_id": {
+        "type": "string"
+      },
+      "provider_kind": {
+        "$ref": "#/components/schemas/ProviderKindDto"
+      },
+      "region_support": {
+        "type": "boolean"
+      },
+      "supported_media_grains": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "provider_id",
+      "display_name",
+      "provider_kind",
+      "documentation_url",
+      "attribution",
+      "supported_media_grains",
+      "capabilities",
+      "network_hosts",
+      "locale_support",
+      "region_support",
+      "identity_namespaces"
+    ],
+    "type": "object"
+  },
+  "ProviderHealthResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "capabilities": {
+        "items": {
+          "$ref": "#/components/schemas/ProviderCapabilityDto"
+        },
+        "type": "array"
+      },
+      "provider_id": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "provider_id",
+      "capabilities"
+    ],
+    "type": "object"
+  },
+  "ProviderKindDto": {
+    "enum": [
+      "metadata",
+      "ratings",
+      "catalog",
+      "tracking",
+      "identity"
+    ],
+    "type": "string"
+  },
+  "RatingClaimDto": {
+    "additionalProperties": false,
+    "properties": {
+      "claim_id": {
+        "type": "string"
+      },
+      "provenance": {
+        "$ref": "#/components/schemas/MetadataClaimProvenanceDto"
+      },
+      "record_id": {
+        "type": "string"
+      },
+      "scale": {
+        "$ref": "#/components/schemas/RatingScaleDto"
+      },
+      "value_millis": {
+        "format": "int32",
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "claim_id",
+      "record_id",
+      "value_millis",
+      "scale",
+      "provenance"
+    ],
+    "type": "object"
+  },
+  "RatingScaleDto": {
+    "additionalProperties": false,
+    "properties": {
+      "maximum_millis": {
+        "format": "int32",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "minimum_millis": {
+        "format": "int32",
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "minimum_millis",
+      "maximum_millis"
+    ],
+    "type": "object"
+  },
+  "ReadAnimeGroupingPolicyResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "policy": {
+        "$ref": "#/components/schemas/AnimeGroupingPolicyDto"
+      }
+    },
+    "required": [
+      "policy"
+    ],
+    "type": "object"
+  },
+  "ReadBrowserSessionResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "session": {
+        "$ref": "#/components/schemas/BrowserSessionDto"
+      }
+    },
+    "required": [
+      "session"
+    ],
+    "type": "object"
+  },
+  "ReadTrailBaseContinuationResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "candidate_revision": {
+        "description": "Revision submitted unchanged with the chosen zero-based choice ordinal.",
+        "maxLength": 71,
+        "minLength": 71,
+        "pattern": "^sha256:[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "choices": {
+        "items": {
+          "$ref": "#/components/schemas/TrailBaseContinuationChoiceDto"
+        },
+        "maxItems": 64,
+        "minItems": 1,
+        "type": "array"
+      },
+      "expires_at": {
+        "format": "date-time",
+        "maxLength": 35,
+        "minLength": 20,
+        "type": "string"
+      },
+      "remembered": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "expires_at",
+      "remembered",
+      "candidate_revision",
+      "choices"
+    ],
+    "type": "object"
+  },
+  "RecentAuthenticationDto": {
+    "additionalProperties": false,
+    "properties": {
+      "expires_at": {
+        "format": "date-time",
+        "maxLength": 35,
+        "minLength": 20,
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "state": {
+        "$ref": "#/components/schemas/AccessEvidenceStateDto"
+      }
+    },
+    "required": [
+      "state"
+    ],
+    "type": "object"
+  },
+  "RecordActivityDto": {
+    "additionalProperties": false,
+    "properties": {
+      "interpretation_state": {
+        "type": "string"
+      },
+      "occurred_at": {
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "$ref": "#/components/schemas/OccurredTimeDto",
+            "description": "The full claimed-time structure (original text, precision, trust), not\na collapsed string -- matches the desktop host's `RecordActivityView`\nso both surfaces expose the same field shape for the same data."
+          }
+        ]
+      }
+    },
+    "required": [
+      "interpretation_state"
+    ],
+    "type": "object"
+  },
+  "RecordIdentifierDto": {
+    "additionalProperties": false,
+    "properties": {
+      "grain": {
+        "type": "string"
+      },
+      "namespace": {
+        "type": "string"
+      },
+      "value": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "namespace",
+      "grain",
+      "value"
+    ],
+    "type": "object"
+  },
+  "RecordSummaryDto": {
+    "additionalProperties": false,
+    "properties": {
+      "grain": {
+        "type": "string"
+      },
+      "identifiers": {
+        "items": {
+          "$ref": "#/components/schemas/RecordIdentifierDto"
+        },
+        "type": "array"
+      },
+      "latest_activity": {
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "$ref": "#/components/schemas/RecordActivityDto"
+          }
+        ]
+      },
+      "original_title": {
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "$ref": "#/components/schemas/ResolvedFieldDto"
+          }
+        ]
+      },
+      "overview": {
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "$ref": "#/components/schemas/ResolvedFieldDto"
+          }
+        ]
+      },
+      "poster": {
+        "$ref": "#/components/schemas/ResolvedFieldDto"
+      },
+      "record_id": {
+        "type": "string"
+      },
+      "release_year": {
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "$ref": "#/components/schemas/ResolvedFieldDto"
+          }
+        ]
+      },
+      "status": {
+        "type": "string"
+      },
+      "title": {
+        "$ref": "#/components/schemas/ResolvedFieldDto"
+      }
+    },
+    "required": [
+      "record_id",
+      "grain",
+      "status",
+      "title",
+      "poster"
+    ],
+    "type": "object"
+  },
+  "RefreshMetadataClaimsRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "field_groups": {
+        "items": {
+          "$ref": "#/components/schemas/MetadataFieldGroupDto"
+        },
+        "maxItems": 32,
+        "minItems": 1,
+        "type": "array"
+      },
+      "locale": {
+        "maxLength": 16,
+        "minLength": 2,
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "mode": {
+        "$ref": "#/components/schemas/MetadataRefreshModeDto"
+      },
+      "operation_id": {
+        "format": "fasti-operation-id",
+        "maxLength": 35,
+        "minLength": 35,
+        "pattern": "^op_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      },
+      "provider_id": {
+        "maxLength": 64,
+        "minLength": 1,
+        "type": "string"
+      },
+      "record_id": {
+        "maxLength": 64,
+        "minLength": 1,
+        "type": "string"
+      },
+      "region": {
+        "maxLength": 8,
+        "minLength": 2,
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "operation_id",
+      "record_id",
+      "provider_id",
+      "field_groups",
+      "mode"
+    ],
+    "type": "object"
+  },
+  "RefreshMetadataClaimsResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "attributions": {
+        "items": {
+          "$ref": "#/components/schemas/MetadataAttributionDto"
+        },
+        "type": "array"
+      },
+      "cache_entries": {
+        "items": {
+          "$ref": "#/components/schemas/MetadataCacheEntryDto"
+        },
+        "type": "array"
+      },
+      "claims": {
+        "items": {
+          "$ref": "#/components/schemas/MetadataClaimDto"
+        },
+        "type": "array"
+      },
+      "projections": {
+        "items": {
+          "$ref": "#/components/schemas/MetadataProjectedFieldDto"
+        },
+        "type": "array"
+      },
+      "provider_id": {
+        "type": "string"
+      },
+      "ratings": {
+        "items": {
+          "$ref": "#/components/schemas/RatingClaimDto"
+        },
+        "type": "array"
+      },
+      "record_id": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "record_id",
+      "provider_id",
+      "claims",
+      "ratings",
+      "projections",
+      "cache_entries",
+      "attributions"
+    ],
+    "type": "object"
+  },
+  "RegisterNamespaceRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "grains": {
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 16,
+        "minItems": 1,
+        "type": "array"
+      },
+      "id_pattern": {
+        "maxLength": 256,
+        "minLength": 1,
+        "type": "string"
+      },
+      "label": {
+        "maxLength": 128,
+        "minLength": 1,
+        "type": "string"
+      },
+      "licence_posture": {
+        "type": "string"
+      },
+      "namespace": {
+        "maxLength": 64,
+        "minLength": 1,
+        "type": "string"
+      },
+      "normalization": {
+        "maxLength": 64,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "namespace",
+      "label",
+      "grains",
+      "id_pattern",
+      "normalization",
+      "licence_posture"
+    ],
+    "type": "object"
+  },
+  "RegisterNamespaceResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "created": {
+        "type": "boolean"
+      },
+      "namespace": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "namespace",
+      "created"
+    ],
+    "type": "object"
+  },
+  "ResolutionIntentDto": {
+    "enum": [
+      "metadata_search",
+      "metadata_lookup",
+      "metadata_enrichment",
+      "rating_lookup",
+      "catalog_lookup",
+      "display_projection",
+      "nuvio_export",
+      "nuvio_import_attachment",
+      "tracker_read",
+      "tracker_write",
+      "segment_translation",
+      "deduplication_review"
+    ],
+    "type": "string"
+  },
+  "ResolveIdentityRouteResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "candidate_routes": {
+        "items": {
+          "$ref": "#/components/schemas/IdentityRouteDto"
+        },
+        "type": "array"
+      },
+      "intent": {
+        "$ref": "#/components/schemas/ResolutionIntentDto"
+      },
+      "known_identifiers": {
+        "items": {
+          "$ref": "#/components/schemas/IdentityIdentifierDto"
+        },
+        "type": "array"
+      },
+      "nuvio_content_id": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "record_id": {
+        "type": "string"
+      },
+      "selected_route": {
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "$ref": "#/components/schemas/IdentityRouteDto"
+          }
+        ]
+      },
+      "status": {
+        "$ref": "#/components/schemas/IdentityRouteStatusDto"
+      },
+      "target_provider": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "record_id",
+      "intent",
+      "target_provider",
+      "status",
+      "known_identifiers",
+      "candidate_routes"
+    ],
+    "type": "object"
+  },
+  "ResolvedFieldDto": {
+    "additionalProperties": false,
+    "properties": {
+      "is_stale": {
+        "type": "boolean"
+      },
+      "source": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "tier": {
+        "type": "string"
+      },
+      "value": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "tier",
+      "is_stale"
+    ],
+    "type": "object"
+  },
+  "RevokeBrowserSessionsResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "revoked_count": {
+        "format": "int64",
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "revoked_count"
+    ],
+    "type": "object"
+  },
+  "RotateBrowserSessionResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "session": {
+        "$ref": "#/components/schemas/BrowserSessionDto"
+      }
+    },
+    "required": [
+      "session"
+    ],
+    "type": "object"
+  },
+  "SelectBrowserSessionProfileRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "profile_grant_id": {
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^grt_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "profile_grant_id"
+    ],
+    "type": "object"
+  },
+  "SelectBrowserSessionProfileResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "session": {
+        "$ref": "#/components/schemas/BrowserSessionDto"
+      }
+    },
+    "required": [
+      "session"
+    ],
+    "type": "object"
+  },
+  "SetTrackingDispositionRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "disposition": {
+        "$ref": "#/components/schemas/TrackingDispositionUpdateDto"
+      }
+    },
+    "required": [
+      "disposition"
+    ],
+    "type": "object"
+  },
+  "StartTrailBaseSignInRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "remembered": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "remembered"
+    ],
+    "type": "object"
+  },
+  "StartTrailBaseSignInResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "authorization_url": {
+        "maxLength": 4096,
+        "minLength": 1,
+        "type": "string"
+      },
+      "expires_at": {
+        "format": "date-time",
+        "maxLength": 35,
+        "minLength": 20,
+        "type": "string"
+      }
+    },
+    "required": [
+      "authorization_url",
+      "expires_at"
+    ],
+    "type": "object"
+  },
+  "SubmitObservationRequest": {
+    "additionalProperties": false,
+    "description": "Durable provider-neutral occurrence ingress envelope.\n\n`source_event_id` is source-owned and must remain stable when the same\ndelivery is retried. Fasti derives the operation ID from the authenticated\nclient, source, and event identity. The complete normalized request is\nstored as immutable evidence before observation acceptance.",
+    "properties": {
+      "duration_seconds": {
+        "format": "int64",
+        "minimum": 1,
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "identifiers": {
+        "items": {
+          "$ref": "#/components/schemas/ObservationIdentifierInput"
+        },
+        "maxItems": 16,
+        "type": "array"
+      },
+      "kind": {
+        "$ref": "#/components/schemas/ObservationIngressKind"
+      },
+      "observed_at": {
+        "format": "date-time",
+        "maxLength": 35,
+        "minLength": 20,
+        "type": "string"
+      },
+      "occurred_at": {
+        "maxLength": 35,
+        "minLength": 10,
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "position_seconds": {
+        "format": "int64",
+        "minimum": 0,
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "progress_percent": {
+        "format": "double",
+        "maximum": 100,
+        "minimum": 0,
+        "type": [
+          "number",
+          "null"
+        ]
+      },
+      "source": {
+        "maxLength": 64,
+        "minLength": 1,
+        "type": "string"
+      },
+      "source_event_id": {
+        "maxLength": 256,
+        "minLength": 1,
+        "type": "string"
+      },
+      "target_grain": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "title": {
+        "maxLength": 512,
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "kind",
+      "source",
+      "source_event_id",
+      "observed_at",
+      "identifiers"
+    ],
+    "type": "object"
+  },
+  "SubmitObservationResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "committed_at": {
+        "type": "string"
+      },
+      "disposition": {
+        "type": "string"
+      },
+      "evidence_id": {
+        "type": "string"
+      },
+      "interpretation_id": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "observation_id": {
+        "type": "string"
+      },
+      "occurrence_id": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "operation_id": {
+        "type": "string"
+      },
+      "payload_digest": {
+        "type": "string"
+      },
+      "profile_id": {
+        "type": "string"
+      },
+      "receipt_id": {
+        "type": "string"
+      },
+      "received_at": {
+        "type": "string"
+      },
+      "record_id": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "resolution": {
+        "type": "string"
+      },
+      "review_item_id": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "source_client_id": {
+        "type": "string"
+      },
+      "workspace_id": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "disposition",
+      "receipt_id",
+      "operation_id",
+      "workspace_id",
+      "profile_id",
+      "source_client_id",
+      "observation_id",
+      "evidence_id",
+      "payload_digest",
+      "resolution",
+      "received_at",
+      "committed_at"
+    ],
+    "type": "object"
+  },
+  "TrackingDispositionDto": {
+    "enum": [
+      "watching",
+      "on_hold",
+      "dropped"
+    ],
+    "type": "string"
+  },
+  "TrackingDispositionStateDto": {
+    "additionalProperties": false,
+    "properties": {
+      "disposition": {
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "$ref": "#/components/schemas/TrackingDispositionDto"
+          }
+        ]
+      },
+      "record_id": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "record_id"
+    ],
+    "type": "object"
+  },
+  "TrackingDispositionUpdateDto": {
+    "enum": [
+      "watching",
+      "on_hold",
+      "dropped",
+      "unset"
+    ],
+    "type": "string"
+  },
+  "TrailBaseActivationBlockerDto": {
+    "enum": [
+      "release_mismatch",
+      "physical_root_identity_mismatch",
+      "declared_restore"
+    ],
+    "type": "string"
+  },
+  "TrailBaseActivationDto": {
+    "additionalProperties": false,
+    "properties": {
+      "blocker": {
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "$ref": "#/components/schemas/TrailBaseActivationBlockerDto"
+          }
+        ]
+      },
+      "generation": {
+        "format": "int64",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "session_generation_current": {
+        "type": "boolean"
+      },
+      "state": {
+        "$ref": "#/components/schemas/TrailBaseActivationStateDto"
+      },
+      "trailbase_instance_id": {
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^tbi_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      },
+      "updated_at": {
+        "format": "date-time",
+        "maxLength": 35,
+        "minLength": 20,
+        "type": "string"
+      }
+    },
+    "required": [
+      "state",
+      "trailbase_instance_id",
+      "generation",
+      "session_generation_current",
+      "updated_at"
+    ],
+    "type": "object"
+  },
+  "TrailBaseActivationStateDto": {
+    "enum": [
+      "inactive",
+      "active",
+      "blocked"
+    ],
+    "type": "string"
+  },
+  "TrailBaseContinuationChoiceDto": {
+    "additionalProperties": false,
+    "properties": {
+      "choice_ordinal": {
+        "description": "Zero-based opaque choice submitted with the unchanged candidate revision.",
+        "format": "int32",
+        "maximum": 63,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "membership_state": {
+        "$ref": "#/components/schemas/AccessMembershipLifecycleDto"
+      },
+      "profile_created_at": {
+        "format": "date-time",
+        "maxLength": 35,
+        "minLength": 20,
+        "type": "string"
+      },
+      "profile_ordinal": {
+        "description": "One-based profile number for display only.",
+        "format": "int32",
+        "maximum": 64,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "role": {
+        "$ref": "#/components/schemas/AccessWorkspaceRoleDto"
+      },
+      "workspace_created_at": {
+        "format": "date-time",
+        "maxLength": 35,
+        "minLength": 20,
+        "type": "string"
+      },
+      "workspace_ordinal": {
+        "description": "One-based workspace number for display only.",
+        "format": "int32",
+        "maximum": 64,
+        "minimum": 1,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "choice_ordinal",
+      "workspace_ordinal",
+      "profile_ordinal",
+      "workspace_created_at",
+      "profile_created_at",
+      "membership_state",
+      "role"
+    ],
+    "type": "object"
+  },
+  "ViolationDto": {
+    "additionalProperties": false,
+    "properties": {
+      "actual": {
+        "type": "null"
+      },
+      "code": {
+        "type": "string"
+      },
+      "expected": {
+        "type": "string"
+      },
+      "pointer": {
+        "type": "string"
+      },
+      "reason": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "code",
+      "pointer",
+      "reason",
+      "expected",
+      "actual"
+    ],
+    "type": "object"
+  }
+} as const;
+
+// prettier-ignore
+export function parseNodeInitializationResponse(value: unknown): NodeInitializationResponse {
+  return parseProductionDto("NodeInitializationResponse", value);
+}
+
+// prettier-ignore
+export function parseClientEnrollmentResponse(value: unknown): ClientEnrollmentResponse {
+  return parseProductionDto("ClientEnrollmentResponse", value);
+}
+
+// prettier-ignore
+function parseProductionDto<T>(schemaName: string, value: unknown): T {
+  const schema = (PRODUCTION_SCHEMAS as Record<string, unknown>)[schemaName];
+  if (schema === undefined) {
+    throw new FastiContractParseError(`Unknown production schema ${schemaName}`);
+  }
+  validateOpenApiValue(value, schema, schemaName, PRODUCTION_SCHEMAS as Record<string, unknown>);
+  return value as T;
+}
+
+// prettier-ignore
+export type ObservationIngressKind = "consumption_occurrence";
+
+// prettier-ignore
+export type TrackingDispositionDto = "dropped" | "on_hold" | "watching";
+
+// prettier-ignore
+export type TrackingDispositionUpdateDto = "dropped" | "on_hold" | "unset" | "watching";
+
+// prettier-ignore
+export type ProviderKindDto = "catalog" | "identity" | "metadata" | "ratings" | "tracking";
+
+// prettier-ignore
+export type CredentialRequirementDto = "api_key" | "basic_auth" | "bearer_token" | "custom_header" | "none" | "oauth2" | "operator_secret_mount" | "optional_api_key" | "user_agent_only";
+
+// prettier-ignore
+export type ProviderCredentialStateDto = "expired" | "invalid" | "missing" | "not_required" | "optional" | "revoked" | "stored_unverified" | "unavailable" | "valid";
+
+// prettier-ignore
+export type ProviderCredentialSourceDto = "credential_store" | "environment" | "none" | "operator_secret_mount";
+
+// prettier-ignore
+export type ProviderCapabilityStateDto = "available" | "degraded" | "disabled" | "unavailable";
+
+// prettier-ignore
+export type ProviderCheckStateDto = "failed" | "never_run" | "passed" | "unavailable";
+
+// prettier-ignore
+export type MetadataFieldGroupDto = "artwork" | "basic_info" | "collections" | "credits" | "details" | "episodes" | "networks" | "production_companies" | "recommendations" | "release_dates" | "season_artwork" | "trailers" | "watch_providers";
+
+// prettier-ignore
+export type MetadataRefreshModeDto = "prefer_cache" | "revalidate";
+
+// prettier-ignore
+export type MetadataClaimStatusDto = "fresh" | "invalid" | "revoked" | "stale" | "superseded" | "unavailable";
+
+// prettier-ignore
+export type MetadataProjectionTierDto = "empty" | "fallback_provider_claim" | "last_known_good" | "preferred_provider_claim" | "user_override";
+
+// prettier-ignore
+export type LastKnownGoodPolicyDto = "allow" | "deny";
+
+// prettier-ignore
+export type MetadataCachePurposeDto = "display_projection" | "metadata_enrichment" | "offline_read" | "rating_lookup";
+
+// prettier-ignore
+export type MetadataDataClassificationDto = "confidential" | "internal" | "public" | "restricted";
+
+// prettier-ignore
+export type MetadataCacheInvalidationReasonDto = "credential_rotated" | "explicit_retraction" | "projection_policy_changed" | "provider_configuration_changed" | "terms_changed";
+
+// prettier-ignore
+export type MetadataCacheReadStateDto = "expired" | "fresh" | "invalidated" | "partition_denied" | "stale_on_error" | "stale_while_refreshing";
+
+// prettier-ignore
+export type AccessEvidenceStateDto = "empty" | "failed_safely" | "loading" | "needs_attention" | "unavailable" | "verified";
+
+// prettier-ignore
+export type AccessSubjectLifecycleDto = "active" | "deleted" | "disabled" | "recovery_pending";
+
+// prettier-ignore
+export type AccessMembershipLifecycleDto = "active" | "invited" | "pending_approval" | "removed" | "suspended";
+
+// prettier-ignore
+export type AccessWorkspaceRoleDto = "administrator" | "member";
+
+// prettier-ignore
+export type TrailBaseActivationStateDto = "active" | "blocked" | "inactive";
+
+// prettier-ignore
+export type TrailBaseActivationBlockerDto = "declared_restore" | "physical_root_identity_mismatch" | "release_mismatch";
+
+// prettier-ignore
+export type AccessAuthenticationMethodDto = "trail_base_password" | "trail_base_social";
+
+// prettier-ignore
+export type AccessEvidenceKindDto = "current_session_issued" | "first_administrator_bootstrap";
+
+// prettier-ignore
+export type AccessCeremonyStateDto = "cancelled" | "claimed" | "cleanup_uncertain" | "completed" | "expired" | "failed" | "pending" | "selection_required";
+
+// prettier-ignore
+export type AccessCeremonyFailureDto = "exchange_failed" | "exchange_outcome_uncertain" | "local_authorization_denied" | "local_persistence_failed" | "logout_uncertain" | "status_rejected" | "trust_unavailable" | "verifier_lost_on_restart";
+
+// prettier-ignore
+export type AccessFirstRunStepKeyDto = "account_confirmed" | "devices_and_clients" | "external_identity" | "recovery" | "strong_sign_in";
+
+// prettier-ignore
+export type ResolutionIntentDto = "catalog_lookup" | "deduplication_review" | "display_projection" | "metadata_enrichment" | "metadata_lookup" | "metadata_search" | "nuvio_export" | "nuvio_import_attachment" | "rating_lookup" | "segment_translation" | "tracker_read" | "tracker_write";
+
+// prettier-ignore
+export type IdentityRouteStatusDto = "ambiguous" | "missing" | "selected";
+
+// prettier-ignore
+export type IdentityRouteKindDto = "accepted_crosswalk" | "provider_native" | "verified_alias";
+
+// prettier-ignore
+export type IdentityAssertionRelationDto = "alternate_cut_of" | "exact" | "not_same_as" | "overlaps" | "related" | "subset_of" | "superset_of";
+
+// prettier-ignore
+export type AnimeGroupingPreferenceDto = "automatic" | "group_by_tv_work" | "keep_kitsu_releases_separate" | "keep_mal_releases_separate";
+
+// prettier-ignore
+export type AnimeGroupingPolicyScopeKindDto = "client" | "profile";
+
+// prettier-ignore
+export type AnimeGroupingPolicySourceDto = "client_override" | "profile_default";
+
+// prettier-ignore
+export type AnimeGroupingPolicyChangeDto = { readonly applied_operation_id: string; readonly kind: "rollback" } | { readonly kind: "inherit_profile" } | { readonly kind: "set"; readonly preference: AnimeGroupingPreferenceDto };
+
+// The Nuvio wire document intentionally preserves extension fields.
+export type NuvioCollectionsDocumentDto = ReadonlyArray<Record<string, unknown>>;
+
+export interface ObservationIdentifierInput {
+  readonly grain: string;
+  readonly namespace: string;
+  readonly value: string;
+}
+
+export interface SubmitObservationRequest {
+  readonly duration_seconds?: null | number;
+  readonly identifiers: ReadonlyArray<ObservationIdentifierInput>;
+  readonly kind: ObservationIngressKind;
+  readonly observed_at: string;
+  readonly occurred_at?: null | string;
+  readonly position_seconds?: null | number;
+  readonly progress_percent?: null | number;
+  readonly source: string;
+  readonly source_event_id: string;
+  readonly target_grain?: null | string;
+  readonly title?: null | string;
+}
+
+export interface SubmitObservationResponse {
+  readonly committed_at: string;
+  readonly disposition: string;
+  readonly evidence_id: string;
+  readonly interpretation_id?: null | string;
+  readonly observation_id: string;
+  readonly occurrence_id?: null | string;
+  readonly operation_id: string;
+  readonly payload_digest: string;
+  readonly profile_id: string;
+  readonly receipt_id: string;
+  readonly received_at: string;
+  readonly record_id?: null | string;
+  readonly resolution: string;
+  readonly review_item_id?: null | string;
+  readonly source_client_id: string;
+  readonly workspace_id: string;
+}
+
+export interface CreateRecordRequest {
+  readonly grain: string;
+}
+
+export interface CreateRecordResponse {
+  readonly grain: string;
+  readonly record_id: string;
+}
+
+export interface ResolvedFieldDto {
+  readonly is_stale: boolean;
+  readonly source?: null | string;
+  readonly tier: string;
+  readonly value?: null | string;
+}
+
+export interface RecordActivityDto {
+  readonly interpretation_state: string;
+  readonly occurred_at?: OccurredTimeDto | null;
+}
+
+export interface RecordIdentifierDto {
+  readonly grain: string;
+  readonly namespace: string;
+  readonly value: string;
+}
+
+export interface RecordSummaryDto {
+  readonly grain: string;
+  readonly identifiers?: ReadonlyArray<RecordIdentifierDto>;
+  readonly latest_activity?: RecordActivityDto | null;
+  readonly original_title?: ResolvedFieldDto | null;
+  readonly overview?: ResolvedFieldDto | null;
+  readonly poster: ResolvedFieldDto;
+  readonly record_id: string;
+  readonly release_year?: ResolvedFieldDto | null;
+  readonly status: string;
+  readonly title: ResolvedFieldDto;
+}
+
+export interface ListRecordsResponse {
+  readonly records: ReadonlyArray<RecordSummaryDto>;
+  readonly truncated: boolean;
+}
+
+export interface AttachIdentifierRequest {
+  readonly grain: string;
+  readonly namespace: string;
+  readonly record_id: string;
+  readonly value: string;
+}
+
+export interface AttachIdentifierResponse {
+  readonly created: boolean;
+  readonly external_identifier_id: string;
+  readonly record_id: string;
+}
+
+export interface RegisterNamespaceRequest {
+  readonly grains: ReadonlyArray<string>;
+  readonly id_pattern: string;
+  readonly label: string;
+  readonly licence_posture: string;
+  readonly namespace: string;
+  readonly normalization: string;
+}
+
+export interface RegisterNamespaceResponse {
+  readonly created: boolean;
+  readonly namespace: string;
+}
+
+export interface SetTrackingDispositionRequest {
+  readonly disposition: TrackingDispositionUpdateDto;
+}
+
+export interface TrackingDispositionStateDto {
+  readonly disposition?: TrackingDispositionDto | null;
+  readonly record_id: string;
+}
+
+export interface ListTrackingDispositionsResponse {
+  readonly states: ReadonlyArray<TrackingDispositionStateDto>;
+  readonly truncated: boolean;
+}
+
+export interface NuvioCollectionsStateDto {
+  readonly document?: NuvioCollectionsDocumentDto | null;
+}
+
+export interface ProviderCheckDto {
+  readonly checked_at?: null | string;
+  readonly safe_problem_code?: null | string;
+  readonly state: ProviderCheckStateDto;
+}
+
+export interface ProviderCapabilityDto {
+  readonly capability_id: string;
+  readonly credential_requirement: CredentialRequirementDto;
+  readonly credential_source: ProviderCredentialSourceDto;
+  readonly credential_state: ProviderCredentialStateDto;
+  readonly credential_test: ProviderCheckDto;
+  readonly health: ProviderCheckDto;
+  readonly purpose: string;
+  readonly state: ProviderCapabilityStateDto;
+  readonly testable: boolean;
+  readonly version: number;
+  readonly writable: boolean;
+}
+
+export interface ProviderDescriptorDto {
+  readonly attribution: string;
+  readonly capabilities: ReadonlyArray<ProviderCapabilityDto>;
+  readonly display_name: string;
+  readonly documentation_url: string;
+  readonly identity_namespaces: ReadonlyArray<string>;
+  readonly locale_support: boolean;
+  readonly network_hosts: ReadonlyArray<string>;
+  readonly provider_id: string;
+  readonly provider_kind: ProviderKindDto;
+  readonly region_support: boolean;
+  readonly supported_media_grains: ReadonlyArray<string>;
+}
+
+export interface ListProvidersResponse {
+  readonly providers: ReadonlyArray<ProviderDescriptorDto>;
+}
+
+export interface ConfigureProviderCredentialRequest {
+  readonly secret: string;
+}
+
+export interface ProviderCapabilityResponse {
+  readonly capabilities: ReadonlyArray<ProviderCapabilityDto>;
+  readonly provider_id: string;
+}
+
+export interface ProviderHealthResponse {
+  readonly capabilities: ReadonlyArray<ProviderCapabilityDto>;
+  readonly provider_id: string;
+}
+
+export interface RefreshMetadataClaimsRequest {
+  readonly field_groups: ReadonlyArray<MetadataFieldGroupDto>;
+  readonly locale?: null | string;
+  readonly mode: MetadataRefreshModeDto;
+  readonly operation_id: string;
+  readonly provider_id: string;
+  readonly record_id: string;
+  readonly region?: null | string;
+}
+
+export interface MetadataClaimProvenanceDto {
+  readonly claim_id: string;
+  readonly evidence_digest?: null | string;
+  readonly expires_at?: null | string;
+  readonly fetched_at: string;
+  readonly field_key?: null | string;
+  readonly locale?: null | string;
+  readonly provider_id?: null | string;
+  readonly record_id?: null | string;
+  readonly region?: null | string;
+  readonly source_identifier?: null | string;
+  readonly source_namespace: string;
+  readonly source_version?: null | string;
+  readonly status: MetadataClaimStatusDto;
+}
+
+export interface MetadataClaimDto {
+  readonly claim_id: string;
+  readonly field_key?: null | string;
+  readonly provenance: MetadataClaimProvenanceDto;
+  readonly record_id?: null | string;
+  readonly value: string;
+}
+
+export interface RatingScaleDto {
+  readonly maximum_millis: number;
+  readonly minimum_millis: number;
+}
+
+export interface RatingClaimDto {
+  readonly claim_id: string;
+  readonly provenance: MetadataClaimProvenanceDto;
+  readonly record_id: string;
+  readonly scale: RatingScaleDto;
+  readonly value_millis: number;
+}
+
+export interface MetadataProjectedFieldDto {
+  readonly field_key: string;
+  readonly is_stale: boolean;
+  readonly profile_id: string;
+  readonly projected_at: string;
+  readonly provenance?: MetadataClaimProvenanceDto | null;
+  readonly record_id: string;
+  readonly source_namespace?: null | string;
+  readonly tier: MetadataProjectionTierDto;
+  readonly value?: null | string;
+}
+
+export interface EnrichmentPolicyDto {
+  readonly allow_english_fallback: boolean;
+  readonly enabled_field_groups: ReadonlyArray<MetadataFieldGroupDto>;
+  readonly last_known_good: LastKnownGoodPolicyDto;
+  readonly original_locale?: null | string;
+  readonly preferred_locale?: null | string;
+  readonly preferred_provider_id?: null | string;
+  readonly profile_id: string;
+  readonly region?: null | string;
+}
+
+export interface MetadataCacheKeyDto {
+  readonly classification: MetadataDataClassificationDto;
+  readonly configuration_digest: string;
+  readonly credential_reference_version?: null | number;
+  readonly field_group: MetadataFieldGroupDto;
+  readonly grain: string;
+  readonly locale?: null | string;
+  readonly provider_id: string;
+  readonly purpose: MetadataCachePurposeDto;
+  readonly record_id: string;
+  readonly region?: null | string;
+  readonly resolved_provider_route: string;
+  readonly schema_version: number;
+  readonly settings_fingerprint: string;
+  readonly source_identifier: string;
+  readonly source_namespace: string;
+  readonly terms_revision: string;
+}
+
+export interface MetadataCacheInvalidationDto {
+  readonly invalidated_at: string;
+  readonly reason: MetadataCacheInvalidationReasonDto;
+}
+
+export interface MetadataCacheEntryDto {
+  readonly claim_ids: ReadonlyArray<string>;
+  readonly created_at: string;
+  readonly fresh_until: string;
+  readonly invalidation?: MetadataCacheInvalidationDto | null;
+  readonly key: MetadataCacheKeyDto;
+  readonly read_state: MetadataCacheReadStateDto;
+  readonly stale_on_error_until: string;
+  readonly stale_while_refreshing_until: string;
+}
+
+export interface MetadataAttributionDto {
+  readonly documentation_url: string;
+  readonly provider_id: string;
+  readonly text: string;
+}
+
+export interface RefreshMetadataClaimsResponse {
+  readonly attributions: ReadonlyArray<MetadataAttributionDto>;
+  readonly cache_entries: ReadonlyArray<MetadataCacheEntryDto>;
+  readonly claims: ReadonlyArray<MetadataClaimDto>;
+  readonly projections: ReadonlyArray<MetadataProjectedFieldDto>;
+  readonly provider_id: string;
+  readonly ratings: ReadonlyArray<RatingClaimDto>;
+  readonly record_id: string;
+}
+
+export interface MetadataProjectionResponse {
+  readonly attributions: ReadonlyArray<MetadataAttributionDto>;
+  readonly cache_entries: ReadonlyArray<MetadataCacheEntryDto>;
+  readonly fields: ReadonlyArray<MetadataProjectedFieldDto>;
+  readonly policy: EnrichmentPolicyDto;
+  readonly profile_id: string;
+  readonly ratings: ReadonlyArray<RatingClaimDto>;
+  readonly record_id: string;
+}
+
+export interface MetadataProjectionQueryParameters {
+  readonly offline?: boolean;
+}
+
+// prettier-ignore
+export type MetadataOverrideMutationDto = { readonly field_key: string; readonly operation: "clear"; readonly record_id: string } | { readonly field_key: string; readonly operation: "set"; readonly record_id: string; readonly value: string };
+
+export interface ConfigureMetadataProjectionRequest {
+  readonly allow_english_fallback: boolean;
+  readonly enabled_field_groups: ReadonlyArray<MetadataFieldGroupDto>;
+  readonly last_known_good: LastKnownGoodPolicyDto;
+  readonly original_locale?: null | string;
+  readonly overrides: ReadonlyArray<MetadataOverrideMutationDto>;
+  readonly preferred_locale?: null | string;
+  readonly preferred_provider_id?: null | string;
+  readonly region?: null | string;
+}
+
+export interface MetadataProjectionConfigurationResponse {
+  readonly invalidated_cache_entries: number;
+  readonly policy: EnrichmentPolicyDto;
+}
+
+export interface IdentityIdentifierDto {
+  readonly grain: string;
+  readonly namespace: string;
+  readonly value: string;
+}
+
+export interface AcceptedIdentityRouteAssertionDto {
+  readonly assertion_id: string;
+  readonly record_id: string;
+  readonly relation: IdentityAssertionRelationDto;
+  readonly source_grain: string;
+}
+
+export interface IdentityRouteDto {
+  readonly accepted_assertions: ReadonlyArray<AcceptedIdentityRouteAssertionDto>;
+  readonly identifier: IdentityIdentifierDto;
+  readonly kind: IdentityRouteKindDto;
+}
+
+export interface ResolveIdentityRouteResponse {
+  readonly candidate_routes: ReadonlyArray<IdentityRouteDto>;
+  readonly intent: ResolutionIntentDto;
+  readonly known_identifiers: ReadonlyArray<IdentityIdentifierDto>;
+  readonly nuvio_content_id?: null | string;
+  readonly record_id: string;
+  readonly selected_route?: IdentityRouteDto | null;
+  readonly status: IdentityRouteStatusDto;
+  readonly target_provider: string;
+}
+
+export interface AnimeGroupingPolicyScopeDto {
+  readonly client_id?: null | string;
+  readonly kind: AnimeGroupingPolicyScopeKindDto;
+}
+
+export interface AnimeGroupingPolicyDto {
+  readonly preference: AnimeGroupingPreferenceDto;
+  readonly profile_id: string;
+  readonly revision: number;
+  readonly scope: AnimeGroupingPolicyScopeDto;
+  readonly source: AnimeGroupingPolicySourceDto;
+}
+
+export interface ReadAnimeGroupingPolicyResponse {
+  readonly policy: AnimeGroupingPolicyDto;
+}
+
+export interface PreviewAnimeGroupingPolicyChangeRequest {
+  readonly after_record_id?: null | string;
+  readonly change: AnimeGroupingPolicyChangeDto;
+  readonly limit: number;
+  readonly scope: AnimeGroupingPolicyScopeDto;
+}
+
+export interface AnimeGroupingRecordPreviewDto {
+  readonly possible_season_regrouping: boolean;
+  readonly previous_preference: AnimeGroupingPreferenceDto;
+  readonly previous_route?: IdentityRouteDto | null;
+  readonly previous_status: IdentityRouteStatusDto;
+  readonly proposed_preference: AnimeGroupingPreferenceDto;
+  readonly proposed_route?: IdentityRouteDto | null;
+  readonly proposed_status: IdentityRouteStatusDto;
+  readonly record_id: string;
+  readonly route_changed: boolean;
+}
+
+export interface AnimeGroupingPolicyImpactResponse {
+  readonly affected_records: number;
+  readonly next_after_record_id?: null | string;
+  readonly policy: AnimeGroupingPolicyDto;
+  readonly possible_season_regroupings: number;
+  readonly proposed_preference: AnimeGroupingPreferenceDto;
+  readonly proposed_source: AnimeGroupingPolicySourceDto;
+  readonly records: ReadonlyArray<AnimeGroupingRecordPreviewDto>;
+  readonly total_records: number;
+  readonly unresolved_routes: number;
+}
+
+export interface ApplyAnimeGroupingPolicyChangeRequest {
+  readonly change: AnimeGroupingPolicyChangeDto;
+  readonly expected_revision: number;
+  readonly operation_id: string;
+  readonly scope: AnimeGroupingPolicyScopeDto;
+}
+
+export interface ApplyAnimeGroupingPolicyChangeResponse {
+  readonly affected_records: number;
+  readonly change: AnimeGroupingPolicyChangeDto;
+  readonly operation_id: string;
+  readonly policy: AnimeGroupingPolicyDto;
+  readonly possible_season_regroupings: number;
+  readonly previous_preference: AnimeGroupingPreferenceDto;
+  readonly previous_source: AnimeGroupingPolicySourceDto;
+  readonly rolled_back_operation_id?: null | string;
+  readonly unresolved_routes: number;
+}
+
+export interface StartTrailBaseSignInRequest {
+  readonly remembered: boolean;
+}
+
+export interface StartTrailBaseSignInResponse {
+  readonly authorization_url: string;
+  readonly expires_at: string;
+}
+
+export interface TrailBaseContinuationChoiceDto {
+  readonly choice_ordinal: number;
+  readonly membership_state: AccessMembershipLifecycleDto;
+  readonly profile_created_at: string;
+  readonly profile_ordinal: number;
+  readonly role: AccessWorkspaceRoleDto;
+  readonly workspace_created_at: string;
+  readonly workspace_ordinal: number;
+}
+
+export interface ReadTrailBaseContinuationResponse {
+  readonly candidate_revision: string;
+  readonly choices: ReadonlyArray<TrailBaseContinuationChoiceDto>;
+  readonly expires_at: string;
+  readonly remembered: boolean;
+}
+
+export interface CompleteTrailBaseContinuationRequest {
+  readonly candidate_revision: string;
+  readonly choice_ordinal: number;
+}
+
+export interface SelectBrowserSessionProfileRequest {
+  readonly profile_grant_id: string;
+}
+
+export interface BrowserSessionDto {
+  readonly absolute_expires_at: string;
+  readonly browser_session_id: string;
+  readonly created_at: string;
+  readonly idle_expires_at: string;
+  readonly is_current: boolean;
+  readonly last_seen_at: string;
+  readonly rotation_generation: number;
+  readonly selected_profile_grant_id: string;
+  readonly workspace_id: string;
+}
+
+export interface ReadBrowserSessionResponse {
+  readonly session: BrowserSessionDto;
+}
+
+export interface ListBrowserSessionsResponse {
+  readonly sessions: ReadonlyArray<BrowserSessionDto>;
+  readonly truncated: boolean;
+}
+
+export interface RevokeBrowserSessionsResponse {
+  readonly revoked_count: number;
+}
+
+export interface RotateBrowserSessionResponse {
+  readonly session: BrowserSessionDto;
+}
+
+export interface SelectBrowserSessionProfileResponse {
+  readonly session: BrowserSessionDto;
+}
+
+export interface AccessSubjectDto {
+  readonly auth_subject_id: string;
+  readonly created_at: string;
+  readonly lifecycle: AccessSubjectLifecycleDto;
+  readonly updated_at: string;
+}
+
+export interface AccessMembershipDto {
+  readonly created_at: string;
+  readonly lifecycle: AccessMembershipLifecycleDto;
+  readonly membership_id: string;
+  readonly role: AccessWorkspaceRoleDto;
+  readonly updated_at: string;
+  readonly workspace_id: string;
+}
+
+export interface AccessProfileGrantDto {
+  readonly owner_client_id: string;
+  readonly profile_grant_id: string;
+  readonly profile_id: string;
+  readonly selected: boolean;
+}
+
+export interface BrowserSessionPolicyDto {
+  readonly browser_lifetime_seconds: number;
+  readonly idle_timeout_seconds: number;
+  readonly last_seen_write_interval_seconds: number;
+  readonly remembered_browser_lifetime_seconds: number;
+}
+
+export interface RecentAuthenticationDto {
+  readonly expires_at?: null | string;
+  readonly state: AccessEvidenceStateDto;
+}
+
+export interface AccessSessionAuthenticationDto {
+  readonly activation_generation: number;
+  readonly method: AccessAuthenticationMethodDto;
+  readonly recent_authentication: RecentAuthenticationDto;
+  readonly verified_at: string;
+}
+
+export interface TrailBaseActivationDto {
+  readonly blocker?: TrailBaseActivationBlockerDto | null;
+  readonly generation: number;
+  readonly session_generation_current: boolean;
+  readonly state: TrailBaseActivationStateDto;
+  readonly trailbase_instance_id: string;
+  readonly updated_at: string;
+}
+
+export interface AccessFirstRunStepDto {
+  readonly key: AccessFirstRunStepKeyDto;
+  readonly state: AccessEvidenceStateDto;
+}
+
+export interface AccessEvidenceDto {
+  readonly ceremony_state?: AccessCeremonyStateDto | null;
+  readonly correlation_id: string;
+  readonly failure?: AccessCeremonyFailureDto | null;
+  readonly kind: AccessEvidenceKindDto;
+  readonly occurred_at: string;
+  readonly operation_id: string;
+  readonly state: AccessEvidenceStateDto;
+}
+
+export interface AccessProjectionResponse {
+  readonly authentication: AccessSessionAuthenticationDto;
+  readonly current_session: BrowserSessionDto;
+  readonly evidence: ReadonlyArray<AccessEvidenceDto>;
+  readonly evidence_truncated: boolean;
+  readonly first_run_steps: ReadonlyArray<AccessFirstRunStepDto>;
+  readonly generated_at: string;
+  readonly membership: AccessMembershipDto;
+  readonly profile_grants: ReadonlyArray<AccessProfileGrantDto>;
+  readonly profile_grants_truncated: boolean;
+  readonly session_policy: BrowserSessionPolicyDto;
+  readonly sessions: ReadonlyArray<BrowserSessionDto>;
+  readonly sessions_truncated: boolean;
+  readonly subject: AccessSubjectDto;
+  readonly trailbase: TrailBaseActivationDto;
+}
+
+// prettier-ignore
+export const LOCAL_RUNTIME_OPERATIONS = {
+  submitObservation: { operationId: "submit_observation", method: "POST", path: "/api/v1/observations", capabilityId: "observation.accept", authorization: "scoped_or_browser_session", requiredScopes: ["observation_accept"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","invalid_observation","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["observation.accept.capacity_exceeded","observation.accept.receipt","observation.accept.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: "SubmitObservationRequest", responseSchema: "SubmitObservationResponse" },
+  nuvioWebhook: { operationId: "nuvio_webhook", method: "POST", path: "/api/v1/integrations/nuvio/webhook", capabilityId: "observation.accept", authorization: "scoped", requiredScopes: ["observation_accept"], problemCodes: ["authentication_failed","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","invalid_observation","malformed_json","payload_too_large","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["observation.accept.capacity_exceeded","observation.accept.receipt","observation.accept.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: "IntegrationObservationRequest", responseSchema: "SubmitObservationResponse" },
+  tautulliWebhook: { operationId: "tautulli_webhook", method: "POST", path: "/api/v1/integrations/tautulli/webhook", capabilityId: "observation.accept", authorization: "scoped", requiredScopes: ["observation_accept"], problemCodes: ["authentication_failed","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","invalid_observation","malformed_json","payload_too_large","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["observation.accept.capacity_exceeded","observation.accept.receipt","observation.accept.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: "IntegrationObservationRequest", responseSchema: "SubmitObservationResponse" },
+  jellyfinWebhook: { operationId: "jellyfin_webhook", method: "POST", path: "/api/v1/integrations/jellyfin/webhook", capabilityId: "observation.accept", authorization: "scoped", requiredScopes: ["observation_accept"], problemCodes: ["authentication_failed","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","invalid_observation","malformed_json","payload_too_large","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["observation.accept.capacity_exceeded","observation.accept.receipt","observation.accept.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: "IntegrationObservationRequest", responseSchema: "SubmitObservationResponse" },
+  embyWebhook: { operationId: "emby_webhook", method: "POST", path: "/api/v1/integrations/emby/webhook", capabilityId: "observation.accept", authorization: "scoped", requiredScopes: ["observation_accept"], problemCodes: ["authentication_failed","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","invalid_observation","malformed_json","payload_too_large","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["observation.accept.capacity_exceeded","observation.accept.receipt","observation.accept.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: null, responseSchema: "SubmitObservationResponse" },
+  plexWebhook: { operationId: "plex_webhook", method: "POST", path: "/api/v1/integrations/plex/webhook", capabilityId: "observation.accept", authorization: "scoped", requiredScopes: ["observation_accept"], problemCodes: ["authentication_failed","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","invalid_observation","malformed_json","payload_too_large","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["observation.accept.capacity_exceeded","observation.accept.receipt","observation.accept.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: null, responseSchema: "SubmitObservationResponse" },
+  createRecord: { operationId: "create_record", method: "POST", path: "/api/v1/records", capabilityId: "identity.record.create", authorization: "scoped_or_browser_session", requiredScopes: ["identity_write"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","integrity_failed","invalid_identifier","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["identity.record.create.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "CreateRecordRequest", responseSchema: "CreateRecordResponse" },
+  listRecords: { operationId: "list_records", method: "GET", path: "/api/v1/records", capabilityId: "identity.record.list", authorization: "scoped_or_browser_session", requiredScopes: ["identity_read"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","integrity_failed","session_policy_changed","storage_unavailable"], exampleIds: ["identity.record.list.forbidden"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ListRecordsResponse" },
+  attachIdentifier: { operationId: "attach_identifier", method: "POST", path: "/api/v1/records/identifiers", capabilityId: "identity.identifier.attach", authorization: "scoped_or_browser_session", requiredScopes: ["identity_write"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","identity_conflict","integrity_failed","invalid_identifier","malformed_json","payload_too_large","record_not_found","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["identity.identifier.attach.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: "AttachIdentifierRequest", responseSchema: "AttachIdentifierResponse" },
+  registerNamespace: { operationId: "register_namespace", method: "POST", path: "/api/v1/namespaces", capabilityId: "identity.namespace.register", authorization: "scoped_or_browser_session", requiredScopes: ["identity_write"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","integrity_failed","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["identity.namespace.register.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: "RegisterNamespaceRequest", responseSchema: "RegisterNamespaceResponse" },
+  listTrackingDispositions: { operationId: "list_tracking_dispositions", method: "GET", path: "/api/v1/profile/record-tracking-dispositions", capabilityId: "profile.record.tracking_disposition.list", authorization: "scoped_or_browser_session", requiredScopes: ["profile_state_read"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","integrity_failed","session_policy_changed","storage_unavailable"], exampleIds: ["profile.record.tracking_disposition.list.forbidden"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ListTrackingDispositionsResponse" },
+  setTrackingDisposition: { operationId: "set_tracking_disposition", method: "PUT", path: "/api/v1/profile/record-tracking-dispositions/{record_id}", capabilityId: "profile.record.tracking_disposition.set", authorization: "scoped_or_browser_session", requiredScopes: ["profile_state_write"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","integrity_failed","malformed_json","payload_too_large","record_not_found","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["profile.record.tracking_disposition.set.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: "SetTrackingDispositionRequest", responseSchema: "TrackingDispositionStateDto" },
+  getNuvioCollections: { operationId: "get_nuvio_collections", method: "GET", path: "/api/v1/profile/nuvio-collections", capabilityId: "profile.nuvio_collections.get", authorization: "scoped_or_browser_session", requiredScopes: ["profile_state_read"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","integrity_failed","session_policy_changed","storage_unavailable"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "NuvioCollectionsStateDto" },
+  replaceNuvioCollections: { operationId: "replace_nuvio_collections", method: "PUT", path: "/api/v1/profile/nuvio-collections", capabilityId: "profile.nuvio_collections.replace", authorization: "scoped_or_browser_session", requiredScopes: ["profile_state_write"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","integrity_failed","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: "NuvioCollectionsDocumentDto", responseSchema: "NuvioCollectionsStateDto" },
+  clearNuvioCollections: { operationId: "clear_nuvio_collections", method: "DELETE", path: "/api/v1/profile/nuvio-collections", capabilityId: "profile.nuvio_collections.clear", authorization: "scoped_or_browser_session", requiredScopes: ["profile_state_write"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","integrity_failed","session_policy_changed","storage_unavailable"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "NuvioCollectionsStateDto" },
+  listProviders: { operationId: "list_providers", method: "GET", path: "/api/v1/providers", capabilityId: "provider.list", authorization: "scoped", requiredScopes: ["provider_read"], problemCodes: ["authentication_failed","forbidden","integrity_failed","storage_unavailable"], exampleIds: ["provider.list.forbidden"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ListProvidersResponse" },
+  configureProviderCredential: { operationId: "configure_provider_credential", method: "PUT", path: "/api/v1/providers/{provider_id}/credentials/{capability_id}", capabilityId: "provider.credential.configure", authorization: "scoped", requiredScopes: ["provider_credential_manage"], problemCodes: ["authentication_failed","forbidden","integrity_failed","malformed_json","payload_too_large","provider_credential_invalid","provider_unavailable","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["provider.credential.configure.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "ConfigureProviderCredentialRequest", responseSchema: "ProviderCapabilityResponse" },
+  removeProviderCredential: { operationId: "remove_provider_credential", method: "DELETE", path: "/api/v1/providers/{provider_id}/credentials/{capability_id}", capabilityId: "provider.credential.configure", authorization: "scoped", requiredScopes: ["provider_credential_manage"], problemCodes: ["authentication_failed","forbidden","integrity_failed","malformed_json","payload_too_large","provider_credential_invalid","provider_unavailable","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["provider.credential.configure.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: null, responseSchema: "ProviderCapabilityResponse" },
+  testProviderCredential: { operationId: "test_provider_credential", method: "POST", path: "/api/v1/providers/{provider_id}/credentials/{capability_id}/tests", capabilityId: "provider.credential.test", authorization: "scoped", requiredScopes: ["provider_credential_manage"], problemCodes: ["authentication_failed","forbidden","integrity_failed","provider_credential_expired","provider_credential_invalid","provider_credential_missing","provider_rate_limited","provider_response_invalid","provider_route_unavailable","provider_unavailable","storage_unavailable"], exampleIds: ["provider.credential.test.provider_credential_missing"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: null, responseSchema: "ProviderCapabilityResponse" },
+  readProviderHealth: { operationId: "read_provider_health", method: "GET", path: "/api/v1/providers/{provider_id}/health", capabilityId: "provider.health.read", authorization: "scoped", requiredScopes: ["provider_read"], problemCodes: ["authentication_failed","forbidden","integrity_failed","provider_rate_limited","provider_response_invalid","provider_route_unavailable","provider_unavailable","storage_unavailable"], exampleIds: ["provider.health.read.provider_unavailable"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ProviderHealthResponse" },
+  refreshMetadataClaims: { operationId: "refresh_metadata_claims", method: "POST", path: "/api/v1/metadata/claims/refresh", capabilityId: "metadata.claim.refresh", authorization: "scoped", requiredScopes: ["metadata_claim_refresh"], problemCodes: ["authentication_failed","forbidden","idempotency_conflict","integrity_failed","malformed_json","metadata_claim_stale","payload_too_large","provider_credential_expired","provider_credential_invalid","provider_credential_missing","provider_rate_limited","provider_response_invalid","provider_route_unavailable","provider_unavailable","record_not_found","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["metadata.claim.refresh.metadata_claim_stale"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: "RefreshMetadataClaimsRequest", responseSchema: "RefreshMetadataClaimsResponse" },
+  readMetadataProjection: { operationId: "read_metadata_projection", method: "GET", path: "/api/v1/records/{record_id}/metadata-projection", capabilityId: "metadata.projection.read", authorization: "scoped", requiredScopes: ["metadata_projection_read"], problemCodes: ["authentication_failed","forbidden","integrity_failed","record_not_found","storage_unavailable","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "MetadataProjectionResponse" },
+  configureMetadataProjection: { operationId: "configure_metadata_projection", method: "PUT", path: "/api/v1/profile/metadata-projection", capabilityId: "metadata.projection.configure", authorization: "scoped", requiredScopes: ["metadata_projection_configure"], problemCodes: ["authentication_failed","forbidden","integrity_failed","malformed_json","payload_too_large","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["metadata.projection.configure.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "ConfigureMetadataProjectionRequest", responseSchema: "MetadataProjectionConfigurationResponse" },
+  resolveIdentityRoute: { operationId: "resolve_identity_route", method: "GET", path: "/api/v1/records/{record_id}/identity-route", capabilityId: "identity.route.resolve", authorization: "scoped_or_browser_session", requiredScopes: ["identity_read"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","capacity_exceeded","forbidden","integrity_failed","record_not_found","session_policy_changed","storage_unavailable","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ResolveIdentityRouteResponse" },
+  readAnimeGroupingPolicy: { operationId: "read_anime_grouping_policy", method: "GET", path: "/api/v1/profile/anime-grouping-policy", capabilityId: "profile.anime_grouping_policy.read", authorization: "scoped_or_browser_session", requiredScopes: ["profile_state_read"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","integrity_failed","session_policy_changed","storage_unavailable","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ReadAnimeGroupingPolicyResponse" },
+  previewAnimeGroupingPolicyChange: { operationId: "preview_anime_grouping_policy_change", method: "POST", path: "/api/v1/profile/anime-grouping-policy/preview", capabilityId: "profile.anime_grouping_policy.preview", authorization: "scoped_or_browser_session", requiredScopes: ["profile_state_read"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","capacity_exceeded","forbidden","integrity_failed","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: "PreviewAnimeGroupingPolicyChangeRequest", responseSchema: "AnimeGroupingPolicyImpactResponse" },
+  applyAnimeGroupingPolicyChange: { operationId: "apply_anime_grouping_policy_change", method: "PUT", path: "/api/v1/profile/anime-grouping-policy", capabilityId: "profile.anime_grouping_policy.apply", authorization: "scoped_or_browser_session", requiredScopes: ["profile_state_write"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: "ApplyAnimeGroupingPolicyChangeRequest", responseSchema: "ApplyAnimeGroupingPolicyChangeResponse" },
+  startTrailBaseSignIn: { operationId: "start_trailbase_sign_in", method: "POST", path: "/api/access/v1/trailbase/sign-in", capabilityId: "browser.session.create", authorization: "unauthenticated", requiredScopes: [], problemCodes: ["capacity_exceeded","forbidden","integrity_failed","malformed_json","payload_too_large","storage_unavailable","trailbase_trust_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: false, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "StartTrailBaseSignInRequest", responseSchema: "StartTrailBaseSignInResponse" },
+  readTrailBaseContinuation: { operationId: "read_trailbase_continuation", method: "GET", path: "/api/access/v1/trailbase/continuation", capabilityId: "browser.session.create", authorization: "unauthenticated", requiredScopes: [], problemCodes: ["auth_browser_binding_invalid","auth_continuation_persistence_failed","auth_subject_unaffiliated","capacity_exceeded","forbidden","identity_service_unavailable","integrity_failed","storage_unavailable","trailbase_proof_invalid","trailbase_session_cleanup_failed","trailbase_trust_unavailable","validation_failed"], exampleIds: [], authenticated: false, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ReadTrailBaseContinuationResponse" },
+  completeTrailBaseContinuation: { operationId: "complete_trailbase_continuation", method: "POST", path: "/api/access/v1/trailbase/continuation", capabilityId: "browser.session.create", authorization: "unauthenticated", requiredScopes: [], problemCodes: ["auth_browser_binding_invalid","auth_continuation_persistence_failed","auth_selection_changed","auth_subject_unaffiliated","capacity_exceeded","forbidden","identity_service_unavailable","integrity_failed","malformed_json","payload_too_large","storage_unavailable","trailbase_proof_invalid","trailbase_session_cleanup_failed","trailbase_trust_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: false, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "CompleteTrailBaseContinuationRequest", responseSchema: null },
+  cancelTrailBaseContinuation: { operationId: "cancel_trailbase_continuation", method: "DELETE", path: "/api/access/v1/trailbase/continuation", capabilityId: "browser.session.create", authorization: "unauthenticated", requiredScopes: [], problemCodes: ["auth_browser_binding_invalid","forbidden","integrity_failed","storage_unavailable","trailbase_proof_invalid","validation_failed"], exampleIds: [], authenticated: false, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: null, responseSchema: null },
+  readAccessProjection: { operationId: "read_access_projection", method: "GET", path: "/api/access/v1/projection", capabilityId: "access.projection.read", authorization: "browser_session", requiredScopes: [], problemCodes: ["browser_session_expired","browser_session_revoked","integrity_failed","session_policy_changed","storage_unavailable"], exampleIds: [], authenticated: false, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "AccessProjectionResponse" },
+  readBrowserSession: { operationId: "read_browser_session", method: "GET", path: "/api/access/v1/browser-session", capabilityId: "browser.session.read", authorization: "browser_session", requiredScopes: [], problemCodes: ["browser_session_expired","browser_session_revoked","integrity_failed","session_policy_changed","storage_unavailable"], exampleIds: [], authenticated: false, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ReadBrowserSessionResponse" },
+  endBrowserSession: { operationId: "end_browser_session", method: "DELETE", path: "/api/access/v1/browser-session", capabilityId: "browser.session.end", authorization: "browser_session", requiredScopes: [], problemCodes: ["browser_session_expired","browser_session_revoked","forbidden","integrity_failed","session_policy_changed","storage_unavailable"], exampleIds: [], authenticated: false, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: null, responseSchema: null },
+  listBrowserSessions: { operationId: "list_browser_sessions", method: "GET", path: "/api/access/v1/browser-sessions", capabilityId: "browser.sessions.list", authorization: "browser_session", requiredScopes: [], problemCodes: ["browser_session_expired","browser_session_revoked","integrity_failed","session_policy_changed","storage_unavailable"], exampleIds: [], authenticated: false, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ListBrowserSessionsResponse" },
+  revokeBrowserSession: { operationId: "revoke_browser_session", method: "DELETE", path: "/api/access/v1/browser-sessions/{browser_session_id}", capabilityId: "browser.session.revoke", authorization: "browser_session", requiredScopes: [], problemCodes: ["browser_session_expired","browser_session_revoked","forbidden","integrity_failed","session_policy_changed","storage_unavailable","validation_failed"], exampleIds: [], authenticated: false, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: null, responseSchema: "RevokeBrowserSessionsResponse" },
+  revokeOtherBrowserSessions: { operationId: "revoke_other_browser_sessions", method: "DELETE", path: "/api/access/v1/browser-sessions/others", capabilityId: "browser.sessions.revoke_others", authorization: "browser_session", requiredScopes: [], problemCodes: ["browser_session_expired","browser_session_revoked","forbidden","integrity_failed","session_policy_changed","storage_unavailable"], exampleIds: [], authenticated: false, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: null, responseSchema: "RevokeBrowserSessionsResponse" },
+  revokeAllBrowserSessions: { operationId: "revoke_all_browser_sessions", method: "DELETE", path: "/api/access/v1/browser-sessions", capabilityId: "browser.sessions.revoke_all", authorization: "browser_session", requiredScopes: [], problemCodes: ["browser_session_expired","browser_session_revoked","forbidden","integrity_failed","session_policy_changed","storage_unavailable"], exampleIds: [], authenticated: false, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: null, responseSchema: "RevokeBrowserSessionsResponse" },
+  rotateBrowserSession: { operationId: "rotate_browser_session", method: "POST", path: "/api/access/v1/browser-session/rotation", capabilityId: "browser.session.rotate", authorization: "browser_session", requiredScopes: [], problemCodes: ["browser_session_expired","browser_session_revoked","forbidden","integrity_failed","session_policy_changed","storage_unavailable"], exampleIds: [], authenticated: false, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: null, responseSchema: "RotateBrowserSessionResponse" },
+  selectBrowserSessionProfile: { operationId: "select_browser_session_profile", method: "PUT", path: "/api/access/v1/browser-session/profile", capabilityId: "browser.session.profile.select", authorization: "browser_session", requiredScopes: [], problemCodes: ["browser_session_expired","browser_session_revoked","forbidden","integrity_failed","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: false, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "SelectBrowserSessionProfileRequest", responseSchema: "SelectBrowserSessionProfileResponse" },
+} as const;
+
+// prettier-ignore
+export function parseSubmitObservationRequest(value: unknown): SubmitObservationRequest {
+  return parseProductionDto("SubmitObservationRequest", value);
+}
+
+// prettier-ignore
+export function parseSubmitObservationResponse(value: unknown): SubmitObservationResponse {
+  return parseProductionDto("SubmitObservationResponse", value);
+}
+
+// prettier-ignore
+export function parseCreateRecordRequest(value: unknown): CreateRecordRequest {
+  return parseProductionDto("CreateRecordRequest", value);
+}
+
+// prettier-ignore
+export function parseCreateRecordResponse(value: unknown): CreateRecordResponse {
+  return parseProductionDto("CreateRecordResponse", value);
+}
+
+// prettier-ignore
+export function parseListRecordsResponse(value: unknown): ListRecordsResponse {
+  return parseProductionDto("ListRecordsResponse", value);
+}
+
+// prettier-ignore
+export function parseAttachIdentifierRequest(value: unknown): AttachIdentifierRequest {
+  return parseProductionDto("AttachIdentifierRequest", value);
+}
+
+// prettier-ignore
+export function parseAttachIdentifierResponse(value: unknown): AttachIdentifierResponse {
+  return parseProductionDto("AttachIdentifierResponse", value);
+}
+
+// prettier-ignore
+export function parseRegisterNamespaceRequest(value: unknown): RegisterNamespaceRequest {
+  return parseProductionDto("RegisterNamespaceRequest", value);
+}
+
+// prettier-ignore
+export function parseRegisterNamespaceResponse(value: unknown): RegisterNamespaceResponse {
+  return parseProductionDto("RegisterNamespaceResponse", value);
+}
+
+// prettier-ignore
+export function parseSetTrackingDispositionRequest(value: unknown): SetTrackingDispositionRequest {
+  return parseProductionDto("SetTrackingDispositionRequest", value);
+}
+
+// prettier-ignore
+export function parseTrackingDispositionStateDto(value: unknown): TrackingDispositionStateDto {
+  return parseProductionDto("TrackingDispositionStateDto", value);
+}
+
+// prettier-ignore
+export function parseListTrackingDispositionsResponse(value: unknown): ListTrackingDispositionsResponse {
+  return parseProductionDto("ListTrackingDispositionsResponse", value);
+}
+
+// prettier-ignore
+export function parseNuvioCollectionsDocumentDto(value: unknown): NuvioCollectionsDocumentDto {
+  return parseProductionDto("NuvioCollectionsDocumentDto", value);
+}
+
+// prettier-ignore
+export function parseNuvioCollectionsStateDto(value: unknown): NuvioCollectionsStateDto {
+  return parseProductionDto("NuvioCollectionsStateDto", value);
+}
+
+// prettier-ignore
+export function parseConfigureProviderCredentialRequest(value: unknown): ConfigureProviderCredentialRequest {
+  return parseProductionDto("ConfigureProviderCredentialRequest", value);
+}
+
+// prettier-ignore
+export function parseListProvidersResponse(value: unknown): ListProvidersResponse {
+  return parseProductionDto("ListProvidersResponse", value);
+}
+
+// prettier-ignore
+export function parseProviderCapabilityResponse(value: unknown): ProviderCapabilityResponse {
+  return parseProductionDto("ProviderCapabilityResponse", value);
+}
+
+// prettier-ignore
+export function parseProviderHealthResponse(value: unknown): ProviderHealthResponse {
+  return parseProductionDto("ProviderHealthResponse", value);
+}
+
+// prettier-ignore
+export function parseRefreshMetadataClaimsRequest(value: unknown): RefreshMetadataClaimsRequest {
+  return parseProductionDto("RefreshMetadataClaimsRequest", value);
+}
+
+// prettier-ignore
+export function parseRefreshMetadataClaimsResponse(value: unknown): RefreshMetadataClaimsResponse {
+  return parseProductionDto("RefreshMetadataClaimsResponse", value);
+}
+
+// prettier-ignore
+export function parseMetadataProjectionResponse(value: unknown): MetadataProjectionResponse {
+  return parseProductionDto("MetadataProjectionResponse", value);
+}
+
+// prettier-ignore
+export function parseConfigureMetadataProjectionRequest(value: unknown): ConfigureMetadataProjectionRequest {
+  return parseProductionDto("ConfigureMetadataProjectionRequest", value);
+}
+
+// prettier-ignore
+export function parseMetadataProjectionConfigurationResponse(value: unknown): MetadataProjectionConfigurationResponse {
+  return parseProductionDto("MetadataProjectionConfigurationResponse", value);
+}
+
+// prettier-ignore
+export function parseResolveIdentityRouteResponse(value: unknown): ResolveIdentityRouteResponse {
+  return parseProductionDto("ResolveIdentityRouteResponse", value);
+}
+
+// prettier-ignore
+export function parseReadAnimeGroupingPolicyResponse(value: unknown): ReadAnimeGroupingPolicyResponse {
+  return parseProductionDto("ReadAnimeGroupingPolicyResponse", value);
+}
+
+// prettier-ignore
+export function parsePreviewAnimeGroupingPolicyChangeRequest(value: unknown): PreviewAnimeGroupingPolicyChangeRequest {
+  return parseProductionDto("PreviewAnimeGroupingPolicyChangeRequest", value);
+}
+
+// prettier-ignore
+export function parseAnimeGroupingPolicyImpactResponse(value: unknown): AnimeGroupingPolicyImpactResponse {
+  return parseProductionDto("AnimeGroupingPolicyImpactResponse", value);
+}
+
+// prettier-ignore
+export function parseApplyAnimeGroupingPolicyChangeRequest(value: unknown): ApplyAnimeGroupingPolicyChangeRequest {
+  return parseProductionDto("ApplyAnimeGroupingPolicyChangeRequest", value);
+}
+
+// prettier-ignore
+export function parseApplyAnimeGroupingPolicyChangeResponse(value: unknown): ApplyAnimeGroupingPolicyChangeResponse {
+  return parseProductionDto("ApplyAnimeGroupingPolicyChangeResponse", value);
+}
+
+// prettier-ignore
+export function parseStartTrailBaseSignInRequest(value: unknown): StartTrailBaseSignInRequest {
+  return parseProductionDto("StartTrailBaseSignInRequest", value);
+}
+
+// prettier-ignore
+export function parseStartTrailBaseSignInResponse(value: unknown): StartTrailBaseSignInResponse {
+  return parseProductionDto("StartTrailBaseSignInResponse", value);
+}
+
+// prettier-ignore
+export function parseReadTrailBaseContinuationResponse(value: unknown): ReadTrailBaseContinuationResponse {
+  return parseProductionDto("ReadTrailBaseContinuationResponse", value);
+}
+
+// prettier-ignore
+export function parseCompleteTrailBaseContinuationRequest(value: unknown): CompleteTrailBaseContinuationRequest {
+  return parseProductionDto("CompleteTrailBaseContinuationRequest", value);
+}
+
+// prettier-ignore
+export function parseSelectBrowserSessionProfileRequest(value: unknown): SelectBrowserSessionProfileRequest {
+  return parseProductionDto("SelectBrowserSessionProfileRequest", value);
+}
+
+// prettier-ignore
+export function parseReadBrowserSessionResponse(value: unknown): ReadBrowserSessionResponse {
+  return parseProductionDto("ReadBrowserSessionResponse", value);
+}
+
+// prettier-ignore
+export function parseListBrowserSessionsResponse(value: unknown): ListBrowserSessionsResponse {
+  return parseProductionDto("ListBrowserSessionsResponse", value);
+}
+
+// prettier-ignore
+export function parseRevokeBrowserSessionsResponse(value: unknown): RevokeBrowserSessionsResponse {
+  return parseProductionDto("RevokeBrowserSessionsResponse", value);
+}
+
+// prettier-ignore
+export function parseRotateBrowserSessionResponse(value: unknown): RotateBrowserSessionResponse {
+  return parseProductionDto("RotateBrowserSessionResponse", value);
+}
+
+// prettier-ignore
+export function parseSelectBrowserSessionProfileResponse(value: unknown): SelectBrowserSessionProfileResponse {
+  return parseProductionDto("SelectBrowserSessionProfileResponse", value);
+}
+
+// prettier-ignore
+export function parseAccessProjectionResponse(value: unknown): AccessProjectionResponse {
+  return parseProductionDto("AccessProjectionResponse", value);
+}
+
 export interface AcceptObservationRequest {
   readonly evidence: EvidenceReferenceDto;
   readonly observed_at: ObservedTimeDto;
@@ -64,16 +4687,16 @@ export interface AcceptObservationResponse {
 }
 
 export interface CapabilityDescriptorDto {
-  readonly authorization: "bootstrap_only" | "local_operator" | "scoped" | "unauthenticated";
+  readonly authorization: "bootstrap_only" | "browser_session" | "local_operator" | "scoped" | "scoped_or_browser_session" | "unauthenticated";
   readonly bounded_context: string;
-  readonly contract_body: "b1" | "b2" | "b3";
-  readonly examples: ReadonlyArray<"client.enroll.forbidden" | "credential.revoke.capability_unavailable" | "credential.rotate.capability_unavailable" | "listener.configure.capability_unavailable" | "node.initialize.validation_failed" | "observation.accept.capacity_exceeded" | "observation.accept.receipt" | "observation.accept.validation_failed" | "profile.select.capability_unavailable" | "receipt.replay.receipt_not_found" | "receipt.stream.event" | "receipt.stream.receipt_not_found" | "system.capabilities.forbidden" | "system.capabilities.success" | "system.health.success">;
-  readonly id: "client.enroll" | "correction.chain.append" | "correction.chain.inspect" | "credential.revoke" | "credential.rotate" | "identity.identifier.attach" | "identity.record.create" | "identity.review.defer" | "identity.review.inspect" | "identity.review.resolve" | "identity.review.resume" | "listener.configure" | "node.initialize" | "observation.accept" | "portability.workspace.export" | "portability.workspace.restore" | "portability.workspace.verify" | "profile.select" | "receipt.replay" | "receipt.stream" | "system.capabilities.discover" | "system.health";
+  readonly contract_body: "b1" | "b2" | "b3" | "c1" | "m1" | "m2" | "m3";
+  readonly examples: ReadonlyArray<"client.enroll.forbidden" | "credential.revoke.capability_unavailable" | "credential.rotate.capability_unavailable" | "identity.identifier.attach.validation_failed" | "identity.namespace.register.validation_failed" | "identity.record.create.validation_failed" | "identity.record.list.forbidden" | "integration.status.success" | "listener.configure.capability_unavailable" | "metadata.claim.refresh.metadata_claim_stale" | "metadata.projection.configure.validation_failed" | "node.initialize.validation_failed" | "observation.accept.capacity_exceeded" | "observation.accept.receipt" | "observation.accept.validation_failed" | "profile.record.tracking_disposition.list.forbidden" | "profile.record.tracking_disposition.set.validation_failed" | "profile.select.capability_unavailable" | "provider.credential.configure.validation_failed" | "provider.credential.test.provider_credential_missing" | "provider.health.read.provider_unavailable" | "provider.list.forbidden" | "receipt.replay.receipt_not_found" | "receipt.stream.event" | "receipt.stream.receipt_not_found" | "system.capabilities.forbidden" | "system.capabilities.success" | "system.health.success">;
+  readonly id: "access.identity.bootstrap" | "access.projection.read" | "browser.session.create" | "browser.session.end" | "browser.session.profile.select" | "browser.session.read" | "browser.session.revoke" | "browser.session.rotate" | "browser.sessions.list" | "browser.sessions.revoke_all" | "browser.sessions.revoke_others" | "client.enroll" | "correction.chain.append" | "correction.chain.inspect" | "credential.revoke" | "credential.rotate" | "identity.identifier.attach" | "identity.namespace.register" | "identity.record.create" | "identity.record.list" | "identity.review.defer" | "identity.review.inspect" | "identity.review.resolve" | "identity.review.resume" | "identity.route.resolve" | "integration.status" | "listener.configure" | "metadata.claim.refresh" | "metadata.projection.configure" | "metadata.projection.read" | "node.initialize" | "observation.accept" | "portability.workspace.export" | "portability.workspace.restore" | "portability.workspace.verify" | "profile.anime_grouping_policy.apply" | "profile.anime_grouping_policy.preview" | "profile.anime_grouping_policy.read" | "profile.nuvio_collections.clear" | "profile.nuvio_collections.get" | "profile.nuvio_collections.replace" | "profile.record.tracking_disposition.list" | "profile.record.tracking_disposition.set" | "profile.select" | "provider.credential.configure" | "provider.credential.test" | "provider.health.read" | "provider.list" | "receipt.replay" | "receipt.stream" | "system.capabilities.discover" | "system.health";
   readonly lifecycle: CapabilityLifecycleDto;
-  readonly problems: ReadonlyArray<"capability_unavailable" | "capacity_exceeded" | "forbidden" | "idempotency_conflict" | "invalid_identifier" | "invalid_observation" | "malformed_json" | "payload_too_large" | "receipt_not_found" | "unsupported_media_type" | "validation_failed">;
-  readonly runtime_body: "b0" | "b1" | "b2" | "b3";
-  readonly scopes: ReadonlyArray<"capability_read" | "client_enroll" | "correction_read" | "correction_write" | "credential_manage" | "identity_write" | "listener_configure" | "observation_accept" | "profile_select" | "receipt_read" | "review_read" | "review_write" | "workspace_export" | "workspace_verify">;
-  readonly surface_profile: "b1_http_fixture" | "b1_observation_accept" | "b1_receipt_replay" | "b1_receipt_stream" | "health" | "later_b2" | "later_b3";
+  readonly problems: ReadonlyArray<"already_initialized" | "auth_browser_binding_invalid" | "auth_continuation_persistence_failed" | "auth_identity_conflict" | "auth_selection_changed" | "auth_subject_unaffiliated" | "authentication_failed" | "bootstrap_closed" | "browser_session_expired" | "browser_session_revoked" | "capability_unavailable" | "capacity_exceeded" | "forbidden" | "idempotency_conflict" | "identity_conflict" | "identity_service_unavailable" | "integrity_failed" | "invalid_identifier" | "invalid_observation" | "malformed_json" | "metadata_claim_stale" | "payload_too_large" | "provider_credential_expired" | "provider_credential_invalid" | "provider_credential_missing" | "provider_rate_limited" | "provider_response_invalid" | "provider_route_unavailable" | "provider_unavailable" | "receipt_not_found" | "record_not_found" | "session_policy_changed" | "storage_unavailable" | "trailbase_proof_invalid" | "trailbase_session_cleanup_failed" | "trailbase_trust_unavailable" | "trailbase_version_unsupported" | "unsupported_media_type" | "validation_failed">;
+  readonly runtime_body: "b0" | "b1" | "b2" | "b3" | "c1" | "m1" | "m2" | "m3";
+  readonly scopes: ReadonlyArray<"capability_read" | "client_enroll" | "correction_read" | "correction_write" | "credential_manage" | "identity_read" | "identity_write" | "listener_configure" | "metadata_claim_refresh" | "metadata_projection_configure" | "metadata_projection_read" | "observation_accept" | "profile_select" | "profile_state_read" | "profile_state_write" | "provider_credential_manage" | "provider_read" | "receipt_read" | "review_read" | "review_write" | "workspace_export" | "workspace_verify">;
+  readonly surface_profile: "b1_durable_bootstrap" | "b1_http_fixture" | "b1_integration_status" | "b1_observation_accept" | "b1_receipt_replay" | "b1_receipt_stream" | "b1_records" | "b2_profile_state" | "c1_access_projection" | "c1_browser_session_foundation" | "c1_identity_bootstrap" | "health" | "later_b2" | "later_b3" | "m1_providers" | "m2_metadata" | "m3_identity_routing";
   readonly uat: ReadonlyArray<CapabilityUatDto>;
 }
 
@@ -87,21 +4710,21 @@ export interface CapabilityDiscoveryResponse {
 
 export interface CapabilityLifecycleDto {
   readonly contract_state: "finalized" | "reserved";
-  readonly introduced_in: "b0" | "b1";
+  readonly introduced_in: "b0" | "b1" | "b2" | "c1" | "m1" | "m2" | "m3";
   readonly runtime_availability: "fixture_only" | "guarded" | "implemented" | "later_body";
 }
 
 export interface CapabilitySurfaceDispositionDto {
   readonly binding?: null | string;
   readonly binding_visibility?: "internal" | "public";
-  readonly body?: "b0" | "b1" | "b2" | "b3";
+  readonly body?: "b0" | "b1" | "b2" | "b3" | "c1" | "m1" | "m2" | "m3";
   readonly reason?: null | string;
   readonly state: "later_body" | "not_applicable" | "required";
 }
 
 export interface CapabilityUatDto {
   readonly id: string;
-  readonly owner_body: "b1" | "b2" | "b3";
+  readonly owner_body: "b1" | "b2" | "b3" | "c1" | "m1" | "m2" | "m3";
   readonly reason: string;
   readonly relationship: "deferred" | "direct" | "split";
 }
@@ -195,7 +4818,7 @@ export const B1_CONFORMANCE_OPERATIONS = {
   configureListener: { operationId: "configure_listener_unavailable", method: "PUT", path: "/api/v1/listener-configuration", capabilityId: "listener.configure", authorization: "scoped", requiredScopes: ["listener_configure"], problemCodes: ["capability_unavailable","forbidden"], exampleIds: ["listener.configure.capability_unavailable"], authenticated: true, runtimeAvailability: "fixture_only", durability: "none", retry: "never", requestSchema: null, responseSchema: null },
   initializeNode: { operationId: "initialize_node", method: "POST", path: "/api/v1/node/initialization", capabilityId: "node.initialize", authorization: "bootstrap_only", requiredScopes: [], problemCodes: ["forbidden","malformed_json","payload_too_large","unsupported_media_type","validation_failed"], exampleIds: ["node.initialize.validation_failed"], authenticated: false, runtimeAvailability: "fixture_only", durability: "none", retry: "never", requestSchema: "InitializeNodeRequest", responseSchema: "InitializeNodeResponse" },
   enrollFirstClient: { operationId: "enroll_first_client", method: "POST", path: "/api/v1/client-enrollments", capabilityId: "client.enroll", authorization: "scoped", requiredScopes: ["client_enroll"], problemCodes: ["forbidden","malformed_json","payload_too_large","unsupported_media_type","validation_failed"], exampleIds: ["client.enroll.forbidden"], authenticated: false, runtimeAvailability: "fixture_only", durability: "none", retry: "never", requestSchema: "EnrollFirstClientRequest", responseSchema: "EnrollFirstClientResponse" },
-  acceptObservation: { operationId: "accept_observation", method: "POST", path: "/api/v1/observations", capabilityId: "observation.accept", authorization: "scoped", requiredScopes: ["observation_accept"], problemCodes: ["capacity_exceeded","forbidden","idempotency_conflict","invalid_observation","malformed_json","payload_too_large","unsupported_media_type","validation_failed"], exampleIds: ["observation.accept.capacity_exceeded","observation.accept.receipt","observation.accept.validation_failed"], authenticated: true, runtimeAvailability: "fixture_only", durability: "none", retry: "stable_body_operation_id", requestSchema: "AcceptObservationRequest", responseSchema: "AcceptObservationResponse" },
+  acceptObservation: { operationId: "accept_observation", method: "POST", path: "/api/v1/observations", capabilityId: "observation.accept", authorization: "scoped", requiredScopes: ["observation_accept"], problemCodes: ["authentication_failed","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","invalid_observation","malformed_json","payload_too_large","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["observation.accept.capacity_exceeded","observation.accept.receipt","observation.accept.validation_failed"], authenticated: true, runtimeAvailability: "fixture_only", durability: "none", retry: "stable_body_operation_id", requestSchema: "AcceptObservationRequest", responseSchema: "AcceptObservationResponse" },
   replayReceipt: { operationId: "replay_receipt", method: "GET", path: "/api/v1/receipts/{receipt_id}", capabilityId: "receipt.replay", authorization: "scoped", requiredScopes: ["receipt_read"], problemCodes: ["forbidden","receipt_not_found"], exampleIds: ["receipt.replay.receipt_not_found"], authenticated: true, runtimeAvailability: "fixture_only", durability: "none", retry: "safe", requestSchema: null, responseSchema: "ReplayReceiptResponse" },
 } as const;
 
@@ -263,8 +4886,10 @@ const B1_CONFORMANCE_SCHEMAS = {
       "authorization": {
         "enum": [
           "bootstrap_only",
+          "browser_session",
           "local_operator",
           "scoped",
+          "scoped_or_browser_session",
           "unauthenticated"
         ],
         "type": "string"
@@ -277,7 +4902,11 @@ const B1_CONFORMANCE_SCHEMAS = {
         "enum": [
           "b1",
           "b2",
-          "b3"
+          "b3",
+          "c1",
+          "m1",
+          "m2",
+          "m3"
         ],
         "type": "string"
       },
@@ -287,12 +4916,25 @@ const B1_CONFORMANCE_SCHEMAS = {
             "client.enroll.forbidden",
             "credential.revoke.capability_unavailable",
             "credential.rotate.capability_unavailable",
+            "identity.identifier.attach.validation_failed",
+            "identity.namespace.register.validation_failed",
+            "identity.record.create.validation_failed",
+            "identity.record.list.forbidden",
+            "integration.status.success",
             "listener.configure.capability_unavailable",
+            "metadata.claim.refresh.metadata_claim_stale",
+            "metadata.projection.configure.validation_failed",
             "node.initialize.validation_failed",
             "observation.accept.capacity_exceeded",
             "observation.accept.receipt",
             "observation.accept.validation_failed",
+            "profile.record.tracking_disposition.list.forbidden",
+            "profile.record.tracking_disposition.set.validation_failed",
             "profile.select.capability_unavailable",
+            "provider.credential.configure.validation_failed",
+            "provider.credential.test.provider_credential_missing",
+            "provider.health.read.provider_unavailable",
+            "provider.list.forbidden",
             "receipt.replay.receipt_not_found",
             "receipt.stream.event",
             "receipt.stream.receipt_not_found",
@@ -307,24 +4949,54 @@ const B1_CONFORMANCE_SCHEMAS = {
       },
       "id": {
         "enum": [
+          "access.identity.bootstrap",
+          "access.projection.read",
+          "browser.session.create",
+          "browser.session.end",
+          "browser.session.profile.select",
+          "browser.session.read",
+          "browser.session.revoke",
+          "browser.session.rotate",
+          "browser.sessions.list",
+          "browser.sessions.revoke_all",
+          "browser.sessions.revoke_others",
           "client.enroll",
           "correction.chain.append",
           "correction.chain.inspect",
           "credential.revoke",
           "credential.rotate",
           "identity.identifier.attach",
+          "identity.namespace.register",
           "identity.record.create",
+          "identity.record.list",
           "identity.review.defer",
           "identity.review.inspect",
           "identity.review.resolve",
           "identity.review.resume",
+          "identity.route.resolve",
+          "integration.status",
           "listener.configure",
+          "metadata.claim.refresh",
+          "metadata.projection.configure",
+          "metadata.projection.read",
           "node.initialize",
           "observation.accept",
           "portability.workspace.export",
           "portability.workspace.restore",
           "portability.workspace.verify",
+          "profile.anime_grouping_policy.apply",
+          "profile.anime_grouping_policy.preview",
+          "profile.anime_grouping_policy.read",
+          "profile.nuvio_collections.clear",
+          "profile.nuvio_collections.get",
+          "profile.nuvio_collections.replace",
+          "profile.record.tracking_disposition.list",
+          "profile.record.tracking_disposition.set",
           "profile.select",
+          "provider.credential.configure",
+          "provider.credential.test",
+          "provider.health.read",
+          "provider.list",
           "receipt.replay",
           "receipt.stream",
           "system.capabilities.discover",
@@ -339,15 +5011,43 @@ const B1_CONFORMANCE_SCHEMAS = {
       "problems": {
         "items": {
           "enum": [
+            "already_initialized",
+            "auth_browser_binding_invalid",
+            "auth_continuation_persistence_failed",
+            "auth_identity_conflict",
+            "auth_selection_changed",
+            "auth_subject_unaffiliated",
+            "authentication_failed",
+            "bootstrap_closed",
+            "browser_session_expired",
+            "browser_session_revoked",
             "capability_unavailable",
             "capacity_exceeded",
             "forbidden",
             "idempotency_conflict",
+            "identity_conflict",
+            "identity_service_unavailable",
+            "integrity_failed",
             "invalid_identifier",
             "invalid_observation",
             "malformed_json",
+            "metadata_claim_stale",
             "payload_too_large",
+            "provider_credential_expired",
+            "provider_credential_invalid",
+            "provider_credential_missing",
+            "provider_rate_limited",
+            "provider_response_invalid",
+            "provider_route_unavailable",
+            "provider_unavailable",
             "receipt_not_found",
+            "record_not_found",
+            "session_policy_changed",
+            "storage_unavailable",
+            "trailbase_proof_invalid",
+            "trailbase_session_cleanup_failed",
+            "trailbase_trust_unavailable",
+            "trailbase_version_unsupported",
             "unsupported_media_type",
             "validation_failed"
           ],
@@ -361,7 +5061,11 @@ const B1_CONFORMANCE_SCHEMAS = {
           "b0",
           "b1",
           "b2",
-          "b3"
+          "b3",
+          "c1",
+          "m1",
+          "m2",
+          "m3"
         ],
         "type": "string"
       },
@@ -373,10 +5077,18 @@ const B1_CONFORMANCE_SCHEMAS = {
             "correction_read",
             "correction_write",
             "credential_manage",
+            "identity_read",
             "identity_write",
             "listener_configure",
+            "metadata_claim_refresh",
+            "metadata_projection_configure",
+            "metadata_projection_read",
             "observation_accept",
             "profile_select",
+            "profile_state_read",
+            "profile_state_write",
+            "provider_credential_manage",
+            "provider_read",
             "receipt_read",
             "review_read",
             "review_write",
@@ -390,13 +5102,23 @@ const B1_CONFORMANCE_SCHEMAS = {
       },
       "surface_profile": {
         "enum": [
+          "b1_durable_bootstrap",
           "b1_http_fixture",
+          "b1_integration_status",
           "b1_observation_accept",
           "b1_receipt_replay",
           "b1_receipt_stream",
+          "b1_records",
+          "b2_profile_state",
+          "c1_access_projection",
+          "c1_browser_session_foundation",
+          "c1_identity_bootstrap",
           "health",
           "later_b2",
-          "later_b3"
+          "later_b3",
+          "m1_providers",
+          "m2_metadata",
+          "m3_identity_routing"
         ],
         "type": "string"
       },
@@ -429,8 +5151,8 @@ const B1_CONFORMANCE_SCHEMAS = {
         "items": {
           "$ref": "#/components/schemas/CapabilityDescriptorDto"
         },
-        "maxItems": 22,
-        "minItems": 22,
+        "maxItems": 52,
+        "minItems": 52,
         "type": "array",
         "uniqueItems": true
       },
@@ -468,17 +5190,27 @@ const B1_CONFORMANCE_SCHEMAS = {
           },
           "type": "object"
         },
-        "maxProperties": 7,
-        "minProperties": 7,
+        "maxProperties": 17,
+        "minProperties": 17,
         "propertyNames": {
           "enum": [
+            "b1_durable_bootstrap",
             "b1_http_fixture",
+            "b1_integration_status",
             "b1_observation_accept",
             "b1_receipt_replay",
             "b1_receipt_stream",
+            "b1_records",
+            "b2_profile_state",
+            "c1_access_projection",
+            "c1_browser_session_foundation",
+            "c1_identity_bootstrap",
             "health",
             "later_b2",
-            "later_b3"
+            "later_b3",
+            "m1_providers",
+            "m2_metadata",
+            "m3_identity_routing"
           ],
           "type": "string"
         },
@@ -507,7 +5239,12 @@ const B1_CONFORMANCE_SCHEMAS = {
       "introduced_in": {
         "enum": [
           "b0",
-          "b1"
+          "b1",
+          "b2",
+          "c1",
+          "m1",
+          "m2",
+          "m3"
         ],
         "type": "string"
       },
@@ -552,7 +5289,11 @@ const B1_CONFORMANCE_SCHEMAS = {
           "b0",
           "b1",
           "b2",
-          "b3"
+          "b3",
+          "c1",
+          "m1",
+          "m2",
+          "m3"
         ],
         "type": [
           "string",
@@ -583,14 +5324,18 @@ const B1_CONFORMANCE_SCHEMAS = {
     "additionalProperties": false,
     "properties": {
       "id": {
-        "pattern": "^ID-[0-9]{3}$",
+        "pattern": "^(?:ID|MDN)-[0-9]{3}$",
         "type": "string"
       },
       "owner_body": {
         "enum": [
           "b1",
           "b2",
-          "b3"
+          "b3",
+          "c1",
+          "m1",
+          "m2",
+          "m3"
         ],
         "type": "string"
       },
@@ -1112,31 +5857,32 @@ function parseConformanceDto<T>(schemaName: string, value: unknown): T {
   if (schema === undefined) {
     throw new FastiContractParseError(`Unknown conformance schema ${schemaName}`);
   }
-  validateOpenApiValue(value, schema, schemaName);
+  validateOpenApiValue(value, schema, schemaName, B1_CONFORMANCE_SCHEMAS as Record<string, unknown>);
   return value as T;
 }
 
 // prettier-ignore
-function validateOpenApiValue(value: unknown, schemaValue: unknown, path: string): void {
+function validateOpenApiValue(value: unknown, schemaValue: unknown, path: string, schemas: Record<string, unknown>): void {
   const schema = schemaValue as Record<string, unknown>;
+  if (Object.keys(schema).length === 0) return;
   if (typeof schema.$ref === "string") {
     const prefix = "#/components/schemas/";
     if (!schema.$ref.startsWith(prefix)) {
       throw new FastiContractParseError(`${path} has an unsupported schema reference`);
     }
     const name = schema.$ref.slice(prefix.length);
-    const target = (B1_CONFORMANCE_SCHEMAS as Record<string, unknown>)[name];
+    const target = schemas[name];
     if (target === undefined) {
       throw new FastiContractParseError(`${path} references an unknown schema`);
     }
-    validateOpenApiValue(value, target, path);
+    validateOpenApiValue(value, target, path, schemas);
     return;
   }
   if (Array.isArray(schema.oneOf)) {
     let matches = 0;
     for (const candidate of schema.oneOf) {
       try {
-        validateOpenApiValue(value, candidate, path);
+        validateOpenApiValue(value, candidate, path, schemas);
         matches += 1;
       } catch (error) {
         if (!(error instanceof FastiContractParseError)) throw error;
@@ -1185,6 +5931,24 @@ function validateOpenApiValue(value: unknown, schemaValue: unknown, path: string
     }
     return;
   }
+  if (schemaTypes.includes("number")) {
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      throw new FastiContractParseError(`${path} must be a finite number`);
+    }
+    if (typeof schema.minimum === "number" && value < schema.minimum) {
+      throw new FastiContractParseError(`${path} is below its minimum`);
+    }
+    if (typeof schema.maximum === "number" && value > schema.maximum) {
+      throw new FastiContractParseError(`${path} exceeds its maximum`);
+    }
+    return;
+  }
+  if (schemaTypes.includes("boolean")) {
+    if (typeof value !== "boolean") {
+      throw new FastiContractParseError(`${path} must be a boolean`);
+    }
+    return;
+  }
   if (schemaTypes.includes("array")) {
     if (!Array.isArray(value)) {
       throw new FastiContractParseError(`${path} must be an array`);
@@ -1195,7 +5959,7 @@ function validateOpenApiValue(value: unknown, schemaValue: unknown, path: string
     if (typeof schema.maxItems === "number" && value.length > schema.maxItems) {
       throw new FastiContractParseError(`${path} exceeds its bounded items`);
     }
-    value.forEach((item, index) => validateOpenApiValue(item, schema.items, `${path}[${index}]`));
+    value.forEach((item, index) => validateOpenApiValue(item, schema.items, `${path}[${index}]`, schemas));
     return;
   }
   if (schemaTypes.includes("object")) {
@@ -1215,14 +5979,14 @@ function validateOpenApiValue(value: unknown, schemaValue: unknown, path: string
       : {};
     for (const key of keys) {
       if (isPlainObject(schema.propertyNames)) {
-        validateOpenApiValue(key, schema.propertyNames, `${path} property name`);
+        validateOpenApiValue(key, schema.propertyNames, `${path} property name`, schemas);
       }
       if (!Object.hasOwn(properties, key)) {
         if (schema.additionalProperties === false) {
           throw new FastiContractParseError(`${path} contains unknown field ${key}`);
         }
         if (isPlainObject(schema.additionalProperties)) {
-          validateOpenApiValue(object[key], schema.additionalProperties, `${path}.${key}`);
+          validateOpenApiValue(object[key], schema.additionalProperties, `${path}.${key}`, schemas);
         }
       }
     }
@@ -1234,7 +5998,7 @@ function validateOpenApiValue(value: unknown, schemaValue: unknown, path: string
     }
     for (const [field, fieldSchema] of Object.entries(properties)) {
       if (Object.hasOwn(object, field)) {
-        validateOpenApiValue(object[field], fieldSchema, `${path}.${field}`);
+        validateOpenApiValue(object[field], fieldSchema, `${path}.${field}`, schemas);
       }
     }
     return;
@@ -1294,24 +6058,54 @@ function isRealCalendarDate(year: number, month: number, day: number): boolean {
 
 // prettier-ignore
 export type CapabilityId =
+  | "access.identity.bootstrap"
+  | "access.projection.read"
+  | "browser.session.create"
+  | "browser.session.end"
+  | "browser.session.profile.select"
+  | "browser.session.read"
+  | "browser.session.revoke"
+  | "browser.session.rotate"
+  | "browser.sessions.list"
+  | "browser.sessions.revoke_all"
+  | "browser.sessions.revoke_others"
   | "client.enroll"
   | "correction.chain.append"
   | "correction.chain.inspect"
   | "credential.revoke"
   | "credential.rotate"
   | "identity.identifier.attach"
+  | "identity.namespace.register"
   | "identity.record.create"
+  | "identity.record.list"
   | "identity.review.defer"
   | "identity.review.inspect"
   | "identity.review.resolve"
   | "identity.review.resume"
+  | "identity.route.resolve"
+  | "integration.status"
   | "listener.configure"
+  | "metadata.claim.refresh"
+  | "metadata.projection.configure"
+  | "metadata.projection.read"
   | "node.initialize"
   | "observation.accept"
   | "portability.workspace.export"
   | "portability.workspace.restore"
   | "portability.workspace.verify"
+  | "profile.anime_grouping_policy.apply"
+  | "profile.anime_grouping_policy.preview"
+  | "profile.anime_grouping_policy.read"
+  | "profile.nuvio_collections.clear"
+  | "profile.nuvio_collections.get"
+  | "profile.nuvio_collections.replace"
+  | "profile.record.tracking_disposition.list"
+  | "profile.record.tracking_disposition.set"
   | "profile.select"
+  | "provider.credential.configure"
+  | "provider.credential.test"
+  | "provider.health.read"
+  | "provider.list"
   | "receipt.replay"
   | "receipt.stream"
   | "system.capabilities.discover"
@@ -1322,7 +6116,11 @@ export type CapabilityBody =
   | "b0"
   | "b1"
   | "b2"
-  | "b3";
+  | "b3"
+  | "c1"
+  | "m1"
+  | "m2"
+  | "m3";
 
 // prettier-ignore
 export type ContractState =
@@ -1338,21 +6136,343 @@ export type RuntimeAvailability =
 
 // prettier-ignore
 export type ProblemCode =
+  | "already_initialized"
+  | "auth_browser_binding_invalid"
+  | "auth_continuation_persistence_failed"
+  | "auth_identity_conflict"
+  | "auth_selection_changed"
+  | "auth_subject_unaffiliated"
+  | "authentication_failed"
+  | "bootstrap_closed"
+  | "browser_session_expired"
+  | "browser_session_revoked"
   | "capability_unavailable"
   | "capacity_exceeded"
   | "forbidden"
   | "idempotency_conflict"
+  | "identity_conflict"
+  | "identity_service_unavailable"
+  | "integrity_failed"
   | "invalid_identifier"
   | "invalid_observation"
   | "malformed_json"
+  | "metadata_claim_stale"
   | "payload_too_large"
+  | "provider_credential_expired"
+  | "provider_credential_invalid"
+  | "provider_credential_missing"
+  | "provider_rate_limited"
+  | "provider_response_invalid"
+  | "provider_route_unavailable"
+  | "provider_unavailable"
   | "receipt_not_found"
+  | "record_not_found"
+  | "session_policy_changed"
+  | "storage_unavailable"
+  | "trailbase_proof_invalid"
+  | "trailbase_session_cleanup_failed"
+  | "trailbase_trust_unavailable"
+  | "trailbase_version_unsupported"
   | "unsupported_media_type"
   | "validation_failed";
 
 // prettier-ignore
 export const PUBLIC_CAPABILITY_REGISTRY = {
   "capabilities": [
+    {
+      "authorization": "local_operator",
+      "bounded_context": "access.identity",
+      "contract_body": "c1",
+      "examples": [],
+      "id": "access.identity.bootstrap",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "c1",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "auth_browser_binding_invalid",
+        "auth_identity_conflict",
+        "capacity_exceeded",
+        "forbidden",
+        "identity_service_unavailable",
+        "integrity_failed",
+        "storage_unavailable",
+        "trailbase_proof_invalid",
+        "trailbase_session_cleanup_failed",
+        "trailbase_trust_unavailable",
+        "trailbase_version_unsupported"
+      ],
+      "runtime_body": "c1",
+      "scopes": [],
+      "surface_profile": "c1_identity_bootstrap",
+      "uat": []
+    },
+    {
+      "authorization": "browser_session",
+      "bounded_context": "access.projection",
+      "contract_body": "c1",
+      "examples": [],
+      "id": "access.projection.read",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "c1",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "browser_session_expired",
+        "browser_session_revoked",
+        "capability_unavailable",
+        "integrity_failed",
+        "session_policy_changed",
+        "storage_unavailable"
+      ],
+      "runtime_body": "c1",
+      "scopes": [],
+      "surface_profile": "c1_access_projection",
+      "uat": []
+    },
+    {
+      "authorization": "unauthenticated",
+      "bounded_context": "browser.authentication",
+      "contract_body": "c1",
+      "examples": [],
+      "id": "browser.session.create",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "c1",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "auth_browser_binding_invalid",
+        "auth_continuation_persistence_failed",
+        "auth_identity_conflict",
+        "auth_selection_changed",
+        "auth_subject_unaffiliated",
+        "capability_unavailable",
+        "capacity_exceeded",
+        "forbidden",
+        "identity_service_unavailable",
+        "integrity_failed",
+        "malformed_json",
+        "payload_too_large",
+        "storage_unavailable",
+        "trailbase_proof_invalid",
+        "trailbase_session_cleanup_failed",
+        "trailbase_trust_unavailable",
+        "trailbase_version_unsupported",
+        "unsupported_media_type",
+        "validation_failed"
+      ],
+      "runtime_body": "c1",
+      "scopes": [],
+      "surface_profile": "c1_browser_session_foundation",
+      "uat": []
+    },
+    {
+      "authorization": "browser_session",
+      "bounded_context": "browser.authentication",
+      "contract_body": "c1",
+      "examples": [],
+      "id": "browser.session.end",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "c1",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "browser_session_expired",
+        "browser_session_revoked",
+        "capability_unavailable",
+        "forbidden",
+        "integrity_failed",
+        "session_policy_changed",
+        "storage_unavailable"
+      ],
+      "runtime_body": "c1",
+      "scopes": [],
+      "surface_profile": "c1_browser_session_foundation",
+      "uat": []
+    },
+    {
+      "authorization": "browser_session",
+      "bounded_context": "browser.authentication",
+      "contract_body": "c1",
+      "examples": [],
+      "id": "browser.session.profile.select",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "c1",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "browser_session_expired",
+        "browser_session_revoked",
+        "capability_unavailable",
+        "forbidden",
+        "integrity_failed",
+        "malformed_json",
+        "payload_too_large",
+        "session_policy_changed",
+        "storage_unavailable",
+        "unsupported_media_type",
+        "validation_failed"
+      ],
+      "runtime_body": "c1",
+      "scopes": [],
+      "surface_profile": "c1_browser_session_foundation",
+      "uat": []
+    },
+    {
+      "authorization": "browser_session",
+      "bounded_context": "browser.authentication",
+      "contract_body": "c1",
+      "examples": [],
+      "id": "browser.session.read",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "c1",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "browser_session_expired",
+        "browser_session_revoked",
+        "capability_unavailable",
+        "integrity_failed",
+        "session_policy_changed",
+        "storage_unavailable"
+      ],
+      "runtime_body": "c1",
+      "scopes": [],
+      "surface_profile": "c1_browser_session_foundation",
+      "uat": []
+    },
+    {
+      "authorization": "browser_session",
+      "bounded_context": "browser.authentication",
+      "contract_body": "c1",
+      "examples": [],
+      "id": "browser.session.revoke",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "c1",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "browser_session_expired",
+        "browser_session_revoked",
+        "capability_unavailable",
+        "forbidden",
+        "integrity_failed",
+        "session_policy_changed",
+        "storage_unavailable",
+        "validation_failed"
+      ],
+      "runtime_body": "c1",
+      "scopes": [],
+      "surface_profile": "c1_browser_session_foundation",
+      "uat": []
+    },
+    {
+      "authorization": "browser_session",
+      "bounded_context": "browser.authentication",
+      "contract_body": "c1",
+      "examples": [],
+      "id": "browser.session.rotate",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "c1",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "browser_session_expired",
+        "browser_session_revoked",
+        "capability_unavailable",
+        "forbidden",
+        "integrity_failed",
+        "session_policy_changed",
+        "storage_unavailable"
+      ],
+      "runtime_body": "c1",
+      "scopes": [],
+      "surface_profile": "c1_browser_session_foundation",
+      "uat": []
+    },
+    {
+      "authorization": "browser_session",
+      "bounded_context": "browser.authentication",
+      "contract_body": "c1",
+      "examples": [],
+      "id": "browser.sessions.list",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "c1",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "browser_session_expired",
+        "browser_session_revoked",
+        "capability_unavailable",
+        "integrity_failed",
+        "session_policy_changed",
+        "storage_unavailable"
+      ],
+      "runtime_body": "c1",
+      "scopes": [],
+      "surface_profile": "c1_browser_session_foundation",
+      "uat": []
+    },
+    {
+      "authorization": "browser_session",
+      "bounded_context": "browser.authentication",
+      "contract_body": "c1",
+      "examples": [],
+      "id": "browser.sessions.revoke_all",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "c1",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "browser_session_expired",
+        "browser_session_revoked",
+        "capability_unavailable",
+        "forbidden",
+        "integrity_failed",
+        "session_policy_changed",
+        "storage_unavailable"
+      ],
+      "runtime_body": "c1",
+      "scopes": [],
+      "surface_profile": "c1_browser_session_foundation",
+      "uat": []
+    },
+    {
+      "authorization": "browser_session",
+      "bounded_context": "browser.authentication",
+      "contract_body": "c1",
+      "examples": [],
+      "id": "browser.sessions.revoke_others",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "c1",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "browser_session_expired",
+        "browser_session_revoked",
+        "capability_unavailable",
+        "forbidden",
+        "integrity_failed",
+        "session_policy_changed",
+        "storage_unavailable",
+        "validation_failed"
+      ],
+      "runtime_body": "c1",
+      "scopes": [],
+      "surface_profile": "c1_browser_session_foundation",
+      "uat": []
+    },
     {
       "authorization": "scoped",
       "bounded_context": "client.enrollment",
@@ -1364,12 +6484,15 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       "lifecycle": {
         "contract_state": "finalized",
         "introduced_in": "b1",
-        "runtime_availability": "fixture_only"
+        "runtime_availability": "implemented"
       },
       "problems": [
+        "bootstrap_closed",
         "forbidden",
+        "integrity_failed",
         "malformed_json",
         "payload_too_large",
+        "storage_unavailable",
         "unsupported_media_type",
         "validation_failed"
       ],
@@ -1377,7 +6500,7 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       "scopes": [
         "client_enroll"
       ],
-      "surface_profile": "b1_http_fixture",
+      "surface_profile": "b1_durable_bootstrap",
       "uat": []
     },
     {
@@ -1474,49 +6597,139 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       "uat": []
     },
     {
-      "authorization": "scoped",
+      "authorization": "scoped_or_browser_session",
       "bounded_context": "identity.identifiers",
-      "contract_body": "b2",
-      "examples": [],
+      "contract_body": "b1",
+      "examples": [
+        "identity.identifier.attach.validation_failed"
+      ],
       "id": "identity.identifier.attach",
       "lifecycle": {
-        "contract_state": "reserved",
+        "contract_state": "finalized",
         "introduced_in": "b1",
-        "runtime_availability": "later_body"
+        "runtime_availability": "implemented"
       },
       "problems": [
+        "authentication_failed",
+        "browser_session_expired",
+        "browser_session_revoked",
         "capability_unavailable",
+        "forbidden",
+        "identity_conflict",
+        "integrity_failed",
         "invalid_identifier",
+        "malformed_json",
+        "payload_too_large",
+        "record_not_found",
+        "session_policy_changed",
+        "storage_unavailable",
+        "unsupported_media_type",
         "validation_failed"
       ],
       "runtime_body": "b2",
       "scopes": [
         "identity_write"
       ],
-      "surface_profile": "later_b2",
+      "surface_profile": "b1_records",
       "uat": []
     },
     {
-      "authorization": "scoped",
-      "bounded_context": "identity.records",
-      "contract_body": "b2",
-      "examples": [],
-      "id": "identity.record.create",
+      "authorization": "scoped_or_browser_session",
+      "bounded_context": "identity.identifiers",
+      "contract_body": "b1",
+      "examples": [
+        "identity.namespace.register.validation_failed"
+      ],
+      "id": "identity.namespace.register",
       "lifecycle": {
-        "contract_state": "reserved",
+        "contract_state": "finalized",
         "introduced_in": "b1",
-        "runtime_availability": "later_body"
+        "runtime_availability": "implemented"
       },
       "problems": [
+        "authentication_failed",
+        "browser_session_expired",
+        "browser_session_revoked",
         "capability_unavailable",
-        "invalid_identifier",
+        "forbidden",
+        "integrity_failed",
+        "malformed_json",
+        "payload_too_large",
+        "session_policy_changed",
+        "storage_unavailable",
+        "unsupported_media_type",
         "validation_failed"
       ],
       "runtime_body": "b2",
       "scopes": [
         "identity_write"
       ],
-      "surface_profile": "later_b2",
+      "surface_profile": "b1_records",
+      "uat": []
+    },
+    {
+      "authorization": "scoped_or_browser_session",
+      "bounded_context": "identity.records",
+      "contract_body": "b1",
+      "examples": [
+        "identity.record.create.validation_failed"
+      ],
+      "id": "identity.record.create",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "b1",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "browser_session_expired",
+        "browser_session_revoked",
+        "capability_unavailable",
+        "forbidden",
+        "integrity_failed",
+        "invalid_identifier",
+        "malformed_json",
+        "payload_too_large",
+        "session_policy_changed",
+        "storage_unavailable",
+        "unsupported_media_type",
+        "validation_failed"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "identity_write"
+      ],
+      "surface_profile": "b1_records",
+      "uat": []
+    },
+    {
+      "authorization": "scoped_or_browser_session",
+      "bounded_context": "identity.records",
+      "contract_body": "b1",
+      "examples": [
+        "identity.record.list.forbidden"
+      ],
+      "id": "identity.record.list",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "b1",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "browser_session_expired",
+        "browser_session_revoked",
+        "capability_unavailable",
+        "forbidden",
+        "integrity_failed",
+        "session_policy_changed",
+        "storage_unavailable"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "identity_read"
+      ],
+      "surface_profile": "b1_records",
       "uat": []
     },
     {
@@ -1611,6 +6824,69 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       "uat": []
     },
     {
+      "authorization": "scoped_or_browser_session",
+      "bounded_context": "identity.routing",
+      "contract_body": "m3",
+      "examples": [],
+      "id": "identity.route.resolve",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "m3",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "browser_session_expired",
+        "browser_session_revoked",
+        "capability_unavailable",
+        "capacity_exceeded",
+        "forbidden",
+        "integrity_failed",
+        "record_not_found",
+        "session_policy_changed",
+        "storage_unavailable",
+        "validation_failed"
+      ],
+      "runtime_body": "m3",
+      "scopes": [
+        "identity_read"
+      ],
+      "surface_profile": "m3_identity_routing",
+      "uat": [
+        {
+          "id": "MDN-001",
+          "owner_body": "m3",
+          "reason": "M3 proves the verified IMDb alias route while M8 owns live TMDB enrichment.",
+          "relationship": "split"
+        },
+        {
+          "id": "MDN-002",
+          "owner_body": "m3",
+          "reason": "M3 proves the verified IMDb alias route while M8 owns live TMDB enrichment.",
+          "relationship": "split"
+        }
+      ]
+    },
+    {
+      "authorization": "unauthenticated",
+      "bounded_context": "observation.ingress",
+      "contract_body": "b1",
+      "examples": [
+        "integration.status.success"
+      ],
+      "id": "integration.status",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "b1",
+        "runtime_availability": "implemented"
+      },
+      "problems": [],
+      "runtime_body": "b1",
+      "scopes": [],
+      "surface_profile": "b1_integration_status",
+      "uat": []
+    },
+    {
       "authorization": "scoped",
       "bounded_context": "observation.ingress",
       "contract_body": "b1",
@@ -1635,6 +6911,102 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       "uat": []
     },
     {
+      "authorization": "scoped",
+      "bounded_context": "metadata.claims",
+      "contract_body": "m2",
+      "examples": [
+        "metadata.claim.refresh.metadata_claim_stale"
+      ],
+      "id": "metadata.claim.refresh",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "m2",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "forbidden",
+        "idempotency_conflict",
+        "integrity_failed",
+        "malformed_json",
+        "metadata_claim_stale",
+        "payload_too_large",
+        "provider_credential_expired",
+        "provider_credential_invalid",
+        "provider_credential_missing",
+        "provider_rate_limited",
+        "provider_response_invalid",
+        "provider_route_unavailable",
+        "provider_unavailable",
+        "record_not_found",
+        "storage_unavailable",
+        "unsupported_media_type",
+        "validation_failed"
+      ],
+      "runtime_body": "m2",
+      "scopes": [
+        "metadata_claim_refresh"
+      ],
+      "surface_profile": "m2_metadata",
+      "uat": []
+    },
+    {
+      "authorization": "scoped",
+      "bounded_context": "metadata.projection",
+      "contract_body": "m2",
+      "examples": [
+        "metadata.projection.configure.validation_failed"
+      ],
+      "id": "metadata.projection.configure",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "m2",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "forbidden",
+        "integrity_failed",
+        "malformed_json",
+        "payload_too_large",
+        "storage_unavailable",
+        "unsupported_media_type",
+        "validation_failed"
+      ],
+      "runtime_body": "m2",
+      "scopes": [
+        "metadata_projection_configure"
+      ],
+      "surface_profile": "m2_metadata",
+      "uat": []
+    },
+    {
+      "authorization": "scoped",
+      "bounded_context": "metadata.projection",
+      "contract_body": "m2",
+      "examples": [],
+      "id": "metadata.projection.read",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "m2",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "forbidden",
+        "integrity_failed",
+        "record_not_found",
+        "storage_unavailable",
+        "validation_failed"
+      ],
+      "runtime_body": "m2",
+      "scopes": [
+        "metadata_projection_read"
+      ],
+      "surface_profile": "m2_metadata",
+      "uat": []
+    },
+    {
       "authorization": "bootstrap_only",
       "bounded_context": "node.administration",
       "contract_body": "b1",
@@ -1645,22 +7017,25 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       "lifecycle": {
         "contract_state": "finalized",
         "introduced_in": "b1",
-        "runtime_availability": "fixture_only"
+        "runtime_availability": "implemented"
       },
       "problems": [
+        "already_initialized",
         "forbidden",
+        "integrity_failed",
         "malformed_json",
         "payload_too_large",
+        "storage_unavailable",
         "unsupported_media_type",
         "validation_failed"
       ],
       "runtime_body": "b2",
       "scopes": [],
-      "surface_profile": "b1_http_fixture",
+      "surface_profile": "b1_durable_bootstrap",
       "uat": []
     },
     {
-      "authorization": "scoped",
+      "authorization": "scoped_or_browser_session",
       "bounded_context": "observation.ingress",
       "contract_body": "b1",
       "examples": [
@@ -1672,15 +7047,21 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       "lifecycle": {
         "contract_state": "finalized",
         "introduced_in": "b1",
-        "runtime_availability": "fixture_only"
+        "runtime_availability": "implemented"
       },
       "problems": [
+        "authentication_failed",
+        "browser_session_expired",
+        "browser_session_revoked",
         "capacity_exceeded",
         "forbidden",
         "idempotency_conflict",
+        "integrity_failed",
         "invalid_observation",
         "malformed_json",
         "payload_too_large",
+        "session_policy_changed",
+        "storage_unavailable",
         "unsupported_media_type",
         "validation_failed"
       ],
@@ -1789,6 +7170,276 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       "uat": []
     },
     {
+      "authorization": "scoped_or_browser_session",
+      "bounded_context": "profile.projection_policy",
+      "contract_body": "m3",
+      "examples": [],
+      "id": "profile.anime_grouping_policy.apply",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "m3",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "browser_session_expired",
+        "browser_session_revoked",
+        "capability_unavailable",
+        "capacity_exceeded",
+        "forbidden",
+        "idempotency_conflict",
+        "integrity_failed",
+        "malformed_json",
+        "payload_too_large",
+        "session_policy_changed",
+        "storage_unavailable",
+        "unsupported_media_type",
+        "validation_failed"
+      ],
+      "runtime_body": "m3",
+      "scopes": [
+        "profile_state_write"
+      ],
+      "surface_profile": "m3_identity_routing",
+      "uat": [
+        {
+          "id": "MDN-018",
+          "owner_body": "m3",
+          "reason": "M3 durably changes projection policy without re-keying Records or Chronicle state.",
+          "relationship": "direct"
+        }
+      ]
+    },
+    {
+      "authorization": "scoped_or_browser_session",
+      "bounded_context": "profile.projection_policy",
+      "contract_body": "m3",
+      "examples": [],
+      "id": "profile.anime_grouping_policy.preview",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "m3",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "browser_session_expired",
+        "browser_session_revoked",
+        "capability_unavailable",
+        "capacity_exceeded",
+        "forbidden",
+        "integrity_failed",
+        "malformed_json",
+        "payload_too_large",
+        "session_policy_changed",
+        "storage_unavailable",
+        "unsupported_media_type",
+        "validation_failed"
+      ],
+      "runtime_body": "m3",
+      "scopes": [
+        "profile_state_read"
+      ],
+      "surface_profile": "m3_identity_routing",
+      "uat": [
+        {
+          "id": "MDN-018",
+          "owner_body": "m3",
+          "reason": "M3 previews the bounded projection impact before any governed policy change.",
+          "relationship": "split"
+        }
+      ]
+    },
+    {
+      "authorization": "scoped_or_browser_session",
+      "bounded_context": "profile.projection_policy",
+      "contract_body": "m3",
+      "examples": [],
+      "id": "profile.anime_grouping_policy.read",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "m3",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "browser_session_expired",
+        "browser_session_revoked",
+        "capability_unavailable",
+        "forbidden",
+        "integrity_failed",
+        "session_policy_changed",
+        "storage_unavailable",
+        "validation_failed"
+      ],
+      "runtime_body": "m3",
+      "scopes": [
+        "profile_state_read"
+      ],
+      "surface_profile": "m3_identity_routing",
+      "uat": [
+        {
+          "id": "MDN-018",
+          "owner_body": "m3",
+          "reason": "M3 exposes the durable profile policy read used by the governed change flow.",
+          "relationship": "split"
+        }
+      ]
+    },
+    {
+      "authorization": "scoped_or_browser_session",
+      "bounded_context": "profile.catalog_configuration",
+      "contract_body": "b2",
+      "examples": [],
+      "id": "profile.nuvio_collections.clear",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "b2",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "browser_session_expired",
+        "browser_session_revoked",
+        "capability_unavailable",
+        "forbidden",
+        "integrity_failed",
+        "session_policy_changed",
+        "storage_unavailable"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "profile_state_write"
+      ],
+      "surface_profile": "b2_profile_state",
+      "uat": []
+    },
+    {
+      "authorization": "scoped_or_browser_session",
+      "bounded_context": "profile.catalog_configuration",
+      "contract_body": "b2",
+      "examples": [],
+      "id": "profile.nuvio_collections.get",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "b2",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "browser_session_expired",
+        "browser_session_revoked",
+        "capability_unavailable",
+        "forbidden",
+        "integrity_failed",
+        "session_policy_changed",
+        "storage_unavailable"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "profile_state_read"
+      ],
+      "surface_profile": "b2_profile_state",
+      "uat": []
+    },
+    {
+      "authorization": "scoped_or_browser_session",
+      "bounded_context": "profile.catalog_configuration",
+      "contract_body": "b2",
+      "examples": [],
+      "id": "profile.nuvio_collections.replace",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "b2",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "browser_session_expired",
+        "browser_session_revoked",
+        "capability_unavailable",
+        "forbidden",
+        "integrity_failed",
+        "malformed_json",
+        "payload_too_large",
+        "session_policy_changed",
+        "storage_unavailable",
+        "unsupported_media_type",
+        "validation_failed"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "profile_state_write"
+      ],
+      "surface_profile": "b2_profile_state",
+      "uat": []
+    },
+    {
+      "authorization": "scoped_or_browser_session",
+      "bounded_context": "profile.tracking",
+      "contract_body": "b2",
+      "examples": [
+        "profile.record.tracking_disposition.list.forbidden"
+      ],
+      "id": "profile.record.tracking_disposition.list",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "b2",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "browser_session_expired",
+        "browser_session_revoked",
+        "capability_unavailable",
+        "forbidden",
+        "integrity_failed",
+        "session_policy_changed",
+        "storage_unavailable"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "profile_state_read"
+      ],
+      "surface_profile": "b2_profile_state",
+      "uat": []
+    },
+    {
+      "authorization": "scoped_or_browser_session",
+      "bounded_context": "profile.tracking",
+      "contract_body": "b2",
+      "examples": [
+        "profile.record.tracking_disposition.set.validation_failed"
+      ],
+      "id": "profile.record.tracking_disposition.set",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "b2",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "browser_session_expired",
+        "browser_session_revoked",
+        "capability_unavailable",
+        "forbidden",
+        "integrity_failed",
+        "malformed_json",
+        "payload_too_large",
+        "record_not_found",
+        "session_policy_changed",
+        "storage_unavailable",
+        "unsupported_media_type",
+        "validation_failed"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "profile_state_write"
+      ],
+      "surface_profile": "b2_profile_state",
+      "uat": []
+    },
+    {
       "authorization": "scoped",
       "bounded_context": "profile.preferences",
       "contract_body": "b1",
@@ -1810,6 +7461,127 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "profile_select"
       ],
       "surface_profile": "b1_http_fixture",
+      "uat": []
+    },
+    {
+      "authorization": "scoped",
+      "bounded_context": "connections.providers",
+      "contract_body": "m1",
+      "examples": [
+        "provider.credential.configure.validation_failed"
+      ],
+      "id": "provider.credential.configure",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "m1",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "forbidden",
+        "integrity_failed",
+        "malformed_json",
+        "payload_too_large",
+        "provider_credential_invalid",
+        "provider_unavailable",
+        "storage_unavailable",
+        "unsupported_media_type",
+        "validation_failed"
+      ],
+      "runtime_body": "m1",
+      "scopes": [
+        "provider_credential_manage"
+      ],
+      "surface_profile": "m1_providers",
+      "uat": []
+    },
+    {
+      "authorization": "scoped",
+      "bounded_context": "connections.providers",
+      "contract_body": "m1",
+      "examples": [
+        "provider.credential.test.provider_credential_missing"
+      ],
+      "id": "provider.credential.test",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "m1",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "forbidden",
+        "integrity_failed",
+        "provider_credential_expired",
+        "provider_credential_invalid",
+        "provider_credential_missing",
+        "provider_rate_limited",
+        "provider_response_invalid",
+        "provider_route_unavailable",
+        "provider_unavailable",
+        "storage_unavailable"
+      ],
+      "runtime_body": "m1",
+      "scopes": [
+        "provider_credential_manage"
+      ],
+      "surface_profile": "m1_providers",
+      "uat": []
+    },
+    {
+      "authorization": "scoped",
+      "bounded_context": "connections.providers",
+      "contract_body": "m1",
+      "examples": [
+        "provider.health.read.provider_unavailable"
+      ],
+      "id": "provider.health.read",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "m1",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "forbidden",
+        "integrity_failed",
+        "provider_rate_limited",
+        "provider_response_invalid",
+        "provider_route_unavailable",
+        "provider_unavailable",
+        "storage_unavailable"
+      ],
+      "runtime_body": "m1",
+      "scopes": [
+        "provider_read"
+      ],
+      "surface_profile": "m1_providers",
+      "uat": []
+    },
+    {
+      "authorization": "scoped",
+      "bounded_context": "connections.providers",
+      "contract_body": "m1",
+      "examples": [
+        "provider.list.forbidden"
+      ],
+      "id": "provider.list",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "m1",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "forbidden",
+        "integrity_failed",
+        "storage_unavailable"
+      ],
+      "runtime_body": "m1",
+      "scopes": [
+        "provider_read"
+      ],
+      "surface_profile": "m1_providers",
       "uat": []
     },
     {
@@ -1935,6 +7707,58 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
   "capability_base_uri": "https://fasti.scrobble.dev/ns/capabilities/v1/",
   "contract_version": "1.0.0",
   "surface_profiles": {
+    "b1_durable_bootstrap": {
+      "cli": {
+        "reason": "One-time secret delivery uses the loopback API and generated SDK.",
+        "state": "not_applicable"
+      },
+      "domain_application": {
+        "binding_visibility": "internal",
+        "state": "required"
+      },
+      "http_openapi": {
+        "binding": "openapi:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "json_ld": {
+        "reason": "Node bootstrap is operational state rather than linked-data domain state.",
+        "state": "not_applicable"
+      },
+      "json_schema": {
+        "binding": "schema:production-openapi-operation:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "knowledge": {
+        "binding": "knowledge:problem-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "okf": {
+        "binding": "okf:capability-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "package_smoke": {
+        "binding": "package-smoke:production-bootstrap",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "sdk": {
+        "binding": "sdk:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "sse_asyncapi": {
+        "reason": "Bootstrap is a finite local operation and has no event stream.",
+        "state": "not_applicable"
+      },
+      "ui": {
+        "reason": "The local host shell owns one-time secret setup and storage.",
+        "state": "not_applicable"
+      }
+    },
     "b1_http_fixture": {
       "cli": {
         "binding": "cli:capability-discovery",
@@ -1981,6 +7805,58 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       },
       "sse_asyncapi": {
         "reason": "This capability has no server-sent event channel.",
+        "state": "not_applicable"
+      },
+      "ui": {
+        "reason": "Fasti is headless through B3.",
+        "state": "not_applicable"
+      }
+    },
+    "b1_integration_status": {
+      "cli": {
+        "body": "b2",
+        "reason": "A governed CLI surface for integration status is deferred to B2.",
+        "state": "later_body"
+      },
+      "domain_application": {
+        "binding_visibility": "internal",
+        "state": "required"
+      },
+      "http_openapi": {
+        "binding": "openapi:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "json_ld": {
+        "reason": "Integration status is operational state, not linked-data domain state.",
+        "state": "not_applicable"
+      },
+      "json_schema": {
+        "binding": "schema:production-openapi-operation:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "knowledge": {
+        "reason": "Integration status has no governed recovery problem.",
+        "state": "not_applicable"
+      },
+      "okf": {
+        "binding": "okf:capability-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "package_smoke": {
+        "body": "b2",
+        "reason": "A network-isolated native package smoke for integration status is deferred to B2; the loopback HTTP contract is proven by fasti-api's own integration tests today.",
+        "state": "later_body"
+      },
+      "sdk": {
+        "body": "b2",
+        "reason": "A generated SDK client method for integration status is deferred to B2.",
+        "state": "later_body"
+      },
+      "sse_asyncapi": {
+        "reason": "Integration status is a finite request with no event channel.",
         "state": "not_applicable"
       },
       "ui": {
@@ -2149,6 +8025,270 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "state": "not_applicable"
       }
     },
+    "b1_records": {
+      "cli": {
+        "body": "b2",
+        "reason": "A governed CLI surface for record identity is deferred to B2.",
+        "state": "later_body"
+      },
+      "domain_application": {
+        "binding_visibility": "internal",
+        "state": "required"
+      },
+      "http_openapi": {
+        "binding": "openapi:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "json_ld": {
+        "body": "b2",
+        "reason": "A governed linked-data context for record identity is deferred to B2.",
+        "state": "later_body"
+      },
+      "json_schema": {
+        "binding": "schema:production-openapi-operation:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "knowledge": {
+        "binding": "knowledge:problem-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "okf": {
+        "binding": "okf:capability-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "package_smoke": {
+        "body": "b2",
+        "reason": "A network-isolated native package smoke for record identity is deferred to B2; the loopback HTTP contract is proven by fasti-api's own integration tests today.",
+        "state": "later_body"
+      },
+      "sdk": {
+        "binding": "sdk:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "sse_asyncapi": {
+        "reason": "Record identity mutations are finite requests with no event channel.",
+        "state": "not_applicable"
+      },
+      "ui": {
+        "reason": "Fasti is headless through B3.",
+        "state": "not_applicable"
+      }
+    },
+    "b2_profile_state": {
+      "cli": {
+        "body": "b3",
+        "reason": "A profile-state CLI is not required for the B2 product workflow.",
+        "state": "later_body"
+      },
+      "domain_application": {
+        "binding_visibility": "internal",
+        "state": "required"
+      },
+      "http_openapi": {
+        "binding": "openapi:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "json_ld": {
+        "reason": "Private profile tracking and catalog configuration are not public linked-data identity.",
+        "state": "not_applicable"
+      },
+      "json_schema": {
+        "binding": "schema:production-openapi-operation:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "knowledge": {
+        "binding": "knowledge:problem-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "okf": {
+        "binding": "okf:capability-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "package_smoke": {
+        "body": "b3",
+        "reason": "The authenticated loopback contract is proven by API integration tests in B2.",
+        "state": "later_body"
+      },
+      "sdk": {
+        "binding": "sdk:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "sse_asyncapi": {
+        "reason": "Profile tracking and catalog configuration are finite request state with no event channel.",
+        "state": "not_applicable"
+      },
+      "ui": {
+        "binding": "ui:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      }
+    },
+    "c1_access_projection": {
+      "cli": {
+        "reason": "The Account and Security projection is a first-party browser surface.",
+        "state": "not_applicable"
+      },
+      "domain_application": {
+        "binding_visibility": "internal",
+        "state": "required"
+      },
+      "http_openapi": {
+        "binding": "openapi:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "json_ld": {
+        "reason": "Private account and session security state is not linked data.",
+        "state": "not_applicable"
+      },
+      "json_schema": {
+        "binding": "schema:production-openapi-operation:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "knowledge": {
+        "binding": "knowledge:problem-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "okf": {
+        "binding": "okf:capability-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "package_smoke": {
+        "body": "c1",
+        "reason": "Authenticated projection smoke is delivered after the route is active.",
+        "state": "later_body"
+      },
+      "sdk": {
+        "binding": "sdk:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "sse_asyncapi": {
+        "reason": "The Access projection is a finite request and has no event stream.",
+        "state": "not_applicable"
+      },
+      "ui": {
+        "binding": "ui:account-security",
+        "binding_visibility": "public",
+        "state": "required"
+      }
+    },
+    "c1_browser_session_foundation": {
+      "cli": {
+        "reason": "Browser sessions are administered through the first-party web surface.",
+        "state": "not_applicable"
+      },
+      "domain_application": {
+        "binding_visibility": "internal",
+        "state": "required"
+      },
+      "http_openapi": {
+        "binding": "openapi:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "json_ld": {
+        "reason": "Private browser authentication state is not linked data.",
+        "state": "not_applicable"
+      },
+      "json_schema": {
+        "binding": "schema:production-openapi-operation:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "knowledge": {
+        "binding": "knowledge:problem-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "okf": {
+        "binding": "okf:capability-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "package_smoke": {
+        "body": "c1",
+        "reason": "The authenticated HTTP contract requires the C1 runtime.",
+        "state": "later_body"
+      },
+      "sdk": {
+        "binding": "sdk:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "sse_asyncapi": {
+        "reason": "Browser authentication uses finite requests and has no event stream.",
+        "state": "not_applicable"
+      },
+      "ui": {
+        "body": "c1",
+        "reason": "PR A keeps the Account and security controls visibly unavailable until C1.",
+        "state": "later_body"
+      }
+    },
+    "c1_identity_bootstrap": {
+      "cli": {
+        "binding": "cli:access-identity-bootstrap",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "domain_application": {
+        "binding_visibility": "internal",
+        "state": "required"
+      },
+      "http_openapi": {
+        "reason": "First-administrator bootstrap is a trusted local CLI operation and has no HTTP route.",
+        "state": "not_applicable"
+      },
+      "json_ld": {
+        "reason": "Private authentication bootstrap state is not linked data.",
+        "state": "not_applicable"
+      },
+      "json_schema": {
+        "reason": "No public transport represents the local-operator bootstrap command.",
+        "state": "not_applicable"
+      },
+      "knowledge": {
+        "binding": "knowledge:problem-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "okf": {
+        "binding": "okf:capability-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "package_smoke": {
+        "binding": "package-smoke:c1-operator-bootstrap",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "sdk": {
+        "reason": "Browser and third-party SDK callers cannot invoke local-operator bootstrap.",
+        "state": "not_applicable"
+      },
+      "sse_asyncapi": {
+        "reason": "First-administrator bootstrap is a finite operation and has no event stream.",
+        "state": "not_applicable"
+      },
+      "ui": {
+        "reason": "The active first-administrator operation is the trusted local CLI; packaged first-run authentication remains unavailable until C1-TAURI-AUTH.",
+        "state": "not_applicable"
+      }
+    },
     "health": {
       "cli": {
         "reason": "Health is exposed as the process HTTP probe.",
@@ -2196,7 +8336,7 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "state": "not_applicable"
       },
       "ui": {
-        "reason": "Fasti is headless through B3.",
+        "reason": "Product UI is not active through B3; the local health diagnostic is evidence tooling.",
         "state": "not_applicable"
       }
     },
@@ -2309,6 +8449,168 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "reason": "Fasti is headless through B3.",
         "state": "not_applicable"
       }
+    },
+    "m1_providers": {
+      "cli": {
+        "binding": "cli:capability-discovery",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "domain_application": {
+        "binding_visibility": "internal",
+        "state": "required"
+      },
+      "http_openapi": {
+        "binding": "openapi:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "json_ld": {
+        "reason": "Provider configuration and health are private operational state rather than linked domain evidence.",
+        "state": "not_applicable"
+      },
+      "json_schema": {
+        "binding": "schema:production-openapi-operation:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "knowledge": {
+        "binding": "knowledge:problem-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "okf": {
+        "binding": "okf:capability-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "package_smoke": {
+        "binding": "package-smoke:production-providers",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "sdk": {
+        "binding": "sdk:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "sse_asyncapi": {
+        "reason": "Provider registry credential and health operations are finite requests with no event channel.",
+        "state": "not_applicable"
+      },
+      "ui": {
+        "binding": "ui:provider-settings",
+        "binding_visibility": "public",
+        "state": "required"
+      }
+    },
+    "m2_metadata": {
+      "cli": {
+        "binding": "cli:capability-discovery",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "domain_application": {
+        "binding_visibility": "internal",
+        "state": "required"
+      },
+      "http_openapi": {
+        "binding": "openapi:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "json_ld": {
+        "reason": "Profile projection policy and refresh control are private operational state rather than public linked data.",
+        "state": "not_applicable"
+      },
+      "json_schema": {
+        "binding": "schema:production-openapi-operation:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "knowledge": {
+        "binding": "knowledge:problem-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "okf": {
+        "binding": "okf:capability-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "package_smoke": {
+        "binding": "package-smoke:production-metadata",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "sdk": {
+        "binding": "sdk:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "sse_asyncapi": {
+        "reason": "Metadata refresh and profile projection operations are finite requests; no durable event transport exists in M2.",
+        "state": "not_applicable"
+      },
+      "ui": {
+        "binding": "ui:metadata-provenance",
+        "binding_visibility": "public",
+        "state": "required"
+      }
+    },
+    "m3_identity_routing": {
+      "cli": {
+        "binding": "cli:capability-discovery",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "domain_application": {
+        "binding_visibility": "internal",
+        "state": "required"
+      },
+      "http_openapi": {
+        "binding": "openapi:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "json_ld": {
+        "reason": "Private identity evidence and profile projection policy are not public linked data.",
+        "state": "not_applicable"
+      },
+      "json_schema": {
+        "binding": "schema:production-openapi-operation:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "knowledge": {
+        "binding": "knowledge:problem-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "okf": {
+        "binding": "okf:capability-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "package_smoke": {
+        "binding": "package-smoke:production-identity-routing",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "sdk": {
+        "binding": "sdk:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "sse_asyncapi": {
+        "reason": "Identity routing and anime policy operations are finite requests with no event channel.",
+        "state": "not_applicable"
+      },
+      "ui": {
+        "binding": "ui:anime-grouping-policy",
+        "binding_visibility": "public",
+        "state": "required"
+      }
     }
   }
 } as const;
@@ -2319,6 +8621,1752 @@ export const PUBLIC_PROBLEM_CATALOG = {
   "documentation_base": "https://fasti.scrobble.dev",
   "problems": [
     {
+      "capability_id": "access.identity.bootstrap",
+      "code": "auth_browser_binding_invalid",
+      "detail": "the browser request is not bound to one active Fasti authentication ceremony",
+      "next_actions": [
+        {
+          "id": "restart_sign_in",
+          "label": "Start a new sign-in ceremony"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication browser binding invalid",
+      "type": "https://fasti.scrobble.dev/v1/problems/auth-browser-binding-invalid"
+    },
+    {
+      "capability_id": "access.identity.bootstrap",
+      "code": "auth_identity_conflict",
+      "detail": "the proven identity conflicts with an existing Fasti identity link",
+      "next_actions": [
+        {
+          "id": "inspect_identity_link",
+          "label": "Inspect the existing identity link before making changes"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 409,
+      "title": "Authentication identity conflict",
+      "type": "https://fasti.scrobble.dev/v1/problems/auth-identity-conflict"
+    },
+    {
+      "capability_id": "access.identity.bootstrap",
+      "code": "capacity_exceeded",
+      "detail": "bounded application capacity has been reached",
+      "next_actions": [
+        {
+          "id": "release_capacity",
+          "label": "Release retained capacity before retrying"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 507,
+      "title": "Capacity exceeded",
+      "type": "https://fasti.scrobble.dev/v1/problems/capacity-exceeded"
+    },
+    {
+      "capability_id": "access.identity.bootstrap",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "access.identity.bootstrap",
+      "code": "identity_service_unavailable",
+      "detail": "the pinned human identity service did not complete the requested operation",
+      "next_actions": [
+        {
+          "id": "retry_identity_service",
+          "label": "Check TrailBase health and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "prior_state_retained",
+      "status": 503,
+      "title": "Identity service unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/identity-service-unavailable"
+    },
+    {
+      "capability_id": "access.identity.bootstrap",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "access.identity.bootstrap",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "access.identity.bootstrap",
+      "code": "trailbase_proof_invalid",
+      "detail": "the TrailBase authentication proof did not satisfy the active ceremony",
+      "next_actions": [
+        {
+          "id": "restart_sign_in",
+          "label": "Start a new sign-in ceremony"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 401,
+      "title": "TrailBase proof invalid",
+      "type": "https://fasti.scrobble.dev/v1/problems/trailbase-proof-invalid"
+    },
+    {
+      "capability_id": "access.identity.bootstrap",
+      "code": "trailbase_session_cleanup_failed",
+      "detail": "TrailBase did not confirm refresh-session cleanup, so Fasti did not issue a browser session",
+      "next_actions": [
+        {
+          "id": "inspect_trailbase_cleanup",
+          "label": "Check TrailBase health, then start a new sign-in ceremony"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 502,
+      "title": "TrailBase session cleanup failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/trailbase-session-cleanup-failed"
+    },
+    {
+      "capability_id": "access.identity.bootstrap",
+      "code": "trailbase_trust_unavailable",
+      "detail": "the active TrailBase installation does not satisfy the pinned trust contract",
+      "next_actions": [
+        {
+          "id": "repair_trailbase_activation",
+          "label": "Repair the pinned TrailBase activation before retrying"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "TrailBase trust unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/trailbase-trust-unavailable"
+    },
+    {
+      "capability_id": "access.identity.bootstrap",
+      "code": "trailbase_version_unsupported",
+      "detail": "the active TrailBase release is not the pinned supported release",
+      "next_actions": [
+        {
+          "id": "install_supported_trailbase",
+          "label": "Install the pinned supported TrailBase release"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "TrailBase version unsupported",
+      "type": "https://fasti.scrobble.dev/v1/problems/trailbase-version-unsupported"
+    },
+    {
+      "capability_id": "access.projection.read",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "access.projection.read",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
+    },
+    {
+      "capability_id": "access.projection.read",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by c1",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "access.projection.read",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "access.projection.read",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
+    },
+    {
+      "capability_id": "access.projection.read",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "browser.session.create",
+      "code": "auth_browser_binding_invalid",
+      "detail": "the browser request is not bound to one active Fasti authentication ceremony",
+      "next_actions": [
+        {
+          "id": "restart_sign_in",
+          "label": "Start a new sign-in ceremony"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication browser binding invalid",
+      "type": "https://fasti.scrobble.dev/v1/problems/auth-browser-binding-invalid"
+    },
+    {
+      "capability_id": "browser.session.create",
+      "code": "auth_continuation_persistence_failed",
+      "detail": "Fasti could not persist the sign-in selection after TrailBase session cleanup, so no Fasti browser session was issued",
+      "next_actions": [
+        {
+          "id": "restart_sign_in",
+          "label": "Start a new sign-in ceremony"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 503,
+      "title": "Sign-in continuation persistence failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/auth-continuation-persistence-failed"
+    },
+    {
+      "capability_id": "browser.session.create",
+      "code": "auth_identity_conflict",
+      "detail": "the proven identity conflicts with an existing Fasti identity link",
+      "next_actions": [
+        {
+          "id": "inspect_identity_link",
+          "label": "Inspect the existing identity link before making changes"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 409,
+      "title": "Authentication identity conflict",
+      "type": "https://fasti.scrobble.dev/v1/problems/auth-identity-conflict"
+    },
+    {
+      "capability_id": "browser.session.create",
+      "code": "auth_selection_changed",
+      "detail": "the available sign-in choices changed after they were reviewed",
+      "next_actions": [
+        {
+          "id": "review_sign_in_choices",
+          "label": "Review the current sign-in choices"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 409,
+      "title": "Sign-in choices changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/auth-selection-changed"
+    },
+    {
+      "capability_id": "browser.session.create",
+      "code": "auth_subject_unaffiliated",
+      "detail": "the authenticated subject does not have active access to the requested workspace",
+      "next_actions": [
+        {
+          "id": "request_workspace_membership",
+          "label": "Ask a workspace administrator for access"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 403,
+      "title": "Authentication subject unaffiliated",
+      "type": "https://fasti.scrobble.dev/v1/problems/auth-subject-unaffiliated"
+    },
+    {
+      "capability_id": "browser.session.create",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by c1",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "browser.session.create",
+      "code": "capacity_exceeded",
+      "detail": "bounded application capacity has been reached",
+      "next_actions": [
+        {
+          "id": "release_capacity",
+          "label": "Release retained capacity before retrying"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 507,
+      "title": "Capacity exceeded",
+      "type": "https://fasti.scrobble.dev/v1/problems/capacity-exceeded"
+    },
+    {
+      "capability_id": "browser.session.create",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "browser.session.create",
+      "code": "identity_service_unavailable",
+      "detail": "the pinned human identity service did not complete the requested operation",
+      "next_actions": [
+        {
+          "id": "retry_identity_service",
+          "label": "Check TrailBase health and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "prior_state_retained",
+      "status": 503,
+      "title": "Identity service unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/identity-service-unavailable"
+    },
+    {
+      "capability_id": "browser.session.create",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "browser.session.create",
+      "code": "malformed_json",
+      "detail": "request JSON is malformed",
+      "next_actions": [
+        {
+          "id": "correct_json",
+          "label": "Correct the JSON syntax and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 400,
+      "title": "Malformed JSON",
+      "type": "https://fasti.scrobble.dev/v1/problems/malformed-json"
+    },
+    {
+      "capability_id": "browser.session.create",
+      "code": "payload_too_large",
+      "detail": "request body exceeds the bounded transport limit",
+      "next_actions": [
+        {
+          "id": "reduce_request_body",
+          "label": "Reduce the request body and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 413,
+      "title": "Payload too large",
+      "type": "https://fasti.scrobble.dev/v1/problems/payload-too-large"
+    },
+    {
+      "capability_id": "browser.session.create",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "browser.session.create",
+      "code": "trailbase_proof_invalid",
+      "detail": "the TrailBase authentication proof did not satisfy the active ceremony",
+      "next_actions": [
+        {
+          "id": "restart_sign_in",
+          "label": "Start a new sign-in ceremony"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 401,
+      "title": "TrailBase proof invalid",
+      "type": "https://fasti.scrobble.dev/v1/problems/trailbase-proof-invalid"
+    },
+    {
+      "capability_id": "browser.session.create",
+      "code": "trailbase_session_cleanup_failed",
+      "detail": "TrailBase did not confirm refresh-session cleanup, so Fasti did not issue a browser session",
+      "next_actions": [
+        {
+          "id": "inspect_trailbase_cleanup",
+          "label": "Check TrailBase health, then start a new sign-in ceremony"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 502,
+      "title": "TrailBase session cleanup failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/trailbase-session-cleanup-failed"
+    },
+    {
+      "capability_id": "browser.session.create",
+      "code": "trailbase_trust_unavailable",
+      "detail": "the active TrailBase installation does not satisfy the pinned trust contract",
+      "next_actions": [
+        {
+          "id": "repair_trailbase_activation",
+          "label": "Repair the pinned TrailBase activation before retrying"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "TrailBase trust unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/trailbase-trust-unavailable"
+    },
+    {
+      "capability_id": "browser.session.create",
+      "code": "trailbase_version_unsupported",
+      "detail": "the active TrailBase release is not the pinned supported release",
+      "next_actions": [
+        {
+          "id": "install_supported_trailbase",
+          "label": "Install the pinned supported TrailBase release"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "TrailBase version unsupported",
+      "type": "https://fasti.scrobble.dev/v1/problems/trailbase-version-unsupported"
+    },
+    {
+      "capability_id": "browser.session.create",
+      "code": "unsupported_media_type",
+      "detail": "request media type is unsupported",
+      "next_actions": [
+        {
+          "id": "use_supported_media_type",
+          "label": "Use the documented media type and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 415,
+      "title": "Unsupported media type",
+      "type": "https://fasti.scrobble.dev/v1/problems/unsupported-media-type"
+    },
+    {
+      "capability_id": "browser.session.create",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
+      "capability_id": "browser.session.end",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "browser.session.end",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
+    },
+    {
+      "capability_id": "browser.session.end",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by c1",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "browser.session.end",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "browser.session.end",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "browser.session.end",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
+    },
+    {
+      "capability_id": "browser.session.end",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "browser.session.profile.select",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "browser.session.profile.select",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
+    },
+    {
+      "capability_id": "browser.session.profile.select",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by c1",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "browser.session.profile.select",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "browser.session.profile.select",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "browser.session.profile.select",
+      "code": "malformed_json",
+      "detail": "request JSON is malformed",
+      "next_actions": [
+        {
+          "id": "correct_json",
+          "label": "Correct the JSON syntax and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 400,
+      "title": "Malformed JSON",
+      "type": "https://fasti.scrobble.dev/v1/problems/malformed-json"
+    },
+    {
+      "capability_id": "browser.session.profile.select",
+      "code": "payload_too_large",
+      "detail": "request body exceeds the bounded transport limit",
+      "next_actions": [
+        {
+          "id": "reduce_request_body",
+          "label": "Reduce the request body and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 413,
+      "title": "Payload too large",
+      "type": "https://fasti.scrobble.dev/v1/problems/payload-too-large"
+    },
+    {
+      "capability_id": "browser.session.profile.select",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
+    },
+    {
+      "capability_id": "browser.session.profile.select",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "browser.session.profile.select",
+      "code": "unsupported_media_type",
+      "detail": "request media type is unsupported",
+      "next_actions": [
+        {
+          "id": "use_supported_media_type",
+          "label": "Use the documented media type and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 415,
+      "title": "Unsupported media type",
+      "type": "https://fasti.scrobble.dev/v1/problems/unsupported-media-type"
+    },
+    {
+      "capability_id": "browser.session.profile.select",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
+      "capability_id": "browser.session.read",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "browser.session.read",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
+    },
+    {
+      "capability_id": "browser.session.read",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by c1",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "browser.session.read",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "browser.session.read",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
+    },
+    {
+      "capability_id": "browser.session.read",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "browser.session.revoke",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "browser.session.revoke",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
+    },
+    {
+      "capability_id": "browser.session.revoke",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by c1",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "browser.session.revoke",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "browser.session.revoke",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "browser.session.revoke",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
+    },
+    {
+      "capability_id": "browser.session.revoke",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "browser.session.revoke",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
+      "capability_id": "browser.session.rotate",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "browser.session.rotate",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
+    },
+    {
+      "capability_id": "browser.session.rotate",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by c1",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "browser.session.rotate",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "browser.session.rotate",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "browser.session.rotate",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
+    },
+    {
+      "capability_id": "browser.session.rotate",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "browser.sessions.list",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "browser.sessions.list",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
+    },
+    {
+      "capability_id": "browser.sessions.list",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by c1",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "browser.sessions.list",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "browser.sessions.list",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
+    },
+    {
+      "capability_id": "browser.sessions.list",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "browser.sessions.revoke_all",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "browser.sessions.revoke_all",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
+    },
+    {
+      "capability_id": "browser.sessions.revoke_all",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by c1",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "browser.sessions.revoke_all",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "browser.sessions.revoke_all",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "browser.sessions.revoke_all",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
+    },
+    {
+      "capability_id": "browser.sessions.revoke_all",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "browser.sessions.revoke_others",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "browser.sessions.revoke_others",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
+    },
+    {
+      "capability_id": "browser.sessions.revoke_others",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by c1",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "browser.sessions.revoke_others",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "browser.sessions.revoke_others",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "browser.sessions.revoke_others",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
+    },
+    {
+      "capability_id": "browser.sessions.revoke_others",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "browser.sessions.revoke_others",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
+      "capability_id": "client.enroll",
+      "code": "bootstrap_closed",
+      "detail": "the one-time enrollment proof is invalid, expired, or already consumed",
+      "next_actions": [
+        {
+          "id": "inspect_node_status",
+          "label": "Inspect the local node status before retrying"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 409,
+      "title": "Bootstrap closed",
+      "type": "https://fasti.scrobble.dev/v1/problems/bootstrap-closed"
+    },
+    {
       "capability_id": "client.enroll",
       "code": "forbidden",
       "detail": "request is not authorized for this capability",
@@ -2335,6 +10383,24 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "status": 403,
       "title": "Forbidden",
       "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "client.enroll",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
     },
     {
       "capability_id": "client.enroll",
@@ -2371,6 +10437,24 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "status": 413,
       "title": "Payload too large",
       "type": "https://fasti.scrobble.dev/v1/problems/payload-too-large"
+    },
+    {
+      "capability_id": "client.enroll",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
     },
     {
       "capability_id": "client.enroll",
@@ -2572,6 +10656,60 @@ export const PUBLIC_PROBLEM_CATALOG = {
     },
     {
       "capability_id": "identity.identifier.attach",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "identity.identifier.attach",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "identity.identifier.attach",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
+    },
+    {
+      "capability_id": "identity.identifier.attach",
       "code": "capability_unavailable",
       "detail": "requested capability is not available in this body; it is owned by b2",
       "next_actions": [
@@ -2587,6 +10725,60 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "status": 501,
       "title": "Capability unavailable",
       "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "identity.identifier.attach",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "identity.identifier.attach",
+      "code": "identity_conflict",
+      "detail": "an exact external identifier is already attached to another active Record",
+      "next_actions": [
+        {
+          "id": "review_identity_conflict",
+          "label": "Review the existing Record before attaching the identifier"
+        }
+      ],
+      "param": "/identifier",
+      "param_policy": "fixed",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 409,
+      "title": "Identity conflict",
+      "type": "https://fasti.scrobble.dev/v1/problems/identity-conflict"
+    },
+    {
+      "capability_id": "identity.identifier.attach",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
     },
     {
       "capability_id": "identity.identifier.attach",
@@ -2608,6 +10800,114 @@ export const PUBLIC_PROBLEM_CATALOG = {
     },
     {
       "capability_id": "identity.identifier.attach",
+      "code": "malformed_json",
+      "detail": "request JSON is malformed",
+      "next_actions": [
+        {
+          "id": "correct_json",
+          "label": "Correct the JSON syntax and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 400,
+      "title": "Malformed JSON",
+      "type": "https://fasti.scrobble.dev/v1/problems/malformed-json"
+    },
+    {
+      "capability_id": "identity.identifier.attach",
+      "code": "payload_too_large",
+      "detail": "request body exceeds the bounded transport limit",
+      "next_actions": [
+        {
+          "id": "reduce_request_body",
+          "label": "Reduce the request body and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 413,
+      "title": "Payload too large",
+      "type": "https://fasti.scrobble.dev/v1/problems/payload-too-large"
+    },
+    {
+      "capability_id": "identity.identifier.attach",
+      "code": "record_not_found",
+      "detail": "no active Record is available for the requested identifier",
+      "next_actions": [
+        {
+          "id": "verify_record_id",
+          "label": "Verify the Record ID or create a new Record"
+        }
+      ],
+      "param": "/record_id",
+      "param_policy": "fixed",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 404,
+      "title": "Record not found",
+      "type": "https://fasti.scrobble.dev/v1/problems/record-not-found"
+    },
+    {
+      "capability_id": "identity.identifier.attach",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
+    },
+    {
+      "capability_id": "identity.identifier.attach",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "identity.identifier.attach",
+      "code": "unsupported_media_type",
+      "detail": "request media type is unsupported",
+      "next_actions": [
+        {
+          "id": "use_supported_media_type",
+          "label": "Use the documented media type and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 415,
+      "title": "Unsupported media type",
+      "type": "https://fasti.scrobble.dev/v1/problems/unsupported-media-type"
+    },
+    {
+      "capability_id": "identity.identifier.attach",
       "code": "validation_failed",
       "detail": "request representation does not satisfy the governed contract",
       "next_actions": [
@@ -2623,6 +10923,276 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "status": 422,
       "title": "Validation failed",
       "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
+      "capability_id": "identity.namespace.register",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "identity.namespace.register",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "identity.namespace.register",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
+    },
+    {
+      "capability_id": "identity.namespace.register",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by b2",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "identity.namespace.register",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "identity.namespace.register",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "identity.namespace.register",
+      "code": "malformed_json",
+      "detail": "request JSON is malformed",
+      "next_actions": [
+        {
+          "id": "correct_json",
+          "label": "Correct the JSON syntax and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 400,
+      "title": "Malformed JSON",
+      "type": "https://fasti.scrobble.dev/v1/problems/malformed-json"
+    },
+    {
+      "capability_id": "identity.namespace.register",
+      "code": "payload_too_large",
+      "detail": "request body exceeds the bounded transport limit",
+      "next_actions": [
+        {
+          "id": "reduce_request_body",
+          "label": "Reduce the request body and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 413,
+      "title": "Payload too large",
+      "type": "https://fasti.scrobble.dev/v1/problems/payload-too-large"
+    },
+    {
+      "capability_id": "identity.namespace.register",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
+    },
+    {
+      "capability_id": "identity.namespace.register",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "identity.namespace.register",
+      "code": "unsupported_media_type",
+      "detail": "request media type is unsupported",
+      "next_actions": [
+        {
+          "id": "use_supported_media_type",
+          "label": "Use the documented media type and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 415,
+      "title": "Unsupported media type",
+      "type": "https://fasti.scrobble.dev/v1/problems/unsupported-media-type"
+    },
+    {
+      "capability_id": "identity.namespace.register",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
+      "capability_id": "identity.record.create",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "identity.record.create",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "identity.record.create",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
     },
     {
       "capability_id": "identity.record.create",
@@ -2644,6 +11214,42 @@ export const PUBLIC_PROBLEM_CATALOG = {
     },
     {
       "capability_id": "identity.record.create",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "identity.record.create",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "identity.record.create",
       "code": "invalid_identifier",
       "detail": "identifier does not satisfy the governed format",
       "next_actions": [
@@ -2662,6 +11268,96 @@ export const PUBLIC_PROBLEM_CATALOG = {
     },
     {
       "capability_id": "identity.record.create",
+      "code": "malformed_json",
+      "detail": "request JSON is malformed",
+      "next_actions": [
+        {
+          "id": "correct_json",
+          "label": "Correct the JSON syntax and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 400,
+      "title": "Malformed JSON",
+      "type": "https://fasti.scrobble.dev/v1/problems/malformed-json"
+    },
+    {
+      "capability_id": "identity.record.create",
+      "code": "payload_too_large",
+      "detail": "request body exceeds the bounded transport limit",
+      "next_actions": [
+        {
+          "id": "reduce_request_body",
+          "label": "Reduce the request body and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 413,
+      "title": "Payload too large",
+      "type": "https://fasti.scrobble.dev/v1/problems/payload-too-large"
+    },
+    {
+      "capability_id": "identity.record.create",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
+    },
+    {
+      "capability_id": "identity.record.create",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "identity.record.create",
+      "code": "unsupported_media_type",
+      "detail": "request media type is unsupported",
+      "next_actions": [
+        {
+          "id": "use_supported_media_type",
+          "label": "Use the documented media type and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 415,
+      "title": "Unsupported media type",
+      "type": "https://fasti.scrobble.dev/v1/problems/unsupported-media-type"
+    },
+    {
+      "capability_id": "identity.record.create",
       "code": "validation_failed",
       "detail": "request representation does not satisfy the governed contract",
       "next_actions": [
@@ -2677,6 +11373,150 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "status": 422,
       "title": "Validation failed",
       "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
+      "capability_id": "identity.record.list",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "identity.record.list",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "identity.record.list",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
+    },
+    {
+      "capability_id": "identity.record.list",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by b2",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "identity.record.list",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "identity.record.list",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "identity.record.list",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
+    },
+    {
+      "capability_id": "identity.record.list",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
     },
     {
       "capability_id": "identity.review.defer",
@@ -2877,6 +11717,204 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
     },
     {
+      "capability_id": "identity.route.resolve",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "identity.route.resolve",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "identity.route.resolve",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
+    },
+    {
+      "capability_id": "identity.route.resolve",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by m3",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "identity.route.resolve",
+      "code": "capacity_exceeded",
+      "detail": "bounded application capacity has been reached",
+      "next_actions": [
+        {
+          "id": "release_capacity",
+          "label": "Release retained capacity before retrying"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 507,
+      "title": "Capacity exceeded",
+      "type": "https://fasti.scrobble.dev/v1/problems/capacity-exceeded"
+    },
+    {
+      "capability_id": "identity.route.resolve",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "identity.route.resolve",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "identity.route.resolve",
+      "code": "record_not_found",
+      "detail": "no active Record is available for the requested identifier",
+      "next_actions": [
+        {
+          "id": "verify_record_id",
+          "label": "Verify the Record ID or create a new Record"
+        }
+      ],
+      "param": "/record_id",
+      "param_policy": "fixed",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 404,
+      "title": "Record not found",
+      "type": "https://fasti.scrobble.dev/v1/problems/record-not-found"
+    },
+    {
+      "capability_id": "identity.route.resolve",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
+    },
+    {
+      "capability_id": "identity.route.resolve",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "identity.route.resolve",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
       "capability_id": "listener.configure",
       "code": "capability_unavailable",
       "detail": "requested capability is not available in this body; it is owned by b2",
@@ -2911,6 +11949,600 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "status": 403,
       "title": "Forbidden",
       "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "metadata.claim.refresh",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "metadata.claim.refresh",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "metadata.claim.refresh",
+      "code": "idempotency_conflict",
+      "detail": "operation ID was already used with different request semantics",
+      "next_actions": [
+        {
+          "id": "use_new_operation_id",
+          "label": "Use a new operation ID for a distinct observation"
+        }
+      ],
+      "param": "/operation_id",
+      "param_policy": "fixed",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 409,
+      "title": "Idempotency conflict",
+      "type": "https://fasti.scrobble.dev/v1/problems/idempotency-conflict"
+    },
+    {
+      "capability_id": "metadata.claim.refresh",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "metadata.claim.refresh",
+      "code": "malformed_json",
+      "detail": "request JSON is malformed",
+      "next_actions": [
+        {
+          "id": "correct_json",
+          "label": "Correct the JSON syntax and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 400,
+      "title": "Malformed JSON",
+      "type": "https://fasti.scrobble.dev/v1/problems/malformed-json"
+    },
+    {
+      "capability_id": "metadata.claim.refresh",
+      "code": "metadata_claim_stale",
+      "detail": "the provider refresh did not produce a fresh claim; the last-known-good claim remains active",
+      "next_actions": [
+        {
+          "id": "retry_metadata_refresh",
+          "label": "Retry the metadata refresh or use the labelled last-known-good value"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "prior_state_retained",
+      "status": 409,
+      "title": "Metadata claim stale",
+      "type": "https://fasti.scrobble.dev/v1/problems/metadata-claim-stale"
+    },
+    {
+      "capability_id": "metadata.claim.refresh",
+      "code": "payload_too_large",
+      "detail": "request body exceeds the bounded transport limit",
+      "next_actions": [
+        {
+          "id": "reduce_request_body",
+          "label": "Reduce the request body and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 413,
+      "title": "Payload too large",
+      "type": "https://fasti.scrobble.dev/v1/problems/payload-too-large"
+    },
+    {
+      "capability_id": "metadata.claim.refresh",
+      "code": "provider_credential_expired",
+      "detail": "the configured provider credential has expired",
+      "next_actions": [
+        {
+          "id": "reauthorize_provider",
+          "label": "Reauthorize the provider connection"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 401,
+      "title": "Provider credential expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/provider-credential-expired"
+    },
+    {
+      "capability_id": "metadata.claim.refresh",
+      "code": "provider_credential_invalid",
+      "detail": "the provider rejected the configured credential",
+      "next_actions": [
+        {
+          "id": "replace_provider_credential",
+          "label": "Replace the provider credential and test it again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 401,
+      "title": "Provider credential invalid",
+      "type": "https://fasti.scrobble.dev/v1/problems/provider-credential-invalid"
+    },
+    {
+      "capability_id": "metadata.claim.refresh",
+      "code": "provider_credential_missing",
+      "detail": "this provider capability requires a stored credential",
+      "next_actions": [
+        {
+          "id": "configure_provider_credential",
+          "label": "Configure the required provider credential"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 409,
+      "title": "Provider credential missing",
+      "type": "https://fasti.scrobble.dev/v1/problems/provider-credential-missing"
+    },
+    {
+      "capability_id": "metadata.claim.refresh",
+      "code": "provider_rate_limited",
+      "detail": "the provider request budget is temporarily exhausted",
+      "next_actions": [
+        {
+          "id": "retry_after_provider_limit",
+          "label": "Retry after the provider limit resets"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "prior_state_retained",
+      "status": 429,
+      "title": "Provider rate limited",
+      "type": "https://fasti.scrobble.dev/v1/problems/provider-rate-limited"
+    },
+    {
+      "capability_id": "metadata.claim.refresh",
+      "code": "provider_response_invalid",
+      "detail": "the provider response did not satisfy the bounded response contract",
+      "next_actions": [
+        {
+          "id": "inspect_provider_health",
+          "label": "Inspect provider health before retrying"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "prior_state_retained",
+      "status": 502,
+      "title": "Provider response invalid",
+      "type": "https://fasti.scrobble.dev/v1/problems/provider-response-invalid"
+    },
+    {
+      "capability_id": "metadata.claim.refresh",
+      "code": "provider_route_unavailable",
+      "detail": "no verified provider route is available for this capability",
+      "next_actions": [
+        {
+          "id": "review_provider_route",
+          "label": "Review the provider capability and identity route"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 422,
+      "title": "Provider route unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/provider-route-unavailable"
+    },
+    {
+      "capability_id": "metadata.claim.refresh",
+      "code": "provider_unavailable",
+      "detail": "the provider is unavailable within the bounded request policy",
+      "next_actions": [
+        {
+          "id": "retry_provider",
+          "label": "Retry after checking provider and network status"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "prior_state_retained",
+      "status": 503,
+      "title": "Provider unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/provider-unavailable"
+    },
+    {
+      "capability_id": "metadata.claim.refresh",
+      "code": "record_not_found",
+      "detail": "no active Record is available for the requested identifier",
+      "next_actions": [
+        {
+          "id": "verify_record_id",
+          "label": "Verify the Record ID or create a new Record"
+        }
+      ],
+      "param": "/record_id",
+      "param_policy": "fixed",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 404,
+      "title": "Record not found",
+      "type": "https://fasti.scrobble.dev/v1/problems/record-not-found"
+    },
+    {
+      "capability_id": "metadata.claim.refresh",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "metadata.claim.refresh",
+      "code": "unsupported_media_type",
+      "detail": "request media type is unsupported",
+      "next_actions": [
+        {
+          "id": "use_supported_media_type",
+          "label": "Use the documented media type and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 415,
+      "title": "Unsupported media type",
+      "type": "https://fasti.scrobble.dev/v1/problems/unsupported-media-type"
+    },
+    {
+      "capability_id": "metadata.claim.refresh",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
+      "capability_id": "metadata.projection.configure",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "metadata.projection.configure",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "metadata.projection.configure",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "metadata.projection.configure",
+      "code": "malformed_json",
+      "detail": "request JSON is malformed",
+      "next_actions": [
+        {
+          "id": "correct_json",
+          "label": "Correct the JSON syntax and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 400,
+      "title": "Malformed JSON",
+      "type": "https://fasti.scrobble.dev/v1/problems/malformed-json"
+    },
+    {
+      "capability_id": "metadata.projection.configure",
+      "code": "payload_too_large",
+      "detail": "request body exceeds the bounded transport limit",
+      "next_actions": [
+        {
+          "id": "reduce_request_body",
+          "label": "Reduce the request body and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 413,
+      "title": "Payload too large",
+      "type": "https://fasti.scrobble.dev/v1/problems/payload-too-large"
+    },
+    {
+      "capability_id": "metadata.projection.configure",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "metadata.projection.configure",
+      "code": "unsupported_media_type",
+      "detail": "request media type is unsupported",
+      "next_actions": [
+        {
+          "id": "use_supported_media_type",
+          "label": "Use the documented media type and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 415,
+      "title": "Unsupported media type",
+      "type": "https://fasti.scrobble.dev/v1/problems/unsupported-media-type"
+    },
+    {
+      "capability_id": "metadata.projection.configure",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
+      "capability_id": "metadata.projection.read",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "metadata.projection.read",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "metadata.projection.read",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "metadata.projection.read",
+      "code": "record_not_found",
+      "detail": "no active Record is available for the requested identifier",
+      "next_actions": [
+        {
+          "id": "verify_record_id",
+          "label": "Verify the Record ID or create a new Record"
+        }
+      ],
+      "param": "/record_id",
+      "param_policy": "fixed",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 404,
+      "title": "Record not found",
+      "type": "https://fasti.scrobble.dev/v1/problems/record-not-found"
+    },
+    {
+      "capability_id": "metadata.projection.read",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "metadata.projection.read",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
+      "capability_id": "node.initialize",
+      "code": "already_initialized",
+      "detail": "the local node has already completed its one-time initialization",
+      "next_actions": [
+        {
+          "id": "use_existing_node",
+          "label": "Use the existing node and enrolled client"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 409,
+      "title": "Node already initialized",
+      "type": "https://fasti.scrobble.dev/v1/problems/already-initialized"
     },
     {
       "capability_id": "node.initialize",
@@ -2929,6 +12561,24 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "status": 403,
       "title": "Forbidden",
       "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "node.initialize",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
     },
     {
       "capability_id": "node.initialize",
@@ -2968,6 +12618,24 @@ export const PUBLIC_PROBLEM_CATALOG = {
     },
     {
       "capability_id": "node.initialize",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "node.initialize",
       "code": "unsupported_media_type",
       "detail": "request media type is unsupported",
       "next_actions": [
@@ -3001,6 +12669,60 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "status": 422,
       "title": "Validation failed",
       "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
+      "capability_id": "observation.accept",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "observation.accept",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "observation.accept",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
     },
     {
       "capability_id": "observation.accept",
@@ -3058,6 +12780,24 @@ export const PUBLIC_PROBLEM_CATALOG = {
     },
     {
       "capability_id": "observation.accept",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "observation.accept",
       "code": "invalid_observation",
       "detail": "observation does not satisfy the governed contract",
       "next_actions": [
@@ -3109,6 +12849,42 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "status": 413,
       "title": "Payload too large",
       "type": "https://fasti.scrobble.dev/v1/problems/payload-too-large"
+    },
+    {
+      "capability_id": "observation.accept",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
+    },
+    {
+      "capability_id": "observation.accept",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
     },
     {
       "capability_id": "observation.accept",
@@ -3291,6 +13067,1536 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
     },
     {
+      "capability_id": "profile.anime_grouping_policy.apply",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.apply",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.apply",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.apply",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by m3",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.apply",
+      "code": "capacity_exceeded",
+      "detail": "bounded application capacity has been reached",
+      "next_actions": [
+        {
+          "id": "release_capacity",
+          "label": "Release retained capacity before retrying"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 507,
+      "title": "Capacity exceeded",
+      "type": "https://fasti.scrobble.dev/v1/problems/capacity-exceeded"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.apply",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.apply",
+      "code": "idempotency_conflict",
+      "detail": "operation ID was already used with different request semantics",
+      "next_actions": [
+        {
+          "id": "use_new_operation_id",
+          "label": "Use a new operation ID for a distinct observation"
+        }
+      ],
+      "param": "/operation_id",
+      "param_policy": "fixed",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 409,
+      "title": "Idempotency conflict",
+      "type": "https://fasti.scrobble.dev/v1/problems/idempotency-conflict"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.apply",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.apply",
+      "code": "malformed_json",
+      "detail": "request JSON is malformed",
+      "next_actions": [
+        {
+          "id": "correct_json",
+          "label": "Correct the JSON syntax and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 400,
+      "title": "Malformed JSON",
+      "type": "https://fasti.scrobble.dev/v1/problems/malformed-json"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.apply",
+      "code": "payload_too_large",
+      "detail": "request body exceeds the bounded transport limit",
+      "next_actions": [
+        {
+          "id": "reduce_request_body",
+          "label": "Reduce the request body and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 413,
+      "title": "Payload too large",
+      "type": "https://fasti.scrobble.dev/v1/problems/payload-too-large"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.apply",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.apply",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.apply",
+      "code": "unsupported_media_type",
+      "detail": "request media type is unsupported",
+      "next_actions": [
+        {
+          "id": "use_supported_media_type",
+          "label": "Use the documented media type and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 415,
+      "title": "Unsupported media type",
+      "type": "https://fasti.scrobble.dev/v1/problems/unsupported-media-type"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.apply",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.preview",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.preview",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.preview",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.preview",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by m3",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.preview",
+      "code": "capacity_exceeded",
+      "detail": "bounded application capacity has been reached",
+      "next_actions": [
+        {
+          "id": "release_capacity",
+          "label": "Release retained capacity before retrying"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 507,
+      "title": "Capacity exceeded",
+      "type": "https://fasti.scrobble.dev/v1/problems/capacity-exceeded"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.preview",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.preview",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.preview",
+      "code": "malformed_json",
+      "detail": "request JSON is malformed",
+      "next_actions": [
+        {
+          "id": "correct_json",
+          "label": "Correct the JSON syntax and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 400,
+      "title": "Malformed JSON",
+      "type": "https://fasti.scrobble.dev/v1/problems/malformed-json"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.preview",
+      "code": "payload_too_large",
+      "detail": "request body exceeds the bounded transport limit",
+      "next_actions": [
+        {
+          "id": "reduce_request_body",
+          "label": "Reduce the request body and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 413,
+      "title": "Payload too large",
+      "type": "https://fasti.scrobble.dev/v1/problems/payload-too-large"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.preview",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.preview",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.preview",
+      "code": "unsupported_media_type",
+      "detail": "request media type is unsupported",
+      "next_actions": [
+        {
+          "id": "use_supported_media_type",
+          "label": "Use the documented media type and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 415,
+      "title": "Unsupported media type",
+      "type": "https://fasti.scrobble.dev/v1/problems/unsupported-media-type"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.preview",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.read",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.read",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.read",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.read",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by m3",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.read",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.read",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.read",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.read",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "profile.anime_grouping_policy.read",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
+      "capability_id": "profile.nuvio_collections.clear",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "profile.nuvio_collections.clear",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "profile.nuvio_collections.clear",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
+    },
+    {
+      "capability_id": "profile.nuvio_collections.clear",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by b2",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "profile.nuvio_collections.clear",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "profile.nuvio_collections.clear",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "profile.nuvio_collections.clear",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
+    },
+    {
+      "capability_id": "profile.nuvio_collections.clear",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "profile.nuvio_collections.get",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "profile.nuvio_collections.get",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "profile.nuvio_collections.get",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
+    },
+    {
+      "capability_id": "profile.nuvio_collections.get",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by b2",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "profile.nuvio_collections.get",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "profile.nuvio_collections.get",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "profile.nuvio_collections.get",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
+    },
+    {
+      "capability_id": "profile.nuvio_collections.get",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "profile.nuvio_collections.replace",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "profile.nuvio_collections.replace",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "profile.nuvio_collections.replace",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
+    },
+    {
+      "capability_id": "profile.nuvio_collections.replace",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by b2",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "profile.nuvio_collections.replace",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "profile.nuvio_collections.replace",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "profile.nuvio_collections.replace",
+      "code": "malformed_json",
+      "detail": "request JSON is malformed",
+      "next_actions": [
+        {
+          "id": "correct_json",
+          "label": "Correct the JSON syntax and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 400,
+      "title": "Malformed JSON",
+      "type": "https://fasti.scrobble.dev/v1/problems/malformed-json"
+    },
+    {
+      "capability_id": "profile.nuvio_collections.replace",
+      "code": "payload_too_large",
+      "detail": "request body exceeds the bounded transport limit",
+      "next_actions": [
+        {
+          "id": "reduce_request_body",
+          "label": "Reduce the request body and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 413,
+      "title": "Payload too large",
+      "type": "https://fasti.scrobble.dev/v1/problems/payload-too-large"
+    },
+    {
+      "capability_id": "profile.nuvio_collections.replace",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
+    },
+    {
+      "capability_id": "profile.nuvio_collections.replace",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "profile.nuvio_collections.replace",
+      "code": "unsupported_media_type",
+      "detail": "request media type is unsupported",
+      "next_actions": [
+        {
+          "id": "use_supported_media_type",
+          "label": "Use the documented media type and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 415,
+      "title": "Unsupported media type",
+      "type": "https://fasti.scrobble.dev/v1/problems/unsupported-media-type"
+    },
+    {
+      "capability_id": "profile.nuvio_collections.replace",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.list",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.list",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.list",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.list",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by b2",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.list",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.list",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.list",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.list",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.set",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.set",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.set",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.set",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by b2",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.set",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.set",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.set",
+      "code": "malformed_json",
+      "detail": "request JSON is malformed",
+      "next_actions": [
+        {
+          "id": "correct_json",
+          "label": "Correct the JSON syntax and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 400,
+      "title": "Malformed JSON",
+      "type": "https://fasti.scrobble.dev/v1/problems/malformed-json"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.set",
+      "code": "payload_too_large",
+      "detail": "request body exceeds the bounded transport limit",
+      "next_actions": [
+        {
+          "id": "reduce_request_body",
+          "label": "Reduce the request body and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 413,
+      "title": "Payload too large",
+      "type": "https://fasti.scrobble.dev/v1/problems/payload-too-large"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.set",
+      "code": "record_not_found",
+      "detail": "no active Record is available for the requested identifier",
+      "next_actions": [
+        {
+          "id": "verify_record_id",
+          "label": "Verify the Record ID or create a new Record"
+        }
+      ],
+      "param": "/record_id",
+      "param_policy": "fixed",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 404,
+      "title": "Record not found",
+      "type": "https://fasti.scrobble.dev/v1/problems/record-not-found"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.set",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.set",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.set",
+      "code": "unsupported_media_type",
+      "detail": "request media type is unsupported",
+      "next_actions": [
+        {
+          "id": "use_supported_media_type",
+          "label": "Use the documented media type and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 415,
+      "title": "Unsupported media type",
+      "type": "https://fasti.scrobble.dev/v1/problems/unsupported-media-type"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.set",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
       "capability_id": "profile.select",
       "code": "capability_unavailable",
       "detail": "requested capability is not available in this body; it is owned by b2",
@@ -3325,6 +14631,600 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "status": 403,
       "title": "Forbidden",
       "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "provider.credential.configure",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "provider.credential.configure",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "provider.credential.configure",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "provider.credential.configure",
+      "code": "malformed_json",
+      "detail": "request JSON is malformed",
+      "next_actions": [
+        {
+          "id": "correct_json",
+          "label": "Correct the JSON syntax and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 400,
+      "title": "Malformed JSON",
+      "type": "https://fasti.scrobble.dev/v1/problems/malformed-json"
+    },
+    {
+      "capability_id": "provider.credential.configure",
+      "code": "payload_too_large",
+      "detail": "request body exceeds the bounded transport limit",
+      "next_actions": [
+        {
+          "id": "reduce_request_body",
+          "label": "Reduce the request body and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 413,
+      "title": "Payload too large",
+      "type": "https://fasti.scrobble.dev/v1/problems/payload-too-large"
+    },
+    {
+      "capability_id": "provider.credential.configure",
+      "code": "provider_credential_invalid",
+      "detail": "the provider rejected the configured credential",
+      "next_actions": [
+        {
+          "id": "replace_provider_credential",
+          "label": "Replace the provider credential and test it again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 401,
+      "title": "Provider credential invalid",
+      "type": "https://fasti.scrobble.dev/v1/problems/provider-credential-invalid"
+    },
+    {
+      "capability_id": "provider.credential.configure",
+      "code": "provider_unavailable",
+      "detail": "the provider is unavailable within the bounded request policy",
+      "next_actions": [
+        {
+          "id": "retry_provider",
+          "label": "Retry after checking provider and network status"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "prior_state_retained",
+      "status": 503,
+      "title": "Provider unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/provider-unavailable"
+    },
+    {
+      "capability_id": "provider.credential.configure",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "provider.credential.configure",
+      "code": "unsupported_media_type",
+      "detail": "request media type is unsupported",
+      "next_actions": [
+        {
+          "id": "use_supported_media_type",
+          "label": "Use the documented media type and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 415,
+      "title": "Unsupported media type",
+      "type": "https://fasti.scrobble.dev/v1/problems/unsupported-media-type"
+    },
+    {
+      "capability_id": "provider.credential.configure",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
+      "capability_id": "provider.credential.test",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "provider.credential.test",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "provider.credential.test",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "provider.credential.test",
+      "code": "provider_credential_expired",
+      "detail": "the configured provider credential has expired",
+      "next_actions": [
+        {
+          "id": "reauthorize_provider",
+          "label": "Reauthorize the provider connection"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 401,
+      "title": "Provider credential expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/provider-credential-expired"
+    },
+    {
+      "capability_id": "provider.credential.test",
+      "code": "provider_credential_invalid",
+      "detail": "the provider rejected the configured credential",
+      "next_actions": [
+        {
+          "id": "replace_provider_credential",
+          "label": "Replace the provider credential and test it again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 401,
+      "title": "Provider credential invalid",
+      "type": "https://fasti.scrobble.dev/v1/problems/provider-credential-invalid"
+    },
+    {
+      "capability_id": "provider.credential.test",
+      "code": "provider_credential_missing",
+      "detail": "this provider capability requires a stored credential",
+      "next_actions": [
+        {
+          "id": "configure_provider_credential",
+          "label": "Configure the required provider credential"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 409,
+      "title": "Provider credential missing",
+      "type": "https://fasti.scrobble.dev/v1/problems/provider-credential-missing"
+    },
+    {
+      "capability_id": "provider.credential.test",
+      "code": "provider_rate_limited",
+      "detail": "the provider request budget is temporarily exhausted",
+      "next_actions": [
+        {
+          "id": "retry_after_provider_limit",
+          "label": "Retry after the provider limit resets"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "prior_state_retained",
+      "status": 429,
+      "title": "Provider rate limited",
+      "type": "https://fasti.scrobble.dev/v1/problems/provider-rate-limited"
+    },
+    {
+      "capability_id": "provider.credential.test",
+      "code": "provider_response_invalid",
+      "detail": "the provider response did not satisfy the bounded response contract",
+      "next_actions": [
+        {
+          "id": "inspect_provider_health",
+          "label": "Inspect provider health before retrying"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "prior_state_retained",
+      "status": 502,
+      "title": "Provider response invalid",
+      "type": "https://fasti.scrobble.dev/v1/problems/provider-response-invalid"
+    },
+    {
+      "capability_id": "provider.credential.test",
+      "code": "provider_route_unavailable",
+      "detail": "no verified provider route is available for this capability",
+      "next_actions": [
+        {
+          "id": "review_provider_route",
+          "label": "Review the provider capability and identity route"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 422,
+      "title": "Provider route unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/provider-route-unavailable"
+    },
+    {
+      "capability_id": "provider.credential.test",
+      "code": "provider_unavailable",
+      "detail": "the provider is unavailable within the bounded request policy",
+      "next_actions": [
+        {
+          "id": "retry_provider",
+          "label": "Retry after checking provider and network status"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "prior_state_retained",
+      "status": 503,
+      "title": "Provider unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/provider-unavailable"
+    },
+    {
+      "capability_id": "provider.credential.test",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "provider.health.read",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "provider.health.read",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "provider.health.read",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "provider.health.read",
+      "code": "provider_rate_limited",
+      "detail": "the provider request budget is temporarily exhausted",
+      "next_actions": [
+        {
+          "id": "retry_after_provider_limit",
+          "label": "Retry after the provider limit resets"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "prior_state_retained",
+      "status": 429,
+      "title": "Provider rate limited",
+      "type": "https://fasti.scrobble.dev/v1/problems/provider-rate-limited"
+    },
+    {
+      "capability_id": "provider.health.read",
+      "code": "provider_response_invalid",
+      "detail": "the provider response did not satisfy the bounded response contract",
+      "next_actions": [
+        {
+          "id": "inspect_provider_health",
+          "label": "Inspect provider health before retrying"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "prior_state_retained",
+      "status": 502,
+      "title": "Provider response invalid",
+      "type": "https://fasti.scrobble.dev/v1/problems/provider-response-invalid"
+    },
+    {
+      "capability_id": "provider.health.read",
+      "code": "provider_route_unavailable",
+      "detail": "no verified provider route is available for this capability",
+      "next_actions": [
+        {
+          "id": "review_provider_route",
+          "label": "Review the provider capability and identity route"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 422,
+      "title": "Provider route unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/provider-route-unavailable"
+    },
+    {
+      "capability_id": "provider.health.read",
+      "code": "provider_unavailable",
+      "detail": "the provider is unavailable within the bounded request policy",
+      "next_actions": [
+        {
+          "id": "retry_provider",
+          "label": "Retry after checking provider and network status"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "prior_state_retained",
+      "status": 503,
+      "title": "Provider unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/provider-unavailable"
+    },
+    {
+      "capability_id": "provider.health.read",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "provider.list",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "provider.list",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "provider.list",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "provider.list",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
     },
     {
       "capability_id": "receipt.replay",
@@ -3451,9 +15351,9 @@ type JsonObject = Record<string, unknown>;
 const HEALTH_ALLOWED = ["status", "version"] as const;
 const HEALTH_REQUIRED = ["status", "version"] as const;
 // prettier-ignore
-const CAPABILITY_IDS = ["client.enroll", "correction.chain.append", "correction.chain.inspect", "credential.revoke", "credential.rotate", "identity.identifier.attach", "identity.record.create", "identity.review.defer", "identity.review.inspect", "identity.review.resolve", "identity.review.resume", "listener.configure", "node.initialize", "observation.accept", "portability.workspace.export", "portability.workspace.restore", "portability.workspace.verify", "profile.select", "receipt.replay", "receipt.stream", "system.capabilities.discover", "system.health"] as const;
+const CAPABILITY_IDS = ["access.identity.bootstrap", "access.projection.read", "browser.session.create", "browser.session.end", "browser.session.profile.select", "browser.session.read", "browser.session.revoke", "browser.session.rotate", "browser.sessions.list", "browser.sessions.revoke_all", "browser.sessions.revoke_others", "client.enroll", "correction.chain.append", "correction.chain.inspect", "credential.revoke", "credential.rotate", "identity.identifier.attach", "identity.namespace.register", "identity.record.create", "identity.record.list", "identity.review.defer", "identity.review.inspect", "identity.review.resolve", "identity.review.resume", "identity.route.resolve", "integration.status", "listener.configure", "metadata.claim.refresh", "metadata.projection.configure", "metadata.projection.read", "node.initialize", "observation.accept", "portability.workspace.export", "portability.workspace.restore", "portability.workspace.verify", "profile.anime_grouping_policy.apply", "profile.anime_grouping_policy.preview", "profile.anime_grouping_policy.read", "profile.nuvio_collections.clear", "profile.nuvio_collections.get", "profile.nuvio_collections.replace", "profile.record.tracking_disposition.list", "profile.record.tracking_disposition.set", "profile.select", "provider.credential.configure", "provider.credential.test", "provider.health.read", "provider.list", "receipt.replay", "receipt.stream", "system.capabilities.discover", "system.health"] as const;
 // prettier-ignore
-const PROBLEM_CODES = ["capability_unavailable", "capacity_exceeded", "forbidden", "idempotency_conflict", "invalid_identifier", "invalid_observation", "malformed_json", "payload_too_large", "receipt_not_found", "unsupported_media_type", "validation_failed"] as const;
+const PROBLEM_CODES = ["already_initialized", "auth_browser_binding_invalid", "auth_continuation_persistence_failed", "auth_identity_conflict", "auth_selection_changed", "auth_subject_unaffiliated", "authentication_failed", "bootstrap_closed", "browser_session_expired", "browser_session_revoked", "capability_unavailable", "capacity_exceeded", "forbidden", "idempotency_conflict", "identity_conflict", "identity_service_unavailable", "integrity_failed", "invalid_identifier", "invalid_observation", "malformed_json", "metadata_claim_stale", "payload_too_large", "provider_credential_expired", "provider_credential_invalid", "provider_credential_missing", "provider_rate_limited", "provider_response_invalid", "provider_route_unavailable", "provider_unavailable", "receipt_not_found", "record_not_found", "session_policy_changed", "storage_unavailable", "trailbase_proof_invalid", "trailbase_session_cleanup_failed", "trailbase_trust_unavailable", "trailbase_version_unsupported", "unsupported_media_type", "validation_failed"] as const;
 // prettier-ignore
 const PROBLEM_ALLOWED = ["actual", "capability_id", "code", "correlation_id", "detail", "next_actions", "param", "retryability", "safe_state", "status", "title", "type", "violations"] as const;
 // prettier-ignore

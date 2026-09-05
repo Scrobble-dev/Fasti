@@ -4,6 +4,7 @@ members = [
   "apps/fastid",
   "crates/fasti-domain",
   "crates/fasti-application",
+  "crates/fasti-provider-runtime",
   "crates/fasti-contracts",
   "crates/fasti-store",
   "crates/fasti-api",
@@ -24,12 +25,14 @@ publish = false
 # Internal crates
 fasti-domain = { path = "crates/fasti-domain", version = "0.1.0" }
 fasti-application = { path = "crates/fasti-application", version = "0.1.0" }
+fasti-provider-runtime = { path = "crates/fasti-provider-runtime", version = "0.1.0" }
 fasti-contracts = { path = "crates/fasti-contracts", version = "0.1.0" }
 fasti-store = { path = "crates/fasti-store", version = "0.1.0" }
 fasti-api = { path = "crates/fasti-api", version = "0.1.0" }
 
 # Async & Runtime
 tokio = { version = "1.40", features = ["full"] }
+reqwest = { version = "=0.13.4", default-features = false, features = ["rustls", "stream"] }
 
 # Serialization & Models
 serde = { version = "1.0", features = ["derive"] }
@@ -42,20 +45,23 @@ chrono = { version = "0.4", features = ["serde"] }
 # Web & API
 axum = { version = "0.8", features = ["macros", "ws"] }
 tower = { version = "0.5", features = ["util", "timeout"] }
+tower-http = { version = "0.7", features = ["fs"] }
 
 # SQLite & Persistence
-rusqlite = { version = "0.32", features = ["backup", "bundled", "chrono", "hooks", "uuid"] }
+rusqlite = { version = "0.40", features = ["backup", "bundled", "chrono", "hooks", "uuid"] }
 
 # CLI & Utilities
 clap = { version = "4.5", features = ["derive", "env"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 thiserror = "2.0"
+zeroize = "1.8"
 anyhow = "1.0"
+argon2 = "0.5.3"
 serde-saphyr = "1.0.1"
 proptest = "1.6"
 static_assertions = "1.1"
-getrandom = "0.3"
+getrandom = "0.4"
 rustix = { version = "1.1.4", features = ["fs"] }
 tar = { version = "0.4.46", default-features = false }
 zstd = { version = "0.13.3", default-features = false }

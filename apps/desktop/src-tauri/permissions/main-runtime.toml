@@ -1,0 +1,38 @@
+"$schema" = "../gen/schemas/schema.json"
+
+[[permission]]
+identifier = "main-runtime"
+description = "Allows the existing packaged Workbench commands from the exact main WebView capability."
+commands.allow = [
+  "setup_status",
+  "complete_setup",
+  "start_first_administrator_bootstrap",
+  "list_api_clients",
+  "create_api_client",
+  "revoke_api_client",
+  "load_network_configuration",
+  "save_network_configuration",
+  "test_endpoint_connection",
+  "provider_credential_status",
+  "save_provider_credential",
+  "delete_provider_credential",
+  "test_provider_credential",
+  "read_provider_health",
+  "search_provider",
+  "track_provider_candidate",
+  "apply_provider_metadata",
+  "refresh_metadata_claims",
+  "read_metadata_projection",
+  "configure_metadata_projection",
+  "list_records",
+  "create_record",
+  "attach_identifier",
+  "register_namespace",
+  "list_tracking_dispositions",
+  "set_tracking_disposition",
+  "get_nuvio_collections",
+  "replace_nuvio_collections",
+  "clear_nuvio_collections",
+  "list_reviews",
+  "resolve_review"
+]

@@ -1,8 +1,10 @@
+use crate::browser_auth::authenticate_session;
 use crate::crypto::{constant_time_eq, sha256_hex};
 use crate::schema::{migrate, SCHEMA_VERSION};
 use chrono::{DateTime, Utc};
 use fasti_application::{
-    authorize, AccessSnapshot, ApplicationResult, AuthorizationRequirement, CapabilityKey,
+    authorize, AccessSnapshot, ApplicationAccessContext, ApplicationResult,
+    AuthorizationRequirement, AuthorizedActor, AuthorizedApplicationAccess, CapabilityKey,
     CredentialStatus, FastiProblem, GrantStatus, ProblemCode, RequestAccessContext, ScopeKey,
 };
 use fasti_domain::{
@@ -18,8 +20,12 @@ use thiserror::Error;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
+use std::io::{Read, Seek, SeekFrom, Write};
+#[cfg(any(target_os = "linux", target_os = "android"))]
 use std::os::fd::AsRawFd;
+#[cfg(any(target_os = "linux", target_os = "android"))]
+use std::os::unix::fs::MetadataExt;
 
 pub const DEFAULT_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 pub const MAX_EVIDENCE_BYTES: u64 = 8 * 1024 * 1024;
@@ -30,6 +36,7 @@ pub const MAX_TEMP_EVIDENCE_BYTES: u64 = 32 * 1024 * 1024;
 /// state before later retention and operator cleanup capabilities exist.
 pub const MAX_PREPARED_EVIDENCE_BYTES: u64 = 64 * 1024 * 1024;
 pub const MAX_CONCURRENT_UPLOADS: usize = 4;
+const DATA_ROOT_NONCE_BYTES: usize = 32;
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -52,6 +59,8 @@ pub enum StoreOpenError {
     DataRootLocked,
     #[error("restore activation state is incomplete or invalid")]
     RestoreActivation,
+    #[error("human Access restart recovery failed")]
+    AccessRecovery,
 }
 
 #[derive(Debug, Clone)]
@@ -59,22 +68,39 @@ pub struct SqliteKernel {
     pub(crate) inner: Arc<KernelInner>,
 }
 
+/// Stable identity of one opened physical data root.
+///
+/// The value comes from the retained directory descriptor, not from the
+/// configured pathname. It is suitable for local account scoping but is not a
+/// portable workspace identifier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct DataRootIdentity([u8; 16 + DATA_ROOT_NONCE_BYTES]);
+
+impl DataRootIdentity {
+    pub fn as_bytes(&self) -> &[u8; 16 + DATA_ROOT_NONCE_BYTES] {
+        &self.0
+    }
+}
+
 /// Exclusive access to one data root without creating or opening `current/`.
 ///
 /// The daemon kernel and stopped-node CLI use this same guard so restore can
 /// prove the daemon is stopped before it inspects staging or active data.
-/// The lock follows the opened physical root across a rename; a replacement at
-/// the configured pathname is a distinct root.
+/// On Linux and Android, the lock follows the opened physical root across a
+/// rename; a replacement at the configured pathname is a distinct root.
+/// A live Rust guard or kernel owner must not be used or dropped in a forked
+/// child. Child processes must exec or exit without running those destructors.
 #[derive(Debug)]
 pub struct LockedDataRoot {
     path: PathBuf,
-    #[cfg(target_os = "linux")]
+    identity: DataRootIdentity,
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     root_directory: File,
     _lock: File,
 }
 
 impl LockedDataRoot {
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     pub fn acquire(path: impl AsRef<Path>) -> Result<Self, StoreOpenError> {
         let path = path.as_ref().to_path_buf();
         if path.file_name().is_none() {
@@ -85,15 +111,21 @@ impl LockedDataRoot {
         }
         prepare_private_directory(&path)?;
         let root_directory = open_data_root_directory(&path)?;
-        let lock = acquire_data_root_lock(&path, &root_directory)?;
+        let path = fs::read_link(format!("/proc/self/fd/{}", root_directory.as_raw_fd()))?;
+        let mut lock = acquire_data_root_lock(&path, &root_directory)?;
+        let identity = data_root_identity(&path, &root_directory, &mut lock).inspect_err(|_| {
+            // No guard exists yet; release inherited lock ownership on error.
+            let _ = lock.unlock();
+        })?;
         Ok(Self {
             path,
+            identity,
             root_directory,
             _lock: lock,
         })
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
     pub fn acquire(_path: impl AsRef<Path>) -> Result<Self, StoreOpenError> {
         Err(StoreOpenError::UnsupportedPlatform)
     }
@@ -102,12 +134,17 @@ impl LockedDataRoot {
         &self.path
     }
 
+    pub fn identity(&self) -> DataRootIdentity {
+        self.identity
+    }
+
     /// Returns an anchored data-root directory handle where descriptor-relative
     /// filesystem operations are supported.
     ///
     /// Linux restore and recovery code must use this handle instead of
-    /// resolving child paths from [`Self::path`] again. Acquiring the guard
-    /// fails on other platforms until they provide equivalent semantics.
+    /// resolving child paths from [`Self::path`] again. Android retains a
+    /// directory handle for kernel storage but does not expose Linux-only B3
+    /// restore behavior through this method.
     pub fn anchored_directory(&self) -> Option<&File> {
         #[cfg(target_os = "linux")]
         {
@@ -118,29 +155,36 @@ impl LockedDataRoot {
             None
         }
     }
+}
 
-    fn current_path(&self) -> PathBuf {
-        #[cfg(target_os = "linux")]
-        {
-            PathBuf::from(format!(
-                "/proc/self/fd/{}/current",
-                self.root_directory.as_raw_fd()
-            ))
-        }
-        #[cfg(not(target_os = "linux"))]
-        {
-            self.path.join("current")
-        }
+#[cfg(any(target_os = "linux", target_os = "android"))]
+impl Drop for LockedDataRoot {
+    fn drop(&mut self) {
+        // CLOEXEC does not close a child's inherited descriptor until exec.
+        // Release the shared lock now; ordinary close remains the fallback
+        // if the OS rejects unlock. Drop must not panic during other cleanup.
+        let _ = self._lock.unlock();
     }
 }
 
 #[derive(Debug)]
 pub(crate) struct KernelInner {
     pub(crate) current_root: PathBuf,
-    pub(crate) payload_root: PathBuf,
     pub(crate) scratch_root: PathBuf,
     pub(crate) connection: Mutex<Connection>,
     pub(crate) upload_budget: Mutex<UploadBudget>,
+    // Serializes ensure_bootstrap_secret's read-validate-recover sequence.
+    // Without it, two concurrent callers can each see the same malformed
+    // file, and the one that loses the race can delete a secret the other
+    // just published, then republish a different one -- see
+    // ensure_bootstrap_secret's recovery loop.
+    pub(crate) bootstrap_secret: Mutex<()>,
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    _current_directory: File,
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    payload_directory: File,
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    _scratch_directory: File,
     // Rust drops fields in declaration order; release this lock last.
     pub(crate) data_root: LockedDataRoot,
 }
@@ -163,23 +207,66 @@ impl SqliteKernel {
             crate::restore_activation::recover_activation_before_database_open(root)
                 .map_err(|_| StoreOpenError::RestoreActivation)?;
         }
-        let current_root = data_root.current_path();
-        let payload_root = current_root.join("payloads").join("sha256");
-        let scratch_root = current_root.join("scratch").join("uploads");
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        let current_directory =
+            open_or_create_kernel_directory(&data_root.root_directory, "current")?;
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        let payloads_directory = open_or_create_kernel_directory(&current_directory, "payloads")?;
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        let payload_directory = open_or_create_kernel_directory(&payloads_directory, "sha256")?;
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        let scratch_base = open_or_create_kernel_directory(&current_directory, "scratch")?;
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        let scratch_directory = open_or_create_kernel_directory(&scratch_base, "uploads")?;
 
-        prepare_private_directory(&current_root)?;
-        prepare_private_directory(&payload_root)?;
-        prepare_private_directory(&scratch_root)?;
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        let current_root = descriptor_path(&current_directory);
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        let scratch_root = descriptor_path(&scratch_directory);
+
+        #[cfg(not(any(target_os = "linux", target_os = "android")))]
+        let current_root = data_root.path.join("current");
+        #[cfg(not(any(target_os = "linux", target_os = "android")))]
+        let payload_root = current_root.join("payloads").join("sha256");
+        #[cfg(not(any(target_os = "linux", target_os = "android")))]
+        let scratch_root = current_root.join("scratch").join("uploads");
+        #[cfg(not(any(target_os = "linux", target_os = "android")))]
+        {
+            prepare_private_directory(&current_root)?;
+            prepare_private_directory(&payload_root)?;
+            prepare_private_directory(&scratch_root)?;
+        }
 
         let database_path = current_root.join("fasti.sqlite3");
+        // Open the final path component atomically relative to the held
+        // current-directory descriptor (NOFOLLOW + BENEATH + NO_SYMLINKS) on
+        // Linux/Android, so a same-user process cannot replace fasti.sqlite3
+        // with a symlink between a path-based check and SQLite's own open.
+        // SQLITE_OPEN_NOFOLLOW is intentionally not set on those platforms:
+        // bundled SQLite >= 3.39.3 canonicalizes the whole path before
+        // opening, which rejects the /proc/self/fd/<fd> descriptor path this
+        // guard hands it. The openat2 resolve flags already give the
+        // NOFOLLOW guarantee for the real filesystem entry.
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        let database_file = open_kernel_database_file(&current_directory, "fasti.sqlite3")?;
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        let connection = {
+            set_owner_only_open_file_permissions(&database_file)?;
+            Connection::open_with_flags(descriptor_path(&database_file), OpenFlags::default())?
+        };
+        // database_file stays alive until here so /proc/self/fd/<fd> stays
+        // resolvable for the open() call above; SQLite holds its own fd
+        // after that, so database_file can now be dropped normally.
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        drop(database_file);
+
+        #[cfg(not(any(target_os = "linux", target_os = "android")))]
         reject_unsafe_existing_file(&database_path)?;
-        let flags = OpenFlags::default();
-        #[cfg(not(target_os = "linux"))]
-        let flags = flags | OpenFlags::SQLITE_OPEN_NOFOLLOW;
-        // Linux is already rooted through a retained directory descriptor.
-        // SQLite rejects NOFOLLOW when `/proc/self/fd` appears in the path,
-        // while its final file open still uses the bundled no-follow guard.
+        #[cfg(not(any(target_os = "linux", target_os = "android")))]
+        let flags = OpenFlags::default() | OpenFlags::SQLITE_OPEN_NOFOLLOW;
+        #[cfg(not(any(target_os = "linux", target_os = "android")))]
         let connection = Connection::open_with_flags(&database_path, flags)?;
+
         harden_private_regular_file(&database_path)?;
         connection.busy_timeout(DEFAULT_BUSY_TIMEOUT)?;
         connection.pragma_update(None, "foreign_keys", "ON")?;
@@ -201,14 +288,31 @@ impl SqliteKernel {
                 actual: version,
             });
         }
+        crate::human_access::recover_auth_ceremonies_on_open(
+            &connection,
+            RequestCorrelationId::new_v7(),
+            now(),
+        )
+        .map_err(|error| match error {
+            crate::human_access::HumanAccessStoreError::Storage(error) => {
+                StoreOpenError::Sqlite(error)
+            }
+            _ => StoreOpenError::AccessRecovery,
+        })?;
 
         Ok(Self {
             inner: Arc::new(KernelInner {
                 current_root,
-                payload_root,
                 scratch_root,
                 connection: Mutex::new(connection),
                 upload_budget: Mutex::new(UploadBudget::default()),
+                bootstrap_secret: Mutex::new(()),
+                #[cfg(any(target_os = "linux", target_os = "android"))]
+                _current_directory: current_directory,
+                #[cfg(any(target_os = "linux", target_os = "android"))]
+                payload_directory,
+                #[cfg(any(target_os = "linux", target_os = "android"))]
+                _scratch_directory: scratch_directory,
                 data_root,
             }),
         })
@@ -218,8 +322,65 @@ impl SqliteKernel {
         self.inner.data_root.path()
     }
 
+    pub fn data_root_identity(&self) -> DataRootIdentity {
+        self.inner.data_root.identity()
+    }
+
     pub fn database_path(&self) -> PathBuf {
         self.inner.current_root.join("fasti.sqlite3")
+    }
+
+    pub(crate) fn prepare_evidence_destination(
+        &self,
+        digest_hex: &str,
+    ) -> Result<(File, PathBuf), StoreOpenError> {
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        {
+            validate_evidence_digest(digest_hex)?;
+            let (prefix, created) =
+                open_or_create_private_directory(&self.inner.payload_directory, &digest_hex[..2])?;
+            if created {
+                self.inner.payload_directory.sync_all()?;
+            }
+            let destination = descriptor_path(&prefix).join(digest_hex);
+            Ok((prefix, destination))
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "android")))]
+        {
+            let _ = digest_hex;
+            Err(StoreOpenError::UnsupportedPlatform)
+        }
+    }
+
+    pub(crate) fn open_evidence_file(&self, digest_hex: &str) -> Result<File, StoreOpenError> {
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        {
+            validate_evidence_digest(digest_hex)?;
+            let prefix = open_kernel_directory(&self.inner.payload_directory, &digest_hex[..2])?;
+            self.open_evidence_file_at(&prefix, digest_hex)
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "android")))]
+        {
+            let _ = digest_hex;
+            Err(StoreOpenError::UnsupportedPlatform)
+        }
+    }
+
+    pub(crate) fn open_evidence_file_at(
+        &self,
+        prefix_directory: &File,
+        digest_hex: &str,
+    ) -> Result<File, StoreOpenError> {
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        {
+            validate_evidence_digest(digest_hex)?;
+            open_kernel_regular_file(prefix_directory, digest_hex)
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "android")))]
+        {
+            let _ = (prefix_directory, digest_hex);
+            Err(StoreOpenError::UnsupportedPlatform)
+        }
     }
 
     pub(crate) fn lock_connection(
@@ -247,15 +408,28 @@ impl SqliteKernel {
             ))
         })
     }
+
+    pub(crate) fn lock_bootstrap_secret(
+        &self,
+        capability: CapabilityKey,
+        correlation_id: RequestCorrelationId,
+    ) -> ApplicationResult<MutexGuard<'_, ()>> {
+        self.inner.bootstrap_secret.lock().map_err(|_| {
+            Box::new(FastiProblem::storage_unavailable(
+                capability,
+                correlation_id,
+            ))
+        })
+    }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 fn acquire_data_root_lock(data_root: &Path, root_directory: &File) -> Result<File, StoreOpenError> {
     let file = open_data_root_lock(root_directory)?;
     finish_data_root_lock(data_root, file)
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 fn finish_data_root_lock(data_root: &Path, file: File) -> Result<File, StoreOpenError> {
     if !file.metadata()?.is_file() {
         return Err(unsafe_path(
@@ -271,14 +445,14 @@ fn finish_data_root_lock(data_root: &Path, file: File) -> Result<File, StoreOpen
     Ok(file)
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 fn open_data_root_directory(data_root: &Path) -> Result<File, StoreOpenError> {
     let directory = open_directory(data_root)?;
     set_owner_only_open_directory_permissions(&directory)?;
     Ok(directory)
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 fn open_directory(path: &Path) -> Result<File, StoreOpenError> {
     let fd = rustix::fs::open(
         path,
@@ -290,6 +464,215 @@ fn open_directory(path: &Path) -> Result<File, StoreOpenError> {
     )
     .map_err(|error| StoreOpenError::Io(std::io::Error::from_raw_os_error(error.raw_os_error())))?;
     Ok(File::from(fd))
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn data_root_identity(
+    data_root: &Path,
+    root_directory: &File,
+    lock: &mut File,
+) -> Result<DataRootIdentity, StoreOpenError> {
+    let metadata = root_directory.metadata()?;
+    let nonce = data_root_nonce(data_root, root_directory, lock)?;
+    Ok(data_root_identity_from_parts(
+        metadata.dev(),
+        metadata.ino(),
+        nonce,
+    ))
+}
+
+fn data_root_identity_from_parts(
+    device: u64,
+    inode: u64,
+    nonce: [u8; DATA_ROOT_NONCE_BYTES],
+) -> DataRootIdentity {
+    let mut value = [0_u8; 16 + DATA_ROOT_NONCE_BYTES];
+    value[..8].copy_from_slice(&device.to_be_bytes());
+    value[8..16].copy_from_slice(&inode.to_be_bytes());
+    value[16..].copy_from_slice(&nonce);
+    DataRootIdentity(value)
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn data_root_nonce(
+    data_root: &Path,
+    root_directory: &File,
+    lock: &mut File,
+) -> Result<[u8; DATA_ROOT_NONCE_BYTES], StoreOpenError> {
+    let lock_path = data_root.join("fasti.lock");
+    let length = lock.metadata()?.len();
+    let mut nonce = [0_u8; DATA_ROOT_NONCE_BYTES];
+    lock.seek(SeekFrom::Start(0))?;
+    match length {
+        0 => {
+            getrandom::fill(&mut nonce).map_err(|_| {
+                StoreOpenError::Io(std::io::Error::other(
+                    "the operating system random source is unavailable",
+                ))
+            })?;
+            lock.write_all(&nonce)?;
+            lock.sync_all()?;
+            root_directory.sync_all()?;
+        }
+        length if length == DATA_ROOT_NONCE_BYTES as u64 => lock.read_exact(&mut nonce)?,
+        _ => {
+            return Err(unsafe_path(
+                &lock_path,
+                "expected an empty legacy lock or a 32-byte data-root nonce",
+            ))
+        }
+    }
+    Ok(nonce)
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn descriptor_path(directory: &File) -> PathBuf {
+    PathBuf::from(format!("/proc/self/fd/{}", directory.as_raw_fd()))
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn open_or_create_kernel_directory(parent: &File, name: &str) -> Result<File, StoreOpenError> {
+    open_or_create_private_directory(parent, name).map(|(directory, _created)| directory)
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn open_or_create_private_directory(
+    parent: &File,
+    name: &str,
+) -> Result<(File, bool), StoreOpenError> {
+    let created = match rustix::fs::mkdirat(parent, name, rustix::fs::Mode::from_raw_mode(0o700)) {
+        Ok(()) => true,
+        Err(rustix::io::Errno::EXIST) => false,
+        Err(error) => {
+            return Err(StoreOpenError::Io(std::io::Error::from_raw_os_error(
+                error.raw_os_error(),
+            )))
+        }
+    };
+    let directory = open_kernel_directory(parent, name)?;
+    set_owner_only_open_directory_permissions(&directory)?;
+    Ok((directory, created))
+}
+
+fn validate_evidence_digest(digest_hex: &str) -> Result<(), StoreOpenError> {
+    if digest_hex.len() == 64
+        && digest_hex
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        Ok(())
+    } else {
+        Err(unsafe_path(
+            Path::new(digest_hex),
+            "expected a canonical SHA-256 digest",
+        ))
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn open_kernel_directory(parent: &File, name: &str) -> Result<File, StoreOpenError> {
+    let fd = rustix::fs::openat2(
+        parent,
+        name,
+        rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::DIRECTORY
+            | rustix::fs::OFlags::CLOEXEC
+            | rustix::fs::OFlags::NOFOLLOW,
+        rustix::fs::Mode::empty(),
+        rustix::fs::ResolveFlags::BENEATH
+            | rustix::fs::ResolveFlags::NO_MAGICLINKS
+            | rustix::fs::ResolveFlags::NO_SYMLINKS
+            | rustix::fs::ResolveFlags::NO_XDEV,
+    )
+    .map_err(|error| StoreOpenError::Io(std::io::Error::from_raw_os_error(error.raw_os_error())))?;
+    Ok(File::from(fd))
+}
+
+#[cfg(target_os = "linux")]
+fn open_kernel_regular_file(parent: &File, name: &str) -> Result<File, StoreOpenError> {
+    let fd = rustix::fs::openat2(
+        parent,
+        name,
+        rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::NOFOLLOW,
+        rustix::fs::Mode::empty(),
+        rustix::fs::ResolveFlags::BENEATH
+            | rustix::fs::ResolveFlags::NO_MAGICLINKS
+            | rustix::fs::ResolveFlags::NO_SYMLINKS
+            | rustix::fs::ResolveFlags::NO_XDEV,
+    )
+    .map_err(|error| StoreOpenError::Io(std::io::Error::from_raw_os_error(error.raw_os_error())))?;
+    finish_regular_file(File::from(fd), name)
+}
+
+#[cfg(target_os = "android")]
+fn open_kernel_directory(parent: &File, name: &str) -> Result<File, StoreOpenError> {
+    let fd = rustix::fs::openat(
+        parent,
+        name,
+        rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::DIRECTORY
+            | rustix::fs::OFlags::CLOEXEC
+            | rustix::fs::OFlags::NOFOLLOW,
+        rustix::fs::Mode::empty(),
+    )
+    .map_err(|error| StoreOpenError::Io(std::io::Error::from_raw_os_error(error.raw_os_error())))?;
+    Ok(File::from(fd))
+}
+
+#[cfg(target_os = "android")]
+fn open_kernel_regular_file(parent: &File, name: &str) -> Result<File, StoreOpenError> {
+    let fd = rustix::fs::openat(
+        parent,
+        name,
+        rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::NOFOLLOW,
+        rustix::fs::Mode::empty(),
+    )
+    .map_err(|error| StoreOpenError::Io(std::io::Error::from_raw_os_error(error.raw_os_error())))?;
+    finish_regular_file(File::from(fd), name)
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn finish_regular_file(file: File, name: &str) -> Result<File, StoreOpenError> {
+    if file.metadata()?.is_file() {
+        Ok(file)
+    } else {
+        Err(unsafe_path(Path::new(name), "expected a regular file"))
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn open_kernel_database_file(parent: &File, name: &str) -> Result<File, StoreOpenError> {
+    let fd = rustix::fs::openat2(
+        parent,
+        name,
+        rustix::fs::OFlags::RDWR
+            | rustix::fs::OFlags::CREATE
+            | rustix::fs::OFlags::CLOEXEC
+            | rustix::fs::OFlags::NOFOLLOW,
+        rustix::fs::Mode::from_raw_mode(0o600),
+        rustix::fs::ResolveFlags::BENEATH
+            | rustix::fs::ResolveFlags::NO_MAGICLINKS
+            | rustix::fs::ResolveFlags::NO_SYMLINKS
+            | rustix::fs::ResolveFlags::NO_XDEV,
+    )
+    .map_err(|error| StoreOpenError::Io(std::io::Error::from_raw_os_error(error.raw_os_error())))?;
+    finish_regular_file(File::from(fd), name)
+}
+
+#[cfg(target_os = "android")]
+fn open_kernel_database_file(parent: &File, name: &str) -> Result<File, StoreOpenError> {
+    let fd = rustix::fs::openat(
+        parent,
+        name,
+        rustix::fs::OFlags::RDWR
+            | rustix::fs::OFlags::CREATE
+            | rustix::fs::OFlags::CLOEXEC
+            | rustix::fs::OFlags::NOFOLLOW,
+        rustix::fs::Mode::from_raw_mode(0o600),
+    )
+    .map_err(|error| StoreOpenError::Io(std::io::Error::from_raw_os_error(error.raw_os_error())))?;
+    finish_regular_file(File::from(fd), name)
 }
 
 #[cfg(target_os = "linux")]
@@ -306,6 +689,26 @@ fn open_data_root_lock(root_directory: &File) -> Result<File, StoreOpenError> {
             | rustix::fs::ResolveFlags::NO_MAGICLINKS
             | rustix::fs::ResolveFlags::NO_SYMLINKS
             | rustix::fs::ResolveFlags::NO_XDEV,
+    )
+    .map_err(|error| StoreOpenError::Io(std::io::Error::from_raw_os_error(error.raw_os_error())))?;
+    Ok(File::from(fd))
+}
+
+#[cfg(target_os = "android")]
+fn open_data_root_lock(root_directory: &File) -> Result<File, StoreOpenError> {
+    open_data_root_lock_with_openat(root_directory)
+}
+
+#[cfg(any(target_os = "android", all(test, target_os = "linux")))]
+fn open_data_root_lock_with_openat(root_directory: &File) -> Result<File, StoreOpenError> {
+    let fd = rustix::fs::openat(
+        root_directory,
+        "fasti.lock",
+        rustix::fs::OFlags::RDWR
+            | rustix::fs::OFlags::CREATE
+            | rustix::fs::OFlags::CLOEXEC
+            | rustix::fs::OFlags::NOFOLLOW,
+        rustix::fs::Mode::from_raw_mode(0o600),
     )
     .map_err(|error| StoreOpenError::Io(std::io::Error::from_raw_os_error(error.raw_os_error())))?;
     Ok(File::from(fd))
@@ -352,13 +755,13 @@ pub(crate) fn harden_private_regular_file(path: &Path) -> Result<(), StoreOpenEr
     Ok(())
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 fn set_owner_only_directory_permissions(path: &Path) -> Result<(), StoreOpenError> {
     let directory = open_directory(path)?;
     set_owner_only_open_directory_permissions(&directory)
 }
 
-#[cfg(all(unix, not(target_os = "linux")))]
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "android"))))]
 fn set_owner_only_directory_permissions(path: &Path) -> Result<(), StoreOpenError> {
     fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
     Ok(())
@@ -380,13 +783,13 @@ fn set_owner_only_file_permissions(_path: &Path) -> Result<(), StoreOpenError> {
     Ok(())
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 fn set_owner_only_open_file_permissions(file: &File) -> Result<(), StoreOpenError> {
     file.set_permissions(fs::Permissions::from_mode(0o600))?;
     Ok(())
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 fn set_owner_only_open_directory_permissions(file: &File) -> Result<(), StoreOpenError> {
     file.set_permissions(fs::Permissions::from_mode(0o700))?;
     Ok(())
@@ -453,10 +856,6 @@ pub(crate) fn verify_digest(stored: &str, presented: &str) -> bool {
     constant_time_eq(stored.as_bytes(), presented.as_bytes())
 }
 
-pub(crate) fn fsync_directory(path: &Path) -> std::io::Result<()> {
-    File::open(path)?.sync_all()
-}
-
 pub(crate) fn scope_storage_key(scope: ScopeKey) -> &'static str {
     match scope {
         ScopeKey::CapabilityRead => "capability_read",
@@ -467,6 +866,14 @@ pub(crate) fn scope_storage_key(scope: ScopeKey) -> &'static str {
         ScopeKey::ObservationAccept => "observation_accept",
         ScopeKey::ReceiptRead => "receipt_read",
         ScopeKey::IdentityWrite => "identity_write",
+        ScopeKey::IdentityRead => "identity_read",
+        ScopeKey::ProfileStateRead => "profile_state_read",
+        ScopeKey::ProfileStateWrite => "profile_state_write",
+        ScopeKey::ProviderRead => "provider_read",
+        ScopeKey::ProviderCredentialManage => "provider_credential_manage",
+        ScopeKey::MetadataClaimRefresh => "metadata_claim_refresh",
+        ScopeKey::MetadataProjectionRead => "metadata_projection_read",
+        ScopeKey::MetadataProjectionConfigure => "metadata_projection_configure",
         ScopeKey::ReviewRead => "review_read",
         ScopeKey::ReviewWrite => "review_write",
         ScopeKey::CorrectionRead => "correction_read",
@@ -627,6 +1034,142 @@ pub(crate) fn authorize_transaction(
     authorize_connection(transaction, capability, access, correlation_id)
 }
 
+pub(crate) fn authorize_application_connection(
+    connection: &Connection,
+    capability: CapabilityKey,
+    access: &ApplicationAccessContext,
+    correlation_id: RequestCorrelationId,
+) -> ApplicationResult<AuthorizedApplicationAccess> {
+    let requirement = AuthorizationRequirement::for_capability(capability);
+    if !requirement.is_scoped_or_browser_session() {
+        return Err(Box::new(FastiProblem::forbidden(
+            capability,
+            correlation_id,
+        )));
+    }
+
+    match access {
+        ApplicationAccessContext::Credential(access) => {
+            authorize_connection(connection, capability, access, correlation_id)?;
+            Ok(AuthorizedApplicationAccess::new(
+                access.workspace_id(),
+                access.profile_id(),
+                access.grant_id(),
+                AuthorizedActor::Credential {
+                    presented_client_id: access.client_id(),
+                    credential_id: access.credential_id(),
+                },
+            ))
+        }
+        ApplicationAccessContext::BrowserSession(access) => {
+            if requirement.requires_browser_mutation_proof() && !access.is_mutation() {
+                return Err(Box::new(FastiProblem::forbidden(
+                    capability,
+                    correlation_id,
+                )));
+            }
+            let current = authenticate_session(
+                connection,
+                access.session_secret(),
+                access.csrf_secret(),
+                now(),
+                capability,
+                correlation_id,
+            )?;
+            let subject = current.subject();
+            let session = current.session();
+            let row = map_sql(
+                connection
+                    .query_row(
+                        r#"
+                        SELECT grant.profile_id, grant.client_id
+                        FROM profile_grants grant
+                        JOIN profiles profile
+                          ON profile.profile_id = grant.profile_id
+                         AND profile.workspace_id = grant.workspace_id
+                        JOIN clients client
+                          ON client.client_id = grant.client_id
+                         AND client.workspace_id = grant.workspace_id
+                         AND client.status = 'active'
+                        JOIN auth_subject_profile_grants subject_grant
+                          ON subject_grant.profile_grant_id = grant.grant_id
+                         AND subject_grant.auth_subject_id = ?1
+                        WHERE grant.grant_id = ?2
+                          AND grant.workspace_id = ?3
+                          AND grant.status = 'active'
+                        "#,
+                        rusqlite::params![
+                            subject.id().to_string(),
+                            session.selected_profile_grant_id().to_string(),
+                            session.workspace_id().to_string(),
+                        ],
+                        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                    )
+                    .optional(),
+                capability,
+                correlation_id,
+            )?
+            .ok_or_else(|| Box::new(FastiProblem::forbidden(capability, correlation_id)))?;
+
+            let mut statement = map_sql(
+                connection.prepare("SELECT scope_key FROM grant_scopes WHERE grant_id = ?1"),
+                capability,
+                correlation_id,
+            )?;
+            let rows = map_sql(
+                statement.query_map([session.selected_profile_grant_id().to_string()], |row| {
+                    row.get::<_, String>(0)
+                }),
+                capability,
+                correlation_id,
+            )?;
+            let mut scopes = Vec::new();
+            for scope in rows {
+                let scope = map_sql(scope, capability, correlation_id)?;
+                scopes.push(parse_scope(&scope).ok_or_else(|| {
+                    Box::new(FastiProblem::integrity_failed(capability, correlation_id))
+                })?);
+            }
+            if !requirement
+                .required_scopes()
+                .iter()
+                .all(|required| scopes.contains(required))
+            {
+                return Err(Box::new(FastiProblem::forbidden(
+                    capability,
+                    correlation_id,
+                )));
+            }
+
+            let profile_id = row.0.parse::<ProfileId>().map_err(|_| {
+                Box::new(FastiProblem::integrity_failed(capability, correlation_id))
+            })?;
+            let client_id = row.1.parse::<ClientId>().map_err(|_| {
+                Box::new(FastiProblem::integrity_failed(capability, correlation_id))
+            })?;
+            Ok(AuthorizedApplicationAccess::new(
+                session.workspace_id(),
+                profile_id,
+                session.selected_profile_grant_id(),
+                AuthorizedActor::BrowserSession {
+                    auth_subject_id: subject.id(),
+                    browser_session_id: session.id(),
+                    grant_owner_client_id: client_id,
+                },
+            ))
+        }
+    }
+}
+
+pub(crate) fn authorize_application_transaction(
+    transaction: &Transaction<'_>,
+    capability: CapabilityKey,
+    access: &ApplicationAccessContext,
+    correlation_id: RequestCorrelationId,
+) -> ApplicationResult<AuthorizedApplicationAccess> {
+    authorize_application_connection(transaction, capability, access, correlation_id)
+}
+
 pub(crate) fn problem(
     code: ProblemCode,
     capability: CapabilityKey,
@@ -639,7 +1182,15 @@ pub(crate) fn problem(
 mod tests {
     use super::*;
 
-    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn data_root_identity_includes_the_persisted_nonce() {
+        let first = data_root_identity_from_parts(7, 11, [1; DATA_ROOT_NONCE_BYTES]);
+        let second = data_root_identity_from_parts(7, 11, [2; DATA_ROOT_NONCE_BYTES]);
+
+        assert_ne!(first, second);
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
     #[test]
     fn unsupported_platform_fails_before_touching_the_data_root() {
         let temporary = tempfile::tempdir().expect("temporary directory");
@@ -677,6 +1228,20 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
+    fn data_root_reports_the_opened_physical_path() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let configured = temporary.path().join(".").join("fasti-data");
+        assert!(!configured.exists());
+
+        let guard = LockedDataRoot::acquire(&configured).expect("offline data-root guard");
+        assert_eq!(
+            guard.path(),
+            configured.canonicalize().expect("physical path")
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
     fn data_root_lock_excludes_a_second_kernel_and_releases_on_drop() {
         let temporary = tempfile::tempdir().expect("temporary directory");
         let root = temporary.path().join("fasti-data");
@@ -691,6 +1256,176 @@ mod tests {
 
         drop(first);
         SqliteKernel::open(&root).expect("lock released with kernel");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn data_root_lock_release_does_not_wait_for_an_inherited_descriptor() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let root = temporary.path().join("fasti-data");
+        let guard = LockedDataRoot::acquire(&root).expect("offline data-root guard");
+        // dup and fork retain the same open file description on Linux.
+        let inherited = guard._lock.try_clone().expect("duplicate lock descriptor");
+        let kernel = SqliteKernel::open_locked(guard).expect("kernel from held guard");
+        let retained_kernel = kernel.clone();
+        drop(kernel);
+        assert!(matches!(
+            LockedDataRoot::acquire(&root),
+            Err(StoreOpenError::DataRootLocked)
+        ));
+        drop(retained_kernel);
+
+        let next = LockedDataRoot::acquire(&root)
+            .expect("final kernel drop releases its lock even while a descriptor survives");
+        drop(inherited);
+        assert!(matches!(
+            LockedDataRoot::acquire(&root),
+            Err(StoreOpenError::DataRootLocked)
+        ));
+        drop(next);
+        LockedDataRoot::acquire(&root).expect("new owner releases its own lock");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn data_root_identity_failure_preserves_error_and_releases_acquisition() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let root = temporary.path().join("fasti-data");
+        fs::create_dir(&root).expect("data root");
+        let lock_path = root.join("fasti.lock");
+        fs::write(&lock_path, [1_u8]).expect("malformed nonce");
+        for _ in 0..2 {
+            assert!(matches!(
+                LockedDataRoot::acquire(&root),
+                Err(StoreOpenError::UnsafePath { .. })
+            ));
+        }
+        fs::write(&lock_path, [7_u8; DATA_ROOT_NONCE_BYTES]).expect("corrected nonce");
+        LockedDataRoot::acquire(&root).expect("identity rejection did not retain the lock");
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
+    fn android_compatible_data_root_is_locked_and_descriptor_anchored() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let root = temporary.path().join("fasti-data");
+        let moved = temporary.path().join("moved-fasti-data");
+        prepare_private_directory(&root).expect("private data root");
+        let root_directory = open_data_root_directory(&root).expect("data-root directory");
+
+        let first = open_data_root_lock_with_openat(&root_directory).expect("first lock file");
+        let mut first = finish_data_root_lock(&root, first).expect("first lock");
+        let guard = LockedDataRoot {
+            path: root.canonicalize().expect("physical path"),
+            identity: data_root_identity(&root, &root_directory, &mut first)
+                .expect("root identity"),
+            root_directory,
+            _lock: first,
+        };
+        let second =
+            open_data_root_lock_with_openat(&guard.root_directory).expect("second lock file");
+        assert!(matches!(
+            finish_data_root_lock(&root, second),
+            Err(StoreOpenError::DataRootLocked)
+        ));
+
+        fs::rename(&root, &moved).expect("rename data root");
+        fs::create_dir(&root).expect("replacement data root");
+        let kernel = SqliteKernel::open_locked(guard).expect("descriptor-rooted kernel");
+        assert!(moved.join("current").is_dir());
+        assert!(moved.join("current/fasti.sqlite3").is_file());
+        assert!(!root.join("current").exists());
+
+        drop(kernel);
+        let moved_directory = open_data_root_directory(&moved).expect("moved data-root directory");
+        let released =
+            open_data_root_lock_with_openat(&moved_directory).expect("released lock file");
+        let released = finish_data_root_lock(&moved, released).expect("released lock");
+        drop(released);
+
+        fs::remove_file(moved.join("fasti.lock")).expect("remove lock file");
+        let outside = temporary.path().join("outside");
+        fs::write(&outside, b"unchanged").expect("outside file");
+        std::os::unix::fs::symlink(&outside, moved.join("fasti.lock"))
+            .expect("hostile lock symlink");
+        assert!(open_data_root_lock_with_openat(&moved_directory).is_err());
+        assert_eq!(fs::read(outside).expect("outside bytes"), b"unchanged");
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
+    fn kernel_directory_creation_rejects_an_intermediate_symlink() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let root = temporary.path().join("fasti-data");
+        let outside = temporary.path().join("outside");
+        fs::create_dir_all(root.join("current")).expect("current directory");
+        fs::create_dir(&outside).expect("outside directory");
+        std::os::unix::fs::symlink(&outside, root.join("current/payloads"))
+            .expect("hostile payloads symlink");
+
+        assert!(SqliteKernel::open(&root).is_err());
+        assert!(!outside.join("sha256").exists());
+        assert!(!outside.join("fasti.sqlite3").exists());
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
+    fn database_open_rejects_a_symlinked_final_component() {
+        // Regression: kernel.rs open_locked previously checked
+        // fasti.sqlite3 via a path-based reject_unsafe_existing_file, then
+        // opened it via a second, separate path lookup -- a same-user
+        // process could replace the file with a symlink between the two.
+        // The fix opens the final component atomically (openat2 with
+        // NOFOLLOW|NO_SYMLINKS|BENEATH) relative to a held directory
+        // descriptor. This test pre-plants the hostile symlink before any
+        // open happens, so it fails closed whether the guard is atomic or
+        // just an early check -- it exists to catch a future refactor that
+        // drops back to a plain path-based Connection::open_with_flags.
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let root = temporary.path().join("fasti-data");
+        let outside = temporary.path().join("outside.sqlite3");
+        fs::create_dir_all(root.join("current")).expect("current directory");
+        fs::write(&outside, b"not a fasti database").expect("outside file");
+        std::os::unix::fs::symlink(&outside, root.join("current/fasti.sqlite3"))
+            .expect("hostile database symlink");
+
+        assert!(SqliteKernel::open(&root).is_err());
+        assert_eq!(
+            fs::read(&outside).expect("outside bytes"),
+            b"not a fasti database"
+        );
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
+    fn evidence_prefix_and_file_symlinks_are_rejected() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let root = temporary.path().join("fasti-data");
+        let outside = temporary.path().join("outside");
+        let kernel = SqliteKernel::open(&root).expect("kernel");
+        let digest = format!("ab{}", "0".repeat(62));
+        fs::create_dir(&outside).expect("outside directory");
+        std::os::unix::fs::symlink(&outside, root.join("current/payloads/sha256/ab"))
+            .expect("hostile prefix symlink");
+
+        assert!(kernel.prepare_evidence_destination(&digest).is_err());
+        assert!(!outside.join(&digest).exists());
+
+        fs::remove_file(root.join("current/payloads/sha256/ab")).expect("remove prefix symlink");
+        fs::create_dir(root.join("current/payloads/sha256/ab")).expect("prefix directory");
+        let outside_file = outside.join("payload");
+        fs::write(&outside_file, b"unchanged").expect("outside payload");
+        std::os::unix::fs::symlink(
+            &outside_file,
+            root.join("current/payloads/sha256/ab").join(&digest),
+        )
+        .expect("hostile evidence symlink");
+
+        assert!(kernel.open_evidence_file(&digest).is_err());
+        assert_eq!(
+            fs::read(outside_file).expect("outside payload"),
+            b"unchanged"
+        );
     }
 
     #[cfg(target_os = "linux")]
@@ -891,11 +1626,19 @@ mod tests {
             assert_eq!(mode, 0o700);
         }
 
-        let mode = fs::metadata(kernel.database_path())
-            .expect("database metadata")
-            .permissions()
-            .mode()
-            & 0o777;
-        assert_eq!(mode, 0o600);
+        for file in [root.join("fasti.lock"), kernel.database_path()] {
+            let mode = fs::metadata(file)
+                .expect("private file metadata")
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+        assert_eq!(
+            fs::metadata(root.join("fasti.lock"))
+                .expect("lock metadata")
+                .len(),
+            DATA_ROOT_NONCE_BYTES as u64
+        );
     }
 }

@@ -10,9 +10,48 @@ permissions:
   contents: read
 
 jobs:
+  ci-scope:
+    name: Classify changed paths
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      runtime: ${{ steps.scope.outputs.runtime }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+      - run: node --test tests/js/ci-docs-routing.test.mjs
+      - name: Keep runtime gates for every non-portal path
+        id: scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BASE_SHA: ${{ github.event.before }}
+          PUSH_HEAD_SHA: ${{ github.sha }}
+        run: |
+          if [[ "$EVENT_NAME" == pull_request ]]; then
+            git diff --no-renames --name-only -z "$PR_BASE_SHA...$PR_HEAD_SHA" |
+              node scripts/classify-ci-scope.mjs >> "$GITHUB_OUTPUT"
+          elif [[ "$PUSH_BASE_SHA" =~ ^0+$ ]]; then
+            node scripts/classify-ci-scope.mjs </dev/null >> "$GITHUB_OUTPUT"
+          else
+            git diff --no-renames --name-only -z "$PUSH_BASE_SHA" "$PUSH_HEAD_SHA" |
+              node scripts/classify-ci-scope.mjs >> "$GITHUB_OUTPUT"
+          fi
+
   b1-portable-gate:
     name: Canonical B1 PR gate
+    needs: ci-scope
+    if: needs.ci-scope.outputs.runtime == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@032958afbdc797a9164d3bc0b56325c1308924a5 # 1.97.1
@@ -51,7 +90,11 @@ jobs:
 
   rust:
     name: Rust workspace
+    needs: ci-scope
+    if: needs.ci-scope.outputs.runtime == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@032958afbdc797a9164d3bc0b56325c1308924a5 # 1.97.1
@@ -66,7 +109,11 @@ jobs:
 
   javascript:
     name: Retained JavaScript packages
+    needs: ci-scope
+    if: needs.ci-scope.outputs.runtime == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
@@ -76,21 +123,105 @@ jobs:
         with:
           version: 11.22.0
       - run: pnpm install --frozen-lockfile
-      - run: npx nx run-many -t build
+      - run: npx nx run-many -t build --exclude=@fasti/docs
       - run: pnpm format:check
       - run: pnpm typecheck
       - run: pnpm test
       - run: npx nx fix-ci
         if: always()
 
-  repository-truth:
-    name: B0 repository truth
+  documentation:
+    name: Documentation portal
+    needs: ci-scope
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@032958afbdc797a9164d3bc0b56325c1308924a5 # 1.97.1
+        with:
+          components: rustfmt, clippy
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+        with:
+          version: 11.22.0
+      - run: pnpm install --frozen-lockfile
+      - run: cargo fetch --locked
+      - run: cargo test --package xtask docs::tests --locked
+      - run: cargo xtask docs package --locked
+      - run: node --test tests/js/deploy-plan.test.mjs
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Verify built documentation interactions
+        run: |
+          pnpm --filter @fasti/docs serve --port 4180 --no-open > /tmp/fasti-docs-serve.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for _ in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:4180/start/choose-a-path/ > /dev/null; then
+              FASTI_DOCS_BASE_URL=http://127.0.0.1:4180 \
+                node --test tests/js/docs-*.test.mjs
+              exit
+            fi
+            sleep 1
+          done
+          cat /tmp/fasti-docs-serve.log
+          exit 1
+
+  ui-quality:
+    name: Browser UI quality
+    needs: ci-scope
+    if: needs.ci-scope.outputs.runtime == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+        with:
+          version: 11.22.0
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      # Lighthouse's INP audit needs the trace event restored in Chrome 152.
+      # Refresh only this ephemeral runner's Chrome; ordinary tests use Chromium.
+      - run: pnpm exec playwright install --force chrome
+      - run: pnpm test:ui --grep-invert @performance
+      - name: Lighthouse Access interaction sentinel
+        run: pnpm test:ui --grep @performance --workers=1 --retries=0 --output=test-results-performance
+        env:
+          PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report-performance
+      - name: Retain browser evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fasti-ui-quality-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            playwright-report
+            test-results
+            playwright-report-performance
+            test-results-performance
+          if-no-files-found: error
+          retention-days: 30
+
+  repository-truth:
+    name: B0 repository truth
+    needs: ci-scope
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+        with:
+          version: 11.22.0
+      - run: pnpm install --frozen-lockfile
       - run: bash scripts/check-repository-truth.sh
       - run: bash scripts/check-no-publish.sh
       - run: bash scripts/test-no-publish-policy.sh
@@ -98,13 +229,21 @@ jobs:
 
   oci:
     name: Daemon and CLI OCI smoke
+    needs: ci-scope
+    if: needs.ci-scope.outputs.runtime == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Build strict OCI image
-        run: docker build --tag fasti:b0 .
+        run: docker build --target runtime --tag fasti:b0 .
       - name: Verify non-root, health, false-success, and idle-memory gates
         run: bash scripts/smoke-oci.sh fasti:b0
+      - name: Build the local (UI-bundled) OCI image
+        run: docker build --target local --tag fasti:local .
+      - name: Verify the local image serves the UI and the API on one origin
+        run: bash scripts/smoke-oci-local.sh fasti:local
       - uses: dtolnay/rust-toolchain@032958afbdc797a9164d3bc0b56325c1308924a5 # 1.97.1
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - name: Build native binaries
@@ -114,7 +253,11 @@ jobs:
 
   low-hardware-envelope:
     name: Low-hardware envelope (${{ matrix.arch }})
+    needs: ci-scope
+    if: needs.ci-scope.outputs.runtime == 'true'
     runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -171,7 +314,7 @@ jobs:
             --artifact-budget-receipt "target/fasti-artifact-stage/${{ matrix.arch }}/receipt.json" \
             -- bash scripts/bench-daemon-idle.sh target/release/fastid
       - name: Retain the exact envelope receipt and measured daemon
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: fasti-b1-envelope-${{ matrix.arch }}-attempt-${{ github.run_attempt }}
           path: target/fasti-evidence/envelope/${{ matrix.arch }}
@@ -180,14 +323,17 @@ jobs:
 
   review-source-snapshot:
     name: Exact tracked source snapshot
+    needs: ci-scope
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Archive the exact reviewed tree
         run: |
           git archive --format=tar.gz --output=/tmp/fasti-source.tar.gz HEAD
           sha256sum /tmp/fasti-source.tar.gz > /tmp/fasti-source.tar.gz.sha256
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: fasti-source-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
@@ -198,7 +344,11 @@ jobs:
 
   coverage:
     name: Code coverage (Rust & JS)
+    needs: ci-scope
+    if: needs.ci-scope.outputs.runtime == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@032958afbdc797a9164d3bc0b56325c1308924a5 # 1.97.1
@@ -224,7 +374,7 @@ jobs:
       - name: Generate JavaScript coverage
         run: pnpm run test:coverage
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@0565863a31f2c772f9f0395002a31e3f06189574 # v5.4.0
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage/rust-lcov.info,coverage/js-lcov.info

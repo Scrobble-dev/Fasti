@@ -9,16 +9,17 @@ publish.workspace = true
 description = "Fasti capabilities, application ports, and typed problem catalog"
 
 [dependencies]
-chrono = { workspace = true, optional = true }
+chrono = { workspace = true }
 fasti-domain = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { version = "0.11.0", features = ["zeroize"] }
 uuid = { workspace = true, optional = true }
+zeroize = { workspace = true }
 
 [features]
 default = []
-conformance-fixture = ["dep:chrono", "dep:uuid"]
+conformance-fixture = ["dep:uuid"]
 
 [dev-dependencies]
-chrono = { workspace = true }
-serde_json = { workspace = true }
 static_assertions = { workspace = true }

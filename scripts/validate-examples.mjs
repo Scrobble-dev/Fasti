@@ -12,9 +12,19 @@ import { readStrictJson } from "./lib/strict-json.mjs";
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const EXAMPLE_DIRECTORY = "contracts/examples/v1";
 
+/**
+ * Determines if a year is a leap year.
+ * @param {number} year - The year to check.
+ * @returns {boolean} True if the year is a leap year.
+ */
 const isLeapYear = (year) =>
   year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
 
+/**
+ * Validates that a string is a strictly valid RFC 3339 date-time.
+ * @param {string} value - The date-time string to validate.
+ * @returns {boolean} True if the value is a valid RFC 3339 date-time.
+ */
 const isStrictRfc3339 = (value) => {
   const match =
     /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:|\.\d{1,9})(Z|([+-])(\d{2}):(\d{2}))$/u.exec(
@@ -61,9 +71,19 @@ const isStrictRfc3339 = (value) => {
   return Number(match[9]) <= 23 && Number(match[10]) <= 59;
 };
 
+/**
+ * Reads and parses a strict JSON file from a repository path.
+ * @param {string} root - The repository root directory.
+ * @param {string} relativePath - The path relative to the repository root.
+ * @returns {Promise<*>} The parsed JSON content.
+ */
 const readJson = async (root, relativePath) =>
   readStrictJson(resolve(root, relativePath));
 
+/**
+ * Adds Fasti-specific format validators to an AJV instance.
+ * @param {Ajv2020} ajv - The AJV validator instance to configure.
+ */
 const addContractFormats = (ajv) => {
   for (const format of [
     "fasti-client-id",
@@ -99,6 +119,11 @@ const addContractFormats = (ajv) => {
   });
 };
 
+/**
+ * Recursively transforms OpenAPI component references to JSON Schema $defs references.
+ * @param {*} value - The value to transform (object, array, or primitive).
+ * @returns {*} The transformed value with converted references.
+ */
 const asJsonSchemaDefinitions = (value) => {
   if (Array.isArray(value)) return value.map(asJsonSchemaDefinitions);
   if (value === null || typeof value !== "object") return value;
@@ -112,6 +137,13 @@ const asJsonSchemaDefinitions = (value) => {
   );
 };
 
+/**
+ * Compiles an OpenAPI component schema as a JSON Schema validator.
+ * @param {Ajv2020} ajv - The AJV validator instance.
+ * @param {Object} openapi - The OpenAPI document.
+ * @param {string} component - The component name to compile.
+ * @returns {Function} The compiled AJV validator function.
+ */
 const compileOpenApiComponent = (ajv, openapi, component) =>
   ajv.compile({
     $schema: "https://json-schema.org/draft/2020-12/schema",
@@ -119,10 +151,23 @@ const compileOpenApiComponent = (ajv, openapi, component) =>
     $ref: `#/$defs/${component}`,
   });
 
+/**
+ * Asserts that a value is valid according to an AJV validator.
+ * @param {Function} validator - The compiled AJV validator function.
+ * @param {*} value - The value to validate.
+ * @param {string} label - A label for error reporting.
+ * @param {Ajv2020} ajv - The AJV instance for error formatting.
+ * @throws {AssertionError} If validation fails.
+ */
 const assertValid = (validator, value, label, ajv) => {
   assert.ok(validator(value), `${label}: ${ajv.errorsText(validator.errors)}`);
 };
 
+/**
+ * Extracts the example ID from a filename by removing the file extension.
+ * @param {string} filename - The filename to process.
+ * @returns {string} The example ID without extension.
+ */
 const exampleId = (filename) => filename.slice(0, -extname(filename).length);
 
 // A fixed-count {64} hex check reads as unbounded backtracking risk to
@@ -142,6 +187,12 @@ const looksLikeJwt = (text) => {
   );
 };
 
+/**
+ * Recursively validates that a value contains no sensitive data like credentials or secrets.
+ * @param {*} value - The value to validate (object, array, or primitive).
+ * @param {string} [path="$"] - The JSONPath to the current value for error reporting.
+ * @throws {AssertionError} If sensitive data patterns are detected.
+ */
 const assertNoSensitiveRepresentation = (value, path = "$") => {
   if (typeof value === "string") {
     assert.doesNotMatch(
@@ -172,6 +223,12 @@ const assertNoSensitiveRepresentation = (value, path = "$") => {
   }
 };
 
+/**
+ * Indexes example IDs to their owning capabilities from the capability registry.
+ * @param {Object} registry - The capability registry document.
+ * @returns {Object} An object with capabilities Map and owners Map.
+ * @throws {AssertionError} If an example has multiple owners.
+ */
 const indexExampleOwners = (registry) => {
   const capabilities = new Map(
     registry.capabilities.map((capability) => [capability.id, capability]),
@@ -186,6 +243,15 @@ const indexExampleOwners = (registry) => {
   return { capabilities, owners };
 };
 
+/**
+ * Validates a JSON-LD receipt example against schema and linked-data constraints.
+ * @param {string} root - The repository root directory.
+ * @param {string} path - The path to the receipt file.
+ * @param {Object} owner - The owning capability from the registry.
+ * @param {Function} receiptValidator - The compiled receipt schema validator.
+ * @param {Ajv2020} ajv - The AJV instance for error formatting.
+ * @throws {AssertionError} If validation fails.
+ */
 const validateLinkedDataReceipt = async (
   root,
   path,
@@ -313,9 +379,10 @@ const validateLinkedDataReceipt = async (
 };
 
 /**
- * Validates repository examples against their governing registries and API specifications.
- * @param {string} root - Repository root containing the generated contracts and examples.
- * @return {{exampleCount: number, linkedDataCount: number, problemCount: number}} Validation counts for all examples, linked-data receipts, and problem examples.
+ * Validates contract examples against generated registries and API specifications.
+ * @param {string} [root=repositoryRoot] - The repository root directory.
+ * @return {Promise<Object>} Counts of validated examples, linked-data receipts, and problem examples.
+ * @throws {AssertionError} If a contract example or cross-specification reference is invalid.
  */
 export async function validateExamples(root = repositoryRoot) {
   const [
@@ -378,6 +445,11 @@ export async function validateExamples(root = repositoryRoot) {
     conformanceOpenapi,
     "ObservationReceiptDto",
   );
+  const integrationStatus = compileOpenApiComponent(
+    ajv,
+    openapi,
+    "IntegrationStatusListResponse",
+  );
   const receiptEvent = ajv.compile(
     asyncApi.components.messages.receiptCommitted.payload.schema,
   );
@@ -408,6 +480,22 @@ export async function validateExamples(root = repositoryRoot) {
     operation: productionHealthOperation,
     path: "/api/v1/health",
   });
+  // Bootstrap and runtime operations with no conformance-fixture twin (e.g.
+  // the records capabilities) only exist in the production document -- index
+  // those too, skipping any capability already indexed from the conformance
+  // document above.
+  for (const [path, pathItem] of Object.entries(openapi.paths)) {
+    for (const [method, operation] of Object.entries(pathItem)) {
+      const capabilityId = operation["x-fasti-capability-id"];
+      if (
+        typeof capabilityId !== "string" ||
+        httpOperations.has(capabilityId)
+      ) {
+        continue;
+      }
+      httpOperations.set(capabilityId, { method, operation, path });
+    }
+  }
   const streamProblems =
     asyncApi.operations.sendReceiptCommitted["x-fasti-http-problems"];
   assert.equal(streamProblems.contentType, "application/problem+json");
@@ -441,6 +529,20 @@ export async function validateExamples(root = repositoryRoot) {
     if (id === "system.health.success") {
       assertValid(health, value, id, ajv);
       assert.equal(value.status, "healthy");
+      assert.deepEqual(
+        // id is derived from a filename in the repository-local example
+        // directory, not external input.
+        // eslint-disable-next-line security/detect-object-injection
+        httpOperations.get(owner.id).operation.responses["200"].content[
+          "application/json"
+        ].examples[id].value,
+        value,
+        `${id} differs from the embedded production OpenAPI example`,
+      );
+      continue;
+    }
+    if (id === "integration.status.success") {
+      assertValid(integrationStatus, value, id, ajv);
       assert.deepEqual(
         // id is derived from a filename in the repository-local example
         // directory, not external input.

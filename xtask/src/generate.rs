@@ -1,6 +1,6 @@
 use anyhow::{ensure, Context};
-use fasti_application::{CapabilityKey, ProblemCode, ProblemParamPolicy};
-use fasti_contracts::{HealthResponse, ProblemDetails};
+use fasti_application::{CapabilityKey, ProblemCode, ProblemParamPolicy, WorkspaceExportEntity};
+use fasti_contracts::{ChecksummedWorkspaceManifestDto, HealthResponse, ProblemDetails};
 use schemars::{generate::SchemaSettings, JsonSchema};
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -8,7 +8,7 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::registry;
+use crate::{integration, registry};
 
 pub(crate) type Artifacts = BTreeMap<PathBuf, Vec<u8>>;
 
@@ -20,13 +20,32 @@ const CAPABILITY_DISCOVERY_EXAMPLE_PATH: &str =
     "contracts/examples/v1/system.capabilities.success.json";
 const HEALTH_SCHEMA_PATH: &str = "packages/schemas/schemas/health-response.json";
 const PROBLEM_SCHEMA_PATH: &str = "packages/schemas/schemas/problem-details.json";
+const PORTABILITY_V2_SCHEMA_PATH: &str = "contracts/portability/v2/workspace-manifest.schema.json";
+const PORTABILITY_V1_EXAMPLE_PATH: &str =
+    "contracts/portability/v1/workspace-manifest.example.json";
+const PORTABILITY_V2_EXAMPLE_PATH: &str =
+    "contracts/portability/v2/workspace-manifest.example.json";
+const PORTABILITY_V3_SCHEMA_PATH: &str = "contracts/portability/v3/workspace-manifest.schema.json";
+const PORTABILITY_V3_EXAMPLE_PATH: &str =
+    "contracts/portability/v3/workspace-manifest.example.json";
+const PORTABILITY_V4_SCHEMA_PATH: &str = "contracts/portability/v4/workspace-manifest.schema.json";
+const PORTABILITY_V4_EXAMPLE_PATH: &str =
+    "contracts/portability/v4/workspace-manifest.example.json";
+const PORTABILITY_V5_SCHEMA_PATH: &str = "contracts/portability/v5/workspace-manifest.schema.json";
+const PORTABILITY_V5_EXAMPLE_PATH: &str =
+    "contracts/portability/v5/workspace-manifest.example.json";
 const SDK_GENERATED_PATH: &str = "packages/sdk/src/generated.ts";
 const RUST_CAPABILITY_IDS_PATH: &str = "crates/fasti-contracts/src/generated_capability_ids.rs";
+const PROVIDER_MANIFEST_SCHEMA_PATH: &str =
+    "contracts/addons/generated/v0.1/provider-manifest.schema.json";
 const ASYNCAPI_PATH: &str = "contracts/asyncapi/v1/transport.yaml";
 const EXAMPLES_DIRECTORY: &str = "contracts/examples/v1";
 const DOCUMENTATION_BASE: &str = "https://fasti.scrobble.dev";
-const GENERATED_ONLY_DIRECTORIES: [&str; 2] =
-    ["contracts/generated/v1", "packages/schemas/schemas"];
+const GENERATED_ONLY_DIRECTORIES: [&str; 3] = [
+    "contracts/generated/v1",
+    "packages/schemas/schemas",
+    "contracts/addons/generated",
+];
 
 #[derive(Clone, Copy)]
 struct ConformanceOperation {
@@ -143,6 +162,638 @@ const CONFORMANCE_OPERATIONS: [ConformanceOperation; 9] = [
     },
 ];
 
+const PRODUCTION_BOOTSTRAP_OPERATIONS: [ConformanceOperation; 2] = [
+    ConformanceOperation {
+        alias: "initializeDurableNode",
+        operation_id: "initialize_node",
+        method: "post",
+        path: "/api/v1/node/initialization",
+        capability_id: "node.initialize",
+        authenticated: false,
+        request: Some("InitializeNodeRequest"),
+        response: Some("NodeInitializationResponse"),
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "enrollDurableFirstClient",
+        operation_id: "enroll_first_client",
+        method: "post",
+        path: "/api/v1/client-enrollments",
+        capability_id: "client.enroll",
+        authenticated: false,
+        request: Some("EnrollFirstClientRequest"),
+        response: Some("ClientEnrollmentResponse"),
+        retry: "never",
+    },
+];
+
+/// Production operations that run after bootstrap, on the durable authenticated
+/// surface. Kept separate from `PRODUCTION_BOOTSTRAP_OPERATIONS` because that
+/// array also drives the bootstrap-only SDK slice in
+/// `render_production_bootstrap_contract`, which must not grow to include them.
+const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 40] = [
+    ConformanceOperation {
+        alias: "submitObservation",
+        operation_id: "submit_observation",
+        method: "post",
+        path: "/api/v1/observations",
+        capability_id: "observation.accept",
+        authenticated: true,
+        request: Some("SubmitObservationRequest"),
+        response: Some("SubmitObservationResponse"),
+        retry: "stable_body_operation_id",
+    },
+    ConformanceOperation {
+        alias: "nuvioWebhook",
+        operation_id: "nuvio_webhook",
+        method: "post",
+        path: "/api/v1/integrations/nuvio/webhook",
+        capability_id: "observation.accept",
+        authenticated: true,
+        request: Some("IntegrationObservationRequest"),
+        response: Some("SubmitObservationResponse"),
+        retry: "stable_body_operation_id",
+    },
+    ConformanceOperation {
+        alias: "tautulliWebhook",
+        operation_id: "tautulli_webhook",
+        method: "post",
+        path: "/api/v1/integrations/tautulli/webhook",
+        capability_id: "observation.accept",
+        authenticated: true,
+        request: Some("IntegrationObservationRequest"),
+        response: Some("SubmitObservationResponse"),
+        retry: "stable_body_operation_id",
+    },
+    ConformanceOperation {
+        alias: "jellyfinWebhook",
+        operation_id: "jellyfin_webhook",
+        method: "post",
+        path: "/api/v1/integrations/jellyfin/webhook",
+        capability_id: "observation.accept",
+        authenticated: true,
+        request: Some("IntegrationObservationRequest"),
+        response: Some("SubmitObservationResponse"),
+        retry: "stable_body_operation_id",
+    },
+    ConformanceOperation {
+        alias: "embyWebhook",
+        operation_id: "emby_webhook",
+        method: "post",
+        path: "/api/v1/integrations/emby/webhook",
+        capability_id: "observation.accept",
+        authenticated: true,
+        request: None,
+        response: Some("SubmitObservationResponse"),
+        retry: "stable_body_operation_id",
+    },
+    ConformanceOperation {
+        alias: "plexWebhook",
+        operation_id: "plex_webhook",
+        method: "post",
+        path: "/api/v1/integrations/plex/webhook",
+        capability_id: "observation.accept",
+        authenticated: true,
+        request: None,
+        response: Some("SubmitObservationResponse"),
+        retry: "stable_body_operation_id",
+    },
+    ConformanceOperation {
+        alias: "createRecord",
+        operation_id: "create_record",
+        method: "post",
+        path: "/api/v1/records",
+        capability_id: "identity.record.create",
+        authenticated: true,
+        request: Some("CreateRecordRequest"),
+        response: Some("CreateRecordResponse"),
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "listRecords",
+        operation_id: "list_records",
+        method: "get",
+        path: "/api/v1/records",
+        capability_id: "identity.record.list",
+        authenticated: true,
+        request: None,
+        response: Some("ListRecordsResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "attachIdentifier",
+        operation_id: "attach_identifier",
+        method: "post",
+        path: "/api/v1/records/identifiers",
+        capability_id: "identity.identifier.attach",
+        authenticated: true,
+        request: Some("AttachIdentifierRequest"),
+        response: Some("AttachIdentifierResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "registerNamespace",
+        operation_id: "register_namespace",
+        method: "post",
+        path: "/api/v1/namespaces",
+        capability_id: "identity.namespace.register",
+        authenticated: true,
+        request: Some("RegisterNamespaceRequest"),
+        response: Some("RegisterNamespaceResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "listTrackingDispositions",
+        operation_id: "list_tracking_dispositions",
+        method: "get",
+        path: "/api/v1/profile/record-tracking-dispositions",
+        capability_id: "profile.record.tracking_disposition.list",
+        authenticated: true,
+        request: None,
+        response: Some("ListTrackingDispositionsResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "setTrackingDisposition",
+        operation_id: "set_tracking_disposition",
+        method: "put",
+        path: "/api/v1/profile/record-tracking-dispositions/{record_id}",
+        capability_id: "profile.record.tracking_disposition.set",
+        authenticated: true,
+        request: Some("SetTrackingDispositionRequest"),
+        response: Some("TrackingDispositionStateDto"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "getNuvioCollections",
+        operation_id: "get_nuvio_collections",
+        method: "get",
+        path: "/api/v1/profile/nuvio-collections",
+        capability_id: "profile.nuvio_collections.get",
+        authenticated: true,
+        request: None,
+        response: Some("NuvioCollectionsStateDto"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "replaceNuvioCollections",
+        operation_id: "replace_nuvio_collections",
+        method: "put",
+        path: "/api/v1/profile/nuvio-collections",
+        capability_id: "profile.nuvio_collections.replace",
+        authenticated: true,
+        request: Some("NuvioCollectionsDocumentDto"),
+        response: Some("NuvioCollectionsStateDto"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "clearNuvioCollections",
+        operation_id: "clear_nuvio_collections",
+        method: "delete",
+        path: "/api/v1/profile/nuvio-collections",
+        capability_id: "profile.nuvio_collections.clear",
+        authenticated: true,
+        request: None,
+        response: Some("NuvioCollectionsStateDto"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "listProviders",
+        operation_id: "list_providers",
+        method: "get",
+        path: "/api/v1/providers",
+        capability_id: "provider.list",
+        authenticated: true,
+        request: None,
+        response: Some("ListProvidersResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "configureProviderCredential",
+        operation_id: "configure_provider_credential",
+        method: "put",
+        path: "/api/v1/providers/{provider_id}/credentials/{capability_id}",
+        capability_id: "provider.credential.configure",
+        authenticated: true,
+        request: Some("ConfigureProviderCredentialRequest"),
+        response: Some("ProviderCapabilityResponse"),
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "removeProviderCredential",
+        operation_id: "remove_provider_credential",
+        method: "delete",
+        path: "/api/v1/providers/{provider_id}/credentials/{capability_id}",
+        capability_id: "provider.credential.configure",
+        authenticated: true,
+        request: None,
+        response: Some("ProviderCapabilityResponse"),
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "testProviderCredential",
+        operation_id: "test_provider_credential",
+        method: "post",
+        path: "/api/v1/providers/{provider_id}/credentials/{capability_id}/tests",
+        capability_id: "provider.credential.test",
+        authenticated: true,
+        request: None,
+        response: Some("ProviderCapabilityResponse"),
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "readProviderHealth",
+        operation_id: "read_provider_health",
+        method: "get",
+        path: "/api/v1/providers/{provider_id}/health",
+        capability_id: "provider.health.read",
+        authenticated: true,
+        request: None,
+        response: Some("ProviderHealthResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "refreshMetadataClaims",
+        operation_id: "refresh_metadata_claims",
+        method: "post",
+        path: "/api/v1/metadata/claims/refresh",
+        capability_id: "metadata.claim.refresh",
+        authenticated: true,
+        request: Some("RefreshMetadataClaimsRequest"),
+        response: Some("RefreshMetadataClaimsResponse"),
+        retry: "stable_body_operation_id",
+    },
+    ConformanceOperation {
+        alias: "readMetadataProjection",
+        operation_id: "read_metadata_projection",
+        method: "get",
+        path: "/api/v1/records/{record_id}/metadata-projection",
+        capability_id: "metadata.projection.read",
+        authenticated: true,
+        request: None,
+        response: Some("MetadataProjectionResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "configureMetadataProjection",
+        operation_id: "configure_metadata_projection",
+        method: "put",
+        path: "/api/v1/profile/metadata-projection",
+        capability_id: "metadata.projection.configure",
+        authenticated: true,
+        request: Some("ConfigureMetadataProjectionRequest"),
+        response: Some("MetadataProjectionConfigurationResponse"),
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "resolveIdentityRoute",
+        operation_id: "resolve_identity_route",
+        method: "get",
+        path: "/api/v1/records/{record_id}/identity-route",
+        capability_id: "identity.route.resolve",
+        authenticated: true,
+        request: None,
+        response: Some("ResolveIdentityRouteResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "readAnimeGroupingPolicy",
+        operation_id: "read_anime_grouping_policy",
+        method: "get",
+        path: "/api/v1/profile/anime-grouping-policy",
+        capability_id: "profile.anime_grouping_policy.read",
+        authenticated: true,
+        request: None,
+        response: Some("ReadAnimeGroupingPolicyResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "previewAnimeGroupingPolicyChange",
+        operation_id: "preview_anime_grouping_policy_change",
+        method: "post",
+        path: "/api/v1/profile/anime-grouping-policy/preview",
+        capability_id: "profile.anime_grouping_policy.preview",
+        authenticated: true,
+        request: Some("PreviewAnimeGroupingPolicyChangeRequest"),
+        response: Some("AnimeGroupingPolicyImpactResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "applyAnimeGroupingPolicyChange",
+        operation_id: "apply_anime_grouping_policy_change",
+        method: "put",
+        path: "/api/v1/profile/anime-grouping-policy",
+        capability_id: "profile.anime_grouping_policy.apply",
+        authenticated: true,
+        request: Some("ApplyAnimeGroupingPolicyChangeRequest"),
+        response: Some("ApplyAnimeGroupingPolicyChangeResponse"),
+        retry: "stable_body_operation_id",
+    },
+    ConformanceOperation {
+        alias: "startTrailBaseSignIn",
+        operation_id: "start_trailbase_sign_in",
+        method: "post",
+        path: "/api/access/v1/trailbase/sign-in",
+        capability_id: "browser.session.create",
+        authenticated: false,
+        request: Some("StartTrailBaseSignInRequest"),
+        response: Some("StartTrailBaseSignInResponse"),
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "readTrailBaseContinuation",
+        operation_id: "read_trailbase_continuation",
+        method: "get",
+        path: "/api/access/v1/trailbase/continuation",
+        capability_id: "browser.session.create",
+        authenticated: false,
+        request: None,
+        response: Some("ReadTrailBaseContinuationResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "completeTrailBaseContinuation",
+        operation_id: "complete_trailbase_continuation",
+        method: "post",
+        path: "/api/access/v1/trailbase/continuation",
+        capability_id: "browser.session.create",
+        authenticated: false,
+        request: Some("CompleteTrailBaseContinuationRequest"),
+        response: None,
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "cancelTrailBaseContinuation",
+        operation_id: "cancel_trailbase_continuation",
+        method: "delete",
+        path: "/api/access/v1/trailbase/continuation",
+        capability_id: "browser.session.create",
+        authenticated: false,
+        request: None,
+        response: None,
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "readAccessProjection",
+        operation_id: "read_access_projection",
+        method: "get",
+        path: "/api/access/v1/projection",
+        capability_id: "access.projection.read",
+        authenticated: false,
+        request: None,
+        response: Some("AccessProjectionResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "readBrowserSession",
+        operation_id: "read_browser_session",
+        method: "get",
+        path: "/api/access/v1/browser-session",
+        capability_id: "browser.session.read",
+        authenticated: false,
+        request: None,
+        response: Some("ReadBrowserSessionResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "endBrowserSession",
+        operation_id: "end_browser_session",
+        method: "delete",
+        path: "/api/access/v1/browser-session",
+        capability_id: "browser.session.end",
+        authenticated: false,
+        request: None,
+        response: None,
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "listBrowserSessions",
+        operation_id: "list_browser_sessions",
+        method: "get",
+        path: "/api/access/v1/browser-sessions",
+        capability_id: "browser.sessions.list",
+        authenticated: false,
+        request: None,
+        response: Some("ListBrowserSessionsResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "revokeBrowserSession",
+        operation_id: "revoke_browser_session",
+        method: "delete",
+        path: "/api/access/v1/browser-sessions/{browser_session_id}",
+        capability_id: "browser.session.revoke",
+        authenticated: false,
+        request: None,
+        response: Some("RevokeBrowserSessionsResponse"),
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "revokeOtherBrowserSessions",
+        operation_id: "revoke_other_browser_sessions",
+        method: "delete",
+        path: "/api/access/v1/browser-sessions/others",
+        capability_id: "browser.sessions.revoke_others",
+        authenticated: false,
+        request: None,
+        response: Some("RevokeBrowserSessionsResponse"),
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "revokeAllBrowserSessions",
+        operation_id: "revoke_all_browser_sessions",
+        method: "delete",
+        path: "/api/access/v1/browser-sessions",
+        capability_id: "browser.sessions.revoke_all",
+        authenticated: false,
+        request: None,
+        response: Some("RevokeBrowserSessionsResponse"),
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "rotateBrowserSession",
+        operation_id: "rotate_browser_session",
+        method: "post",
+        path: "/api/access/v1/browser-session/rotation",
+        capability_id: "browser.session.rotate",
+        authenticated: false,
+        request: None,
+        response: Some("RotateBrowserSessionResponse"),
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "selectBrowserSessionProfile",
+        operation_id: "select_browser_session_profile",
+        method: "put",
+        path: "/api/access/v1/browser-session/profile",
+        capability_id: "browser.session.profile.select",
+        authenticated: false,
+        request: Some("SelectBrowserSessionProfileRequest"),
+        response: Some("SelectBrowserSessionProfileResponse"),
+        retry: "never",
+    },
+];
+
+const CREDENTIAL_ONLY_HYBRID_OPERATIONS: [&str; 5] = [
+    "nuvio_webhook",
+    "tautulli_webhook",
+    "jellyfin_webhook",
+    "emby_webhook",
+    "plex_webhook",
+];
+const BROWSER_SESSION_PROBLEMS: [&str; 3] = [
+    "browser_session_expired",
+    "browser_session_revoked",
+    "session_policy_changed",
+];
+const START_TRAILBASE_SIGN_IN_PROBLEMS: [&str; 9] = [
+    "capacity_exceeded",
+    "forbidden",
+    "integrity_failed",
+    "malformed_json",
+    "payload_too_large",
+    "storage_unavailable",
+    "trailbase_trust_unavailable",
+    "unsupported_media_type",
+    "validation_failed",
+];
+const READ_TRAILBASE_CONTINUATION_PROBLEMS: [&str; 12] = [
+    "auth_browser_binding_invalid",
+    "auth_continuation_persistence_failed",
+    "auth_subject_unaffiliated",
+    "capacity_exceeded",
+    "forbidden",
+    "identity_service_unavailable",
+    "integrity_failed",
+    "storage_unavailable",
+    "trailbase_proof_invalid",
+    "trailbase_session_cleanup_failed",
+    "trailbase_trust_unavailable",
+    "validation_failed",
+];
+const COMPLETE_TRAILBASE_CONTINUATION_PROBLEMS: [&str; 16] = [
+    "auth_browser_binding_invalid",
+    "auth_continuation_persistence_failed",
+    "auth_selection_changed",
+    "auth_subject_unaffiliated",
+    "capacity_exceeded",
+    "forbidden",
+    "identity_service_unavailable",
+    "integrity_failed",
+    "malformed_json",
+    "payload_too_large",
+    "storage_unavailable",
+    "trailbase_proof_invalid",
+    "trailbase_session_cleanup_failed",
+    "trailbase_trust_unavailable",
+    "unsupported_media_type",
+    "validation_failed",
+];
+const CANCEL_TRAILBASE_CONTINUATION_PROBLEMS: [&str; 6] = [
+    "auth_browser_binding_invalid",
+    "forbidden",
+    "integrity_failed",
+    "storage_unavailable",
+    "trailbase_proof_invalid",
+    "validation_failed",
+];
+const BROWSER_SESSION_READ_PROBLEMS: [&str; 5] = [
+    "browser_session_expired",
+    "browser_session_revoked",
+    "integrity_failed",
+    "session_policy_changed",
+    "storage_unavailable",
+];
+const BROWSER_SESSION_MUTATION_PROBLEMS: [&str; 6] = [
+    "browser_session_expired",
+    "browser_session_revoked",
+    "forbidden",
+    "integrity_failed",
+    "session_policy_changed",
+    "storage_unavailable",
+];
+
+fn production_problem_codes(
+    operation: ConformanceOperation,
+    capability: &Value,
+) -> anyhow::Result<Vec<Value>> {
+    let exact: Option<&[&str]> = match operation.operation_id {
+        "start_trailbase_sign_in" => Some(&START_TRAILBASE_SIGN_IN_PROBLEMS),
+        "read_trailbase_continuation" => Some(&READ_TRAILBASE_CONTINUATION_PROBLEMS),
+        "complete_trailbase_continuation" => Some(&COMPLETE_TRAILBASE_CONTINUATION_PROBLEMS),
+        "cancel_trailbase_continuation" => Some(&CANCEL_TRAILBASE_CONTINUATION_PROBLEMS),
+        "read_access_projection" | "read_browser_session" | "list_browser_sessions" => {
+            Some(&BROWSER_SESSION_READ_PROBLEMS)
+        }
+        "end_browser_session"
+        | "revoke_other_browser_sessions"
+        | "revoke_all_browser_sessions"
+        | "rotate_browser_session" => Some(&BROWSER_SESSION_MUTATION_PROBLEMS),
+        "revoke_browser_session" => Some(&[
+            "browser_session_expired",
+            "browser_session_revoked",
+            "forbidden",
+            "integrity_failed",
+            "session_policy_changed",
+            "storage_unavailable",
+            "validation_failed",
+        ]),
+        "select_browser_session_profile" => Some(&[
+            "browser_session_expired",
+            "browser_session_revoked",
+            "forbidden",
+            "integrity_failed",
+            "malformed_json",
+            "payload_too_large",
+            "session_policy_changed",
+            "storage_unavailable",
+            "unsupported_media_type",
+            "validation_failed",
+        ]),
+        _ => None,
+    };
+    let governed = array_at(capability, "/problems")?;
+    if let Some(exact) = exact {
+        for code in exact {
+            ensure!(
+                governed.iter().any(|value| value.as_str() == Some(code)),
+                "production operation {} claims problem {code} outside its capability",
+                operation.operation_id
+            );
+        }
+        return Ok(exact
+            .iter()
+            .map(|code| Value::String((*code).to_owned()))
+            .collect());
+    }
+    Ok(governed
+        .iter()
+        .filter(|problem| {
+            !CREDENTIAL_ONLY_HYBRID_OPERATIONS.contains(&operation.operation_id)
+                || problem
+                    .as_str()
+                    .is_none_or(|code| !BROWSER_SESSION_PROBLEMS.contains(&code))
+        })
+        .cloned()
+        .collect())
+}
+
+fn production_operation_authorization(
+    operation: ConformanceOperation,
+    capability_authorization: &str,
+) -> anyhow::Result<&str> {
+    if CREDENTIAL_ONLY_HYBRID_OPERATIONS.contains(&operation.operation_id) {
+        ensure!(
+            operation.capability_id == "observation.accept"
+                && operation.path.starts_with("/api/v1/integrations/"),
+            "credential-only hybrid override escaped governed webhook ingress"
+        );
+        Ok("scoped")
+    } else {
+        Ok(capability_authorization)
+    }
+}
+
 pub(crate) fn generate_checked_in(workspace_root: &Path) -> anyhow::Result<Artifacts> {
     generate_to(workspace_root, workspace_root)
 }
@@ -224,10 +875,26 @@ fn build(workspace_root: &Path) -> anyhow::Result<Artifacts> {
     let capability_discovery_example = capability_discovery_example(&public_registry)?;
     let health_schema = draft_2020_12_schema::<HealthResponse>()?;
     let problem_schema = draft_2020_12_schema::<ProblemDetails>()?;
+    let provider_manifest_schema = integration::provider_manifest_schema()?;
+    let portability_v2_schema = portability_v2_schema()?;
+    let portability_v2_example = portability_v2_example(workspace_root)?;
+    let portability_v3_schema = portability_v3_schema()?;
+    let portability_v3_example = portability_v3_example(workspace_root)?;
+    let portability_v4_schema = portability_v4_schema()?;
+    let portability_v4_example = portability_v4_example(workspace_root)?;
+    let portability_v5_schema = portability_v5_schema()?;
+    let portability_v5_example = portability_v5_example(workspace_root)?;
     let asyncapi = load_yaml(workspace_root, ASYNCAPI_PATH)?;
     let mut production_openapi = serde_json::to_value(fasti_api::openapi())
         .context("production OpenAPI is not serializable")?;
-    enrich_production_health_openapi(workspace_root, &mut production_openapi, &public_registry)?;
+    enrich_production_openapi(
+        workspace_root,
+        &mut production_openapi,
+        &public_registry,
+        &capability_keys,
+    )?;
+    validate_access_contract_secrets(&production_openapi)?;
+    validate_trailbase_continuation_contract(&production_openapi)?;
     let mut conformance_openapi = serde_json::to_value(fasti_api::b1_conformance_openapi())
         .context("B1 conformance OpenAPI is not serializable")?;
     enrich_conformance_openapi(
@@ -238,7 +905,18 @@ fn build(workspace_root: &Path) -> anyhow::Result<Artifacts> {
         &capability_discovery_example,
     )?;
     validate_problem_schema_parity(&problem_schema, &conformance_openapi)?;
-    validate_required_b1_bindings(
+    let sdk_source = typescript_sdk(
+        &public_registry,
+        &problem_catalog,
+        &health_schema,
+        &problem_schema,
+        &asyncapi,
+        &production_openapi,
+        &conformance_openapi,
+    )?;
+    let sdk_transport = fs::read_to_string(workspace_root.join("packages/sdk/src/transport.ts"))
+        .context("SDK transport source is unreadable")?;
+    validate_required_bindings(
         workspace_root,
         &capability_keys,
         &production_openapi,
@@ -246,8 +924,10 @@ fn build(workspace_root: &Path) -> anyhow::Result<Artifacts> {
         &asyncapi,
         &problem_catalog,
         &health_schema,
+        &sdk_source,
+        &sdk_transport,
     )?;
-    insert(&mut artifacts, OPENAPI_PATH, production_openapi)?;
+    insert(&mut artifacts, OPENAPI_PATH, production_openapi.clone())?;
     insert(
         &mut artifacts,
         CAPABILITY_REGISTRY_PATH,
@@ -270,19 +950,52 @@ fn build(workspace_root: &Path) -> anyhow::Result<Artifacts> {
     )?;
     insert(&mut artifacts, HEALTH_SCHEMA_PATH, health_schema.clone())?;
     insert(&mut artifacts, PROBLEM_SCHEMA_PATH, problem_schema.clone())?;
-    insert_bytes(
+    insert(
         &mut artifacts,
-        SDK_GENERATED_PATH,
-        typescript_sdk(
-            &public_registry,
-            &problem_catalog,
-            &health_schema,
-            &problem_schema,
-            &asyncapi,
-            &conformance_openapi,
-        )?
-        .into_bytes(),
+        PROVIDER_MANIFEST_SCHEMA_PATH,
+        provider_manifest_schema,
     )?;
+    insert(
+        &mut artifacts,
+        PORTABILITY_V2_SCHEMA_PATH,
+        portability_v2_schema,
+    )?;
+    insert(
+        &mut artifacts,
+        PORTABILITY_V2_EXAMPLE_PATH,
+        portability_v2_example,
+    )?;
+    insert(
+        &mut artifacts,
+        PORTABILITY_V3_SCHEMA_PATH,
+        portability_v3_schema,
+    )?;
+    insert(
+        &mut artifacts,
+        PORTABILITY_V3_EXAMPLE_PATH,
+        portability_v3_example,
+    )?;
+    insert(
+        &mut artifacts,
+        PORTABILITY_V4_SCHEMA_PATH,
+        portability_v4_schema,
+    )?;
+    insert(
+        &mut artifacts,
+        PORTABILITY_V4_EXAMPLE_PATH,
+        portability_v4_example,
+    )?;
+    insert(
+        &mut artifacts,
+        PORTABILITY_V5_SCHEMA_PATH,
+        portability_v5_schema,
+    )?;
+    insert(
+        &mut artifacts,
+        PORTABILITY_V5_EXAMPLE_PATH,
+        portability_v5_example,
+    )?;
+    insert_bytes(&mut artifacts, SDK_GENERATED_PATH, sdk_source.into_bytes())?;
     insert_bytes(
         &mut artifacts,
         RUST_CAPABILITY_IDS_PATH,
@@ -325,6 +1038,378 @@ fn draft_2020_12_schema<T: JsonSchema>() -> anyhow::Result<Value> {
         "generated JSON Schema is not explicitly Draft 2020-12"
     );
     Ok(value)
+}
+
+fn portability_v2_schema() -> anyhow::Result<Value> {
+    let mut schema = draft_2020_12_schema::<ChecksummedWorkspaceManifestDto>()?;
+    let root = schema
+        .as_object_mut()
+        .context("portability schema root must be an object")?;
+    root.insert(
+        "$id".to_owned(),
+        Value::String(
+            "https://fasti.scrobble.dev/schemas/internal-staged/portability/v2/workspace-manifest.json"
+                .to_owned(),
+        ),
+    );
+    root.insert(
+        "title".to_owned(),
+        Value::String("InternalStagedChecksummedWorkspaceManifestV2".to_owned()),
+    );
+    root.insert(
+        "$comment".to_owned(),
+        Value::String(
+            "Internal staged B3 archive v2. It extends the frozen v1 stream prefix with metadata and profile tracking state."
+                .to_owned(),
+        ),
+    );
+    root.insert(
+        "x-fasti-contract-state".to_owned(),
+        Value::String("internal_staged_archive_v2".to_owned()),
+    );
+
+    *schema
+        .pointer_mut("/$defs/WorkspaceManifestDto/properties/format_version")
+        .context("generated portability schema omits format_version")? = serde_json::json!({
+        "const": 2
+    });
+    let entities = WorkspaceExportEntity::V2.map(WorkspaceExportEntity::as_str);
+    *schema
+        .pointer_mut("/$defs/WorkspaceExportEntityDto/enum")
+        .context("generated portability schema omits export entity enum")? =
+        serde_json::to_value(entities)?;
+    *schema
+        .pointer_mut("/$defs/WorkspaceManifestDto/properties/streams")
+        .context("generated portability schema omits streams")? = serde_json::json!({
+        "type": "array",
+        "minItems": entities.len(),
+        "maxItems": entities.len(),
+        "prefixItems": entities.map(|entity| serde_json::json!({
+            "allOf": [
+                { "$ref": "#/$defs/WorkspaceStreamDescriptorDto" },
+                {
+                    "type": "object",
+                    "properties": { "entity": { "const": entity } }
+                }
+            ]
+        })),
+        "items": false
+    });
+    Ok(schema)
+}
+
+fn portability_v2_example(workspace_root: &Path) -> anyhow::Result<Value> {
+    let source = fs::read(workspace_root.join(PORTABILITY_V1_EXAMPLE_PATH))?;
+    let mut example: Value =
+        serde_json::from_slice(&source).context("archive-v1 manifest example is not valid JSON")?;
+    *example
+        .pointer_mut("/manifest/format_version")
+        .context("archive-v1 example omits format_version")? = serde_json::json!(2);
+    let streams = example
+        .pointer_mut("/manifest/streams")
+        .and_then(Value::as_array_mut)
+        .context("archive-v1 example omits streams")?;
+    let empty_digest = format!("sha256:{}", crate::evidence::sha256_bytes(&[]));
+    for entity in WorkspaceExportEntity::V2[WorkspaceExportEntity::V1.len()..]
+        .iter()
+        .map(|entity| entity.as_str())
+    {
+        streams.push(serde_json::json!({
+            "entity": entity,
+            "row_count": 0,
+            "byte_length": 0,
+            "digest": empty_digest,
+        }));
+    }
+    let manifest = example
+        .get("manifest")
+        .context("archive-v1 example omits manifest")?;
+    let canonical = serde_json_canonicalizer::to_vec(manifest)
+        .context("archive-v2 example manifest is not canonicalizable")?;
+    example["manifest_digest"] = Value::String(format!(
+        "sha256:{}",
+        crate::evidence::sha256_bytes(&canonical)
+    ));
+    Ok(example)
+}
+
+fn portability_v3_schema() -> anyhow::Result<Value> {
+    let mut schema = draft_2020_12_schema::<ChecksummedWorkspaceManifestDto>()?;
+    let root = schema
+        .as_object_mut()
+        .context("portability schema root must be an object")?;
+    root.insert(
+        "$id".to_owned(),
+        Value::String(
+            "https://fasti.scrobble.dev/schemas/internal-staged/portability/v3/workspace-manifest.json"
+                .to_owned(),
+        ),
+    );
+    root.insert(
+        "title".to_owned(),
+        Value::String("InternalStagedChecksummedWorkspaceManifestV3".to_owned()),
+    );
+    root.insert(
+        "$comment".to_owned(),
+        Value::String(
+            "Internal staged B3 archive v3. It extends the frozen v2 stream prefix with authoritative M2 metadata state. Derived projections and disposable cache state are excluded."
+                .to_owned(),
+        ),
+    );
+    root.insert(
+        "x-fasti-contract-state".to_owned(),
+        Value::String("internal_staged_archive_v3".to_owned()),
+    );
+    *schema
+        .pointer_mut("/$defs/WorkspaceManifestDto/properties/format_version")
+        .context("generated portability schema omits format_version")? = serde_json::json!({
+        "const": 3
+    });
+    let entities = WorkspaceExportEntity::V3.map(WorkspaceExportEntity::as_str);
+    *schema
+        .pointer_mut("/$defs/WorkspaceExportEntityDto/enum")
+        .context("generated portability schema omits export entity enum")? =
+        serde_json::to_value(entities)?;
+    *schema
+        .pointer_mut("/$defs/WorkspaceManifestDto/properties/streams")
+        .context("generated portability schema omits streams")? = serde_json::json!({
+        "type": "array",
+        "minItems": entities.len(),
+        "maxItems": entities.len(),
+        "prefixItems": entities.map(|entity| serde_json::json!({
+            "allOf": [
+                { "$ref": "#/$defs/WorkspaceStreamDescriptorDto" },
+                {
+                    "type": "object",
+                    "properties": { "entity": { "const": entity } }
+                }
+            ]
+        })),
+        "items": false
+    });
+    Ok(schema)
+}
+
+fn portability_v3_example(workspace_root: &Path) -> anyhow::Result<Value> {
+    let source = fs::read(workspace_root.join(PORTABILITY_V2_EXAMPLE_PATH))?;
+    let mut example: Value =
+        serde_json::from_slice(&source).context("archive-v2 manifest example is not valid JSON")?;
+    *example
+        .pointer_mut("/manifest/format_version")
+        .context("archive-v2 example omits format_version")? = serde_json::json!(3);
+    let streams = example
+        .pointer_mut("/manifest/streams")
+        .and_then(Value::as_array_mut)
+        .context("archive-v2 example omits streams")?;
+    let empty_digest = format!("sha256:{}", crate::evidence::sha256_bytes(&[]));
+    for entity in WorkspaceExportEntity::V3[WorkspaceExportEntity::V2.len()..]
+        .iter()
+        .map(|entity| entity.as_str())
+    {
+        streams.push(serde_json::json!({
+            "entity": entity,
+            "row_count": 0,
+            "byte_length": 0,
+            "digest": empty_digest,
+        }));
+    }
+    let manifest = example
+        .get("manifest")
+        .context("archive-v2 example omits manifest")?;
+    let canonical = serde_json_canonicalizer::to_vec(manifest)
+        .context("archive-v3 example manifest is not canonicalizable")?;
+    example["manifest_digest"] = Value::String(format!(
+        "sha256:{}",
+        crate::evidence::sha256_bytes(&canonical)
+    ));
+    Ok(example)
+}
+
+fn portability_v4_schema() -> anyhow::Result<Value> {
+    let mut schema = draft_2020_12_schema::<ChecksummedWorkspaceManifestDto>()?;
+    let root = schema
+        .as_object_mut()
+        .context("portability schema root must be an object")?;
+    root.insert(
+        "$id".to_owned(),
+        Value::String(
+            "https://fasti.scrobble.dev/schemas/internal-staged/portability/v4/workspace-manifest.json"
+                .to_owned(),
+        ),
+    );
+    root.insert(
+        "title".to_owned(),
+        Value::String("InternalStagedChecksummedWorkspaceManifestV4".to_owned()),
+    );
+    root.insert(
+        "$comment".to_owned(),
+        Value::String(
+            "Internal staged B3 archive v4. It extends the frozen v3 stream prefix with immutable metadata refresh receipts."
+                .to_owned(),
+        ),
+    );
+    root.insert(
+        "x-fasti-contract-state".to_owned(),
+        Value::String("internal_staged_archive_v4".to_owned()),
+    );
+    *schema
+        .pointer_mut("/$defs/WorkspaceManifestDto/properties/format_version")
+        .context("generated portability schema omits format_version")? = serde_json::json!({
+        "const": 4
+    });
+    let entities = WorkspaceExportEntity::V4.map(WorkspaceExportEntity::as_str);
+    *schema
+        .pointer_mut("/$defs/WorkspaceExportEntityDto/enum")
+        .context("generated portability schema omits export entity enum")? =
+        serde_json::to_value(entities)?;
+    *schema
+        .pointer_mut("/$defs/WorkspaceManifestDto/properties/streams")
+        .context("generated portability schema omits streams")? = serde_json::json!({
+        "type": "array",
+        "minItems": entities.len(),
+        "maxItems": entities.len(),
+        "prefixItems": entities.map(|entity| serde_json::json!({
+            "allOf": [
+                { "$ref": "#/$defs/WorkspaceStreamDescriptorDto" },
+                {
+                    "type": "object",
+                    "properties": { "entity": { "const": entity } }
+                }
+            ]
+        })),
+        "items": false
+    });
+    Ok(schema)
+}
+
+fn portability_v4_example(workspace_root: &Path) -> anyhow::Result<Value> {
+    let source = fs::read(workspace_root.join(PORTABILITY_V3_EXAMPLE_PATH))?;
+    let mut example: Value =
+        serde_json::from_slice(&source).context("archive-v3 manifest example is not valid JSON")?;
+    *example
+        .pointer_mut("/manifest/format_version")
+        .context("archive-v3 example omits format_version")? = serde_json::json!(4);
+    let streams = example
+        .pointer_mut("/manifest/streams")
+        .and_then(Value::as_array_mut)
+        .context("archive-v3 example omits streams")?;
+    let empty_digest = format!("sha256:{}", crate::evidence::sha256_bytes(&[]));
+    for entity in WorkspaceExportEntity::V4[WorkspaceExportEntity::V3.len()..]
+        .iter()
+        .map(|entity| entity.as_str())
+    {
+        streams.push(serde_json::json!({
+            "entity": entity,
+            "row_count": 0,
+            "byte_length": 0,
+            "digest": empty_digest,
+        }));
+    }
+    let manifest = example
+        .get("manifest")
+        .context("archive-v3 example omits manifest")?;
+    let canonical = serde_json_canonicalizer::to_vec(manifest)
+        .context("archive-v4 example manifest is not canonicalizable")?;
+    example["manifest_digest"] = Value::String(format!(
+        "sha256:{}",
+        crate::evidence::sha256_bytes(&canonical)
+    ));
+    Ok(example)
+}
+
+fn portability_v5_schema() -> anyhow::Result<Value> {
+    let mut schema = draft_2020_12_schema::<ChecksummedWorkspaceManifestDto>()?;
+    let root = schema
+        .as_object_mut()
+        .context("portability schema root must be an object")?;
+    root.insert(
+        "$id".to_owned(),
+        Value::String(
+            "https://fasti.scrobble.dev/schemas/internal-staged/portability/v5/workspace-manifest.json"
+                .to_owned(),
+        ),
+    );
+    root.insert(
+        "title".to_owned(),
+        Value::String("InternalStagedChecksummedWorkspaceManifestV5".to_owned()),
+    );
+    root.insert(
+        "$comment".to_owned(),
+        Value::String(
+            "Internal staged B3 archive v5. It extends the frozen v4 stream prefix with authoritative identity-routing and anime-grouping policy state."
+                .to_owned(),
+        ),
+    );
+    root.insert(
+        "x-fasti-contract-state".to_owned(),
+        Value::String("internal_staged_archive_v5".to_owned()),
+    );
+    *schema
+        .pointer_mut("/$defs/WorkspaceManifestDto/properties/format_version")
+        .context("generated portability schema omits format_version")? = serde_json::json!({
+        "const": 5
+    });
+    let entities = WorkspaceExportEntity::ALL
+        .iter()
+        .map(|entity| entity.as_str())
+        .collect::<Vec<_>>();
+    *schema
+        .pointer_mut("/$defs/WorkspaceExportEntityDto/enum")
+        .context("generated portability schema omits export entity enum")? =
+        serde_json::to_value(&entities)?;
+    *schema
+        .pointer_mut("/$defs/WorkspaceManifestDto/properties/streams")
+        .context("generated portability schema omits streams")? = serde_json::json!({
+        "type": "array",
+        "minItems": entities.len(),
+        "maxItems": entities.len(),
+        "prefixItems": entities.iter().map(|entity| serde_json::json!({
+            "allOf": [
+                { "$ref": "#/$defs/WorkspaceStreamDescriptorDto" },
+                {
+                    "type": "object",
+                    "properties": { "entity": { "const": entity } }
+                }
+            ]
+        })).collect::<Vec<_>>(),
+        "items": false
+    });
+    Ok(schema)
+}
+
+fn portability_v5_example(workspace_root: &Path) -> anyhow::Result<Value> {
+    let source = fs::read(workspace_root.join(PORTABILITY_V4_EXAMPLE_PATH))?;
+    let mut example: Value =
+        serde_json::from_slice(&source).context("archive-v4 manifest example is not valid JSON")?;
+    *example
+        .pointer_mut("/manifest/format_version")
+        .context("archive-v4 example omits format_version")? = serde_json::json!(5);
+    let streams = example
+        .pointer_mut("/manifest/streams")
+        .and_then(Value::as_array_mut)
+        .context("archive-v4 example omits streams")?;
+    let empty_digest = format!("sha256:{}", crate::evidence::sha256_bytes(&[]));
+    for entity in WorkspaceExportEntity::ALL[WorkspaceExportEntity::V4.len()..]
+        .iter()
+        .map(|entity| entity.as_str())
+    {
+        streams.push(serde_json::json!({
+            "entity": entity,
+            "row_count": 0,
+            "byte_length": 0,
+            "digest": empty_digest,
+        }));
+    }
+    let manifest = example
+        .get("manifest")
+        .context("archive-v4 example omits manifest")?;
+    let canonical = serde_json_canonicalizer::to_vec(manifest)
+        .context("archive-v5 example manifest is not canonicalizable")?;
+    example["manifest_digest"] = Value::String(format!(
+        "sha256:{}",
+        crate::evidence::sha256_bytes(&canonical)
+    ));
+    Ok(example)
 }
 
 fn pretty_json(value: Value) -> anyhow::Result<Vec<u8>> {
@@ -440,10 +1525,8 @@ fn enrich_conformance_openapi(
                 )
             })?;
         let scopes = array_at(capability, "/scopes")?.to_vec();
-        let problems = array_at(capability, "/problems")?.to_vec();
+        let problems = conformance_problem_codes(capability, expected)?;
         let examples = array_at(capability, "/examples")?.to_vec();
-        let runtime_availability =
-            string_at(capability, "/lifecycle/runtime_availability")?.to_owned();
         let pointer = format!(
             "/paths/{}/{}",
             escape_pointer(expected.path),
@@ -465,7 +1548,14 @@ fn enrich_conformance_openapi(
         operation.insert("x-fasti-required-scopes".to_owned(), Value::Array(scopes));
         operation.insert(
             "x-fasti-authorization".to_owned(),
-            Value::String(string_at(capability, "/authorization")?.to_owned()),
+            Value::String(
+                if expected.operation_id == "accept_observation" {
+                    "scoped"
+                } else {
+                    string_at(capability, "/authorization")?
+                }
+                .to_owned(),
+            ),
         );
         operation.insert(
             "x-fasti-problem-codes".to_owned(),
@@ -477,7 +1567,7 @@ fn enrich_conformance_openapi(
         );
         operation.insert(
             "x-fasti-runtime-availability".to_owned(),
-            Value::String(runtime_availability),
+            Value::String("fixture_only".to_owned()),
         );
         validate_problem_responses(operation, expected, capability_keys, &problems)?;
         bind_governed_examples(
@@ -493,6 +1583,39 @@ fn enrich_conformance_openapi(
     }
     enrich_discovery_collection_schema(openapi, public_registry)?;
     Ok(())
+}
+
+fn conformance_problem_codes(
+    capability: &Value,
+    expected: ConformanceOperation,
+) -> anyhow::Result<Vec<Value>> {
+    let production_only: &[&str] = match expected.capability_id {
+        "node.initialize" => &[
+            "already_initialized",
+            "bootstrap_closed",
+            "integrity_failed",
+            "storage_unavailable",
+        ],
+        "client.enroll" => &[
+            "already_initialized",
+            "bootstrap_closed",
+            "integrity_failed",
+            "storage_unavailable",
+        ],
+        "observation.accept" if expected.operation_id == "accept_observation" => {
+            &BROWSER_SESSION_PROBLEMS
+        }
+        _ => &[],
+    };
+    Ok(array_at(capability, "/problems")?
+        .iter()
+        .filter(|problem| {
+            problem
+                .as_str()
+                .is_none_or(|code| !production_only.contains(&code))
+        })
+        .cloned()
+        .collect())
 }
 
 fn enrich_discovery_collection_schema(
@@ -642,7 +1765,7 @@ fn enrich_discovery_collection_schema(
         ),
         (
             "/components/schemas/CapabilityUatDto/properties/id",
-            r"^ID-[0-9]{3}$",
+            r"^(?:ID|MDN)-[0-9]{3}$",
         ),
     ] {
         openapi
@@ -662,7 +1785,7 @@ fn enrich_discovery_collection_schema(
         ),
         (
             "/components/schemas/CapabilitySurfaceDispositionDto/properties/body",
-            vec!["b0", "b1", "b2", "b3"],
+            vec!["b0", "b1", "b2", "b3", "c1", "m1", "m2", "m3"],
         ),
         (
             "/components/schemas/CapabilityUatDto/properties/relationship",
@@ -670,7 +1793,7 @@ fn enrich_discovery_collection_schema(
         ),
         (
             "/components/schemas/CapabilityUatDto/properties/owner_body",
-            vec!["b1", "b2", "b3"],
+            vec!["b1", "b2", "b3", "c1", "m1", "m2", "m3"],
         ),
     ] {
         openapi
@@ -734,22 +1857,524 @@ fn validate_problem_schema_parity(
     Ok(())
 }
 
-fn enrich_production_health_openapi(
+fn enrich_production_openapi(
     workspace_root: &Path,
+    openapi: &mut Value,
+    public_registry: &Value,
+    capability_keys: &BTreeMap<String, CapabilityKey>,
+) -> anyhow::Result<()> {
+    validate_production_security_schemes(openapi)?;
+    enrich_production_health_openapi(workspace_root, openapi, public_registry)?;
+    enrich_production_integration_status_openapi(workspace_root, openapi, public_registry)?;
+    let policy_changes = openapi
+        .pointer_mut("/components/schemas/AnimeGroupingPolicyChangeDto/oneOf")
+        .and_then(Value::as_array_mut)
+        .context("AnimeGroupingPolicyChangeDto variants are absent")?;
+    ensure!(
+        policy_changes.len() == 3,
+        "AnimeGroupingPolicyChangeDto variant count changed"
+    );
+    for variant in policy_changes {
+        variant
+            .as_object_mut()
+            .context("anime grouping policy change variant must be an object")?
+            .insert("additionalProperties".to_owned(), Value::Bool(false));
+    }
+    let capabilities = array_at(public_registry, "/capabilities")?;
+    for expected in PRODUCTION_BOOTSTRAP_OPERATIONS
+        .into_iter()
+        .chain(PRODUCTION_RUNTIME_OPERATIONS)
+    {
+        let capability = capabilities
+            .iter()
+            .find(|capability| string_at(capability, "/id").ok() == Some(expected.capability_id))
+            .with_context(|| {
+                format!(
+                    "production operation {} references absent registry capability {}",
+                    expected.operation_id, expected.capability_id
+                )
+            })?;
+        let pointer = format!(
+            "/paths/{}/{}",
+            escape_pointer(expected.path),
+            expected.method
+        );
+        let operation = openapi
+            .pointer_mut(&pointer)
+            .and_then(Value::as_object_mut)
+            .with_context(|| {
+                format!(
+                    "production OpenAPI omits {} {}",
+                    expected.method, expected.path
+                )
+            })?;
+        operation.insert(
+            "x-fasti-capability-id".to_owned(),
+            Value::String(expected.capability_id.to_owned()),
+        );
+        operation.insert(
+            "x-fasti-required-scopes".to_owned(),
+            Value::Array(array_at(capability, "/scopes")?.clone()),
+        );
+        operation.insert(
+            "x-fasti-authorization".to_owned(),
+            Value::String(
+                production_operation_authorization(
+                    expected,
+                    string_at(capability, "/authorization")?,
+                )?
+                .to_owned(),
+            ),
+        );
+        let problems = production_problem_codes(expected, capability)?;
+        operation.insert(
+            "x-fasti-problem-codes".to_owned(),
+            Value::Array(problems.clone()),
+        );
+        let examples = array_at(capability, "/examples")?.clone();
+        operation.insert(
+            "x-fasti-example-ids".to_owned(),
+            Value::Array(examples.clone()),
+        );
+        operation.insert(
+            "x-fasti-runtime-availability".to_owned(),
+            Value::String(string_at(capability, "/lifecycle/runtime_availability")?.to_owned()),
+        );
+        validate_problem_responses(operation, expected, capability_keys, &problems)?;
+        bind_governed_examples(
+            workspace_root,
+            operation,
+            public_registry,
+            capability,
+            expected,
+            capability_keys,
+            &examples,
+            &Value::Null,
+        )?;
+    }
+    enrich_trailbase_callback_openapi(openapi, public_registry)?;
+    Ok(())
+}
+
+fn enrich_trailbase_callback_openapi(
     openapi: &mut Value,
     public_registry: &Value,
 ) -> anyhow::Result<()> {
     let capability = array_at(public_registry, "/capabilities")?
         .iter()
-        .find(|capability| string_at(capability, "/id").ok() == Some("system.health"))
-        .context("public registry omits system.health")?;
+        .find(|capability| string_at(capability, "/id").ok() == Some("browser.session.create"))
+        .context("registry omits browser.session.create")?;
     let operation = openapi
-        .pointer_mut("/paths/~1api~1v1~1health/get")
+        .pointer_mut("/paths/~1api~1access~1v1~1trailbase~1callback/get")
         .and_then(Value::as_object_mut)
-        .context("production OpenAPI omits GET /api/v1/health")?;
+        .context("production OpenAPI omits the TrailBase callback")?;
+    ensure!(
+        operation.get("operationId").and_then(Value::as_str)
+            == Some("complete_trailbase_authentication"),
+        "TrailBase callback operation ID changed"
+    );
+    ensure!(
+        operation.get("requestBody").is_none(),
+        "TrailBase callback must not accept a request body"
+    );
+    ensure!(
+        operation.get("security") == Some(&serde_json::json!([{"auth_binding_cookie": []}])),
+        "TrailBase callback must require only the binding cookie"
+    );
+    let responses = operation
+        .get("responses")
+        .and_then(Value::as_object)
+        .context("TrailBase callback responses must be an object")?;
+    ensure!(
+        responses.len() == 1 && responses.contains_key("303"),
+        "TrailBase callback must expose only its fixed 303 redirect"
+    );
+    let parameters = operation
+        .get("parameters")
+        .and_then(Value::as_array)
+        .context("TrailBase callback parameters must be an array")?;
+    ensure!(
+        parameters.len() == 1
+            && string_at(&parameters[0], "/name")? == "code"
+            && string_at(&parameters[0], "/in")? == "query"
+            && parameters[0].get("required") == Some(&Value::Bool(true))
+            && u64_at(&parameters[0], "/schema/minLength")? == 48
+            && u64_at(&parameters[0], "/schema/maxLength")? == 48
+            && string_at(&parameters[0], "/schema/pattern")? == "^[A-Za-z0-9]{48}$",
+        "TrailBase callback must expose one exact 48-character code query"
+    );
+    for (name, value) in [
+        (
+            "x-fasti-capability-id",
+            Value::String("browser.session.create".to_owned()),
+        ),
+        (
+            "x-fasti-required-scopes",
+            Value::Array(array_at(capability, "/scopes")?.clone()),
+        ),
+        (
+            "x-fasti-authorization",
+            Value::String(string_at(capability, "/authorization")?.to_owned()),
+        ),
+        ("x-fasti-problem-codes", Value::Array(Vec::new())),
+        (
+            "x-fasti-example-ids",
+            Value::Array(array_at(capability, "/examples")?.clone()),
+        ),
+        (
+            "x-fasti-runtime-availability",
+            Value::String(string_at(capability, "/lifecycle/runtime_availability")?.to_owned()),
+        ),
+    ] {
+        operation.insert(name.to_owned(), value);
+    }
+    Ok(())
+}
+
+const FORBIDDEN_ACCESS_CONTRACT_PROPERTIES: [&str; 16] = [
+    "access_token",
+    "bootstrap_secret",
+    "browser_binding",
+    "browser_binding_digest",
+    "code_verifier",
+    "credential",
+    "credential_digest",
+    "csrf",
+    "csrf_digest",
+    "csrf_secret",
+    "csrf_token",
+    "id_token",
+    "refresh_token",
+    "session_digest",
+    "session_secret",
+    "vendor_token",
+];
+
+fn validate_access_contract_secrets(openapi: &Value) -> anyhow::Result<()> {
+    let paths = object_at(openapi, "/paths")?;
+    let mut seen_refs = BTreeSet::new();
+    for (path, path_item) in paths {
+        if !path.starts_with("/api/access/v1/") {
+            continue;
+        }
+        for operation in path_item
+            .as_object()
+            .context("Access path item must be an object")?
+            .values()
+        {
+            for key in ["parameters", "requestBody", "responses"] {
+                if let Some(surface) = operation.get(key) {
+                    validate_access_schema_node(openapi, surface, &mut seen_refs)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_trailbase_continuation_contract(openapi: &Value) -> anyhow::Result<()> {
+    let schemas = object_at(openapi, "/components/schemas")?;
+    for (name, expected) in [
+        ("StartTrailBaseSignInRequest", &["remembered"][..]),
+        (
+            "StartTrailBaseSignInResponse",
+            &["authorization_url", "expires_at"][..],
+        ),
+        (
+            "TrailBaseContinuationChoiceDto",
+            &[
+                "choice_ordinal",
+                "workspace_ordinal",
+                "profile_ordinal",
+                "workspace_created_at",
+                "profile_created_at",
+                "membership_state",
+                "role",
+            ][..],
+        ),
+        (
+            "ReadTrailBaseContinuationResponse",
+            &["expires_at", "remembered", "candidate_revision", "choices"][..],
+        ),
+        (
+            "CompleteTrailBaseContinuationRequest",
+            &["choice_ordinal", "candidate_revision"][..],
+        ),
+    ] {
+        let schema = schemas
+            .get(name)
+            .with_context(|| format!("production OpenAPI omits {name}"))?;
+        ensure!(
+            schema.get("additionalProperties").and_then(Value::as_bool) == Some(false),
+            "{name} must reject unknown fields"
+        );
+        let actual: BTreeSet<_> = object_at(schema, "/properties")?
+            .keys()
+            .map(String::as_str)
+            .collect();
+        let expected: BTreeSet<_> = expected.iter().copied().collect();
+        ensure!(actual == expected, "{name} exposes unexpected properties");
+    }
+    for (pointer, minimum, maximum) in [
+        (
+            "/components/schemas/TrailBaseContinuationChoiceDto/properties/choice_ordinal",
+            0,
+            63,
+        ),
+        (
+            "/components/schemas/TrailBaseContinuationChoiceDto/properties/workspace_ordinal",
+            1,
+            64,
+        ),
+        (
+            "/components/schemas/TrailBaseContinuationChoiceDto/properties/profile_ordinal",
+            1,
+            64,
+        ),
+        (
+            "/components/schemas/CompleteTrailBaseContinuationRequest/properties/choice_ordinal",
+            0,
+            63,
+        ),
+    ] {
+        let schema = value_at(openapi, pointer)?;
+        ensure!(
+            u64_at(schema, "/minimum")? == minimum && u64_at(schema, "/maximum")? == maximum,
+            "{pointer} has the wrong numeric bounds"
+        );
+    }
+    let choices = value_at(
+        openapi,
+        "/components/schemas/ReadTrailBaseContinuationResponse/properties/choices",
+    )?;
+    ensure!(
+        u64_at(choices, "/minItems")? == 1 && u64_at(choices, "/maxItems")? == 64,
+        "TrailBase continuation choices must contain 1 to 64 entries"
+    );
+    for pointer in [
+        "/components/schemas/ReadTrailBaseContinuationResponse/properties/candidate_revision",
+        "/components/schemas/CompleteTrailBaseContinuationRequest/properties/candidate_revision",
+    ] {
+        let revision = value_at(openapi, pointer)?;
+        ensure!(
+            u64_at(revision, "/minLength")? == 71
+                && u64_at(revision, "/maxLength")? == 71
+                && string_at(revision, "/pattern")? == r"^sha256:[0-9a-f]{64}$",
+            "{pointer} must use the canonical SHA-256 revision"
+        );
+    }
+    Ok(())
+}
+
+fn validate_access_schema_node(
+    openapi: &Value,
+    node: &Value,
+    seen_refs: &mut BTreeSet<String>,
+) -> anyhow::Result<()> {
+    match node {
+        Value::Array(values) => {
+            for value in values {
+                validate_access_schema_node(openapi, value, seen_refs)?;
+            }
+        }
+        Value::Object(object) => {
+            if let Some(reference) = object.get("$ref").and_then(Value::as_str) {
+                ensure!(
+                    reference.starts_with("#/components/schemas/"),
+                    "Access contract contains a non-local schema reference"
+                );
+                if seen_refs.insert(reference.to_owned()) {
+                    let pointer = reference
+                        .strip_prefix('#')
+                        .expect("local schema reference has a fragment");
+                    let target = value_at(openapi, pointer).with_context(|| {
+                        format!("Access schema reference {reference} is absent")
+                    })?;
+                    validate_access_schema_node(openapi, target, seen_refs)?;
+                }
+            }
+            if let Some(properties) = object.get("properties").and_then(Value::as_object) {
+                for name in properties.keys() {
+                    ensure!(
+                        !FORBIDDEN_ACCESS_CONTRACT_PROPERTIES.contains(&name.as_str())
+                            && name != "token",
+                        "Access contract exposes forbidden secret property {name}"
+                    );
+                }
+            }
+            for value in object.values() {
+                validate_access_schema_node(openapi, value, seen_refs)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn validate_production_security_schemes(openapi: &Value) -> anyhow::Result<()> {
+    for name in ["bootstrap_bearer", "credential_bearer"] {
+        let pointer = format!("/components/securitySchemes/{name}");
+        let scheme = value_at(openapi, &pointer)?;
+        ensure!(
+            string_at(scheme, "/type")? == "http" && string_at(scheme, "/scheme")? == "bearer",
+            "production security scheme {name} must be HTTP bearer"
+        );
+    }
+    for (name, location, wire_name) in [
+        ("browser_session_cookie", "cookie", "__Host-fasti_session"),
+        ("csrf_cookie", "cookie", "__Host-fasti_csrf"),
+        ("csrf_header", "header", "X-CSRF-Token"),
+        (
+            "auth_binding_cookie",
+            "cookie",
+            "__Secure-fasti_auth_binding",
+        ),
+        (
+            "auth_continuation_cookie",
+            "cookie",
+            "__Secure-fasti_auth_continuation",
+        ),
+    ] {
+        let pointer = format!("/components/securitySchemes/{name}");
+        let scheme = value_at(openapi, &pointer)?;
+        ensure!(
+            string_at(scheme, "/type")? == "apiKey"
+                && string_at(scheme, "/in")? == location
+                && string_at(scheme, "/name")? == wire_name,
+            "production security scheme {name} must be the exact {location} {wire_name}"
+        );
+    }
+    Ok(())
+}
+
+fn validate_production_operation_security(
+    operation: &Value,
+    operation_id: &str,
+    method: &str,
+    path: &str,
+) -> anyhow::Result<()> {
+    let access_security = match operation_id {
+        "start_trailbase_sign_in" => Some(serde_json::json!(null)),
+        "read_trailbase_continuation"
+        | "complete_trailbase_continuation"
+        | "cancel_trailbase_continuation" => {
+            Some(serde_json::json!([{"auth_continuation_cookie": []}]))
+        }
+        "read_access_projection" | "read_browser_session" | "list_browser_sessions" => {
+            Some(serde_json::json!([{"browser_session_cookie": []}]))
+        }
+        "end_browser_session"
+        | "revoke_browser_session"
+        | "revoke_other_browser_sessions"
+        | "revoke_all_browser_sessions"
+        | "rotate_browser_session"
+        | "select_browser_session_profile" => Some(serde_json::json!([{
+            "browser_session_cookie": [],
+            "csrf_cookie": [],
+            "csrf_header": []
+        }])),
+        "submit_observation"
+        | "create_record"
+        | "attach_identifier"
+        | "register_namespace"
+        | "set_tracking_disposition"
+        | "replace_nuvio_collections"
+        | "clear_nuvio_collections"
+        | "apply_anime_grouping_policy_change" => Some(serde_json::json!([
+            {"credential_bearer": []},
+            {
+                "browser_session_cookie": [],
+                "csrf_cookie": [],
+                "csrf_header": []
+            }
+        ])),
+        _ => None,
+    };
+    if let Some(expected) = access_security {
+        if expected.is_null() {
+            ensure!(
+                operation.get("security").is_none(),
+                "production operation {method} {path} must not declare authentication"
+            );
+        } else {
+            ensure!(
+                operation.get("security") == Some(&expected),
+                "production operation {method} {path} has the wrong browser security requirement"
+            );
+        }
+        return Ok(());
+    }
+    let expected = match operation_id {
+        "initialize_node" => vec!["bootstrap_bearer"],
+        "list_records"
+        | "list_tracking_dispositions"
+        | "get_nuvio_collections"
+        | "resolve_identity_route"
+        | "read_anime_grouping_policy"
+        | "preview_anime_grouping_policy_change" => {
+            vec!["credential_bearer", "browser_session_cookie"]
+        }
+        "list_providers"
+        | "configure_provider_credential"
+        | "remove_provider_credential"
+        | "test_provider_credential"
+        | "read_provider_health"
+        | "refresh_metadata_claims"
+        | "read_metadata_projection"
+        | "configure_metadata_projection" => vec!["credential_bearer"],
+        "nuvio_webhook" | "tautulli_webhook" | "jellyfin_webhook" | "emby_webhook"
+        | "plex_webhook" => vec!["credential_bearer"],
+        "enroll_first_client" | "health_check" | "integration_status" => Vec::new(),
+        other => anyhow::bail!("unknown production operation {other}"),
+    };
+    if expected.is_empty() {
+        ensure!(
+            operation.get("security").is_none(),
+            "production operation {method} {path} must not declare authentication"
+        );
+        return Ok(());
+    }
+    let requirements = array_at(operation, "/security")?;
+    ensure!(
+        requirements.len() == expected.len(),
+        "production operation {method} {path} has the wrong number of security requirements"
+    );
+    for scheme in expected {
+        ensure!(
+            requirements.iter().any(|requirement| {
+                requirement.as_object().is_some_and(|requirement| {
+                    requirement.len() == 1
+                        && requirement
+                            .get(scheme)
+                            .and_then(Value::as_array)
+                            .is_some_and(Vec::is_empty)
+                })
+            }),
+            "production operation {method} {path} must use {scheme} without OAuth scopes"
+        );
+    }
+    Ok(())
+}
+
+fn enrich_governed_success_operation_openapi(
+    workspace_root: &Path,
+    openapi: &mut Value,
+    public_registry: &Value,
+    capability_id: &str,
+    path_pointer: &str,
+    example_id: &str,
+) -> anyhow::Result<()> {
+    let capability = array_at(public_registry, "/capabilities")?
+        .iter()
+        .find(|capability| string_at(capability, "/id").ok() == Some(capability_id))
+        .with_context(|| format!("public registry omits {capability_id}"))?;
+    let operation = openapi
+        .pointer_mut(path_pointer)
+        .and_then(Value::as_object_mut)
+        .with_context(|| format!("production OpenAPI omits operation at {path_pointer}"))?;
     operation.insert(
         "x-fasti-capability-id".to_owned(),
-        Value::String("system.health".to_owned()),
+        Value::String(capability_id.to_owned()),
     );
     operation.insert(
         "x-fasti-required-scopes".to_owned(),
@@ -773,13 +2398,13 @@ fn enrich_production_health_openapi(
         Value::String(string_at(capability, "/lifecycle/runtime_availability")?.to_owned()),
     );
     ensure!(
-        example_ids.len() == 1 && example_ids[0].as_str() == Some("system.health.success"),
-        "production health must own exactly the governed health success example"
+        example_ids.len() == 1 && example_ids[0].as_str() == Some(example_id),
+        "production {capability_id} must own exactly the governed {example_id} example"
     );
-    let example = load_governed_example(workspace_root, "system.health.success", &Value::Null)?;
+    let example = load_governed_example(workspace_root, example_id, &Value::Null)?;
     ensure!(
         example.media_type == "application/json",
-        "system.health.success must be an application/json example"
+        "{example_id} must be an application/json example"
     );
     let media = operation
         .get_mut("responses")
@@ -789,18 +2414,55 @@ fn enrich_production_health_openapi(
         .and_then(Value::as_object_mut)
         .and_then(|content| content.get_mut("application/json"))
         .and_then(Value::as_object_mut)
-        .context("production health 200 response omits application/json")?;
+        .with_context(|| {
+            format!("production {capability_id} 200 response omits application/json")
+        })?;
     media.insert(
         "examples".to_owned(),
         serde_json::json!({
-            "system.health.success": { "value": example.payload }
+            example_id: { "value": example.payload }
         }),
     );
     Ok(())
 }
 
+fn enrich_production_health_openapi(
+    workspace_root: &Path,
+    openapi: &mut Value,
+    public_registry: &Value,
+) -> anyhow::Result<()> {
+    enrich_governed_success_operation_openapi(
+        workspace_root,
+        openapi,
+        public_registry,
+        "system.health",
+        "/paths/~1api~1v1~1health/get",
+        "system.health.success",
+    )
+}
+
+/// Enriches GET /api/v1/integrations directly, bypassing the generic
+/// [`PRODUCTION_RUNTIME_OPERATIONS`] path. That path's example binding only
+/// supports governed problem examples or the literal `system.capabilities.success`
+/// id; `integration.status` has no problems and needs its own always-200
+/// success example, so it is special-cased the same way `system.health` is.
+fn enrich_production_integration_status_openapi(
+    workspace_root: &Path,
+    openapi: &mut Value,
+    public_registry: &Value,
+) -> anyhow::Result<()> {
+    enrich_governed_success_operation_openapi(
+        workspace_root,
+        openapi,
+        public_registry,
+        "integration.status",
+        "/paths/~1api~1v1~1integrations/get",
+        "integration.status.success",
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
-fn validate_required_b1_bindings(
+fn validate_required_bindings(
     workspace_root: &Path,
     capability_keys: &BTreeMap<String, CapabilityKey>,
     production_openapi: &Value,
@@ -808,8 +2470,10 @@ fn validate_required_b1_bindings(
     asyncapi: &Value,
     problem_catalog: &Value,
     health_schema: &Value,
+    sdk_source: &str,
+    sdk_transport: &str,
 ) -> anyhow::Result<()> {
-    for required in registry::finalized_b1_required_bindings(workspace_root)? {
+    for required in registry::finalized_required_bindings(workspace_root)? {
         resolve_required_binding(
             workspace_root,
             required.surface,
@@ -821,6 +2485,8 @@ fn validate_required_b1_bindings(
             asyncapi,
             problem_catalog,
             health_schema,
+            sdk_source,
+            sdk_transport,
         )
         .with_context(|| {
             format!(
@@ -830,6 +2496,31 @@ fn validate_required_b1_bindings(
         })?;
     }
     Ok(())
+}
+
+/// True only if some operation entry for `capability_id` was actually emitted
+/// into the generated SDK text, not merely declared in one of the
+/// `*_OPERATIONS` arrays that feed the generator. Membership in those arrays
+/// is necessary but not sufficient -- a rendering gap (a category the
+/// generator forgot to render, as `PRODUCTION_RUNTIME_OPERATIONS` once was)
+/// would still pass a membership-only check while shipping an SDK with no
+/// method for that capability.
+fn sdk_source_declares_capability(sdk_source: &str, capability_id: &str) -> bool {
+    PRODUCTION_BOOTSTRAP_OPERATIONS
+        .iter()
+        .chain(PRODUCTION_RUNTIME_OPERATIONS.iter())
+        .chain(CONFORMANCE_OPERATIONS.iter())
+        .filter(|operation| operation.capability_id == capability_id)
+        .any(|operation| sdk_source.contains(&format!("  {}: {{ operationId:", operation.alias)))
+}
+
+fn sdk_transport_declares_capability(sdk_transport: &str, capability_id: &str) -> bool {
+    PRODUCTION_BOOTSTRAP_OPERATIONS
+        .iter()
+        .chain(PRODUCTION_RUNTIME_OPERATIONS.iter())
+        .chain(CONFORMANCE_OPERATIONS.iter())
+        .filter(|operation| operation.capability_id == capability_id)
+        .any(|operation| sdk_transport.contains(&format!("\n  {}(", operation.alias)))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -844,6 +2535,8 @@ fn resolve_required_binding(
     asyncapi: &Value,
     problem_catalog: &Value,
     health_schema: &Value,
+    sdk_source: &str,
+    sdk_transport: &str,
 ) -> anyhow::Result<()> {
     match surface {
         "domain_application" => {
@@ -879,6 +2572,21 @@ fn resolve_required_binding(
             );
         }
         "cli" => {
+            if binding == "cli:access-identity-bootstrap" {
+                let main_source =
+                    fs::read_to_string(workspace_root.join("crates/fasti-cli/src/main.rs"))?;
+                ensure!(
+                    capability_id == "access.identity.bootstrap"
+                        && main_source.contains("BootstrapAdministrator")
+                        && main_source.contains("LocalOperatorAccessRuntime")
+                        && main_source.contains("--password")
+                        && main_source.contains(
+                            "first_administrator_cli_accepts_only_private_root_locations"
+                        ),
+                    "trusted CLI first-administrator bootstrap binding is absent"
+                );
+                return Ok(());
+            }
             ensure!(binding == "cli:capability-discovery", "unknown CLI binding");
             let source =
                 fs::read_to_string(workspace_root.join("crates/fasti-cli/src/capabilities.rs"))?;
@@ -910,6 +2618,10 @@ fn resolve_required_binding(
             "schema:openapi-operation:{capability_id}" => ensure!(
                 openapi_has_capability(conformance_openapi, capability_id)?,
                 "conformance operation schema is absent"
+            ),
+            "schema:production-openapi-operation:{capability_id}" => ensure!(
+                openapi_has_capability(production_openapi, capability_id)?,
+                "production operation schema is absent"
             ),
             "schema:asyncapi-message:receiptCommitted" => ensure!(
                 asyncapi
@@ -945,10 +2657,9 @@ fn resolve_required_binding(
             ensure!(
                 capability_id == "system.health"
                     || capability_id == "receipt.stream"
-                    || CONFORMANCE_OPERATIONS
-                        .iter()
-                        .any(|operation| operation.capability_id == capability_id),
-                "generated SDK capability is absent"
+                    || (sdk_source_declares_capability(sdk_source, capability_id)
+                        && sdk_transport_declares_capability(sdk_transport, capability_id)),
+                "SDK omits a generated operation entry or callable client method for this capability"
             );
         }
         "knowledge" => {
@@ -985,7 +2696,153 @@ fn resolve_required_binding(
                     "B1 conformance package smoke does not exercise {capability_id} through {sdk_method}"
                 );
             }
+            "package-smoke:production-bootstrap" => {
+                let smoke = fs::read_to_string(workspace_root.join("scripts/smoke-native.sh"))?;
+                ensure!(
+                    smoke.contains("/api/v1/node/initialization")
+                        && smoke.contains("/api/v1/client-enrollments"),
+                    "production bootstrap package smoke is absent"
+                );
+            }
+            "package-smoke:production-providers" => {
+                let smoke = fs::read_to_string(workspace_root.join("scripts/smoke-native.sh"))?;
+                ensure!(
+                    smoke.contains("/api/v1/providers")
+                        && smoke.contains("len(provider_rows) != 12")
+                        && smoke.contains("active_providers = {\"tmdb\", \"google-books\"}")
+                        && smoke.contains("capability.get(\"credential_state\")")
+                        && smoke.contains("capability.get(\"writable\")")
+                        && smoke.contains("capability.get(\"testable\")"),
+                    "production provider smoke is absent"
+                );
+            }
+            "package-smoke:production-metadata" => {
+                let smoke = fs::read_to_string(workspace_root.join("scripts/smoke-native.sh"))?;
+                ensure!(
+                    smoke.contains("/api/v1/metadata/claims/refresh")
+                        && smoke.contains("\"operation_id\"")
+                        && smoke.contains("/api/v1/records/")
+                        && smoke.contains("/metadata-projection")
+                        && smoke.contains("metadata_claim_stale")
+                        && smoke.contains("projection.get(\"fields\")"),
+                    "production metadata smoke is absent"
+                );
+            }
+            "package-smoke:production-identity-routing" => {
+                let smoke = fs::read_to_string(workspace_root.join("scripts/smoke-native.sh"))?;
+                ensure!(
+                    smoke.contains("/identity-route?intent=metadata_lookup&target_provider=tmdb")
+                        && smoke.contains("/api/v1/profile/anime-grouping-policy?scope=profile")
+                        && smoke.contains("/api/v1/profile/anime-grouping-policy/preview")
+                        && smoke.contains("\"expected_revision\": 0")
+                        && smoke.contains("immutable receipt"),
+                    "production identity-routing smoke is absent"
+                );
+            }
+            "package-smoke:c1-operator-bootstrap" => {
+                let smoke = fs::read_to_string(workspace_root.join("scripts/smoke-oci.sh"))?;
+                ensure!(
+                    capability_id == "access.identity.bootstrap"
+                        && smoke.contains("access bootstrap-administrator --help")
+                        && smoke.contains("--password")
+                        && smoke.contains("/missing-fasti-data-root"),
+                    "C1 operator bootstrap package smoke is absent"
+                );
+            }
             _ => anyhow::bail!("unknown package-smoke binding"),
+        },
+        "ui" => match binding {
+            "ui:account-security" => {
+                ensure!(
+                    capability_id == "access.projection.read",
+                    "the Account and Security UI binding belongs only to the Access projection"
+                );
+                let types = fs::read_to_string(workspace_root.join("packages/ui/src/types.ts"))?;
+                let host = fs::read_to_string(workspace_root.join("apps/web/src/web-host.ts"))?;
+                let workbench = fs::read_to_string(
+                    workspace_root.join("packages/ui/src/fasti-workbench.svelte"),
+                )?;
+                let view = fs::read_to_string(
+                    workspace_root.join("packages/ui/src/account-security-view.svelte"),
+                )?;
+                let browser =
+                    fs::read_to_string(workspace_root.join("tests/e2e/access-c1.spec.ts"))?;
+                ensure!(
+                    types.contains("readAccessProjection?")
+                        && host.contains("const accessClient = new FastiClient")
+                        && host.contains("accessClient.readAccessProjection")
+                        && workbench.contains("function acceptAccessProjection")
+                        && workbench.contains("function readAccessProjection")
+                        && workbench.contains("clearProfileOwnedWorkbenchState")
+                        && workbench.contains("window.addEventListener(\"focus\"")
+                        && view.contains("const projection = await readAccessProjection()")
+                        && view.contains("onProjection?.(undefined)")
+                        && browser.contains("one shared projection read owns navigation")
+                        && browser.contains("an expired browser-session deadline clears profile authority")
+                        && browser.contains("window focus revalidates cached browser-session authority")
+                        && browser.contains("a committed revocation cannot resurrect stale session inventory"),
+                    "Account and Security UI does not preserve the governed Access projection boundary"
+                );
+            }
+            "ui:provider-settings" => {
+                let view = fs::read_to_string(
+                    workspace_root.join("packages/ui/src/runtime-settings-view.svelte"),
+                )?;
+                ensure!(
+                    view.contains("providerCredentialStatus")
+                        && view.contains("saveProviderCredential")
+                        && view.contains("deleteProviderCredential")
+                        && view.contains("testProviderCredential")
+                        && view.contains("readProviderHealth"),
+                    "provider settings UI does not cover every M1 provider operation"
+                );
+            }
+            "ui:metadata-provenance" => {
+                let types = fs::read_to_string(workspace_root.join("packages/ui/src/types.ts"))?;
+                let detail = fs::read_to_string(
+                    workspace_root.join("packages/ui/src/media-detail-view.svelte"),
+                )?;
+                let settings = fs::read_to_string(
+                    workspace_root.join("packages/ui/src/runtime-settings-view.svelte"),
+                )?;
+                ensure!(
+                    types.contains("readMetadataProjection")
+                        && types.contains("configureMetadataProjection")
+                        && types.contains("refreshMetadataClaims")
+                        && detail.contains("metadata-projection")
+                        && detail.contains("metadata-field-provenance")
+                        && detail.contains("metadata-rating-provenance")
+                        && detail.contains("metadata-attributions")
+                        && detail.contains("metadata-cache-state")
+                        && detail.contains("metadata-offline-state")
+                        && detail.contains("refresh-metadata-claims")
+                        && settings.contains("metadata-projection-policy")
+                        && settings.contains("configure-metadata-projection"),
+                    "metadata UI does not cover projection, provenance, attribution, freshness, offline state, refresh, and profile policy"
+                );
+            }
+            "ui:anime-grouping-policy" => {
+                let types = fs::read_to_string(workspace_root.join("packages/ui/src/types.ts"))?;
+                let host = fs::read_to_string(workspace_root.join("apps/web/src/web-host.ts"))?;
+                let settings = fs::read_to_string(
+                    workspace_root.join("packages/ui/src/runtime-settings-view.svelte"),
+                )?;
+                ensure!(
+                    types.contains("readAnimeGroupingPolicy?")
+                        && types.contains("previewAnimeGroupingPolicyChange?")
+                        && types.contains("applyAnimeGroupingPolicyChange?")
+                        && host.contains("readAnimeGroupingPolicy: (query)")
+                        && host.contains("previewAnimeGroupingPolicyChange: (request)")
+                        && host.contains("applyAnimeGroupingPolicyChange: (request)")
+                        && settings.contains("data-testid=\"anime-grouping-policy\"")
+                        && settings.contains("data-testid=\"preview-anime-grouping-policy\"")
+                        && settings.contains("data-testid=\"apply-anime-grouping-policy\"")
+                        && settings.contains("record.proposed_route")
+                        && settings.contains("Application clients can keep a separate override"),
+                    "anime grouping UI does not expose governed read, preview, apply, route evidence, and application-client semantics"
+                );
+            }
+            _ => anyhow::bail!("unknown UI binding"),
         },
         other => anyhow::bail!("unsupported required surface {other}"),
     }
@@ -1036,7 +2893,9 @@ fn validate_problem_responses(
         .get("responses")
         .and_then(Value::as_object)
         .context("conformance operation responses must be an object")?;
-    let mut represented_statuses = BTreeSet::new();
+    let operation_subset = expected.operation_id == "remove_provider_credential"
+        && expected.capability_id == "provider.credential.configure";
+    let mut governed_statuses = BTreeSet::new();
     for problem in problems {
         let raw_code = problem
             .as_str()
@@ -1058,20 +2917,23 @@ fn validate_problem_responses(
             );
         }
         let status = code.contract().status().to_string();
-        let response = responses.get(&status).with_context(|| {
-            format!(
+        governed_statuses.insert(status.clone());
+        if let Some(response) = responses.get(&status) {
+            ensure!(
+                string_at(response, "/content/application~1problem+json/schema/$ref")?
+                    == "#/components/schemas/ProblemDetails",
+                "{} {} cannot represent governed problem {raw_code} as ProblemDetails",
+                expected.method,
+                expected.path
+            );
+        } else {
+            ensure!(
+                operation_subset,
                 "{} {} cannot represent governed problem {raw_code}: response {status} is absent",
-                expected.method, expected.path
-            )
-        })?;
-        ensure!(
-            string_at(response, "/content/application~1problem+json/schema/$ref")?
-                == "#/components/schemas/ProblemDetails",
-            "{} {} cannot represent governed problem {raw_code} as ProblemDetails",
-            expected.method,
-            expected.path
-        );
-        represented_statuses.insert(status);
+                expected.method,
+                expected.path
+            );
+        }
     }
 
     let documented_problem_statuses: BTreeSet<_> = responses
@@ -1083,12 +2945,25 @@ fn validate_problem_responses(
                 .then_some(status.clone())
         })
         .collect();
-    ensure!(
-        documented_problem_statuses == represented_statuses,
-        "{} {} problem responses drift from registry claims: documented={documented_problem_statuses:?}, governed={represented_statuses:?}",
-        expected.method,
-        expected.path
-    );
+    if operation_subset {
+        let expected_subset = ["401", "403", "422", "500", "503"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        ensure!(
+            documented_problem_statuses == expected_subset,
+            "{} {} removal responses drift from its capability representation: documented={documented_problem_statuses:?}, expected={expected_subset:?}",
+            expected.method,
+            expected.path
+        );
+    } else {
+        ensure!(
+            documented_problem_statuses == governed_statuses,
+            "{} {} problem responses drift from registry claims: documented={documented_problem_statuses:?}, governed={governed_statuses:?}",
+            expected.method,
+            expected.path
+        );
+    }
     Ok(())
 }
 
@@ -1157,7 +3032,8 @@ fn bind_governed_examples(
             (status.to_string(), "application/problem+json")
         } else {
             ensure!(
-                example_id == "system.capabilities.success",
+                example_id == "system.capabilities.success"
+                    || example_id == "integration.status.success",
                 "finite HTTP example {example_id} has no deterministic response binding rule"
             );
             ("200".to_owned(), "application/json")
@@ -1383,12 +3259,592 @@ fn rust_capability_ids(workspace_root: &Path) -> anyhow::Result<String> {
     Ok(output)
 }
 
+fn render_production_bootstrap_contract(openapi: &Value) -> anyhow::Result<String> {
+    ensure!(
+        string_at(openapi, "/openapi")? == "3.1.0",
+        "production OpenAPI must remain 3.1.0"
+    );
+    let expected_paths: BTreeSet<_> = std::iter::once("/api/v1/health")
+        .chain(
+            PRODUCTION_BOOTSTRAP_OPERATIONS
+                .iter()
+                .map(|operation| operation.path),
+        )
+        .collect();
+    let actual_paths: BTreeSet<_> = object_at(openapi, "/paths")?
+        .keys()
+        .map(String::as_str)
+        .collect();
+    ensure!(
+        expected_paths.is_subset(&actual_paths),
+        "production OpenAPI is missing a bootstrap route: expected {expected_paths:?}, found {actual_paths:?}"
+    );
+
+    let schemas = object_at(openapi, "/components/schemas")?;
+    let mut output = String::new();
+    for name in ["ClientEnrollmentResponse", "NodeInitializationResponse"] {
+        let schema = schemas
+            .get(name)
+            .with_context(|| format!("production OpenAPI omits {name}"))?;
+        output.push_str(
+            &render_interface(name, schema)
+                .with_context(|| format!("failed to render production DTO {name}"))?,
+        );
+        output.push('\n');
+    }
+
+    output.push_str("// prettier-ignore\nexport const LOCAL_BOOTSTRAP_OPERATIONS = {\n");
+    for expected in PRODUCTION_BOOTSTRAP_OPERATIONS {
+        let operation_pointer = format!(
+            "/paths/{}/{}",
+            escape_pointer(expected.path),
+            expected.method
+        );
+        let operation = value_at(openapi, &operation_pointer)?;
+        ensure!(
+            string_at(operation, "/operationId")? == expected.operation_id,
+            "production operation ID changed for {} {}",
+            expected.method,
+            expected.path
+        );
+
+        // Extract and validate request schema from OpenAPI
+        let request_name = match expected.request {
+            Some(expected_request) => {
+                let actual_ref = string_at(
+                    operation,
+                    "/requestBody/content/application~1json/schema/$ref",
+                )?;
+                let expected_ref = format!("#/components/schemas/{}", expected_request);
+                ensure!(
+                    actual_ref == expected_ref,
+                    "production request schema mismatch for {} {}: expected {}, found {}",
+                    expected.method,
+                    expected.path,
+                    expected_ref,
+                    actual_ref
+                );
+                Some(expected_request)
+            }
+            None => {
+                ensure!(
+                    operation.get("requestBody").is_none(),
+                    "unexpected request body for {} {}",
+                    expected.method,
+                    expected.path
+                );
+                None
+            }
+        };
+
+        // Extract and validate response schema from OpenAPI
+        let response_name = match expected.response {
+            Some(expected_response) => {
+                let actual_ref = string_at(
+                    operation,
+                    "/responses/200/content/application~1json/schema/$ref",
+                )?;
+                let expected_ref = format!("#/components/schemas/{}", expected_response);
+                ensure!(
+                    actual_ref == expected_ref,
+                    "production response schema mismatch for {} {}: expected {}, found {}",
+                    expected.method,
+                    expected.path,
+                    expected_ref,
+                    actual_ref
+                );
+                Some(expected_response)
+            }
+            None => None,
+        };
+
+        // Bootstrap proofs stay in request bodies. The initialization route uses its
+        // separate data-root bootstrap bearer; enrollment consumes the proof body and
+        // must not receive either bearer credential.
+        let authorization = string_at(operation, "/x-fasti-authorization")?;
+        let authenticated = expected.authenticated;
+        validate_production_operation_security(
+            operation,
+            expected.operation_id,
+            expected.method,
+            expected.path,
+        )?;
+
+        let required_scopes =
+            serde_json::to_string(array_at(operation, "/x-fasti-required-scopes")?)?;
+        let problem_codes = serde_json::to_string(array_at(operation, "/x-fasti-problem-codes")?)?;
+        let example_ids = serde_json::to_string(array_at(operation, "/x-fasti-example-ids")?)?;
+        writeln!(
+            output,
+            "  {}: {{ operationId: {}, method: {}, path: {}, capabilityId: {}, authorization: {}, requiredScopes: {required_scopes}, problemCodes: {problem_codes}, exampleIds: {example_ids}, authenticated: {}, runtimeAvailability: {}, durability: \"durable\", retry: \"never\", requestSchema: {}, responseSchema: {} }},",
+            expected.alias,
+            json_string(expected.operation_id)?,
+            json_string(&expected.method.to_ascii_uppercase())?,
+            json_string(expected.path)?,
+            json_string(expected.capability_id)?,
+            json_string(authorization)?,
+            authenticated,
+            json_string(string_at(
+                operation,
+                "/x-fasti-runtime-availability"
+            )?)?,
+            request_name
+                .map(json_string)
+                .transpose()?
+                .unwrap_or_else(|| "null".to_owned()),
+            response_name
+                .map(json_string)
+                .transpose()?
+                .unwrap_or_else(|| "null".to_owned()),
+        )?;
+    }
+    output.push_str("} as const;\n\n");
+
+    // Dumps every production schema, not just the two named above -- the
+    // runtime contract rendered separately by `render_production_runtime_contract`
+    // reuses this same dump rather than emitting its own, since it validates
+    // against the same production OpenAPI document.
+    let schemas_json = serde_json::to_string_pretty(&sort_json(Value::Object(schemas.clone())))?;
+    writeln!(
+        output,
+        "// prettier-ignore\nconst PRODUCTION_SCHEMAS = {schemas_json} as const;\n"
+    )?;
+    output.push_str(
+        r#"// prettier-ignore
+export function parseNodeInitializationResponse(value: unknown): NodeInitializationResponse {
+  return parseProductionDto("NodeInitializationResponse", value);
+}
+
+// prettier-ignore
+export function parseClientEnrollmentResponse(value: unknown): ClientEnrollmentResponse {
+  return parseProductionDto("ClientEnrollmentResponse", value);
+}
+
+// prettier-ignore
+function parseProductionDto<T>(schemaName: string, value: unknown): T {
+  const schema = (PRODUCTION_SCHEMAS as Record<string, unknown>)[schemaName];
+  if (schema === undefined) {
+    throw new FastiContractParseError(`Unknown production schema ${schemaName}`);
+  }
+  validateOpenApiValue(value, schema, schemaName, PRODUCTION_SCHEMAS as Record<string, unknown>);
+  return value as T;
+}
+
+"#,
+    );
+    Ok(output)
+}
+
+/// Renders the durable, authenticated production-runtime surface (records,
+/// observations) that runs after bootstrap. Parallels
+/// `render_production_bootstrap_contract` but for `PRODUCTION_RUNTIME_OPERATIONS`,
+/// and reuses that function's `PRODUCTION_SCHEMAS` dump rather than emitting
+/// its own -- both validate against the same production OpenAPI document, so
+/// this must run after `render_production_bootstrap_contract` in the output.
+fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String> {
+    let expected_paths: BTreeSet<_> = PRODUCTION_RUNTIME_OPERATIONS
+        .iter()
+        .map(|operation| operation.path)
+        .collect();
+    let actual_paths: BTreeSet<_> = object_at(openapi, "/paths")?
+        .keys()
+        .map(String::as_str)
+        .collect();
+    ensure!(
+        expected_paths.is_subset(&actual_paths),
+        "production OpenAPI is missing a runtime route: expected {expected_paths:?}, found {actual_paths:?}"
+    );
+
+    let schemas = object_at(openapi, "/components/schemas")?;
+    let mut output = String::new();
+    for name in [
+        "ObservationIngressKind",
+        "TrackingDispositionDto",
+        "TrackingDispositionUpdateDto",
+        "ProviderKindDto",
+        "CredentialRequirementDto",
+        "ProviderCredentialStateDto",
+        "ProviderCredentialSourceDto",
+        "ProviderCapabilityStateDto",
+        "ProviderCheckStateDto",
+        "MetadataFieldGroupDto",
+        "MetadataRefreshModeDto",
+        "MetadataClaimStatusDto",
+        "MetadataProjectionTierDto",
+        "LastKnownGoodPolicyDto",
+        "MetadataCachePurposeDto",
+        "MetadataDataClassificationDto",
+        "MetadataCacheInvalidationReasonDto",
+        "MetadataCacheReadStateDto",
+        "AccessEvidenceStateDto",
+        "AccessSubjectLifecycleDto",
+        "AccessMembershipLifecycleDto",
+        "AccessWorkspaceRoleDto",
+        "TrailBaseActivationStateDto",
+        "TrailBaseActivationBlockerDto",
+        "AccessAuthenticationMethodDto",
+        "AccessEvidenceKindDto",
+        "AccessCeremonyStateDto",
+        "AccessCeremonyFailureDto",
+        "AccessFirstRunStepKeyDto",
+        "ResolutionIntentDto",
+        "IdentityRouteStatusDto",
+        "IdentityRouteKindDto",
+        "IdentityAssertionRelationDto",
+        "AnimeGroupingPreferenceDto",
+        "AnimeGroupingPolicyScopeKindDto",
+        "AnimeGroupingPolicySourceDto",
+        "AnimeGroupingPolicyChangeDto",
+    ] {
+        let schema = schemas
+            .get(name)
+            .with_context(|| format!("production OpenAPI omits {name}"))?;
+        writeln!(
+            output,
+            "// prettier-ignore\nexport type {name} = {};\n",
+            typescript_type(schema)
+                .with_context(|| format!("failed to render production runtime type {name}"))?
+        )?;
+    }
+    output.push_str(
+        "// The Nuvio wire document intentionally preserves extension fields.\n\
+         export type NuvioCollectionsDocumentDto = ReadonlyArray<Record<string, unknown>>;\n\n",
+    );
+    for name in [
+        "ObservationIdentifierInput",
+        "SubmitObservationRequest",
+        "SubmitObservationResponse",
+        "CreateRecordRequest",
+        "CreateRecordResponse",
+        "ResolvedFieldDto",
+        "RecordActivityDto",
+        "RecordIdentifierDto",
+        "RecordSummaryDto",
+        "ListRecordsResponse",
+        "AttachIdentifierRequest",
+        "AttachIdentifierResponse",
+        "RegisterNamespaceRequest",
+        "RegisterNamespaceResponse",
+        "SetTrackingDispositionRequest",
+        "TrackingDispositionStateDto",
+        "ListTrackingDispositionsResponse",
+        "NuvioCollectionsStateDto",
+        "ProviderCheckDto",
+        "ProviderCapabilityDto",
+        "ProviderDescriptorDto",
+        "ListProvidersResponse",
+        "ConfigureProviderCredentialRequest",
+        "ProviderCapabilityResponse",
+        "ProviderHealthResponse",
+        "RefreshMetadataClaimsRequest",
+        "MetadataClaimProvenanceDto",
+        "MetadataClaimDto",
+        "RatingScaleDto",
+        "RatingClaimDto",
+        "MetadataProjectedFieldDto",
+        "EnrichmentPolicyDto",
+        "MetadataCacheKeyDto",
+        "MetadataCacheInvalidationDto",
+        "MetadataCacheEntryDto",
+        "MetadataAttributionDto",
+        "RefreshMetadataClaimsResponse",
+        "MetadataProjectionResponse",
+        "MetadataProjectionQueryParameters",
+        "MetadataOverrideMutationDto",
+        "ConfigureMetadataProjectionRequest",
+        "MetadataProjectionConfigurationResponse",
+        "IdentityIdentifierDto",
+        "AcceptedIdentityRouteAssertionDto",
+        "IdentityRouteDto",
+        "ResolveIdentityRouteResponse",
+        "AnimeGroupingPolicyScopeDto",
+        "AnimeGroupingPolicyDto",
+        "ReadAnimeGroupingPolicyResponse",
+        "PreviewAnimeGroupingPolicyChangeRequest",
+        "AnimeGroupingRecordPreviewDto",
+        "AnimeGroupingPolicyImpactResponse",
+        "ApplyAnimeGroupingPolicyChangeRequest",
+        "ApplyAnimeGroupingPolicyChangeResponse",
+        "StartTrailBaseSignInRequest",
+        "StartTrailBaseSignInResponse",
+        "TrailBaseContinuationChoiceDto",
+        "ReadTrailBaseContinuationResponse",
+        "CompleteTrailBaseContinuationRequest",
+        "SelectBrowserSessionProfileRequest",
+        "BrowserSessionDto",
+        "ReadBrowserSessionResponse",
+        "ListBrowserSessionsResponse",
+        "RevokeBrowserSessionsResponse",
+        "RotateBrowserSessionResponse",
+        "SelectBrowserSessionProfileResponse",
+        "AccessSubjectDto",
+        "AccessMembershipDto",
+        "AccessProfileGrantDto",
+        "BrowserSessionPolicyDto",
+        "RecentAuthenticationDto",
+        "AccessSessionAuthenticationDto",
+        "TrailBaseActivationDto",
+        "AccessFirstRunStepDto",
+        "AccessEvidenceDto",
+        "AccessProjectionResponse",
+    ] {
+        let schema = schemas
+            .get(name)
+            .with_context(|| format!("production OpenAPI omits {name}"))?;
+        output.push_str(
+            &render_interface(name, schema)
+                .with_context(|| format!("failed to render production runtime DTO {name}"))?,
+        );
+        output.push('\n');
+    }
+
+    output.push_str("// prettier-ignore\nexport const LOCAL_RUNTIME_OPERATIONS = {\n");
+    for expected in PRODUCTION_RUNTIME_OPERATIONS {
+        let operation_pointer = format!(
+            "/paths/{}/{}",
+            escape_pointer(expected.path),
+            expected.method
+        );
+        let operation = value_at(openapi, &operation_pointer)?;
+        ensure!(
+            string_at(operation, "/operationId")? == expected.operation_id,
+            "production operation ID changed for {} {}",
+            expected.method,
+            expected.path
+        );
+
+        let request_name = match expected.request {
+            Some(expected_request) => {
+                let actual_ref = string_at(
+                    operation,
+                    "/requestBody/content/application~1json/schema/$ref",
+                )?;
+                let expected_ref = format!("#/components/schemas/{}", expected_request);
+                ensure!(
+                    actual_ref == expected_ref,
+                    "production request schema mismatch for {} {}: expected {}, found {}",
+                    expected.method,
+                    expected.path,
+                    expected_ref,
+                    actual_ref
+                );
+                Some(expected_request)
+            }
+            None => {
+                ensure!(
+                    operation.get("requestBody").is_none(),
+                    "unexpected request body for {} {}",
+                    expected.method,
+                    expected.path
+                );
+                None
+            }
+        };
+
+        let response_name = match expected.response {
+            Some(expected_response) => {
+                let actual_ref = string_at(
+                    operation,
+                    "/responses/200/content/application~1json/schema/$ref",
+                )?;
+                let expected_ref = format!("#/components/schemas/{}", expected_response);
+                ensure!(
+                    actual_ref == expected_ref,
+                    "production response schema mismatch for {} {}: expected {}, found {}",
+                    expected.method,
+                    expected.path,
+                    expected_ref,
+                    actual_ref
+                );
+                Some(expected_response)
+            }
+            None => None,
+        };
+
+        let authorization = string_at(operation, "/x-fasti-authorization")?;
+        let authenticated = expected.authenticated;
+        validate_production_operation_security(
+            operation,
+            expected.operation_id,
+            expected.method,
+            expected.path,
+        )?;
+
+        let required_scopes =
+            serde_json::to_string(array_at(operation, "/x-fasti-required-scopes")?)?;
+        let problem_codes = serde_json::to_string(array_at(operation, "/x-fasti-problem-codes")?)?;
+        let example_ids = serde_json::to_string(array_at(operation, "/x-fasti-example-ids")?)?;
+        writeln!(
+            output,
+            "  {}: {{ operationId: {}, method: {}, path: {}, capabilityId: {}, authorization: {}, requiredScopes: {required_scopes}, problemCodes: {problem_codes}, exampleIds: {example_ids}, authenticated: {}, runtimeAvailability: {}, durability: \"durable\", retry: {}, requestSchema: {}, responseSchema: {} }},",
+            expected.alias,
+            json_string(expected.operation_id)?,
+            json_string(&expected.method.to_ascii_uppercase())?,
+            json_string(expected.path)?,
+            json_string(expected.capability_id)?,
+            json_string(authorization)?,
+            authenticated,
+            json_string(string_at(
+                operation,
+                "/x-fasti-runtime-availability"
+            )?)?,
+            json_string(expected.retry)?,
+            request_name
+                .map(json_string)
+                .transpose()?
+                .unwrap_or_else(|| "null".to_owned()),
+            response_name
+                .map(json_string)
+                .transpose()?
+                .unwrap_or_else(|| "null".to_owned()),
+        )?;
+    }
+    output.push_str("} as const;\n\n");
+
+    for (alias, dto) in [
+        ("parseSubmitObservationRequest", "SubmitObservationRequest"),
+        (
+            "parseSubmitObservationResponse",
+            "SubmitObservationResponse",
+        ),
+        ("parseCreateRecordRequest", "CreateRecordRequest"),
+        ("parseCreateRecordResponse", "CreateRecordResponse"),
+        ("parseListRecordsResponse", "ListRecordsResponse"),
+        ("parseAttachIdentifierRequest", "AttachIdentifierRequest"),
+        ("parseAttachIdentifierResponse", "AttachIdentifierResponse"),
+        ("parseRegisterNamespaceRequest", "RegisterNamespaceRequest"),
+        (
+            "parseRegisterNamespaceResponse",
+            "RegisterNamespaceResponse",
+        ),
+        (
+            "parseSetTrackingDispositionRequest",
+            "SetTrackingDispositionRequest",
+        ),
+        (
+            "parseTrackingDispositionStateDto",
+            "TrackingDispositionStateDto",
+        ),
+        (
+            "parseListTrackingDispositionsResponse",
+            "ListTrackingDispositionsResponse",
+        ),
+        (
+            "parseNuvioCollectionsDocumentDto",
+            "NuvioCollectionsDocumentDto",
+        ),
+        ("parseNuvioCollectionsStateDto", "NuvioCollectionsStateDto"),
+        (
+            "parseConfigureProviderCredentialRequest",
+            "ConfigureProviderCredentialRequest",
+        ),
+        ("parseListProvidersResponse", "ListProvidersResponse"),
+        (
+            "parseProviderCapabilityResponse",
+            "ProviderCapabilityResponse",
+        ),
+        ("parseProviderHealthResponse", "ProviderHealthResponse"),
+        (
+            "parseRefreshMetadataClaimsRequest",
+            "RefreshMetadataClaimsRequest",
+        ),
+        (
+            "parseRefreshMetadataClaimsResponse",
+            "RefreshMetadataClaimsResponse",
+        ),
+        (
+            "parseMetadataProjectionResponse",
+            "MetadataProjectionResponse",
+        ),
+        (
+            "parseConfigureMetadataProjectionRequest",
+            "ConfigureMetadataProjectionRequest",
+        ),
+        (
+            "parseMetadataProjectionConfigurationResponse",
+            "MetadataProjectionConfigurationResponse",
+        ),
+        (
+            "parseResolveIdentityRouteResponse",
+            "ResolveIdentityRouteResponse",
+        ),
+        (
+            "parseReadAnimeGroupingPolicyResponse",
+            "ReadAnimeGroupingPolicyResponse",
+        ),
+        (
+            "parsePreviewAnimeGroupingPolicyChangeRequest",
+            "PreviewAnimeGroupingPolicyChangeRequest",
+        ),
+        (
+            "parseAnimeGroupingPolicyImpactResponse",
+            "AnimeGroupingPolicyImpactResponse",
+        ),
+        (
+            "parseApplyAnimeGroupingPolicyChangeRequest",
+            "ApplyAnimeGroupingPolicyChangeRequest",
+        ),
+        (
+            "parseApplyAnimeGroupingPolicyChangeResponse",
+            "ApplyAnimeGroupingPolicyChangeResponse",
+        ),
+        (
+            "parseStartTrailBaseSignInRequest",
+            "StartTrailBaseSignInRequest",
+        ),
+        (
+            "parseStartTrailBaseSignInResponse",
+            "StartTrailBaseSignInResponse",
+        ),
+        (
+            "parseReadTrailBaseContinuationResponse",
+            "ReadTrailBaseContinuationResponse",
+        ),
+        (
+            "parseCompleteTrailBaseContinuationRequest",
+            "CompleteTrailBaseContinuationRequest",
+        ),
+        (
+            "parseSelectBrowserSessionProfileRequest",
+            "SelectBrowserSessionProfileRequest",
+        ),
+        (
+            "parseReadBrowserSessionResponse",
+            "ReadBrowserSessionResponse",
+        ),
+        (
+            "parseListBrowserSessionsResponse",
+            "ListBrowserSessionsResponse",
+        ),
+        (
+            "parseRevokeBrowserSessionsResponse",
+            "RevokeBrowserSessionsResponse",
+        ),
+        (
+            "parseRotateBrowserSessionResponse",
+            "RotateBrowserSessionResponse",
+        ),
+        (
+            "parseSelectBrowserSessionProfileResponse",
+            "SelectBrowserSessionProfileResponse",
+        ),
+        ("parseAccessProjectionResponse", "AccessProjectionResponse"),
+    ] {
+        writeln!(
+            output,
+            "// prettier-ignore\nexport function {alias}(value: unknown): {dto} {{\n  return parseProductionDto(\"{dto}\", value);\n}}\n"
+        )?;
+    }
+    Ok(output)
+}
+
 fn typescript_sdk(
     public_registry: &Value,
     problem_catalog: &Value,
     health_schema: &Value,
     problem_schema: &Value,
     asyncapi: &Value,
+    production_openapi: &Value,
     conformance_openapi: &Value,
 ) -> anyhow::Result<String> {
     validate_receipt_stream_metadata(asyncapi)?;
@@ -1423,6 +3879,8 @@ fn typescript_sdk(
         "export interface ReceiptCommittedEnvelope {\n  readonly id: string;\n  readonly event: \"receiptCommitted\";\n  readonly data: ReceiptCommittedEvent;\n}\n\n",
     );
 
+    output.push_str(&render_production_bootstrap_contract(production_openapi)?);
+    output.push_str(&render_production_runtime_contract(production_openapi)?);
     output.push_str(&render_conformance_contract(conformance_openapi)?);
 
     let capabilities = array_at(public_registry, "/capabilities")?;
@@ -2121,31 +4579,32 @@ function parseConformanceDto<T>(schemaName: string, value: unknown): T {
   if (schema === undefined) {
     throw new FastiContractParseError(`Unknown conformance schema ${schemaName}`);
   }
-  validateOpenApiValue(value, schema, schemaName);
+  validateOpenApiValue(value, schema, schemaName, B1_CONFORMANCE_SCHEMAS as Record<string, unknown>);
   return value as T;
 }
 
 // prettier-ignore
-function validateOpenApiValue(value: unknown, schemaValue: unknown, path: string): void {
+function validateOpenApiValue(value: unknown, schemaValue: unknown, path: string, schemas: Record<string, unknown>): void {
   const schema = schemaValue as Record<string, unknown>;
+  if (Object.keys(schema).length === 0) return;
   if (typeof schema.$ref === "string") {
     const prefix = "#/components/schemas/";
     if (!schema.$ref.startsWith(prefix)) {
       throw new FastiContractParseError(`${path} has an unsupported schema reference`);
     }
     const name = schema.$ref.slice(prefix.length);
-    const target = (B1_CONFORMANCE_SCHEMAS as Record<string, unknown>)[name];
+    const target = schemas[name];
     if (target === undefined) {
       throw new FastiContractParseError(`${path} references an unknown schema`);
     }
-    validateOpenApiValue(value, target, path);
+    validateOpenApiValue(value, target, path, schemas);
     return;
   }
   if (Array.isArray(schema.oneOf)) {
     let matches = 0;
     for (const candidate of schema.oneOf) {
       try {
-        validateOpenApiValue(value, candidate, path);
+        validateOpenApiValue(value, candidate, path, schemas);
         matches += 1;
       } catch (error) {
         if (!(error instanceof FastiContractParseError)) throw error;
@@ -2194,6 +4653,24 @@ function validateOpenApiValue(value: unknown, schemaValue: unknown, path: string
     }
     return;
   }
+  if (schemaTypes.includes("number")) {
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      throw new FastiContractParseError(`${path} must be a finite number`);
+    }
+    if (typeof schema.minimum === "number" && value < schema.minimum) {
+      throw new FastiContractParseError(`${path} is below its minimum`);
+    }
+    if (typeof schema.maximum === "number" && value > schema.maximum) {
+      throw new FastiContractParseError(`${path} exceeds its maximum`);
+    }
+    return;
+  }
+  if (schemaTypes.includes("boolean")) {
+    if (typeof value !== "boolean") {
+      throw new FastiContractParseError(`${path} must be a boolean`);
+    }
+    return;
+  }
   if (schemaTypes.includes("array")) {
     if (!Array.isArray(value)) {
       throw new FastiContractParseError(`${path} must be an array`);
@@ -2204,7 +4681,7 @@ function validateOpenApiValue(value: unknown, schemaValue: unknown, path: string
     if (typeof schema.maxItems === "number" && value.length > schema.maxItems) {
       throw new FastiContractParseError(`${path} exceeds its bounded items`);
     }
-    value.forEach((item, index) => validateOpenApiValue(item, schema.items, `${path}[${index}]`));
+    value.forEach((item, index) => validateOpenApiValue(item, schema.items, `${path}[${index}]`, schemas));
     return;
   }
   if (schemaTypes.includes("object")) {
@@ -2224,14 +4701,14 @@ function validateOpenApiValue(value: unknown, schemaValue: unknown, path: string
       : {};
     for (const key of keys) {
       if (isPlainObject(schema.propertyNames)) {
-        validateOpenApiValue(key, schema.propertyNames, `${path} property name`);
+        validateOpenApiValue(key, schema.propertyNames, `${path} property name`, schemas);
       }
       if (!Object.hasOwn(properties, key)) {
         if (schema.additionalProperties === false) {
           throw new FastiContractParseError(`${path} contains unknown field ${key}`);
         }
         if (isPlainObject(schema.additionalProperties)) {
-          validateOpenApiValue(object[key], schema.additionalProperties, `${path}.${key}`);
+          validateOpenApiValue(object[key], schema.additionalProperties, `${path}.${key}`, schemas);
         }
       }
     }
@@ -2243,7 +4720,7 @@ function validateOpenApiValue(value: unknown, schemaValue: unknown, path: string
     }
     for (const [field, fieldSchema] of Object.entries(properties)) {
       if (Object.hasOwn(object, field)) {
-        validateOpenApiValue(object[field], fieldSchema, `${path}.${field}`);
+        validateOpenApiValue(object[field], fieldSchema, `${path}.${field}`, schemas);
       }
     }
     return;
@@ -2319,6 +4796,16 @@ fn render_interface_with_overrides(
     schema: &Value,
     overrides: &[(&str, &str)],
 ) -> anyhow::Result<String> {
+    if schema.get("oneOf").is_some() {
+        ensure!(
+            overrides.is_empty(),
+            "{name} union cannot use field overrides"
+        );
+        return Ok(format!(
+            "// prettier-ignore\nexport type {name} = {};\n",
+            typescript_type(schema)?
+        ));
+    }
     ensure!(
         schema.get("additionalProperties").and_then(Value::as_bool) == Some(false),
         "{name} must reject unknown fields before SDK generation"
@@ -2411,6 +4898,19 @@ fn typescript_type(schema: &Value) -> anyhow::Result<String> {
                 typescript_type(value_at(schema, "/items")?)?
             )),
             "object" => {
+                if schema.get("additionalProperties").and_then(Value::as_bool) == Some(false) {
+                    let properties = object_at(schema, "/properties")?;
+                    let required = required_names(schema)?;
+                    let mut fields = Vec::with_capacity(properties.len());
+                    for (name, property_schema) in properties {
+                        let optional = if required.contains(name) { "" } else { "?" };
+                        fields.push(format!(
+                            "readonly {name}{optional}: {}",
+                            typescript_type(property_schema)?
+                        ));
+                    }
+                    return Ok(format!("{{ {} }}", fields.join("; ")));
+                }
                 let additional = value_at(schema, "/additionalProperties")?;
                 ensure!(
                     !additional.is_boolean(),
@@ -2547,20 +5047,12 @@ fn write(output_root: &Path, artifacts: &Artifacts) -> anyhow::Result<()> {
 fn verify_inventory(output_root: &Path, expected: &Artifacts) -> anyhow::Result<()> {
     let mut actual = BTreeSet::new();
     for relative_directory in GENERATED_ONLY_DIRECTORIES.map(PathBuf::from) {
-        let directory = output_root.join(&relative_directory);
-        for entry in fs::read_dir(&directory)
-            .with_context(|| format!("failed to inspect {}", directory.display()))?
-        {
-            let entry = entry?;
-            let file_type = entry.file_type()?;
-            ensure!(
-                file_type.is_file(),
-                "generated artifact directory {} contains non-file {}",
-                relative_directory.display(),
-                entry.path().display()
-            );
-            actual.insert(relative_directory.join(entry.file_name()));
-        }
+        collect_generated_files(
+            output_root,
+            &relative_directory,
+            &output_root.join(&relative_directory),
+            &mut actual,
+        )?;
     }
     let generated_only_directories: BTreeSet<_> = GENERATED_ONLY_DIRECTORIES
         .into_iter()
@@ -2569,8 +5061,9 @@ fn verify_inventory(output_root: &Path, expected: &Artifacts) -> anyhow::Result<
     let expected_paths: BTreeSet<_> = expected
         .keys()
         .filter(|path| {
-            path.parent()
-                .is_some_and(|parent| generated_only_directories.contains(parent))
+            generated_only_directories
+                .iter()
+                .any(|directory| path.starts_with(directory))
         })
         .cloned()
         .collect();
@@ -2580,6 +5073,53 @@ fn verify_inventory(output_root: &Path, expected: &Artifacts) -> anyhow::Result<
         expected_paths.difference(&actual).collect::<Vec<_>>(),
         actual.difference(&expected_paths).collect::<Vec<_>>()
     );
+    Ok(())
+}
+
+fn collect_generated_files(
+    output_root: &Path,
+    generated_root: &Path,
+    directory: &Path,
+    files: &mut BTreeSet<PathBuf>,
+) -> anyhow::Result<()> {
+    let metadata = fs::symlink_metadata(directory)
+        .with_context(|| format!("failed to inspect {}", directory.display()))?;
+    ensure!(
+        !metadata.file_type().is_symlink() && metadata.is_dir(),
+        "generated artifact directory {} must be a real directory",
+        directory.display()
+    );
+    for entry in fs::read_dir(directory)
+        .with_context(|| format!("failed to inspect {}", directory.display()))?
+    {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        ensure!(
+            !file_type.is_symlink(),
+            "generated artifact directory {} contains symlink {}",
+            generated_root.display(),
+            entry.path().display()
+        );
+        if file_type.is_dir() {
+            collect_generated_files(output_root, generated_root, &entry.path(), files)?;
+        } else {
+            ensure!(
+                file_type.is_file(),
+                "generated artifact directory {} contains non-file {}",
+                generated_root.display(),
+                entry.path().display()
+            );
+            let path = entry.path();
+            let relative = path.strip_prefix(output_root).with_context(|| {
+                format!(
+                    "generated artifact {} escaped {}",
+                    path.display(),
+                    output_root.display()
+                )
+            })?;
+            files.insert(relative.to_path_buf());
+        }
+    }
     Ok(())
 }
 
@@ -2599,6 +5139,15 @@ mod tests {
             Path::new(CAPABILITY_DISCOVERY_EXAMPLE_PATH),
             Path::new(HEALTH_SCHEMA_PATH),
             Path::new(PROBLEM_SCHEMA_PATH),
+            Path::new(PROVIDER_MANIFEST_SCHEMA_PATH),
+            Path::new(PORTABILITY_V2_SCHEMA_PATH),
+            Path::new(PORTABILITY_V2_EXAMPLE_PATH),
+            Path::new(PORTABILITY_V3_SCHEMA_PATH),
+            Path::new(PORTABILITY_V3_EXAMPLE_PATH),
+            Path::new(PORTABILITY_V4_SCHEMA_PATH),
+            Path::new(PORTABILITY_V4_EXAMPLE_PATH),
+            Path::new(PORTABILITY_V5_SCHEMA_PATH),
+            Path::new(PORTABILITY_V5_EXAMPLE_PATH),
             Path::new(SDK_GENERATED_PATH),
             Path::new(RUST_CAPABILITY_IDS_PATH),
         ]
@@ -2613,6 +5162,64 @@ mod tests {
         let second = build(workspace_root()).expect("second generation succeeds");
         assert_eq!(first, second);
         assert!(first.values().all(|artifact| artifact.ends_with(b"\n")));
+    }
+
+    #[test]
+    fn archive_v2_entity_enum_is_the_frozen_v2_prefix() {
+        let schema = portability_v2_schema().expect("archive-v2 schema");
+        let actual = schema
+            .pointer("/$defs/WorkspaceExportEntityDto/enum")
+            .and_then(Value::as_array)
+            .expect("archive-v2 entity enum");
+        let expected = WorkspaceExportEntity::V2
+            .iter()
+            .map(|entity| Value::String(entity.as_str().to_owned()))
+            .collect::<Vec<_>>();
+        assert_eq!(actual, &expected);
+    }
+
+    #[test]
+    fn archive_v3_v4_and_v5_entity_enums_preserve_their_frozen_prefixes() {
+        for (schema, entities) in [
+            (
+                portability_v3_schema().expect("archive-v3 schema"),
+                WorkspaceExportEntity::V3.as_slice(),
+            ),
+            (
+                portability_v4_schema().expect("archive-v4 schema"),
+                WorkspaceExportEntity::V4.as_slice(),
+            ),
+            (
+                portability_v5_schema().expect("archive-v5 schema"),
+                WorkspaceExportEntity::ALL.as_slice(),
+            ),
+        ] {
+            let actual = schema
+                .pointer("/$defs/WorkspaceExportEntityDto/enum")
+                .and_then(Value::as_array)
+                .expect("archive entity enum");
+            let expected = entities
+                .iter()
+                .map(|entity| Value::String(entity.as_str().to_owned()))
+                .collect::<Vec<_>>();
+            assert_eq!(actual, &expected);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn generated_inventory_rejects_a_symlinked_root() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().expect("temporary root");
+        let real = root.path().join("real");
+        fs::create_dir(&real).expect("real directory");
+        let linked = root.path().join("linked");
+        symlink(&real, &linked).expect("symlink root");
+
+        let error = collect_generated_files(root.path(), &linked, &linked, &mut BTreeSet::new())
+            .expect_err("symlinked generated root must fail");
+        assert!(error.to_string().contains("must be a real directory"));
     }
 
     #[test]
@@ -2648,6 +5255,70 @@ mod tests {
         assert!(sdk.contains("\"scopes\""));
         assert!(sdk.contains("\"problems\""));
         assert!(sdk.contains("\"surface_profiles\""));
+    }
+
+    #[test]
+    fn access_contract_graph_rejects_secret_properties() {
+        let artifacts = build(workspace_root()).expect("contract generation succeeds");
+        let mut openapi: Value = serde_json::from_slice(
+            artifacts
+                .get(Path::new(OPENAPI_PATH))
+                .expect("production OpenAPI generated"),
+        )
+        .expect("production OpenAPI JSON");
+        validate_access_contract_secrets(&openapi).expect("current Access graph is public-safe");
+        openapi
+            .pointer_mut("/components/schemas/AccessProjectionResponse/properties")
+            .and_then(Value::as_object_mut)
+            .expect("Access projection properties")
+            .insert(
+                "session_secret".to_owned(),
+                serde_json::json!({"type": "string"}),
+            );
+        let error = validate_access_contract_secrets(&openapi)
+            .expect_err("secret property must fail the Access contract gate");
+        assert!(error.to_string().contains("session_secret"));
+    }
+
+    #[test]
+    fn trailbase_continuation_contract_rejects_internal_identifiers() {
+        let artifacts = build(workspace_root()).expect("contract generation succeeds");
+        let mut openapi: Value = serde_json::from_slice(
+            artifacts
+                .get(Path::new(OPENAPI_PATH))
+                .expect("production OpenAPI generated"),
+        )
+        .expect("production OpenAPI JSON");
+        validate_trailbase_continuation_contract(&openapi)
+            .expect("current continuation contract is identifier-free");
+        openapi
+            .pointer_mut("/components/schemas/TrailBaseContinuationChoiceDto/properties")
+            .and_then(Value::as_object_mut)
+            .expect("continuation choice properties")
+            .insert(
+                "workspace_id".to_owned(),
+                serde_json::json!({"type": "string"}),
+            );
+        let error = validate_trailbase_continuation_contract(&openapi)
+            .expect_err("internal identifier must fail the continuation contract gate");
+        assert!(error.to_string().contains("unexpected properties"));
+    }
+
+    #[test]
+    fn access_callback_is_documented_but_excluded_from_the_sdk() {
+        let artifacts = build(workspace_root()).expect("contract generation succeeds");
+        let sdk = std::str::from_utf8(
+            artifacts
+                .get(Path::new(SDK_GENERATED_PATH))
+                .expect("SDK generated"),
+        )
+        .expect("SDK is UTF-8");
+        assert!(sdk.contains("startTrailBaseSignIn"));
+        assert!(sdk.contains("readTrailBaseContinuation"));
+        assert!(sdk.contains("completeTrailBaseContinuation"));
+        assert!(sdk.contains("cancelTrailBaseContinuation"));
+        assert!(!sdk.contains("complete_trailbase_authentication"));
+        assert!(!sdk.contains("completeTrailBaseAuthentication"));
     }
 
     #[test]
@@ -2774,6 +5445,109 @@ mod tests {
                     .to_string()
                     .contains(&format!("\"{example}\"")));
             }
+        }
+    }
+
+    #[test]
+    fn production_hybrid_authorization_keeps_webhooks_credential_only() {
+        for operation in PRODUCTION_RUNTIME_OPERATIONS {
+            let authorization = production_operation_authorization(
+                operation,
+                if operation.capability_id == "observation.accept" {
+                    "scoped_or_browser_session"
+                } else {
+                    "scoped"
+                },
+            )
+            .expect("operation authorization is governed");
+            if CREDENTIAL_ONLY_HYBRID_OPERATIONS.contains(&operation.operation_id) {
+                assert_eq!(authorization, "scoped");
+            } else if operation.operation_id == "submit_observation" {
+                assert_eq!(authorization, "scoped_or_browser_session");
+            }
+        }
+    }
+
+    #[test]
+    fn generated_openapi_keeps_browser_auth_on_the_hybrid_ten_only() {
+        let artifacts = build(workspace_root()).expect("contract generation succeeds");
+        let openapi: Value = serde_json::from_slice(
+            artifacts
+                .get(Path::new(OPENAPI_PATH))
+                .expect("production OpenAPI generated"),
+        )
+        .expect("production OpenAPI JSON");
+        for pointer in [
+            "/paths/~1api~1v1~1records/get/security",
+            "/paths/~1api~1v1~1profile~1record-tracking-dispositions/get/security",
+            "/paths/~1api~1v1~1profile~1nuvio-collections/get/security",
+        ] {
+            assert_eq!(
+                value_at(&openapi, pointer).expect("hybrid operation security"),
+                &serde_json::json!([
+                    {"credential_bearer": []},
+                    {"browser_session_cookie": []}
+                ]),
+                "{pointer}"
+            );
+        }
+        for pointer in [
+            "/paths/~1api~1v1~1observations/post/security",
+            "/paths/~1api~1v1~1records/post/security",
+            "/paths/~1api~1v1~1records~1identifiers/post/security",
+            "/paths/~1api~1v1~1namespaces/post/security",
+            "/paths/~1api~1v1~1profile~1record-tracking-dispositions~1{record_id}/put/security",
+            "/paths/~1api~1v1~1profile~1nuvio-collections/put/security",
+            "/paths/~1api~1v1~1profile~1nuvio-collections/delete/security",
+        ] {
+            assert_eq!(
+                value_at(&openapi, pointer).expect("hybrid mutation security"),
+                &serde_json::json!([
+                    {"credential_bearer": []},
+                    {
+                        "browser_session_cookie": [],
+                        "csrf_cookie": [],
+                        "csrf_header": []
+                    }
+                ]),
+                "{pointer}"
+            );
+        }
+        assert_eq!(
+            value_at(
+                &openapi,
+                "/paths/~1api~1v1~1integrations~1nuvio~1webhook/post/security"
+            )
+            .expect("webhook security"),
+            &serde_json::json!([{"credential_bearer": []}])
+        );
+        let webhook = value_at(
+            &openapi,
+            "/paths/~1api~1v1~1integrations~1nuvio~1webhook/post",
+        )
+        .expect("webhook operation");
+        for problem in BROWSER_SESSION_PROBLEMS {
+            assert!(!array_at(webhook, "/x-fasti-problem-codes")
+                .expect("webhook problems")
+                .contains(&Value::String(problem.to_owned())));
+        }
+
+        let conformance: Value = serde_json::from_slice(
+            artifacts
+                .get(Path::new(CONFORMANCE_OPENAPI_PATH))
+                .expect("conformance OpenAPI generated"),
+        )
+        .expect("conformance OpenAPI JSON");
+        let acceptance = value_at(&conformance, "/paths/~1api~1v1~1observations/post")
+            .expect("conformance observation acceptance");
+        assert_eq!(
+            string_at(acceptance, "/x-fasti-authorization").expect("authorization"),
+            "scoped"
+        );
+        for problem in BROWSER_SESSION_PROBLEMS {
+            assert!(!array_at(acceptance, "/x-fasti-problem-codes")
+                .expect("conformance problems")
+                .contains(&Value::String(problem.to_owned())));
         }
     }
 

@@ -3,8 +3,34 @@ name: Security Audit
 on:
   push:
     branches: ["dev", "release"]
+    paths-ignore:
+      - ".github/workflows/docs-pages.yml"
+      - "apps/docs/**"
+      - "diagrams/documentation-publication.svg"
+      - "docs/**"
+      - "*.md"
+      - "**/*.md"
+      - "packages/deploy-plan/**"
+      - "scripts/validate-docs.mjs"
+      - "scripts/validate-docs-build.mjs"
+      - "tests/js/deploy-plan.test.mjs"
+      - "tests/js/docs-*.test.mjs"
+      - "xtask/src/docs.rs"
   pull_request:
     branches: ["dev", "release"]
+    paths-ignore:
+      - ".github/workflows/docs-pages.yml"
+      - "apps/docs/**"
+      - "diagrams/documentation-publication.svg"
+      - "docs/**"
+      - "*.md"
+      - "**/*.md"
+      - "packages/deploy-plan/**"
+      - "scripts/validate-docs.mjs"
+      - "scripts/validate-docs-build.mjs"
+      - "tests/js/deploy-plan.test.mjs"
+      - "tests/js/docs-*.test.mjs"
+      - "xtask/src/docs.rs"
   schedule:
     - cron: "0 0 * * 0" # Weekly on Sundays
 
@@ -12,9 +38,29 @@ permissions:
   contents: read
 
 jobs:
+  js-audit:
+    name: JavaScript Security Advisories
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v4
+        with:
+          version: 11.22.0
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm audit
+
   cargo-audit:
     name: Rust Security Advisories
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Install cargo-audit
@@ -23,3 +69,14 @@ jobs:
         run: cargo audit --file Cargo.lock
       - name: Audit isolated Tauri benchmark lockfile
         run: cargo audit --file benchmarks/b1/tauri-shell/src-tauri/Cargo.lock
+      - name: Audit desktop Tauri lockfile
+        # Tauri 2's GTK3 stack pins glib 0.18.5, affected by RUSTSEC-2024-0429
+        # (unsound VariantStrIter iteration). Fasti's own desktop code has no
+        # direct glib:: calls (verified: no VariantStrIter/glib:: references
+        # under apps/desktop/src-tauri); the advisory's surface is only
+        # reachable through Tauri's own internals, which are out of Fasti's
+        # control until glib is bumped upstream. Keep every other advisory
+        # fatal. Owner: desktop maintainer. Re-evaluate when Tauri 2 bumps its
+        # glib dependency to >=0.20, or at the next desktop dependency review.
+        # Upstream migration: https://github.com/tauri-apps/tauri-docs/issues/3143
+        run: cargo audit --file apps/desktop/src-tauri/Cargo.lock --ignore RUSTSEC-2024-0429

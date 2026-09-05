@@ -1,0 +1,956 @@
+<script lang="ts">
+  import type {
+    MediaRecord,
+    MediaKind,
+    TrackingDispositionUpdate,
+    WatchStatus,
+    ContextMenuItemConfig,
+  } from "./types.js";
+  import {
+    IconSearch,
+    IconLayoutGrid,
+    IconList,
+    IconStarFilled,
+    IconBookmark,
+    IconEye,
+    IconEyeCheck,
+    IconFolder,
+  } from "@tabler/icons-svelte";
+  import FastActionBar from "./fast-action-bar.svelte";
+  import ProgressModal from "./progress-modal.svelte";
+  import RatingReviewModal from "./rating-review-modal.svelte";
+  import CollectionModal from "./collection-modal.svelte";
+  import ContextMenu, { type ContextMenuItem } from "./context-menu.svelte";
+  import { recordContextMenuItems } from "./record-actions.js";
+  import { recordProgressPercent } from "./progress.js";
+
+  interface Props {
+    records: MediaRecord[];
+    availableCollections: string[];
+    onSelectRecord: (recordId: string, tab?: "overview" | "sources") => void;
+    onSetTrackingDisposition?: (
+      recordId: string,
+      disposition: TrackingDispositionUpdate,
+    ) => void;
+    onOpenReconciliation?: () => void;
+    onUpdateStatus?: (recordId: string, status: WatchStatus) => void;
+    onUpdateRating?: (recordId: string, rating: number) => void;
+    onUpdateProgress?: (
+      recordId: string,
+      episodes: number,
+      seconds: number,
+      status: WatchStatus,
+    ) => void;
+    onSaveReview?: (recordId: string, rating: number, notes: string) => void;
+    onSaveCollection?: (recordId: string, collections: string[]) => void;
+    contextMenuConfigs?: ContextMenuItemConfig[];
+  }
+
+  let {
+    records,
+    availableCollections,
+    onSelectRecord,
+    onSetTrackingDisposition,
+    onOpenReconciliation,
+    onUpdateStatus,
+    onUpdateRating,
+    onUpdateProgress,
+    onSaveReview,
+    onSaveCollection,
+    contextMenuConfigs,
+  }: Props = $props();
+
+  let selectedKind: MediaKind | "all" = $state("all");
+  let selectedStatus: WatchStatus | "all" = $state("all");
+  let searchQuery = $state("");
+  let viewMode: "grid" | "list" = $state("grid");
+
+  // Modal Dialog States
+  let activeModalRecord = $state<MediaRecord | null>(null);
+  let showProgressModal = $state(false);
+  let showReviewModal = $state(false);
+  let showCollectionModal = $state(false);
+
+  // Context Menu State
+  let contextMenuState = $state<{
+    x: number;
+    y: number;
+    items: ContextMenuItem[];
+  } | null>(null);
+
+  const filteredRecords = $derived(
+    records.filter((rec) => {
+      const matchKind =
+        selectedKind === "all" || rec.mediaKind === selectedKind;
+      const matchStatus =
+        selectedStatus === "all" || rec.status === selectedStatus;
+      const matchSearch =
+        searchQuery.trim() === "" ||
+        rec.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (rec.tags &&
+          rec.tags.some((t) =>
+            t.toLowerCase().includes(searchQuery.toLowerCase()),
+          ));
+      return matchKind && matchStatus && matchSearch;
+    }),
+  );
+
+  const kinds: Array<{ id: MediaKind | "all"; label: string }> = [
+    { id: "all", label: "All Items" },
+    { id: "movie", label: "Movies" },
+    { id: "show", label: "TV Shows" },
+    { id: "anime", label: "Anime" },
+    { id: "book", label: "Books" },
+    { id: "game", label: "Games" },
+  ];
+
+  const statuses: Array<{ id: WatchStatus | "all"; label: string }> = [
+    { id: "all", label: "All States" },
+    { id: "watching", label: "Watching / In Progress" },
+    { id: "completed", label: "Completed" },
+    { id: "plan_to_watch", label: "Plan to Watch" },
+  ];
+
+  function handleToggleWatched(rec: MediaRecord): void {
+    if (!onUpdateStatus) return;
+    const nextStatus: WatchStatus =
+      rec.status === "completed" ? "watching" : "completed";
+    onUpdateStatus(rec.id, nextStatus);
+  }
+
+  function handleToggleWatchlist(rec: MediaRecord): void {
+    if (!onUpdateStatus) return;
+    const nextStatus: WatchStatus =
+      rec.status === "plan_to_watch" ? "watching" : "plan_to_watch";
+    onUpdateStatus(rec.id, nextStatus);
+  }
+
+  function handleOpenCollection(rec: MediaRecord): void {
+    activeModalRecord = rec;
+    showCollectionModal = true;
+  }
+
+  function handleOpenReview(rec: MediaRecord): void {
+    activeModalRecord = rec;
+    showReviewModal = true;
+  }
+
+  function handleOpenContextMenu(rec: MediaRecord, e: MouseEvent): void {
+    e.preventDefault();
+    contextMenuState = {
+      x: e.clientX,
+      y: e.clientY,
+      items: recordContextMenuItems(
+        rec,
+        {
+          onView: () => onSelectRecord(rec.id),
+          onSetTrackingDisposition: onSetTrackingDisposition
+            ? (disposition) => onSetTrackingDisposition(rec.id, disposition)
+            : undefined,
+          onMarkCompleted: onUpdateStatus
+            ? () => handleToggleWatched(rec)
+            : undefined,
+          onUpdateProgress: onUpdateProgress
+            ? () => {
+                activeModalRecord = rec;
+                showProgressModal = true;
+              }
+            : undefined,
+          onToggleWatchlist: onUpdateStatus
+            ? () => handleToggleWatchlist(rec)
+            : undefined,
+          onOpenCollection: onSaveCollection
+            ? () => {
+                activeModalRecord = rec;
+                showCollectionModal = true;
+              }
+            : undefined,
+          onOpenReview: onSaveReview
+            ? () => {
+                activeModalRecord = rec;
+                showReviewModal = true;
+              }
+            : undefined,
+          onInspectIds: () => onSelectRecord(rec.id, "sources"),
+          onReconcile: onOpenReconciliation,
+          onCopyId:
+            typeof navigator !== "undefined" && navigator.clipboard
+              ? () => void navigator.clipboard.writeText(rec.id).catch(() => {})
+              : undefined,
+        },
+        contextMenuConfigs,
+      ),
+    };
+  }
+</script>
+
+<div class="library-container">
+  <header class="library-header">
+    <div>
+      <h1 class="view-title">Library</h1>
+      <p class="view-subtitle">
+        Review up to 500 records returned by the active Fasti host. More records
+        can exist until pagination is active.
+      </p>
+    </div>
+
+    <!-- View Mode Switcher -->
+    <div class="view-controls">
+      <button
+        type="button"
+        class="mode-btn"
+        class:active={viewMode === "grid"}
+        onclick={() => (viewMode = "grid")}
+        aria-label="Grid view"
+        aria-pressed={viewMode === "grid"}
+      >
+        <IconLayoutGrid size={18} stroke={1.75} />
+      </button>
+      <button
+        type="button"
+        class="mode-btn"
+        class:active={viewMode === "list"}
+        onclick={() => (viewMode = "list")}
+        aria-label="List view"
+        aria-pressed={viewMode === "list"}
+      >
+        <IconList size={18} stroke={1.75} />
+      </button>
+    </div>
+  </header>
+
+  {#if records.length > 0}
+    <!-- Filter & Search Toolbar -->
+    <div class="toolbar">
+      <div class="search-wrap">
+        <IconSearch size={16} stroke={2} class="search-icon" />
+        <input
+          type="search"
+          placeholder="Filter by title, tag, or creator..."
+          bind:value={searchQuery}
+          class="search-input"
+          aria-label="Filter library records"
+        />
+      </div>
+
+      <div
+        class="filter-pills"
+        role="radiogroup"
+        aria-label="Media kind filter"
+      >
+        {#each kinds as k}
+          <button
+            type="button"
+            role="radio"
+            aria-checked={selectedKind === k.id}
+            class="filter-pill"
+            class:active={selectedKind === k.id}
+            onclick={() => (selectedKind = k.id)}
+          >
+            {k.label}
+          </button>
+        {/each}
+      </div>
+
+      <div class="filter-pills" role="radiogroup" aria-label="Status filter">
+        {#each statuses as s}
+          <button
+            type="button"
+            role="radio"
+            aria-checked={selectedStatus === s.id}
+            class="filter-pill status"
+            class:active={selectedStatus === s.id}
+            onclick={() => (selectedStatus = s.id)}
+          >
+            {s.label}
+          </button>
+        {/each}
+      </div>
+    </div>
+  {/if}
+
+  <!-- Records Grid / List -->
+  {#if records.length === 0}
+    <div class="empty-results">
+      <p>No media records are available in this view.</p>
+    </div>
+  {:else if filteredRecords.length === 0}
+    <div class="empty-results">
+      <p>No media records match the selected filters.</p>
+      <button
+        type="button"
+        class="reset-btn"
+        onclick={() => {
+          selectedKind = "all";
+          selectedStatus = "all";
+          searchQuery = "";
+        }}
+      >
+        Reset Filters
+      </button>
+    </div>
+  {:else if viewMode === "grid"}
+    <div class="media-grid">
+      {#each filteredRecords as rec (rec.id)}
+        {@const pct = recordProgressPercent(rec)}
+        <div
+          class="card-wrapper"
+          role="group"
+          aria-label="{rec.title} card"
+          oncontextmenu={(e) => handleOpenContextMenu(rec, e)}
+        >
+          <button
+            type="button"
+            class="card-art-btn"
+            onclick={() => onSelectRecord(rec.id)}
+          >
+            <div class="poster-box">
+              {#if rec.posterUrl}
+                <img
+                  src={rec.posterUrl}
+                  alt=""
+                  class="poster-image"
+                  loading="lazy"
+                />
+              {:else}
+                <div class="fallback-poster">{rec.mediaKind}</div>
+              {/if}
+
+              <span class="kind-badge {rec.mediaKind}">{rec.mediaKind}</span>
+
+              {#if pct > 0}
+                <div class="top-badge-pct" title="{pct}% completed">
+                  {pct}%
+                </div>
+                <div class="progress-bar-track">
+                  <div class="progress-bar-fill" style="width: {pct}%"></div>
+                </div>
+              {/if}
+              {#if rec.userRating}
+                <div class="card-rating">
+                  <IconStarFilled size={12} class="star-icon" />
+                  <span>{rec.userRating}</span>
+                </div>
+              {/if}
+
+              {#if rec.progressEpisodes !== undefined && rec.totalEpisodes !== undefined}
+                <div class="episode-pill">
+                  {rec.progressEpisodes}/{rec.totalEpisodes} eps
+                </div>
+              {/if}
+            </div>
+          </button>
+
+          <!-- Ryot-Style Fast Buttons Toolbar -->
+          <div class="fast-action-toolbar-wrap">
+            <FastActionBar
+              record={rec}
+              onToggleWatched={onUpdateStatus ? handleToggleWatched : undefined}
+              onToggleWatchlist={onUpdateStatus
+                ? handleToggleWatchlist
+                : undefined}
+              onOpenCollection={onSaveCollection
+                ? handleOpenCollection
+                : undefined}
+              onOpenReview={onSaveReview ? handleOpenReview : undefined}
+              onOpenContextMenu={handleOpenContextMenu}
+            />
+          </div>
+
+          <div class="card-info">
+            <button
+              type="button"
+              class="title-link"
+              onclick={() => onSelectRecord(rec.id)}
+            >
+              <h2 class="card-title">{rec.title}</h2>
+            </button>
+            <div class="card-sub-row">
+              <span class="card-year">{rec.releaseYear ?? "—"}</span>
+              <span class="status-indicator {rec.status}"
+                >{rec.status === "unknown"
+                  ? "tracking state unavailable"
+                  : rec.status.replaceAll("_", " ")}</span
+              >
+            </div>
+          </div>
+        </div>
+      {/each}
+    </div>
+  {:else}
+    <!-- List Table View -->
+    <div class="table-frame">
+      <table class="records-table">
+        <thead>
+          <tr>
+            <th scope="col">Title</th>
+            <th scope="col">Kind</th>
+            <th scope="col">Status</th>
+            <th scope="col">Rating</th>
+            <th scope="col">Progress</th>
+            <th scope="col">Quick Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each filteredRecords as rec (rec.id)}
+            <tr
+              class="table-row"
+              oncontextmenu={(e) => handleOpenContextMenu(rec, e)}
+            >
+              <td>
+                <div class="row-title-box">
+                  <button
+                    type="button"
+                    class="title-link"
+                    onclick={() => onSelectRecord(rec.id)}
+                  >
+                    <strong>{rec.title}</strong>
+                  </button>
+                  {#if rec.releaseYear}
+                    <span class="row-year">({rec.releaseYear})</span>
+                  {/if}
+                </div>
+              </td>
+              <td
+                ><span class="kind-tag {rec.mediaKind}">{rec.mediaKind}</span
+                ></td
+              >
+              <td
+                ><span class="status-pill {rec.status}"
+                  >{rec.status === "unknown"
+                    ? "Unavailable"
+                    : rec.status.replaceAll("_", " ")}</span
+                ></td
+              >
+              <td>
+                {#if rec.userRating}
+                  <span class="table-star">★ {rec.userRating}</span>
+                {:else}
+                  <span class="unrated">—</span>
+                {/if}
+              </td>
+              <td>
+                {#if rec.progressEpisodes !== undefined && rec.totalEpisodes !== undefined}
+                  <span class="mono-prog"
+                    >{rec.progressEpisodes}/{rec.totalEpisodes} eps</span
+                  >
+                {:else}
+                  <span class="mono-prog">—</span>
+                {/if}
+              </td>
+              <td onclick={(e) => e.stopPropagation()}>
+                <div class="table-fast-btns">
+                  <button
+                    type="button"
+                    class="table-btn"
+                    class:active={Boolean(
+                      onUpdateStatus && rec.status === "completed",
+                    )}
+                    disabled={!onUpdateStatus}
+                    onclick={() => handleToggleWatched(rec)}
+                    title={onUpdateStatus
+                      ? "Toggle Seen"
+                      : "Completion needs Chronicle progress history"}
+                  >
+                    {#if rec.status === "completed"}
+                      <IconEyeCheck size={16} />
+                    {:else}
+                      <IconEye size={16} />
+                    {/if}
+                  </button>
+                  <button
+                    type="button"
+                    class="table-btn"
+                    class:active={Boolean(
+                      onUpdateStatus && rec.status === "plan_to_watch",
+                    )}
+                    disabled={!onUpdateStatus}
+                    onclick={() => handleToggleWatchlist(rec)}
+                    title={onUpdateStatus
+                      ? "Toggle Watchlist"
+                      : "Watchlist membership is not active on this host"}
+                  >
+                    <IconBookmark size={16} />
+                  </button>
+                  <button
+                    type="button"
+                    class="table-btn"
+                    disabled={!onSaveCollection}
+                    onclick={() => handleOpenCollection(rec)}
+                    title={onSaveCollection
+                      ? "Collection"
+                      : "Collections are not active on this host"}
+                  >
+                    <IconFolder size={16} />
+                  </button>
+                </div>
+              </td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
+  {/if}
+</div>
+
+<!-- Modal Dialogs -->
+{#if showProgressModal && activeModalRecord && onUpdateProgress}
+  <ProgressModal
+    record={activeModalRecord}
+    onClose={() => {
+      showProgressModal = false;
+      activeModalRecord = null;
+    }}
+    onSaveProgress={(recId, eps, sec, st) =>
+      onUpdateProgress(recId, eps, sec, st)}
+  />
+{/if}
+
+{#if showReviewModal && activeModalRecord && onSaveReview}
+  <RatingReviewModal
+    record={activeModalRecord}
+    onClose={() => {
+      showReviewModal = false;
+      activeModalRecord = null;
+    }}
+    onSaveReview={(recId, r, n) => onSaveReview(recId, r, n)}
+  />
+{/if}
+
+{#if showCollectionModal && activeModalRecord && onSaveCollection}
+  <CollectionModal
+    record={activeModalRecord}
+    collections={availableCollections}
+    onClose={() => {
+      showCollectionModal = false;
+      activeModalRecord = null;
+    }}
+    onSaveCollection={(recId, colls) => onSaveCollection(recId, colls)}
+  />
+{/if}
+
+{#if contextMenuState}
+  <ContextMenu
+    x={contextMenuState.x}
+    y={contextMenuState.y}
+    items={contextMenuState.items}
+    onClose={() => (contextMenuState = null)}
+  />
+{/if}
+
+<style>
+  .library-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 32px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+
+  .library-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    border-bottom: 2px solid
+      color-mix(in srgb, var(--fasti-brand-mark) 30%, transparent);
+    padding-bottom: 16px;
+  }
+
+  .view-title {
+    font-family: var(--fasti-font-display);
+    font-size: 2.4rem;
+    font-weight: 600;
+    margin: 0;
+    color: var(--fasti-text-primary);
+  }
+
+  .view-subtitle {
+    margin: 4px 0 0;
+    color: var(--fasti-text-muted);
+    font-size: 0.95rem;
+  }
+
+  .view-controls {
+    display: flex;
+    gap: 4px;
+    background: var(--fasti-surface-paper);
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
+    padding: 2px;
+  }
+
+  .mode-btn {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
+    border: none;
+    background: transparent;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
+    color: var(--fasti-text-muted);
+    cursor: pointer;
+  }
+
+  .mode-btn.active {
+    background: var(--fasti-brand-mark);
+    color: var(--fasti-brand-contrast);
+  }
+
+  .toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .search-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+    min-width: 260px;
+    flex: 1;
+  }
+
+  :global(.search-icon) {
+    position: absolute;
+    left: 12px;
+    color: var(--fasti-text-muted);
+  }
+
+  .search-input {
+    width: 100%;
+    min-height: 44px;
+    padding: 8px 14px 8px 36px;
+    background: var(--fasti-surface-paper);
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
+    font-size: 0.9rem;
+    color: var(--fasti-text-primary);
+  }
+
+  .filter-pills {
+    display: flex;
+    gap: 6px;
+  }
+
+  .filter-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    min-width: 44px;
+    padding: 8px 14px;
+    border-radius: 20px;
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
+    background: var(--fasti-surface-paper);
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--fasti-text-muted);
+    cursor: pointer;
+  }
+
+  .filter-pill.active {
+    background: var(--fasti-brand-mark);
+    border-color: var(--fasti-brand-mark);
+    color: var(--fasti-brand-contrast);
+    font-weight: 600;
+  }
+
+  .empty-results {
+    text-align: center;
+    padding: 48px 24px;
+    background: var(--fasti-surface-paper);
+    border-radius: calc(8px * var(--tblr-border-radius-scale, 1));
+    border: 1px dashed
+      color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
+  }
+
+  .reset-btn {
+    margin-top: 12px;
+    min-height: 44px;
+    min-width: 44px;
+    padding: 8px 16px;
+    background: var(--fasti-brand-mark);
+    color: var(--fasti-brand-contrast);
+    border: none;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .media-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 20px;
+  }
+
+  .card-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .card-art-btn {
+    background: transparent;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    text-align: left;
+    display: block;
+  }
+
+  .poster-box {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 2 / 3;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
+    overflow: hidden;
+    background: var(--fasti-surface-archive);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    transition: transform 120ms ease;
+  }
+
+  .poster-box:hover {
+    transform: translateY(-3px);
+  }
+
+  .poster-image {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .fallback-poster {
+    width: 100%;
+    height: 100%;
+    display: grid;
+    place-items: center;
+    font-family: var(--fasti-font-mono);
+    text-transform: uppercase;
+    color: var(--fasti-text-muted);
+  }
+
+  .kind-badge {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    font-family: var(--fasti-font-mono);
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
+    background: rgba(0, 0, 0, 0.75);
+    color: var(--fasti-overlay-contrast);
+  }
+
+  .top-badge-pct {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    font-family: var(--fasti-font-mono);
+    font-size: 0.68rem;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
+    background: rgba(0, 0, 0, 0.75);
+    color: var(--fasti-overlay-contrast);
+    letter-spacing: -0.02em;
+  }
+
+  .progress-bar-track {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 2;
+  }
+
+  .progress-bar-fill {
+    height: 100%;
+    background: var(--fasti-action-primary);
+  }
+
+  .card-rating {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    font-family: var(--fasti-font-mono);
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
+    background: rgba(0, 0, 0, 0.8);
+    color: var(--fasti-brand-gold);
+  }
+
+  .episode-pill {
+    position: absolute;
+    bottom: 8px;
+    left: 8px;
+    font-family: var(--fasti-font-mono);
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
+    background: rgba(0, 0, 0, 0.8);
+    color: var(--fasti-overlay-contrast);
+  }
+
+  .fast-action-toolbar-wrap {
+    margin-top: 2px;
+  }
+
+  .title-link {
+    background: transparent;
+    border: none;
+    padding: 0;
+    min-height: 44px;
+    min-width: 44px;
+    display: inline-flex;
+    align-items: center;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .card-title {
+    font-family: var(--fasti-font-display);
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin: 0;
+    color: var(--fasti-text-primary);
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .title-link:hover .card-title {
+    color: var(--fasti-action-primary);
+  }
+
+  .card-sub-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-family: var(--fasti-font-mono);
+    font-size: 0.75rem;
+    color: var(--fasti-text-muted);
+    margin-top: 2px;
+  }
+
+  .status-indicator.watching {
+    color: var(--fasti-action-primary);
+    font-weight: 700;
+  }
+  .status-indicator.completed {
+    color: var(--fasti-state-verified);
+    font-weight: 700;
+  }
+
+  /* Table View */
+  .table-frame {
+    background: var(--fasti-surface-paper);
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
+    overflow: hidden;
+  }
+
+  .records-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.88rem;
+    text-align: left;
+  }
+
+  .records-table th,
+  .records-table td {
+    padding: 12px 16px;
+    border-bottom: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 15%, transparent);
+  }
+
+  .table-row {
+    transition: background 80ms ease;
+  }
+
+  .table-row:hover {
+    background: var(--fasti-surface-archive);
+  }
+
+  .kind-tag {
+    font-family: var(--fasti-font-mono);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
+    background: var(--fasti-surface-archive);
+  }
+
+  .status-pill {
+    font-family: var(--fasti-font-mono);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
+  }
+
+  .status-pill.watching {
+    background: color-mix(
+      in srgb,
+      var(--fasti-action-primary) 15%,
+      transparent
+    );
+    color: var(--fasti-action-primary);
+  }
+  .status-pill.completed {
+    background: color-mix(
+      in srgb,
+      var(--fasti-state-verified) 15%,
+      transparent
+    );
+    color: var(--fasti-state-verified);
+  }
+
+  .table-fast-btns {
+    display: flex;
+    gap: 4px;
+  }
+
+  .table-btn {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
+    display: grid;
+    place-items: center;
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
+    background: var(--fasti-surface-archive);
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
+    cursor: pointer;
+    color: var(--fasti-text-muted);
+  }
+
+  .table-btn.active {
+    color: var(--fasti-action-primary);
+    border-color: var(--fasti-action-primary);
+  }
+
+  .table-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
+</style>
