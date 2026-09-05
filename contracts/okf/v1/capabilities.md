@@ -89,7 +89,7 @@ authorization_assignments:
   profile.nuvio_collections.replace: scoped_or_browser_session
   profile.record.tracking_disposition.list: scoped_or_browser_session
   profile.record.tracking_disposition.set: scoped_or_browser_session
-  provider.list: scoped
+  provider.list: scoped_or_browser_session
   provider.credential.configure: scoped
   provider.credential.test: scoped
   provider.health.read: scoped
@@ -147,7 +147,7 @@ not automatically an implemented runtime. Read each entry together with the
 | `profile.nuvio_collections.replace` | `profile.catalog_configuration` | `scoped_or_browser_session` | Implemented           |
 | `profile.record.tracking_disposition.list` | `profile.tracking` | `scoped_or_browser_session` | Implemented                 |
 | `profile.record.tracking_disposition.set` | `profile.tracking` | `scoped_or_browser_session` | Implemented                  |
-| `provider.list`                 | `connections.providers`     | `scoped`          | Implemented in M1                            |
+| `provider.list`                 | `connections.providers`     | `scoped_or_browser_session` | M1 inventory; M4 browser read                |
 | `provider.credential.configure` | `connections.providers`     | `scoped`          | Implemented in M1                            |
 | `provider.credential.test`      | `connections.providers`     | `scoped`          | Implemented in M1                            |
 | `provider.health.read`          | `connections.providers`     | `scoped`          | Implemented in M1                            |

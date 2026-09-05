@@ -5507,7 +5507,7 @@ export const LOCAL_RUNTIME_OPERATIONS = {
   getNuvioCollections: { operationId: "get_nuvio_collections", method: "GET", path: "/api/v1/profile/nuvio-collections", capabilityId: "profile.nuvio_collections.get", authorization: "scoped_or_browser_session", requiredScopes: ["profile_state_read"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","integrity_failed","session_policy_changed","storage_unavailable"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "NuvioCollectionsStateDto" },
   replaceNuvioCollections: { operationId: "replace_nuvio_collections", method: "PUT", path: "/api/v1/profile/nuvio-collections", capabilityId: "profile.nuvio_collections.replace", authorization: "scoped_or_browser_session", requiredScopes: ["profile_state_write"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","integrity_failed","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: "NuvioCollectionsDocumentDto", responseSchema: "NuvioCollectionsStateDto" },
   clearNuvioCollections: { operationId: "clear_nuvio_collections", method: "DELETE", path: "/api/v1/profile/nuvio-collections", capabilityId: "profile.nuvio_collections.clear", authorization: "scoped_or_browser_session", requiredScopes: ["profile_state_write"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","integrity_failed","session_policy_changed","storage_unavailable"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "NuvioCollectionsStateDto" },
-  listProviders: { operationId: "list_providers", method: "GET", path: "/api/v1/providers", capabilityId: "provider.list", authorization: "scoped", requiredScopes: ["provider_read"], problemCodes: ["authentication_failed","forbidden","integrity_failed","storage_unavailable"], exampleIds: ["provider.list.forbidden"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ListProvidersResponse" },
+  listProviders: { operationId: "list_providers", method: "GET", path: "/api/v1/providers", capabilityId: "provider.list", authorization: "scoped_or_browser_session", requiredScopes: ["provider_read"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","forbidden","integrity_failed","session_policy_changed","storage_unavailable"], exampleIds: ["provider.list.forbidden"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ListProvidersResponse" },
   configureProviderCredential: { operationId: "configure_provider_credential", method: "PUT", path: "/api/v1/providers/{provider_id}/credentials/{capability_id}", capabilityId: "provider.credential.configure", authorization: "scoped", requiredScopes: ["provider_credential_manage"], problemCodes: ["authentication_failed","forbidden","integrity_failed","malformed_json","payload_too_large","provider_credential_invalid","provider_unavailable","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["provider.credential.configure.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "ConfigureProviderCredentialRequest", responseSchema: "ProviderCapabilityResponse" },
   removeProviderCredential: { operationId: "remove_provider_credential", method: "DELETE", path: "/api/v1/providers/{provider_id}/credentials/{capability_id}", capabilityId: "provider.credential.configure", authorization: "scoped", requiredScopes: ["provider_credential_manage"], problemCodes: ["authentication_failed","forbidden","integrity_failed","malformed_json","payload_too_large","provider_credential_invalid","provider_unavailable","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["provider.credential.configure.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: null, responseSchema: "ProviderCapabilityResponse" },
   testProviderCredential: { operationId: "test_provider_credential", method: "POST", path: "/api/v1/providers/{provider_id}/credentials/{capability_id}/tests", capabilityId: "provider.credential.test", authorization: "scoped", requiredScopes: ["provider_credential_manage"], problemCodes: ["authentication_failed","forbidden","integrity_failed","provider_credential_expired","provider_credential_invalid","provider_credential_missing","provider_rate_limited","provider_response_invalid","provider_route_unavailable","provider_unavailable","storage_unavailable"], exampleIds: ["provider.credential.test.provider_credential_missing"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: null, responseSchema: "ProviderCapabilityResponse" },
@@ -8724,7 +8724,7 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       "uat": []
     },
     {
-      "authorization": "scoped",
+      "authorization": "scoped_or_browser_session",
       "bounded_context": "connections.providers",
       "contract_body": "m1",
       "examples": [
@@ -8738,8 +8738,11 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       },
       "problems": [
         "authentication_failed",
+        "browser_session_expired",
+        "browser_session_revoked",
         "forbidden",
         "integrity_failed",
+        "session_policy_changed",
         "storage_unavailable"
       ],
       "runtime_body": "m1",
@@ -16699,6 +16702,42 @@ export const PUBLIC_PROBLEM_CATALOG = {
     },
     {
       "capability_id": "provider.list",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "provider.list",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
+    },
+    {
+      "capability_id": "provider.list",
       "code": "forbidden",
       "detail": "request is not authorized for this capability",
       "next_actions": [
@@ -16732,6 +16771,24 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "status": 500,
       "title": "Integrity check failed",
       "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "provider.list",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
     },
     {
       "capability_id": "provider.list",

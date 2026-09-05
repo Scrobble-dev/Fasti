@@ -3835,3 +3835,67 @@ Access confirmed C2 foundation PR #125 MERGED at
 Its documentation correction is not an instruction to merge the old C2 branch.
 M4 retains migration17/archive7 and all shared integration ownership. No
 migration18 allocation, M4 merge or shared-file release follows from this checkpoint.
+
+### M4 browser provider inventory correction
+
+The verified gap is now implemented through existing owners. Only
+`provider.list` becomes `scoped_or_browser_session`, with its existing
+`provider_read` scope. The existing ProviderStatePort gains one narrow
+authorized inventory read; SQLite resolves current authority and reads the
+workspace partition in one transaction. Raw internal provider state operations
+remain available to their already-authorized callers. No second inventory
+service, capability ID, route, DTO, dependency or migration was introduced.
+
+The exact direct listener supplies the existing browser boundary. Generic and
+remote provider routers remain bearer-only. The web host selects its same-origin
+Access client for browser inventory, not the saved service URL. Browser inventory
+does not expose secrets, references, digests or private authority IDs, and its
+write/test flags are false: credential and health operations retain their
+separate bearer requirements. All inventory responses are private/no-store.
+This is an explicit M4 extension after the frozen C1 route set, not a claim
+that historical C1 approval already included it. Registry, application policy,
+OKF, OpenAPI and SDK projections are updated together.
+
+Independent source review found no P0/P1/P2 issue in the production diff.
+Main review then added a corruption regression and proved an error-classification
+regression: generic SQL mapping turned invalid persisted provider data into a
+retryable 503. The new read now reuses provider-specific error classification,
+preserving 500 integrity failures separately from 503 storage outages. The
+regression passed after this correction, and a second independent review is clear.
+
+Dirty-tree verification: six focused HTTP tests pass, including workspace
+isolation, missing scope, malformed/mixed cookies, wrong listener, revoked/expired
+sessions, changed epochs/membership, profile rotation, corrupt state and continued
+browser denial of credential/health operations. The prior full API run passed
+102/102 before the final corruption regression; the next clean gate must include
+all 103. Application hybrid policy, 52 authored-contract/SDK cases, generated
+contract validation and documentation verification pass. Focused API/daemon
+Clippy passed before the final error-mapping correction and must be repeated.
+
+The final isolated browser regression run passes 3/3 in
+`.gstack/qa-reports/m4-provider-inventory-focused-final`. These tests use the real
+web host/SDK with intercepted HTTP responses, not real fastid/provider evidence.
+They prove same-origin inventory/Search and preserved separately authorized
+local results under missing credentials or an inventory-only expiry failure.
+They do not authorize local data under a globally expired session. Initial
+fixture failures were corrected without changing product safeguards: genuine
+chronology for revocation/expiry, the existing Secure CSRF fixture convention,
+and the actual missing-credential recovery section instead of invented copy.
+Both browser ports are released. Clean-head canonical and delivery evidence
+remain pending for this new correction.
+
+Access independently reproduced an inherited-file-descriptor lock lifetime
+defect while diagnosing PR #130 coverage. The commander explicitly handed
+`crates/fasti-store/src/kernel.rs` only to Access for an owner-Drop unlock fix
+and colocated duplicate-descriptor regression. M4 is read-only on that file
+until the exact reviewed commit/tree handoff; existing authorization helpers
+are reused without edits. This does not release schema, provider, API, SDK or
+other M4-owned files and does not identify the original CI lock holder as fact.
+
+Hosted read-only triage on published `a7f832bf` found four existing Dependabot
+alerts (two source-mitigated image-size advisories and two documented unresolved
+glib advisories); do not claim zero vulnerabilities. CodeQL's three analyses
+passed at that head. Codacy's six fixture/process annotations did not establish
+a reachable injection path. Ten CodeRabbit threads are resolved with
+source-backed replies. The JavaScript job remains unproven until its existing
+queued/in-progress run completes; do not restart it simply for being queued.

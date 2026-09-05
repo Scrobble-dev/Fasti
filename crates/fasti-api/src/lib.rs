@@ -420,17 +420,21 @@ pub fn integration_router(kernel: Arc<dyn LocalKernel>) -> Router {
 ///
 /// This is separate from [`integration_router`] so credentials and provider
 /// inventory are never exposed on the dedicated webhook listener.
+/// Only the exact direct listener supplies a browser boundary, and only the
+/// inventory read accepts it. Credential and health operations stay bearer-only.
 pub fn provider_api_router(
     kernel: Arc<dyn LocalKernel>,
     provider_state: Arc<dyn fasti_application::ProviderStatePort>,
     runtime: Arc<fasti_provider_runtime::ProviderRuntime>,
     provider_operation_locks: ProviderOperationLocks,
+    browser_boundary: Option<fasti_application::BrowserRequestBoundaryPolicy>,
 ) -> Router {
     providers::router().with_state(providers::ProviderApiState {
         kernel,
         provider_state,
         runtime,
         provider_operation_locks,
+        browser_boundary,
     })
 }
 

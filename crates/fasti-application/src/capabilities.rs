@@ -906,13 +906,16 @@ define_capabilities!(
         M1,
         Finalized,
         Implemented,
-        Scoped,
+        ScopedOrBrowserSession,
         [ProviderRead],
         [
             AuthenticationFailed,
             Forbidden,
             IntegrityFailed,
-            StorageUnavailable
+            StorageUnavailable,
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
+            SessionPolicyChanged
         ],
         []
     ),
@@ -1422,6 +1425,7 @@ mod tests {
                 CapabilityKey::ClearNuvioCollections,
                 CapabilityKey::ListTrackingDispositions,
                 CapabilityKey::SetTrackingDisposition,
+                CapabilityKey::ListProviders,
                 CapabilityKey::ResolveIdentityRoute,
                 CapabilityKey::ReadAnimeGroupingPolicy,
                 CapabilityKey::PreviewAnimeGroupingPolicyChange,

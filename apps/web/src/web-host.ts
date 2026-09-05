@@ -333,7 +333,7 @@ export function createWebHost(
       return parseIntegrationStatusResponse(response.integrations);
     },
     async providerCredentialStatus(): Promise<ProviderCredentialStatus[]> {
-      return loadProviderRows(client);
+      return loadProviderRows(credential ? client : accessClient);
     },
     async saveProviderCredential(
       provider: string,
