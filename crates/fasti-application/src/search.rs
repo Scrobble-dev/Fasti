@@ -7,8 +7,8 @@ use crate::{
 use chrono::{DateTime, Duration, Utc};
 use fasti_domain::{
     AuthSubjectId, ClientId, ExternalIdentifierClaim, Grain, MetadataLocale, MetadataRegion,
-    ProfileGrantId, ProfileId, RequestCorrelationId, SearchCandidateReceiptId, SearchQuery,
-    Sha256Digest, WorkspaceId,
+    ProfileGrantId, ProfileId, RecordId, RequestCorrelationId, SearchCandidateReceiptId,
+    SearchQuery, Sha256Digest, WorkspaceId,
 };
 use serde::{Deserialize, Serialize};
 use std::{error::Error, fmt};
@@ -19,6 +19,51 @@ pub const SEARCH_STALE_ON_ERROR_SECONDS: i64 = 600;
 pub const SEARCH_RECEIPT_SECONDS: i64 = 24 * 60 * 60;
 pub const MAX_SEARCH_PAGE_CANDIDATES: usize = 100;
 pub const MAX_SEARCH_CONTEXT_BYTES: usize = 2048;
+
+/// Literal Unicode default-case substring matching; never SQL/FTS query syntax.
+/// Locale-specific casing and accent folding are not implicitly applied.
+pub fn normalize_local_search_text(value: &str) -> String {
+    value.to_lowercase()
+}
+
+#[derive(Debug, Clone)]
+pub struct LocalSearchRequest {
+    pub correlation_id: RequestCorrelationId,
+    pub access: ApplicationAccessContext,
+    pub query: SearchQuery,
+    pub grains: Vec<Grain>,
+    pub after: Option<LocalSearchCursor>,
+}
+
+impl LocalSearchRequest {
+    pub fn context_digest(&self, access: &AuthorizedApplicationAccess) -> Sha256Digest {
+        let mut grains = self.grains.clone();
+        grains.sort_by_key(|grain| grain.as_str());
+        grains.dedup();
+        search_digest(&(
+            "fasti.search.local.v1",
+            access.workspace_id(),
+            access.profile_id(),
+            access.grant_id(),
+            self.query.as_str(),
+            grains,
+        ))
+    }
+}
+
+/// A position, not authorization. Every page rechecks current application access.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LocalSearchCursor {
+    pub last_record_id: RecordId,
+    pub context_digest: Sha256Digest,
+}
+
+pub struct LocalSearchPage {
+    pub records: Vec<crate::RecordSummary>,
+    /// Last inspected ID, including rejected candidates. Empty pages can continue.
+    pub next: Option<LocalSearchCursor>,
+}
 
 fn search_digest(value: &impl Serialize) -> Sha256Digest {
     use sha2::{Digest, Sha256};
@@ -242,6 +287,10 @@ pub struct StoredSearchCandidate {
 }
 
 pub trait SearchPersistencePort: Send + Sync {
+    fn search_local_records(
+        &self,
+        request: &LocalSearchRequest,
+    ) -> ApplicationResult<LocalSearchPage>;
     fn prepare_search_page(
         &self,
         request: &SearchPageRequest,

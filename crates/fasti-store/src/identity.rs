@@ -249,58 +249,76 @@ impl IdentityPort for SqliteKernel {
         let truncated = records.len() > MAX_RECORDS_PAGE as usize;
         records.truncate(MAX_RECORDS_PAGE as usize);
 
-        let field_keys = [
-            FieldKey::try_new(TITLE_FIELD_KEY).expect("canonical record summary field key"),
-            FieldKey::try_new(POSTER_FIELD_KEY).expect("canonical record summary field key"),
-            FieldKey::try_new(ORIGINAL_TITLE_FIELD_KEY)
-                .expect("canonical record summary field key"),
-            FieldKey::try_new(OVERVIEW_FIELD_KEY).expect("canonical record summary field key"),
-            FieldKey::try_new(RELEASE_YEAR_FIELD_KEY).expect("canonical record summary field key"),
-        ];
-        let record_ids: Vec<_> = records.iter().map(|(id, _)| *id).collect();
-        let metadata = load_record_metadata_batch(
+        let summaries = load_record_summaries(
             &transaction,
             workspace_id,
             profile_id,
-            &record_ids,
-            &field_keys,
+            records,
             capability,
             correlation_id,
         )?;
-        let mut identifiers = load_record_identifiers_batch(
-            &transaction,
-            workspace_id,
-            &record_ids,
-            capability,
-            correlation_id,
-        )?;
-        let mut activities = load_latest_activities_batch(
-            &transaction,
-            workspace_id,
-            profile_id,
-            &record_ids,
-            capability,
-            correlation_id,
-        )?;
-
-        let mut summaries = Vec::with_capacity(records.len());
-        for (record_id, grain) in records {
-            summaries.push(RecordSummary::new(
-                record_id,
-                grain,
-                RecordStatus::Active,
-                metadata.resolve(record_id, &field_keys[0], capability, correlation_id)?,
-                metadata.resolve(record_id, &field_keys[1], capability, correlation_id)?,
-                metadata.resolve(record_id, &field_keys[2], capability, correlation_id)?,
-                metadata.resolve(record_id, &field_keys[3], capability, correlation_id)?,
-                metadata.resolve(record_id, &field_keys[4], capability, correlation_id)?,
-                identifiers.remove(&record_id).unwrap_or_default(),
-                activities.remove(&record_id),
-            ));
-        }
         map_sql(transaction.commit(), capability, correlation_id)?;
         Ok(RecordListView::new(summaries, truncated))
     }
+}
+
+pub(crate) fn load_record_summaries(
+    connection: &Connection,
+    workspace_id: WorkspaceId,
+    profile_id: fasti_domain::ProfileId,
+    records: Vec<(RecordId, Grain)>,
+    capability: CapabilityKey,
+    correlation_id: fasti_domain::RequestCorrelationId,
+) -> ApplicationResult<Vec<RecordSummary>> {
+    let field_keys = [
+        FieldKey::try_new(TITLE_FIELD_KEY).expect("canonical record summary field key"),
+        FieldKey::try_new(POSTER_FIELD_KEY).expect("canonical record summary field key"),
+        FieldKey::try_new(ORIGINAL_TITLE_FIELD_KEY).expect("canonical record summary field key"),
+        FieldKey::try_new(OVERVIEW_FIELD_KEY).expect("canonical record summary field key"),
+        FieldKey::try_new(RELEASE_YEAR_FIELD_KEY).expect("canonical record summary field key"),
+    ];
+    let record_ids: Vec<_> = records.iter().map(|(id, _)| *id).collect();
+    let metadata = load_record_metadata_batch(
+        connection,
+        workspace_id,
+        profile_id,
+        &record_ids,
+        &field_keys,
+        capability,
+        correlation_id,
+    )?;
+    let mut identifiers = load_record_identifiers_batch(
+        connection,
+        workspace_id,
+        &record_ids,
+        capability,
+        correlation_id,
+    )?;
+    let mut activities = load_latest_activities_batch(
+        connection,
+        workspace_id,
+        profile_id,
+        &record_ids,
+        capability,
+        correlation_id,
+    )?;
+
+    let mut summaries = Vec::with_capacity(records.len());
+    for (record_id, grain) in records {
+        summaries.push(RecordSummary::new(
+            record_id,
+            grain,
+            RecordStatus::Active,
+            metadata.resolve(record_id, &field_keys[0], capability, correlation_id)?,
+            metadata.resolve(record_id, &field_keys[1], capability, correlation_id)?,
+            metadata.resolve(record_id, &field_keys[2], capability, correlation_id)?,
+            metadata.resolve(record_id, &field_keys[3], capability, correlation_id)?,
+            metadata.resolve(record_id, &field_keys[4], capability, correlation_id)?,
+            identifiers.remove(&record_id).unwrap_or_default(),
+            activities.remove(&record_id),
+        ));
+    }
+    Ok(summaries)
 }
 
 fn parse_interpretation_state(

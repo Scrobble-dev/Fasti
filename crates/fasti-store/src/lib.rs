@@ -12,6 +12,7 @@ mod human_access;
 mod identity;
 mod identity_routing;
 mod kernel;
+mod local_search;
 mod metadata;
 mod nuvio_collections;
 mod observation;

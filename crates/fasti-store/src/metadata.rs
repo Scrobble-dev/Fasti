@@ -830,6 +830,19 @@ fn write_field_claim_inner(
         capability,
         correlation_id,
     )?;
+    if crate::local_search::searchable_field(field_key.as_str()) {
+        map_sql(
+            crate::local_search::index_text(
+                connection,
+                &workspace_id.to_string(),
+                "",
+                &record_id.to_string(),
+                claim.value(),
+            ),
+            capability,
+            correlation_id,
+        )?;
+    }
     Ok(())
 }
 
@@ -2344,8 +2357,14 @@ pub(crate) fn write_profile_field_override(
     correlation_id: RequestCorrelationId,
 ) -> ApplicationResult<()> {
     map_sql(
-        connection.execute(
-            r#"
+        connection.execute_batch("SAVEPOINT profile_search_override"),
+        capability,
+        correlation_id,
+    )?;
+    let result = (|| {
+        map_sql(
+            connection.execute(
+                r#"
             INSERT INTO metadata_profile_field_overrides(
                 workspace_id, profile_id, record_id, field_key, value,
                 created_at, updated_at, origin
@@ -2356,19 +2375,45 @@ pub(crate) fn write_profile_field_override(
                 updated_at = excluded.updated_at,
                 origin = 'user'
             "#,
-            params![
-                workspace_id.to_string(),
-                override_.profile_id().to_string(),
-                override_.record_id().to_string(),
-                override_.field_key().as_str(),
-                override_.value(),
-                timestamp(override_.created_at())
-            ],
+                params![
+                    workspace_id.to_string(),
+                    override_.profile_id().to_string(),
+                    override_.record_id().to_string(),
+                    override_.field_key().as_str(),
+                    override_.value(),
+                    timestamp(override_.created_at())
+                ],
+            ),
+            capability,
+            correlation_id,
+        )?;
+        if crate::local_search::searchable_field(override_.field_key().as_str()) {
+            map_sql(
+                crate::local_search::reindex_overrides(
+                    connection,
+                    &workspace_id.to_string(),
+                    &override_.profile_id().to_string(),
+                    &override_.record_id().to_string(),
+                ),
+                capability,
+                correlation_id,
+            )?;
+        }
+        Ok(())
+    })();
+    match result {
+        Ok(()) => map_sql(
+            connection.execute_batch("RELEASE profile_search_override"),
+            capability,
+            correlation_id,
         ),
-        capability,
-        correlation_id,
-    )?;
-    Ok(())
+        Err(error) => {
+            let _ = connection.execute_batch(
+                "ROLLBACK TO profile_search_override; RELEASE profile_search_override",
+            );
+            Err(error)
+        }
+    }
 }
 
 pub(crate) fn load_profile_field_override(
@@ -4229,6 +4274,18 @@ impl MetadataProjectionPort for SqliteKernel {
                         capability,
                         correlation_id,
                     )?;
+                    if crate::local_search::searchable_field(field_key.as_str()) {
+                        map_sql(
+                            crate::local_search::reindex_overrides(
+                                &transaction,
+                                &workspace_id.to_string(),
+                                &profile_id.to_string(),
+                                &record_id.to_string(),
+                            ),
+                            capability,
+                            correlation_id,
+                        )?;
+                    }
                 }
             }
         }
