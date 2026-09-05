@@ -1388,3 +1388,52 @@ Search scope. Just-observed but non-reusable responses and cached Save/refetch
 policy also need explicit semantics; fixed deadlines alone cannot encode every
 response directive. Detail/credential-check callers of `send_json` must retain
 their existing behavior when the shared response envelope changes.
+
+### M4 exact detail verification and bounded future preparation — 2026-09-05
+
+Clean implementation commit `21fb4a9e24b4724341302bf208399a6dda2283a6`, tree
+`70267f3c086196b335ae9ab9449b7aecd14612f8`, passed the complete canonical PR gate.
+Both local receipts were checked against that exact commit/tree with dirty=false:
+27/27 contract gates and 11/11 portable gates passed, plus documentation checks.
+The subsequent five-file browser run on the same unchanged source passed 71/71
+in 1.7 minutes, including all 16 new detail regressions and the existing Access,
+shell, navigation and metadata suites. No live-provider, deployment, full-device
+budget or general accessibility certification is implied by those results.
+
+Read-only GitHub quality triage found no M4 PR and no checks for this unpublished
+commit. Open code-scanning alerts were zero. PR #89's observed Codacy annotations
+did not target this detail/host diff; the historical fake-success finding was
+already fixed in source. Existing image-size patch/regressions remain present.
+The glib advisory still affects both Desktop and benchmark locks. Its old
+benchmark-only disposition was corrected in
+`docs/reviews/2026-08-24-dependency-advisory-disposition.md`; no advisory was
+dismissed, no ignore was added and no CI job was restarted. Native review only;
+Codex Security remains prohibited.
+
+The available agents also completed bounded future preparation, without writes:
+
+- **M6 Discover:** current `discover-view.svelte` composes Search-on-submit,
+  not governed rails. Approved preview capabilities are not active registry
+  contracts. Reuse provider authority/transport and M4 identity/actions, but
+  define real catalog admission instead of forging Search queries/receipts.
+  Search's 120-second fresh/600-second stale caps cannot replace the approved
+  catalog policy of 15-minute freshness, 15-minute refresh grace and 24-hour
+  stale-on-error. M5 owns local smart queries; M7 owns native Collection bindings.
+  Shared registry/generator/API/SDK/host/Workbench writes require explicit release.
+- **M7 Collections:** existing `nuvio_collections.rs` owns profile-scoped catalog
+  configuration, not native Record membership. Preserve its current commands,
+  canonical storage, transactional scope checks and no-op identical replacement.
+  Its duplicate-ID replacement, unsupported-source dropping and reconstructed
+  catalogSources conflict with approved lossless preview/import semantics; settle
+  historical compatibility before changing stored canonical reparse. Pack import
+  requires preview digest, atomic apply/replay, rollback, lossless unknown fields
+  and zero outbound access before activation. Existing Collection-name dialogs
+  and empty Workbench bindings are not durable membership. M4/M5/M6 predecessor
+  contracts and actual migration/archive handoffs govern implementation; historical
+  plan archive-number guesses must not override the current v16/archive-v6 owner.
+
+M4 remains the active writer. Next: the already mapped provider-page POST with
+browser mutation proof, candidate details/actions, local/provider result
+composition, and response-policy enforcement. The future maps allocate no new
+API, table, ID, migration, archive version or production writer. No M4 PR/merge
+or C2 activation handoff has occurred.
