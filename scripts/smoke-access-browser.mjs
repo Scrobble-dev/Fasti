@@ -310,11 +310,9 @@ async function verifyRestartedRecord() {
   });
   await identifiers.waitFor();
   for (const providerId of FIXTURE_PROVIDER_IDS) {
-    const row = identifiers
-      .getByRole("row")
-      .filter({
-        has: page.getByRole("cell", { name: providerId, exact: true }),
-      });
+    const row = identifiers.getByRole("row").filter({
+      has: page.getByRole("cell", { name: providerId, exact: true }),
+    });
     await row.waitFor();
     await requireCount(row, 1, `persisted TMDB identity ${providerId}`);
     const cells = row.getByRole("cell");
