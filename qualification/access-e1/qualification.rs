@@ -1,4 +1,6 @@
 //! Candidate behavior only. No listener, Fasti account, session or persistence.
+mod token_rejection;
+
 use chrono::{DateTime, TimeZone, Utc};
 use openidconnect::core::{
     CoreAuthenticationFlow, CoreClient, CoreIdToken, CoreIdTokenClaims, CoreIdTokenVerifier,

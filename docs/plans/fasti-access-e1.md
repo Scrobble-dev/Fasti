@@ -202,7 +202,7 @@ Intake performed: official sparse-index identity matched archive SHA-256; nine
 selected source files were compared byte-for-byte with archive members, including
 manifest, VCS metadata, licence, verifier, discovery, claims, logout, client and
 library root. The subsequent isolated [qualification harness](../../qualification/access-e1/README.md)
-now has fifteen passing library checks, also run in a fresh network namespace, with
+now has nineteen passing library checks, also run in a fresh network namespace, with
 strict Clippy passing. Its README binds results to file hashes and lists the
 remaining Q1/Q2 evidence. This is not a clean-head delivery or runtime claim.
 
@@ -211,7 +211,7 @@ Independent source/plan review on 2026-09-05 confirmed Q1/Q2 independence and th
 listed public API findings. Its two corrections, caller-owned callback-state
 verification and complete provenance, are incorporated above. The next bounded
 writer scope is `qualification/access-e1/` only: an isolated Cargo workspace,
-its own lockfile and a test file; root Cargo files remain unchanged.
+its own lockfile and test files; root Cargo files remain unchanged.
 That scope now also contains its README and two synthetic signing-key fixtures.
 Independent final review found no actionable issue in the request-shape and
 explicit key-replacement checks. Caller-owned state, governed transport, real

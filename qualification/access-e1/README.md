@@ -1,6 +1,6 @@
 # E1 OIDC candidate qualification
 
-Status: **15 library checks pass; E1-Q1/Q2 remain partial. No runtime adoption.**
+Status: **19 library checks pass; E1-Q1/Q2 remain partial. No runtime adoption.**
 
 This separate Cargo workspace tests `openidconnect =4.0.1` through its public
 APIs. It starts no listener and creates no Fasti account, session or database.
@@ -42,12 +42,15 @@ Rust `1.96.0 (ac68faa20 2026-05-25)`; Cargo `1.96.0 (30a34c682 2026-05-25)`.
   the upstream `http::Response::builder` constructor.
 - First committed segment `de691062` passed 10 tests on clean source.
 - Extended ordinary run: 15 passed, 0 failed, 0 ignored; exit 0.
-- Network-namespace run: the same 15 passed, 0 failed, 0 ignored; exit 0.
+- Latest network-namespace run, including four token-rejection checks:
+  19 passed, 0 failed, 0 ignored; exit 0.
 - Strict Clippy passed with warnings denied. These are not performance results.
 - Independent source/plan review corrected caller-state and provenance omissions.
   Harness review requested exact URL/client/redirect assertions, now included.
   Separate review of the five token/userinfo checks found no actionable issue;
   public-client and JSON-only coverage limits remain explicit.
+- A separate writer added the four token-rejection checks against unchanged
+  helpers. Commander reviewed the leaf and ran the full combined suite.
 - Ponytail complexity review: no additional abstraction, HTTP client, executor
   dependency, session store or production manifest change is needed.
 
@@ -55,7 +58,8 @@ Rust `1.96.0 (ac68faa20 2026-05-25)`; Cargo `1.96.0 (30a34c682 2026-05-25)`.
 | --- | --- |
 | `Cargo.toml` | `bc7a15fd6aff0fc9678bd3151304fc9d41529ee5c5597bad1276df220079fe95` |
 | `Cargo.lock` | `695a432152097118ddd6d97678c07fde9fc472e111aa686e571eeb223e692ee3` |
-| `qualification.rs` | `1d5c5d113cbcfb5107dfbf31a5511aca8edeb58d5ff3f7aa7e5d96c0b640502d` |
+| `qualification.rs` | `48ebfb322e80d9843729a5c339d991b3a16a1d867f3a37b12b73425efe1cb81a` |
+| `token_rejection.rs` | `45bb6bde0d75ba2215d7b55748a326ebe12b2dd38e5bb7d983f07fb603dbb48c` |
 | `synthetic-test-key.pem` | `20a63565470ef8c42e48675edd8478c3d2c9c3e9cb727702a64adc48c98660f4` |
 | `synthetic-rotation-key.pem` | `d2604c19f88ee96466dce9e6f702516d21a303d78a1f9c7920d69a9b72f00774` |
 
@@ -86,12 +90,17 @@ Rust `1.96.0 (ac68faa20 2026-05-25)`; Cargo `1.96.0 (30a34c682 2026-05-25)`.
 - The library's bearer header lacks the sensitive flag. A newline-bearing token
   panics before dispatch. These negative controls expose ingress/normalization
   obligations; test `catch_unwind` is not an approved production recovery path.
+- Malformed compact segments fail parsing. Unsigned `alg:none` reaches validation
+  and fails with `NoSignature`. Missing required identity/time claims fail the
+  claims parser; absent audience defaults empty and fails verification.
+- A correctly signed RS384 token succeeds only when explicitly permitted and
+  fails the default RS256 policy. This is not approval to widen Fasti's profile.
 
 ## Still required
 
 Callback state/single-use/cancellation/restart tests through the real ceremony
-owner; body/error/endpoint bounds and resource proof; unsupported algorithms
-and further malformed-token cases; `azp` policy; assurance policy; token erasure;
+owner; body/error/endpoint bounds and resource proof; remaining JWE/profile
+qualification; `azp` policy; assurance policy; scoped custody and disposal;
 production userinfo binding and signed-userinfo profiles; refresh/discard lifecycle; logout receivers and token
 validation; named provider conformance; full dependency/licence/advisory review.
 No test-only callback or store may stand in for these integration checks.
