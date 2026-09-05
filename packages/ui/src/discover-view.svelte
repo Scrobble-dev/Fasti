@@ -133,6 +133,7 @@
   let searching = $state(false);
   let problem = $state("");
   let searched = $state(false);
+  let completedProviderCount = $state(0);
   let completedQuery = $state("");
   let actionKey = $state("");
   let completedKeys = $state<Set<string>>(new Set());
@@ -652,6 +653,7 @@
         );
       }
       completedQuery = value;
+      completedProviderCount = providers.length;
       searched = true;
     } finally {
       if (revision === searchRevision) searching = false;
@@ -988,6 +990,10 @@
           </p>
         {:else if problem && results.length === 0}
           <p class="problem" role="alert">{problem}</p>
+        {:else if searched && completedProviderCount === 0}
+          <p role="status">
+            No provider was queried. Local results are shown above.
+          </p>
         {:else if searched && results.length === 0}
           <p role="status">
             No compatible titles found {Object.keys(providerNextPages).length >
