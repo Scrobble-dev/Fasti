@@ -2838,3 +2838,51 @@ M7 preparation found lossless import/preview/membership work still open in the
 existing Nuvio Collections owners. Tightening import normalization cannot silently
 invalidate historically persisted documents; compatibility and actual allocated
 migration/archive disposition must precede that change. No M7 writer is allocated.
+
+### 2026-09-05 — Larger-case comparison and diagnostic disposition
+
+Clean diagnostic commit `e514375d8f4e7bd9f10367dd0ccb2dc108799a6a`, tree
+`362bab3f352faf1d2c61d6737057a458fa32d335`, release test binary SHA-256
+`af8649699d1c37d3de9331c4a982fa9e1cc38331a5fd90e5d46aa41cfeb79fca`,
+repeated the same 500-Record mixed fixture. All five samples passed:
+
+| Sample | Wall seconds | Thread CPU seconds | Runqueue seconds | Process physical-read bytes |
+| --- | ---: | ---: | ---: | ---: |
+| 0 | 22.213552215 | 21.951417000 | 0.259444982 | 0 |
+| 1 | 22.601071149 | 22.380435803 | 0.219940143 | 0 |
+| 2 | 22.179421499 | 22.029480987 | 0.149603208 | 0 |
+| 3 | 22.560559849 | 22.083910634 | 0.062329409 | 44,355,584 |
+| 4 | 23.087762532 | 22.502524881 | 0.292842222 | 34,226,176 |
+
+Median/max were 22.560559849/23.087762532 s; HWM 44,367,872 bytes.
+Counters describe the real loader plus result assertions, not SQL alone.
+CPU/wait counters are thread-local; physical reads are process-wide. Zero read
+bytes is not proof of zero I/O activity. These samples are CPU-dominated and do
+not reproduce the earlier 68–98-second anomaly.
+
+A fresh disposable detached checkout of the pre-change `3de02a6d` commit/tree
+above rebuilt the identical baseline binary `fd6286e...cb85`. Its 500-Record mixed
+run passed five samples: median/max 51.859115201/52.991065120 s; HWM 56,827,904
+bytes. Compared with that fresh baseline, the diagnostic after-run's median fell
+56.5% and HWM fell 21.9%. The baseline checkout was verified clean and removed;
+the source remains in Git. The active worktree was not reset or rebased. Its
+shared release target temporarily contains the baseline build and must be rebuilt
+from current source before any further current-head qualification.
+
+Debug report, investigation workflow:
+
+- Symptom: one optimized 500-Record measurement was slow and variable.
+- Root cause: not established for that historical run. Later per-sample counters
+  and a fresh baseline do not justify attributing it to disk, scheduling or SQL.
+- Fix: no additional production change. Retained diagnostic counters and added
+  the passing duplicate Record/field overflow regression in the existing test leaf.
+- Evidence: the fresh 100- and 500-Record comparisons show lower measured latency
+  and memory; all five diagnostic 500 samples were 22–23 seconds. The earlier
+  outlier remains recorded above rather than discarded.
+- Status: DONE_WITH_CONCERNS for this bounded diagnostic pass. Variance remains
+  unexplained; dense pages are not sub-second, and these synthetic local checks
+  are not merged-head or device performance qualification. No scope is removed.
+
+Next: rebuild current source, run the exact clean canonical gate and native
+artwork regression, then continue M4's real Search host/UI integration. The
+investigation does not justify delaying that dependency-ready implementation.
