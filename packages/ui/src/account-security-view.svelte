@@ -620,6 +620,7 @@
       <button
         type="button"
         class="btn btn-outline-secondary"
+        disabled={Boolean(busy)}
         onclick={onOpenAccountSecurity}
       >
         Manage existing access
