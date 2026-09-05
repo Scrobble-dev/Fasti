@@ -2794,3 +2794,47 @@ creation or client-side filtering. M8's remaining field groups and locale fallba
 must use the existing identity, response-policy, override and attribution owners.
 No M8 isolated production leaf is allocated while these shared M4 surfaces remain
 active; no field group, episode/company/network route or alias execution is dropped.
+
+### 2026-09-05 — Clean measurements and unresolved larger-run variance
+
+Clean commit `4467f59389f4830bbf79d9f10f32ef3a4dbebf51`, tree
+`c433d3907f141c5014ad4b756a0f194bd9a412b9`, rebuilt release Store test binary
+`0207d34a838523b42f4b6b17497f1ae0ad3a6384363c169fbfbefc4d9523521c`.
+Sequential isolated checks passed their existing assertions:
+
+- Dense 100 mixed: median/max 3.796072910/3.915917288 s; HWM 28,323,840 bytes.
+  Compared with the fresh baseline above, median fell 58.7% and HWM fell 29.1%.
+- 10,000-Record Search, 100 samples: legacy p50/p95/max
+  2.360618/2.526817/2.558678 ms; observed policy
+  3.360816/3.621916/4.128916 ms. Both retain the 250 ms p95 gate.
+- Dense 100 legacy: median/max 3.327897655/3.349074833 s;
+  HWM 23,191,552 bytes. No fresh legacy before/after gain is claimed.
+- Dense 500 mixed: median/max 68.288536668/98.321982197 s;
+  HWM 43,896,832 bytes. The run took 489.34 s overall including seeding and cleanup.
+  Its memory assertion passed, but latency was worse than earlier 500-Record
+  evidence and highly variable. This is an unresolved performance concern, not
+  a passing latency qualification or a reason to extrapolate the 100-Record gain.
+
+Investigation session `297035-1788615595-242eab34` is active. First hypothesis:
+disk stalls account for much of the 500-Record variance; this is not yet proven.
+The post-run host had available memory and disk capacity, negligible CPU/memory
+pressure, but measurable recent I/O pressure. Added test-only per-sample CPU,
+runqueue-wait and physical-read counters to the existing Linux fixture to separate
+causes, using the [kernel scheduler counter definition](https://www.kernel.org/doc/html/latest/scheduler/sched-stats.html).
+No second production fix is justified yet. A new duplicate Record/field overflow
+regression passed; unlike the older duplicate-field case, it exercises the
+companion with a restriction buried below 256 NULL rows. Debug edits remain in
+the Store test leaf; the optional gstack freeze helper is unavailable.
+
+Read-only native cancellation preparation found an existing-platform route:
+Tauri Channel acknowledgement after bounded registration, then Tokio oneshot/select
+cancellation, scoped to the actual main WebView and current origin. This needs real
+Desktop-only plumbing; Channel alone is not cancellation. Preserve callback lifetime
+through settlement, pre-registration abort delivery, cleanup/deadlines and the
+existing cloned commit lease. A retry retains its original action operation ID.
+No implementation or public API/schema allocation occurred in this preparation.
+
+M7 preparation found lossless import/preview/membership work still open in the
+existing Nuvio Collections owners. Tightening import normalization cannot silently
+invalidate historically persisted documents; compatibility and actual allocated
+migration/archive disposition must precede that change. No M7 writer is allocated.
