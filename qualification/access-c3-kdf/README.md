@@ -84,6 +84,12 @@ deadline rejection, held-open EOF timeout, and preserved nonblocking flags.
 The EOF timeout uses a real owned child that keeps stdout open; it does not
 infer timeout behavior from an already-expired timestamp alone.
 
+The existing Access C3 qualification workflow runs these 13 tests in debug
+and release, checks formatting and strict Clippy, and audits the exact lock
+without suppression. This binary has no doctest target. The summary guard
+requires exactly one successful 13-test summary per profile and rejects failed,
+ignored, filtered, missing or extra summaries. It does not run a measurement.
+
 ## Separate governed measurement
 
 Build the release binary outside the measurement cgroup. Run it with **no
@@ -125,4 +131,5 @@ samples and eight cold samples. Warm p50/p95/p99 were
 123.811338/133.867671/150.894350ms; cold maximum was124.803407ms.
 Whole-cgroup peak was68235264bytes; swap and OOM events were zero.
 These are this host's isolated fixture observations, not production claims.
-Shared CI integration, canonical delivery, hosted checks and merge remain open.
+CI integration is implemented locally. Canonical delivery, hosted checks and
+merge remain open; a source change is not a claim those gates passed.

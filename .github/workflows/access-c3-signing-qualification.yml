@@ -1,4 +1,4 @@
-name: Access C3 signing and framing qualification
+name: Access C3 isolated qualification
 
 on:
   push:
@@ -7,6 +7,7 @@ on:
       - ".github/workflows/access-c3-signing-qualification.yml"
       - "qualification/access-c3-signing/**"
       - "qualification/access-c3-framing/**"
+      - "qualification/access-c3-kdf/**"
       - "crates/fasti-domain/**"
       - "crates/fasti-application/**"
       - "crates/fasti-contracts/**"
@@ -19,6 +20,7 @@ on:
       - ".github/workflows/access-c3-signing-qualification.yml"
       - "qualification/access-c3-signing/**"
       - "qualification/access-c3-framing/**"
+      - "qualification/access-c3-kdf/**"
       - "crates/fasti-domain/**"
       - "crates/fasti-application/**"
       - "crates/fasti-contracts/**"
@@ -44,6 +46,10 @@ jobs:
             label: Framing
             unit_tests: 20
             doctests: 2
+          - package: access-c3-kdf
+            label: KDF runner
+            unit_tests: 13
+            doctests: 0
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -80,13 +86,17 @@ jobs:
           EXPECTED_DOCTESTS: ${{ matrix.doctests }}
         run: |
           set -euo pipefail
+          expected_counts=("$EXPECTED_UNIT_TESTS")
+          if (( EXPECTED_DOCTESTS > 0 )); then
+            expected_counts+=("$EXPECTED_DOCTESTS")
+          fi
           for profile in debug release; do
             args=()
             if [[ "$profile" == release ]]; then args+=(--release); fi
             log="$RUNNER_TEMP/$QUALIFICATION_PACKAGE-$profile.log"
             cargo test "${args[@]}" --offline --locked --manifest-path "qualification/$QUALIFICATION_PACKAGE/Cargo.toml" -- --test-threads=1 2>&1 | tee "$log"
-            test "$(grep -c '^test result:' "$log")" -eq 2
-            for expected in "$EXPECTED_UNIT_TESTS" "$EXPECTED_DOCTESTS"; do
+            test "$(grep -c '^test result:' "$log")" -eq "${#expected_counts[@]}"
+            for expected in "${expected_counts[@]}"; do
               grep -Eq "^test result: ok\\. $expected passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in [0-9.]+s$" "$log"
             done
           done
@@ -103,6 +113,8 @@ jobs:
             label: Detached-signature
           - package: access-c3-framing
             label: Framing
+          - package: access-c3-kdf
+            label: KDF runner
     permissions:
       contents: read
     runs-on: ubuntu-latest
