@@ -872,6 +872,58 @@ impl ProviderMetadataField {
     }
 }
 
+/// Convert bounded provider evidence without choosing a new observation time or
+/// freshness policy. Callers supply the actual response context, not save time.
+pub fn provider_candidate_metadata_fields(
+    candidate: &crate::SearchCandidate,
+    locale: Option<MetadataLocale>,
+    region: Option<MetadataRegion>,
+    evidence_digest: &fasti_domain::Sha256Digest,
+    fetched_at: fasti_domain::ReceivedAt,
+    expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    initial_status: FieldClaimStatus,
+) -> Result<Vec<ProviderMetadataField>, crate::SearchEvidenceError> {
+    let invalid = crate::SearchEvidenceError::InvalidCandidate;
+    let data = candidate.data();
+    let provenance = fasti_domain::FieldClaimProvenance::try_new(
+        MetadataProviderId::try_new(&data.provider).map_err(|_| invalid)?,
+        fasti_domain::NamespaceKey::try_new(candidate.identifier().namespace())
+            .map_err(|_| invalid)?,
+        candidate.identifier().value(),
+        locale,
+        region,
+        None,
+        evidence_digest.clone(),
+    )
+    .map_err(|_| invalid)?;
+    let year = data.release_year.map(|year| year.to_string());
+    [
+        (TITLE_FIELD_KEY, Some(data.title.as_str())),
+        (ORIGINAL_TITLE_FIELD_KEY, data.original_title.as_deref()),
+        (OVERVIEW_FIELD_KEY, data.overview.as_deref()),
+        (POSTER_FIELD_KEY, data.image_url.as_deref()),
+        (RELEASE_YEAR_FIELD_KEY, year.as_deref()),
+    ]
+    .into_iter()
+    .filter_map(|(key, value)| value.map(|value| (key, value)))
+    .map(|(key, value)| {
+        let claim = FieldClaim::try_new_unbound_provider(
+            fasti_domain::MetadataClaimId::new_v7(),
+            value,
+            provenance.clone(),
+            fetched_at,
+            expires_at,
+            initial_status,
+        )
+        .map_err(|_| invalid)?;
+        Ok(ProviderMetadataField::new(
+            FieldKey::try_new(key).map_err(|_| invalid)?,
+            claim,
+        ))
+    })
+    .collect()
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct CreateProviderRecordCommand {
     correlation_id: RequestCorrelationId,

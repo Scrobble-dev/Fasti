@@ -1,7 +1,7 @@
 use crate::transport::{bounded_body, GovernedTransport};
 use crate::ProviderRuntimeError;
 use fasti_application::{
-    provider_identity_mapping, valid_search_candidate_image,
+    provider_candidate_metadata_fields, provider_identity_mapping, valid_search_candidate_image,
     valid_search_candidate_text as valid_candidate_text, ConfigurationDigest, CredentialReference,
     CredentialRequirement, CredentialSecret, CredentialVaultError, CredentialVaultPort,
     CredentialVaultSource, NetworkClass, OutboundAccessDeclaration, OutboundAccessPolicy,
@@ -10,11 +10,8 @@ use fasti_application::{
     StoredCredential, GOOGLE_BOOKS_PROVIDER_ID, MAX_PROVIDER_CREDENTIAL_BYTES, TMDB_PROVIDER_ID,
 };
 use fasti_domain::{
-    ExternalIdentifierClaim, FieldClaim, FieldClaimProvenance, FieldClaimStatus, FieldKey, Grain,
-    MetadataClaimId, MetadataLocale, MetadataProviderId, NamespaceDefinition, NamespaceKey,
+    ExternalIdentifierClaim, FieldClaimStatus, Grain, MetadataLocale, NamespaceDefinition,
     ReceivedAt, SearchQuery, Sha256Digest, MAX_SEARCH_QUERY_BYTES, METADATA_FRESH_SECONDS,
-    ORIGINAL_TITLE_FIELD_KEY, OVERVIEW_FIELD_KEY, POSTER_FIELD_KEY, RELEASE_YEAR_FIELD_KEY,
-    TITLE_FIELD_KEY,
 };
 use reqwest::header::{HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
@@ -450,97 +447,22 @@ impl ProviderCandidate {
         locale: Option<MetadataLocale>,
         region: Option<fasti_domain::MetadataRegion>,
     ) -> Result<Vec<ProviderMetadataField>, ProviderRuntimeError> {
-        let source = NamespaceKey::try_new(self.identity_mapping()?.namespace()).map_err(|_| {
-            ProviderRuntimeError::response_invalid("The provider namespace is invalid.")
-        })?;
-        let provider_id = MetadataProviderId::try_new(self.provider).map_err(|_| {
-            ProviderRuntimeError::response_invalid("The provider identity is invalid.")
-        })?;
         let fetched_at = ReceivedAt::from_application_clock(chrono::Utc::now());
-        let mut fields = vec![provider_field(
-            &provider_id,
-            &source,
-            &self.provider_id,
-            TITLE_FIELD_KEY,
-            &self.title,
-            locale.clone(),
-            region.clone(),
+        provider_candidate_metadata_fields(
+            &self.search_evidence()?,
+            locale,
+            region,
             &self.evidence_digest,
             fetched_at,
-        )?];
-        for (key, value) in [
-            (ORIGINAL_TITLE_FIELD_KEY, self.original_title.as_deref()),
-            (OVERVIEW_FIELD_KEY, self.overview.as_deref()),
-            (POSTER_FIELD_KEY, self.image_url.as_deref()),
-        ] {
-            if let Some(value) = value {
-                fields.push(provider_field(
-                    &provider_id,
-                    &source,
-                    &self.provider_id,
-                    key,
-                    value,
-                    locale.clone(),
-                    region.clone(),
-                    &self.evidence_digest,
-                    fetched_at,
-                )?);
-            }
-        }
-        if let Some(year) = self.release_year {
-            fields.push(provider_field(
-                &provider_id,
-                &source,
-                &self.provider_id,
-                RELEASE_YEAR_FIELD_KEY,
-                &year.to_string(),
-                locale,
-                region,
-                &self.evidence_digest,
-                fetched_at,
-            )?);
-        }
-        Ok(fields)
+            fetched_at
+                .value()
+                .checked_add_signed(chrono::Duration::seconds(METADATA_FRESH_SECONDS)),
+            FieldClaimStatus::Fresh,
+        )
+        .map_err(|_| {
+            ProviderRuntimeError::response_invalid("The provider metadata evidence is invalid.")
+        })
     }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn provider_field(
-    provider_id: &MetadataProviderId,
-    source: &NamespaceKey,
-    source_identifier: &str,
-    key: &str,
-    value: &str,
-    locale: Option<MetadataLocale>,
-    region: Option<fasti_domain::MetadataRegion>,
-    evidence_digest: &Sha256Digest,
-    fetched_at: ReceivedAt,
-) -> Result<ProviderMetadataField, ProviderRuntimeError> {
-    let field_key = FieldKey::try_new(key)
-        .map_err(|_| ProviderRuntimeError::provider("The provider field key is invalid."))?;
-    let provenance = FieldClaimProvenance::try_new(
-        provider_id.clone(),
-        source.clone(),
-        source_identifier,
-        locale,
-        region,
-        None,
-        evidence_digest.clone(),
-    )
-    .map_err(|_| ProviderRuntimeError::provider("The provider provenance is invalid."))?;
-    let expires_at = fetched_at
-        .value()
-        .checked_add_signed(chrono::Duration::seconds(METADATA_FRESH_SECONDS));
-    let claim = FieldClaim::try_new_unbound_provider(
-        MetadataClaimId::new_v7(),
-        value,
-        provenance,
-        fetched_at,
-        expires_at,
-        FieldClaimStatus::Fresh,
-    )
-    .map_err(|_| ProviderRuntimeError::provider("The provider field value is invalid."))?;
-    Ok(ProviderMetadataField::new(field_key, claim))
 }
 
 #[derive(Debug, Deserialize)]
@@ -1420,7 +1342,44 @@ mod tests {
     use fasti_application::{
         ConfigurationDigest, ProblemCode, ProviderCapabilityId, ProviderCheckMetadata, ProviderId,
     };
+    use fasti_domain::MetadataProviderId;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn metadata_conversion_uses_one_received_time_and_existing_freshness_policy() {
+        let candidate = search_page_fixture().candidates.remove(0);
+        let before = chrono::Utc::now();
+        let fields = candidate.metadata_fields(None, None).unwrap();
+        let after = chrono::Utc::now();
+        let fetched = fields[0].claim().fetched_at();
+        assert!(before <= fetched && fetched <= after);
+        for field in fields {
+            let claim = field.claim();
+            assert_eq!(claim.fetched_at(), fetched);
+            assert_eq!(
+                claim.expires_at(),
+                Some(fetched + chrono::Duration::seconds(METADATA_FRESH_SECONDS))
+            );
+            assert_eq!(claim.initial_status(), FieldClaimStatus::Fresh);
+            assert_eq!(
+                claim.provenance().evidence_digest(),
+                Some(&candidate.evidence_digest)
+            );
+            assert_eq!(
+                claim.provenance().source_identifier(),
+                Some(candidate.provider_id.as_str())
+            );
+        }
+        let mut invalid = candidate;
+        invalid.overview = Some("x".repeat(4097));
+        assert_eq!(
+            invalid
+                .metadata_fields(None, None)
+                .unwrap_err()
+                .problem_code(),
+            fasti_application::ProblemCode::ProviderResponseInvalid
+        );
+    }
 
     #[test]
     fn invalid_optional_artwork_does_not_poison_search_evidence() {

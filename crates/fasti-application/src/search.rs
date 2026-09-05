@@ -288,6 +288,40 @@ pub struct StoredSearchCandidate {
     pub context: SearchPageContext,
 }
 
+impl StoredSearchCandidate {
+    /// Project original cached evidence only. This does not authorize a save or
+    /// extend receipt readability; the action transaction must recheck both.
+    pub fn metadata_fields(
+        &self,
+    ) -> Result<Vec<crate::ProviderMetadataField>, SearchEvidenceError> {
+        if !self.context.accepts(self.receipt.candidate())
+            || self.context.digest() != self.receipt.partition().context_digest
+        {
+            return Err(SearchEvidenceError::InvalidPartition);
+        }
+        let lifetime = self.receipt.lifetime();
+        // A historical zero-freshness snapshot is permanently stale. Never
+        // invent a positive TTL to satisfy the claim's strict expiry ordering.
+        let (expiry, status) = if lifetime.fresh_until() == lifetime.created_at() {
+            (None, fasti_domain::FieldClaimStatus::Stale)
+        } else {
+            (
+                Some(lifetime.fresh_until()),
+                fasti_domain::FieldClaimStatus::Fresh,
+            )
+        };
+        crate::provider_candidate_metadata_fields(
+            self.receipt.candidate(),
+            self.context.locale().cloned(),
+            None,
+            self.receipt.response_digest(),
+            fasti_domain::ReceivedAt::from_application_clock(lifetime.created_at()),
+            expiry,
+            status,
+        )
+    }
+}
+
 /// Atomic receipt authorization and provider-read state for one detail fetch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreparedSearchCandidateDetails {
@@ -655,6 +689,7 @@ impl SearchCandidateReceipt {
 
 #[cfg(test)]
 mod tests {
+    include!("search_metadata_tests.rs");
     use super::*;
     use fasti_domain::BrowserSessionId;
 

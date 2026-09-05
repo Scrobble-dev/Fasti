@@ -397,9 +397,9 @@ schema implementation: required tables and capability/port contracts are not yet
 allocated. Shared ownership remains with M4; C2 continues approved independent
 work without speculative SQL. Read-only M5 preparation is Library, not Discover
 (M6). Neither is promoted before its canonical dependencies are satisfied.
-M5 preparation also identified that identifier/activity batch loaders still
-reselect the first 500 Records, unlike the corrected selected-ID metadata loader;
-all three must follow the actual keyset page. The UI's inferred saved/watching
+M5 preparation originally identified identifier/activity batch loaders that
+reselected the first 500 Records. M4 has since corrected both to use the actual
+selected IDs, alongside the metadata batch loader. The UI's inferred saved/watching
 defaults are not independent Library state and must not become Search side effects.
 Native Collection membership is still a predecessor, not the Nuvio catalog document.
 
@@ -870,3 +870,71 @@ C2 separately owns only its bounded inherited licence correction and the two
 qualified rustdoc links in the Nuvio application module, subject to exact final
 reconciliation. M4 has not released v16, allocated v17, changed archive v5 or
 activated C2 runtime capabilities.
+
+### M4 shared candidate metadata and action disposition — 2026-09-05
+
+Candidate-detail commit `e6ce760df5bca95f3b3785e597be5b132911cb0c`, tree
+`88e786c46fd51c756190aeb59e5ca839a9d3cbb1`, passed all 27 canonical gates
+with a clean exact-source receipt. This follow-on reuses one application-owned
+five-field conversion for online provider details and original cached Search
+evidence. The runtime wrapper retains its existing observation time, 24-hour
+metadata freshness and callers; it no longer owns a duplicate field mapping.
+
+Cached conversion supplies the receipt's accepted response digest, original
+timestamp and 120-second freshness deadline, with effective stored locale and no
+unsupported region. It validates context against the original partition digest.
+The receipt's separate 24-hour readability lifetime is not metadata freshness.
+Zero-freshness historical receipts project an initially Stale claim with no
+invented deadline; this cannot become indefinitely fresh. Conversion is pure
+evidence projection, not authorization: the forthcoming action transaction must
+still recheck receipt expiry and current scope. Authors remain in candidate
+evidence; no speculative metadata field was added.
+
+Seven application regressions cover complete/minimal field sets, stable immutable
+semantics, context substitutions, provider coordinates, response digests and
+freshness boundaries. Four real SQLite regressions preserve existing persisted
+claim IDs on identical writes, original stale evidence, and original rows after
+a timestamp/digest collision. Later-field namespace and provenance failures roll
+back the existing provider Record transaction, including local Search postings.
+These tests prove existing metadata-write idempotence and rollback, **not** the
+unfinished durable Search operation replay. The runtime regression verifies one
+received time across all fields, existing freshness and invalid-response mapping.
+Full checks pass: 137 application tests, 48 provider-runtime tests, 342 store unit
+tests and 3 store integration tests; the store's 5 declared ignored unit cases
+and 1 documentation case remain reported, not silently counted as passes.
+Independent native exact-diff review found no concrete P0/P1/P2 finding.
+
+The canonical plan now records the action disposition without restarting prior
+planning gates. Both Create and Attach reuse existing AttachIdentifier authority;
+new operations separately require Search scope. Completed exact retries retain
+historical outcomes after candidate expiry/configuration change, but never bypass
+current IdentityWrite or browser mutation proof. Online exact refetch stays the
+normal path. An explicit cached action preserves original evidence; it is not an
+automatic fallback after invalid data or failed authorization. Stable actor,
+client, profile, action, target, route and evidence mode bind durable operation
+identity. Existing namespace/identifier/metadata transaction bodies remain owners.
+
+M4 has explicitly allocated archive **v6** for the durable Search action stream.
+No schema or archive implementation is changed in this slice: runtime remains
+v5 with 34 streams, historical v1–v5 remain frozen, and v16 stays with M4. Import
+retains historical subject IDs only as audit evidence, with no excluded-auth FK
+or recreated authorization. Fresh recovery clients and browser subjects cannot
+inherit prior actors' retry rights. No v17 or shared-file release has occurred.
+
+Next implementation is the operation-bearing action command and durable receipt,
+one immediate Record/claim/result transaction, followed by archive-v6 roundtrip
+and adversarial replay checks. Agents prepared exact command/digest, store and
+archive maps read-only; the commander retains all shared integration writes.
+M5's selected-ID batching gap is now correctly marked resolved. Its independent
+Library state/filter/pagination work and M7 native-membership dependency remain
+visible; Nuvio configuration JSON is not native Collection membership.
+
+C2's isolated foundation at `23ffff55b5701c91f3c1ef9297bffa1eba5b37d5`, tree
+`fc74c898acd6c562d4e8b6f85b94cf5fc1978ab1`, received a native read-only
+exact-diff review against `df09101028a988a92f4546313c5eed6dd20d238a`: no concrete
+P0/P1/P2 findings. Review verified the 16 original source/test/manifest blobs,
+exact licence exception/checksums and two qualified rustdoc links. C2 reported
+canonical and strict rustdoc passes; those were not rerun by this review. Its
+bounded factual C1 merge-status documentation pass remains separately owned and
+must receive final exact-head reconciliation. No runtime activation or M4 scope
+release follows from that review. Codex Security remains prohibited.
