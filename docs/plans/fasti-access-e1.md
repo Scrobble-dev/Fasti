@@ -160,14 +160,26 @@ concurrency is four (`transport.rs:11–14`). These separate queue/DNS/HTTP boun
 are not one end-to-end ceremony deadline. Preserve them and define the complete
 deadline before integration. No new numeric production limit is chosen here.
 
-**Custody gate remains open.** `oauth2::PkceCodeVerifier` is an ordinary String
+**Scoped custody review remains open.** `oauth2::PkceCodeVerifier` is an ordinary String
 wrapper (`types.rs:417–423`, macro `154–175`), and endpoint serialization creates
 ordinary encoded String/Vec buffers (`endpoint.rs:149–154`) before HTTP dispatch.
 The C1 zeroizing vault cannot establish erasure of those hidden transient copies.
 Likewise, `IdToken::into_claims` does not itself prove token-buffer erasure.
-No-persistence/discard and in-memory erasure are distinct requirements. Do not
-claim the latter, weaken it, or adopt the runtime until a supported mechanism or
-explicit dependency amendment resolves it. No test-owned protocol substitute.
+No-persistence/discard and in-memory erasure are distinct claims. Preserve
+bounded zeroizing Fasti-owned PKCE custody, one-use transfer, no persistence,
+narrow secret lifetimes, validated ingress and secret-safe transport/errors.
+Dropping ordinary transient buffers does not prove their erasure. Universal
+erasure of hidden vendor/network copies is unproven and must not be claimed,
+but it is not an approved prerequisite for runtime adoption. No test-owned
+protocol substitute or weakening of the explicit Fasti-owned custody rule.
+
+Independent requirement-fidelity review corrected the earlier overbroad gate:
+canonical section 6.1 requires at most 64 zeroizing custody entries; the C1 gate
+at lines 239–244 permits vendor values to be zeroized or dropped at the narrowest
+boundary. Merged C1 already serializes borrowed zeroizing values into bounded
+ordinary request bytes (`trailbase.rs:934–945,1228–1230`). Its source blob
+`bf263bfad92e19b9c5d0f0bc2c29e5159e02d3ef` matches merged C1. This is evidence
+of the approved boundary, not proof that all C1 or OIDC memory is erased.
 
 These source findings permit further isolated qualification, not production I1.
 The minimum eventual integration is the existing transport's governed POST and

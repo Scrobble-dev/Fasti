@@ -97,6 +97,9 @@ validation; named provider conformance; full dependency/licence/advisory review.
 No test-only callback or store may stand in for these integration checks.
 The plan's Q2 source map also records dynamic endpoint ownership, missing governed
 POST support, end-to-end deadlines and unproven erasure of transient vendor copies.
+That last limit is not a new universal-erasure prerequisite. The approved gate
+requires bounded zeroizing Fasti-owned custody, no persistence and narrow secret
+lifetimes; ordinary transient buffer disposal must not be called zeroization.
 
 M4 retains shared production files, v17 and archive v7. Access v18 remains
 conditional on its exact merged handoff. Root `AGENTS.md` and runtime contracts
