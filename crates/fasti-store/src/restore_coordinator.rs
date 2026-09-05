@@ -155,6 +155,7 @@ fn preflight_problem(
         | RestorePreflightError::MissingVerifiedManifest
         | RestorePreflightError::StreamCountMismatch
         | RestorePreflightError::StreamDescriptorMismatch { .. }
+        | RestorePreflightError::MetadataPolicy { .. }
         | RestorePreflightError::BlobCountMismatch
         | RestorePreflightError::BlobDescriptorMismatch { .. } => {
             Box::new(FastiProblem::integrity_failed(capability, correlation_id))

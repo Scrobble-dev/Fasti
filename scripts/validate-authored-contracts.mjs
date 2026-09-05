@@ -317,6 +317,7 @@ export async function validateAuthoredContracts(root = repositoryRoot) {
     [4, 29],
     [5, 34],
     [6, 35],
+    [7, 35],
   ]) {
     const directory = resolve(root, `contracts/portability/v${version}`);
     const schema = await readStrictJson(
@@ -340,8 +341,8 @@ export async function validateAuthoredContracts(root = repositoryRoot) {
       `archive-v${version} manifest_digest must cover RFC 8785/JCS canonical manifest bytes`,
     );
     assert.deepEqual(
-      example.manifest.streams.slice(0, previousStreams.length),
-      previousStreams,
+      example.manifest.streams.slice(0, previousStreams.length).filter((stream) => version !== 7 || stream.entity !== "metadata_claims"),
+      previousStreams.filter((stream) => version !== 7 || stream.entity !== "metadata_claims"),
       `archive v${version} must retain the frozen previous stream prefix byte-for-byte`,
     );
     previousStreams = example.manifest.streams;

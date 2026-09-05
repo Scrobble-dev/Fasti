@@ -463,6 +463,7 @@ fn assemble_workspace_archive(
             source_connection,
             workspace_id,
             entity,
+            fasti_application::WORKSPACE_ARCHIVE_FORMAT_VERSION,
             limits,
             &mut stream_file,
             &mut || monitor.check(true),

@@ -1074,6 +1074,7 @@ mod tests {
                 &connection,
                 node.access.workspace_id(),
                 WorkspaceExportEntity::Records,
+                WORKSPACE_EXPORT_FORMAT_VERSION,
                 limits,
                 &mut bytes,
                 &mut || Ok(()),
@@ -1089,6 +1090,7 @@ mod tests {
                 &connection,
                 node.access.workspace_id(),
                 WorkspaceExportEntity::Records,
+                WORKSPACE_EXPORT_FORMAT_VERSION,
                 limits,
                 &mut bytes,
                 &mut || Ok(()),
@@ -1120,6 +1122,7 @@ mod tests {
             &connection,
             node.access.workspace_id(),
             WorkspaceExportEntity::Workspaces,
+            WORKSPACE_EXPORT_FORMAT_VERSION,
             portability_limits(1, 4 * 1024),
             &mut bytes,
             &mut || Ok(()),
@@ -1188,6 +1191,7 @@ mod tests {
             &connection,
             node.access.workspace_id(),
             WorkspaceExportEntity::NamespaceDefinitions,
+            WORKSPACE_EXPORT_FORMAT_VERSION,
             portability_limits(16, 64 * 1024),
             &mut bytes,
             &mut || Ok(()),
@@ -1219,6 +1223,7 @@ mod tests {
             &connection,
             node.access.workspace_id(),
             WorkspaceExportEntity::Records,
+            WORKSPACE_EXPORT_FORMAT_VERSION,
             portability_limits(1, 64 * 1024),
             &mut row_limited,
             &mut || Ok(()),
@@ -1233,6 +1238,7 @@ mod tests {
             &connection,
             node.access.workspace_id(),
             WorkspaceExportEntity::Records,
+            WORKSPACE_EXPORT_FORMAT_VERSION,
             portability_limits(16, 1),
             &mut byte_limited,
             &mut || Ok(()),
@@ -1256,6 +1262,7 @@ mod tests {
             &connection,
             node.access.workspace_id(),
             WorkspaceExportEntity::Records,
+            WORKSPACE_EXPORT_FORMAT_VERSION,
             portability_limits(1_024, 1024 * 1024),
             &mut bytes,
             &mut || {
@@ -1624,7 +1631,7 @@ const EXPORT_SECTIONS: &[ExportSection] = &[
     },
     ExportSection {
         entity: WorkspaceExportEntity::MetadataClaims,
-        sql: "SELECT claim_id, workspace_id, record_id, claim_kind, created_at \
+        sql: "SELECT claim_id, workspace_id, record_id, claim_kind, created_at, response_policy_json \
               FROM metadata_claims \
               WHERE workspace_id = ?1 AND claim_id > ?2 \
               ORDER BY claim_id LIMIT ?3",
@@ -1834,16 +1841,18 @@ impl SnapshotEvidenceBlob {
 /// snapshot database. The monitor runs before every bounded page query. It is
 /// responsible for cancellation and any live authorization/resource fence the
 /// caller must retain while disclosing snapshot bytes.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn stream_archive_entity(
     connection: &Connection,
     workspace_id: WorkspaceId,
     entity: WorkspaceExportEntity,
+    format_version: u32,
     limits: PortabilityLimits,
     sink: &mut dyn Write,
     monitor: &mut dyn FnMut() -> ApplicationResult<()>,
     correlation_id: RequestCorrelationId,
 ) -> ApplicationResult<WorkspaceStreamDescriptor> {
-    let section = section_for_entity(entity, correlation_id)?;
+    let section = section_for_entity(entity, format_version, correlation_id)?;
     let workspace = workspace_id.to_string();
     stream_entity_pages(
         section,
@@ -2053,8 +2062,28 @@ pub(crate) fn snapshot_evidence_blobs(
 
 fn section_for_entity(
     entity: WorkspaceExportEntity,
+    format_version: u32,
     correlation_id: RequestCorrelationId,
 ) -> ApplicationResult<&'static ExportSection> {
+    if !WorkspaceExportEntity::for_format(format_version)
+        .is_some_and(|entities| entities.contains(&entity))
+    {
+        return integrity_failure(CapabilityKey::ExportWorkspace, correlation_id);
+    }
+    // Only restore verification and historical fixtures request older shapes.
+    // Current exports must retain policy; never strip it for compatibility.
+    if entity == WorkspaceExportEntity::MetadataClaims
+        && format_version <= fasti_application::WORKSPACE_ARCHIVE_V6_FORMAT_VERSION
+    {
+        return Ok(&ExportSection {
+            entity: WorkspaceExportEntity::MetadataClaims,
+            sql: "SELECT claim_id, workspace_id, record_id, claim_kind, created_at
+                  FROM metadata_claims WHERE workspace_id = ?1 AND claim_id > ?2
+                  ORDER BY claim_id LIMIT ?3",
+            count_sql: "SELECT COUNT(*) FROM metadata_claims WHERE workspace_id = ?1",
+            cursor_columns: &[CursorColumn::Text(0)],
+        });
+    }
     EXPORT_SECTIONS
         .get(entity.index())
         .filter(|section| section.entity == entity)

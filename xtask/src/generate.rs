@@ -38,6 +38,9 @@ const PORTABILITY_V6_SCHEMA_PATH: &str = "contracts/portability/v6/workspace-man
 const PORTABILITY_V6_EXAMPLE_PATH: &str =
     "contracts/portability/v6/workspace-manifest.example.json";
 const SDK_GENERATED_PATH: &str = "packages/sdk/src/generated.ts";
+const PORTABILITY_V7_SCHEMA_PATH: &str = "contracts/portability/v7/workspace-manifest.schema.json";
+const PORTABILITY_V7_EXAMPLE_PATH: &str =
+    "contracts/portability/v7/workspace-manifest.example.json";
 const RUST_CAPABILITY_IDS_PATH: &str = "crates/fasti-contracts/src/generated_capability_ids.rs";
 const PROVIDER_MANIFEST_SCHEMA_PATH: &str =
     "contracts/addons/generated/v0.1/provider-manifest.schema.json";
@@ -933,6 +936,8 @@ fn build(workspace_root: &Path) -> anyhow::Result<Artifacts> {
     let portability_v5_example = portability_v5_example(workspace_root)?;
     let portability_v6_schema = portability_v6_schema()?;
     let portability_v6_example = portability_v6_example(workspace_root)?;
+    let portability_v7_schema = portability_v7_schema()?;
+    let portability_v7_example = portability_v7_example(workspace_root)?;
     let asyncapi = load_yaml(workspace_root, ASYNCAPI_PATH)?;
     let mut production_openapi = serde_json::to_value(fasti_api::openapi())
         .context("production OpenAPI is not serializable")?;
@@ -1053,6 +1058,16 @@ fn build(workspace_root: &Path) -> anyhow::Result<Artifacts> {
         &mut artifacts,
         PORTABILITY_V6_EXAMPLE_PATH,
         portability_v6_example,
+    )?;
+    insert(
+        &mut artifacts,
+        PORTABILITY_V7_SCHEMA_PATH,
+        portability_v7_schema,
+    )?;
+    insert(
+        &mut artifacts,
+        PORTABILITY_V7_EXAMPLE_PATH,
+        portability_v7_example,
     )?;
     insert_bytes(&mut artifacts, SDK_GENERATED_PATH, sdk_source.into_bytes())?;
     insert_bytes(
@@ -1487,8 +1502,8 @@ fn portability_v6_schema() -> anyhow::Result<Value> {
         .context("archive-v5 schema omits entity enum")?
         .push(serde_json::json!(entity));
     let streams = &mut schema["$defs"]["WorkspaceManifestDto"]["properties"]["streams"];
-    streams["minItems"] = serde_json::json!(WorkspaceExportEntity::ALL.len());
-    streams["maxItems"] = serde_json::json!(WorkspaceExportEntity::ALL.len());
+    streams["minItems"] = serde_json::json!(WorkspaceExportEntity::V6.len());
+    streams["maxItems"] = serde_json::json!(WorkspaceExportEntity::V6.len());
     streams["prefixItems"]
         .as_array_mut()
         .context("archive-v5 schema omits stream prefix")?
@@ -1510,6 +1525,30 @@ fn portability_v6_example(workspace_root: &Path) -> anyhow::Result<Value> {
             "row_count": 0, "byte_length": 0,
             "digest": format!("sha256:{}", crate::evidence::sha256_bytes(&[])),
         }));
+    let canonical = serde_json_canonicalizer::to_vec(&example["manifest"])?;
+    example["manifest_digest"] = serde_json::json!(format!(
+        "sha256:{}",
+        crate::evidence::sha256_bytes(&canonical)
+    ));
+    Ok(example)
+}
+
+fn portability_v7_schema() -> anyhow::Result<Value> {
+    let mut schema = portability_v6_schema()?;
+    schema["$id"] = serde_json::json!(
+        "https://fasti.scrobble.dev/schemas/internal-staged/portability/v7/workspace-manifest.json"
+    );
+    schema["title"] = serde_json::json!("InternalStagedChecksummedWorkspaceManifestV7");
+    schema["$comment"] = serde_json::json!("Internal staged B3 archive v7. MetadataClaims retain nullable response policy evidence. The 35-entity inventory is unchanged; v6 row shapes remain frozen for restore.");
+    schema["x-fasti-contract-state"] = serde_json::json!("internal_staged_archive_v7");
+    schema["$defs"]["WorkspaceManifestDto"]["properties"]["format_version"] =
+        serde_json::json!({"const": 7});
+    Ok(schema)
+}
+
+fn portability_v7_example(workspace_root: &Path) -> anyhow::Result<Value> {
+    let mut example = portability_v6_example(workspace_root)?;
+    example["manifest"]["format_version"] = serde_json::json!(7);
     let canonical = serde_json_canonicalizer::to_vec(&example["manifest"])?;
     example["manifest_digest"] = serde_json::json!(format!(
         "sha256:{}",
@@ -5348,6 +5387,8 @@ mod tests {
             Path::new(PORTABILITY_V5_EXAMPLE_PATH),
             Path::new(PORTABILITY_V6_SCHEMA_PATH),
             Path::new(PORTABILITY_V6_EXAMPLE_PATH),
+            Path::new(PORTABILITY_V7_SCHEMA_PATH),
+            Path::new(PORTABILITY_V7_EXAMPLE_PATH),
             Path::new(SDK_GENERATED_PATH),
             Path::new(RUST_CAPABILITY_IDS_PATH),
         ]
@@ -5395,6 +5436,10 @@ mod tests {
             ),
             (
                 portability_v6_schema().expect("archive-v6 schema"),
+                WorkspaceExportEntity::V6.as_slice(),
+            ),
+            (
+                portability_v7_schema().expect("archive-v7 schema"),
                 WorkspaceExportEntity::ALL.as_slice(),
             ),
         ] {
