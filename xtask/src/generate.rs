@@ -2082,6 +2082,18 @@ fn enrich_production_openapi(
             "x-fasti-required-scopes".to_owned(),
             Value::Array(array_at(capability, "/scopes")?.clone()),
         );
+        if expected.operation_id == "save_search_candidate" {
+            let search_capability = capabilities
+                .iter()
+                .find(|candidate| string_at(candidate, "/id").ok() == Some("metadata.search"))
+                .context("Search candidate save requires the metadata.search capability")?;
+            operation.insert(
+                "x-fasti-conditional-required-scopes".to_owned(),
+                serde_json::json!({
+                    "new_operation": array_at(search_capability, "/scopes")?
+                }),
+            );
+        }
         operation.insert(
             "x-fasti-authorization".to_owned(),
             Value::String(
@@ -3868,11 +3880,17 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
 
         let required_scopes =
             serde_json::to_string(array_at(operation, "/x-fasti-required-scopes")?)?;
+        let conditional_required_scopes = operation
+            .get("x-fasti-conditional-required-scopes")
+            .map(serde_json::to_string)
+            .transpose()?
+            .map(|value| format!(", conditionalRequiredScopes: {value}"))
+            .unwrap_or_default();
         let problem_codes = serde_json::to_string(array_at(operation, "/x-fasti-problem-codes")?)?;
         let example_ids = serde_json::to_string(array_at(operation, "/x-fasti-example-ids")?)?;
         writeln!(
             output,
-            "  {}: {{ operationId: {}, method: {}, path: {}, capabilityId: {}, authorization: {}, requiredScopes: {required_scopes}, problemCodes: {problem_codes}, exampleIds: {example_ids}, authenticated: {}, runtimeAvailability: {}, durability: \"durable\", retry: {}, requestSchema: {}, responseSchema: {} }},",
+            "  {}: {{ operationId: {}, method: {}, path: {}, capabilityId: {}, authorization: {}, requiredScopes: {required_scopes}{conditional_required_scopes}, problemCodes: {problem_codes}, exampleIds: {example_ids}, authenticated: {}, runtimeAvailability: {}, durability: \"durable\", retry: {}, requestSchema: {}, responseSchema: {} }},",
             expected.alias,
             json_string(expected.operation_id)?,
             json_string(&expected.method.to_ascii_uppercase())?,
@@ -5784,6 +5802,31 @@ mod tests {
                 .expect("webhook problems")
                 .contains(&Value::String(problem.to_owned())));
         }
+        assert_eq!(
+            array_at(
+                &openapi,
+                "/paths/~1api~1v1~1search~1candidates~1{provider_id}~1{grain}~1{candidate_receipt_id}~1actions/post/x-fasti-required-scopes"
+            )
+            .expect("candidate action scopes"),
+            &[serde_json::json!("identity_write")]
+        );
+        assert_eq!(
+            array_at(
+                &openapi,
+                "/paths/~1api~1v1~1search~1candidates~1{provider_id}~1{grain}~1{candidate_receipt_id}~1actions/post/x-fasti-conditional-required-scopes/new_operation"
+            )
+            .expect("new candidate action scopes"),
+            &[serde_json::json!("metadata_search")]
+        );
+        let sdk = std::str::from_utf8(
+            artifacts
+                .get(Path::new(SDK_GENERATED_PATH))
+                .expect("production SDK generated"),
+        )
+        .expect("production SDK is UTF-8");
+        assert!(sdk.contains(
+            "requiredScopes: [\"identity_write\"], conditionalRequiredScopes: {\"new_operation\":[\"metadata_search\"]}"
+        ));
 
         let conformance: Value = serde_json::from_slice(
             artifacts

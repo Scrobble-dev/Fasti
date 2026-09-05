@@ -11146,6 +11146,11 @@
         ],
         "x-fasti-authorization": "scoped_or_browser_session",
         "x-fasti-capability-id": "identity.identifier.attach",
+        "x-fasti-conditional-required-scopes": {
+          "new_operation": [
+            "metadata_search"
+          ]
+        },
         "x-fasti-example-ids": [
           "identity.identifier.attach.validation_failed"
         ],
