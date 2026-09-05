@@ -2657,3 +2657,35 @@ only to the source/browser-proven mobile `flex-basis` correction for
 controls and desktop behavior. No other file is allocated; delayed-notice layout
 shifts are a separate disposition and are not included in this permission.
 M4 stays read-only on that component until exact handback. No v18 release.
+
+### 2026-09-05 — Native artwork fixture qualification
+
+The targeted `scripts/smoke-desktop-artwork-webdriver.py` reuses the existing
+native W3C client and managed-process cleanup, without running the authentication
+gate. Its test-only Rust seeder requires a marked, empty, private disposable root,
+uses the actual platform keyring and Store owners, and caches the repository PNG
+with explicit synthetic provenance and a ten-minute original policy. No provider
+response, provider health or authentication qualification is invented.
+
+The actual release Desktop WebView passed the fixture under a private keyring,
+disposable display and separate loopback-only network namespace: exact canonical
+Record poster locator, 512-by-512 decode, reload, query-bearing request rejection
+with a confirmed image error, and restored decode. The provisional dirty-source
+receipt is `target/native-artwork/run-q7jhbcqy/receipt.json`; it is not clean-head
+proof. Source and binary hashes are included in the receipt. Public TMDB image
+acquisition remains the separate live evidence above, not this offline fixture.
+
+Independent native review tightened exact-source/dimension assertions and added
+termination-handler registration and fail receipts for cleanup/cancellation.
+The harness `--self-test` passes seven positive/negative image predicate cases
+and cleanup registration. Actual cancellation fault injection is not claimed.
+Strict Desktop all-target clippy passes. The next step is a clean-source rebuild
+and native rerun after this local test-only checkpoint; no production behavior,
+schema/archive allocation, authentication work, push, PR or merge changes here.
+
+Read-only Search preparation identified SDK method types as the host contract
+owner, per-call browser-client selection, and an explicit native cancellation
+seam: Tauri invoke has no AbortSignal support. Generation fencing alone must not
+be described as cancelling native provider work. Commander retains shared-file
+ownership; the next vertical slice must resolve this in the existing scoped
+command/runtime path rather than lose receipt or lifetime semantics.

@@ -33,6 +33,9 @@ static TEMPORARY_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 #[cfg(test)]
 include!("artwork_policy_tests.rs");
 
+#[cfg(test)]
+include!("artwork_native_fixture.rs");
+
 const TMDB_ARTWORK_ACCESS: OutboundAccessDeclaration<'static> = OutboundAccessDeclaration {
     provider: TMDB_PROVIDER,
     capabilities: &[ARTWORK_CAPABILITY],
