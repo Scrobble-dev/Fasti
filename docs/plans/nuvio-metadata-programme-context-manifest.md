@@ -1323,3 +1323,68 @@ routes, unavailable tracking, keyboard navigation and status announcements.
 Wrong-grain canonicalization needs an explicit disposition before implementation;
 slug is never identity. No new roadmap, framework, scope reduction or speculative
 production interface is authorized by these read-only maps.
+
+### M4 canonical Record detail integration — 2026-09-05
+
+The existing exact Record selector is now wired through browser and Desktop
+hosts into Workbench. Legacy links remain valid; canonical native-grain/title
+segments replace stale presentation segments only after the authorized exact
+read. No list-page scan or tracking permission is required to display identity.
+URL intent survives sign-in/profile changes while private detail, metadata and
+outgoing action feedback are discarded. Request generations and route lifetimes
+fence late success/error/cleanup, including A→B→A navigation and metadata refresh.
+Unknown tracking evidence is visibly unknown; confirmed tracking changes still
+update the existing profile-state owner without implying saved intent. A read
+started before a confirmed tracking mutation cannot overwrite that newer state.
+
+Commander remains the only shared-surface writer. The store agent implemented
+and released only the two allocated Desktop Rust files; its 12 focused tests and
+default-feature Tauri check passed. The contract agent implemented and released
+one new browser regression file. The independent review agent found the stale
+metadata continuation and tracking-message risks; both are corrected, with no
+remaining concrete finding in its final read-only review. UI/web typechecks and
+the Tabler policy check passed on the integration diff.
+
+Browser QA first reproduced the broken direct link, then verified the actual UI
+using the existing bounded fixtures. The broader run caught a Settings metadata
+policy refresh regression; retaining validated navigation identity restores the
+authorized refresh without retaining private data. Old fixtures that ignored
+the exact selector were corrected to the new contract; production singleton/ID
+checks remain strict. The failed-tracking expectation now requires unknown, not
+automatic tracking. A narrow dark-mode audit found active-tab contrast of 2.75;
+the tab now uses the existing theme text token and a currentColor underline.
+Manual screenshot review also caught shrinking/overlapping tab labels at 320px;
+the existing native horizontal tab scroller now keeps each button's full width.
+Keyboard focus also calls native nearest-alignment reveal: Chromium otherwise
+left the focused final button clipped at the prior button's scroll position.
+
+The local QA report and before/after screenshots are under
+`.gstack/qa-reports/m4-record-detail.md`. The requested QA workflow was adapted:
+no global artifact queue synchronization or memory writes; existing fixture
+contract maintenance used native implementation checks rather than claiming the
+skill's new-tests-only restriction was followed unchanged. No Codex Security
+tools or skills were used. Browser fixtures do not establish live provider,
+durable storage, authentication correctness, or complete accessibility conformance.
+
+The clean committed integration still requires its exact canonical PR gate.
+Final focused browser verification passed all 16 cases in 17.8 seconds, including
+the final tracking-read and tab fixes. An earlier neighboring-suite run passed
+70/70 before those last refinements; it is not exact-current 71-case evidence.
+Provider-page POST/CSRF, candidate details/actions, local/provider Search
+composition and provider response-cache policy remain the next M4 work. This is
+not a reduction of scope or a completed M4 claim. M4 retains migration v16,
+archive v6 and shared-file ownership; no PR, merge, v17 allocation or C2 activation
+release has occurred. Rollback is the bounded host/UI/test commit; no stored data
+or prior committed selector/core work needs to change.
+
+Parallel preparation remains bounded. The store agent's response-policy map
+identifies existing `send_json` → `ProviderSearchPage` → Search persistence and
+`SearchReceiptLifetime` as owners for observation time, Age and shorter deadlines.
+No new table is needed. `no-store` must never enter SQLite/WAL or stale fallback;
+the current durable-only Page outcome cannot represent a live transient result.
+This is a concrete internal outcome gap to resolve before claiming full provider
+response-policy support, not permission to fabricate receipt IDs or cut live
+Search scope. Just-observed but non-reusable responses and cached Save/refetch
+policy also need explicit semantics; fixed deadlines alone cannot encode every
+response directive. Detail/credential-check callers of `send_json` must retain
+their existing behavior when the shared response envelope changes.

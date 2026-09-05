@@ -219,7 +219,7 @@ test("global search and configured record actions use durable tracking state", a
       }),
     );
   });
-  await page.route(/\/api\/v1\/records$/, (route) =>
+  await page.route(/\/api\/v1\/records(?:\?record_id=[^&]+)?$/, (route) =>
     route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({
@@ -286,7 +286,7 @@ test("global search and configured record actions use durable tracking state", a
   await expect(page.getByRole("heading", { name: "Alpha Film" })).toBeVisible();
   await expect(
     page.getByRole("combobox", { name: "Profile tracking state" }),
-  ).toHaveValue("unset");
+  ).toHaveValue("unknown");
   await page.getByRole("button", { name: "Back to Library" }).click();
 
   await page.getByRole("group", { name: "Alpha Film card" }).click({
@@ -510,7 +510,13 @@ test("record metadata can refresh or switch through a configured provider", asyn
                       source: "googlebooks.volume",
                     },
                   },
-                ],
+                ].filter((record) => {
+                  const selected = (
+                    arguments_ as
+                      { query?: { record_id?: string | null } } | undefined
+                  )?.query?.record_id;
+                  return selected == null || record.record_id === selected;
+                }),
                 truncated: false,
               };
             case "search_provider":

@@ -749,9 +749,22 @@ argument and accepts the optional query as its second argument; null and omitted
 selectors both mean ordinary listing. Exact-selector responses are checked for
 matching identity, at most one row and no truncation.
 
-The API/SDK selector is a foundation for canonical-route wiring. It does not
-establish completion of Workbench direct reload, route/grain validation, browser
-provider Search, or local/remote partial-result composition.
+Browser and Desktop hosts forward this selector through the existing Record
+read. Workbench details load independently of the bounded Library and tracking
+lists. Both legacy `/records/{record_id}` and canonical routes remain supported.
+Malformed IDs and extra segments do not become exact queries. After an authorized
+exact read, the native Record grain and title replace stale grain/slug segments
+with `history.replaceState`; neither presentation segment selects identity.
+Slugs use bounded ASCII words after Unicode normalization, falling back to
+`record` when no such words exist. This resolves the wrong-grain disposition
+without another route resolver or identity owner.
+
+URL intent survives initial sign-in and profile changes; loaded private details
+and provenance do not. Each route/authority lifetime invalidates prior async
+success, error and cleanup. Missing tracking evidence is explicitly unknown,
+not saved intent or an inferred automatic disposition. A confirmed tracking
+mutation updates the existing profile-state representation. These detail routes
+do not establish browser provider Search or local/remote result composition.
 
 ### M4 atomic candidate-action disposition — 2026-09-05
 

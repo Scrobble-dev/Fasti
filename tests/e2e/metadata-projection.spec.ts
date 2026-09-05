@@ -265,7 +265,13 @@ test("saving profile metadata policy refreshes an already selected Record projec
                       is_stale: false,
                     },
                   },
-                ],
+                ].filter((record) => {
+                  const selected = (
+                    arguments_ as
+                      { query?: { record_id?: string | null } } | undefined
+                  )?.query?.record_id;
+                  return selected == null || record.record_id === selected;
+                }),
                 truncated: false,
               };
             case "list_tracking_dispositions":
