@@ -1,6 +1,6 @@
 # E1 OIDC candidate qualification
 
-Status: **10 library checks pass; E1-Q1 remains partial. No runtime adoption.**
+Status: **15 library checks pass; E1-Q1/Q2 remain partial. No runtime adoption.**
 
 This separate Cargo workspace tests `openidconnect =4.0.1` through its public
 APIs. It starts no listener and creates no Fasti account, session or database.
@@ -40,11 +40,14 @@ Rust `1.96.0 (ac68faa20 2026-05-25)`; Cargo `1.96.0 (30a34c682 2026-05-25)`.
   transitive archives were absent. A locked fetch populated them.
 - Initial compile found the response-builder alias error; the harness now uses
   the upstream `http::Response::builder` constructor.
-- Final ordinary run: 10 passed, 0 failed, 0 ignored; exit 0.
-- Network-namespace run: the same 10 passed, 0 failed, 0 ignored; exit 0.
+- First committed segment `de691062` passed 10 tests on clean source.
+- Extended ordinary run: 15 passed, 0 failed, 0 ignored; exit 0.
+- Network-namespace run: the same 15 passed, 0 failed, 0 ignored; exit 0.
 - Strict Clippy passed with warnings denied. These are not performance results.
 - Independent source/plan review corrected caller-state and provenance omissions.
   Harness review requested exact URL/client/redirect assertions, now included.
+  Separate review of the five token/userinfo checks found no actionable issue;
+  public-client and JSON-only coverage limits remain explicit.
 - Ponytail complexity review: no additional abstraction, HTTP client, executor
   dependency, session store or production manifest change is needed.
 
@@ -52,7 +55,7 @@ Rust `1.96.0 (ac68faa20 2026-05-25)`; Cargo `1.96.0 (30a34c682 2026-05-25)`.
 | --- | --- |
 | `Cargo.toml` | `bc7a15fd6aff0fc9678bd3151304fc9d41529ee5c5597bad1276df220079fe95` |
 | `Cargo.lock` | `695a432152097118ddd6d97678c07fde9fc472e111aa686e571eeb223e692ee3` |
-| `qualification.rs` | `13aa85a36ce23c2e5d3b5a06848faf75a26095f1aa159e6458e28fa3d3bc1b8c` |
+| `qualification.rs` | `1d5c5d113cbcfb5107dfbf31a5511aca8edeb58d5ff3f7aa7e5d96c0b640502d` |
 | `synthetic-test-key.pem` | `20a63565470ef8c42e48675edd8478c3d2c9c3e9cb727702a64adc48c98660f4` |
 | `synthetic-rotation-key.pem` | `d2604c19f88ee96466dce9e6f702516d21a303d78a1f9c7920d69a9b72f00774` |
 
@@ -72,15 +75,28 @@ Rust `1.96.0 (ac68faa20 2026-05-25)`; Cargo `1.96.0 (30a34c682 2026-05-25)`.
 - Access-token hash computation distinguishes substitution when the caller
   compares it. The library does not perform that comparison for the caller.
 - A logout URL can omit ID-token hints. Actual provider acceptance is unproven.
+- Public-client token exchange sends the expected form POST without a client
+  secret. Parsing succeeds even without an ID token; Fasti must reject that case.
+- An injected transport failure results in one request, not automatic retry.
+  This does not prove server-side code consumption or durable recovery.
+- Token parse errors retain the response bytes. Fasti must bound and redact the
+  error boundary; logging the vendor error is not a safe conversion.
+- JSON userinfo rejects a changed subject when bound to verified ID-token claims.
+  Omitting that binding permits the changed subject. Signed userinfo is untested.
+- The library's bearer header lacks the sensitive flag. A newline-bearing token
+  panics before dispatch. These negative controls expose ingress/normalization
+  obligations; test `catch_unwind` is not an approved production recovery path.
 
 ## Still required
 
 Callback state/single-use/cancellation/restart tests through the real ceremony
 owner; body/error/endpoint bounds and resource proof; unsupported algorithms
 and further malformed-token cases; `azp` policy; assurance policy; token erasure;
-userinfo subject binding; refresh/discard lifecycle; logout receivers and token
+production userinfo binding and signed-userinfo profiles; refresh/discard lifecycle; logout receivers and token
 validation; named provider conformance; full dependency/licence/advisory review.
 No test-only callback or store may stand in for these integration checks.
+The plan's Q2 source map also records dynamic endpoint ownership, missing governed
+POST support, end-to-end deadlines and unproven erasure of transient vendor copies.
 
 M4 retains shared production files, v17 and archive v7. Access v18 remains
 conditional on its exact merged handoff. Root `AGENTS.md` and runtime contracts

@@ -137,11 +137,60 @@ Pinned references:
 
 ## Evidence and exclusions
 
+### Q2 source map — integration remains gated
+
+Read-only review used Fasti base `62e10d2e`, pinned `openidconnect 4.0.1`
+and its locked `oauth2 5.0.0` dependency. OAuth2 archive SHA-256
+`51e219e79014df21a225b1860a479e2dcd7cbd9130f4defd4bd0e191ea31d67d`
+matches the isolated lock; embedded VCS is
+`f3424b4b2190c83c6d031fdc71eed2351d49e0df`.
+
+| Operation | Existing owner and source | Required integration work |
+| --- | --- | --- |
+| Discovery/JWKS GET | `fasti-provider-runtime/src/transport.rs:146–179`; `fasti-application/src/outbound_access.rs:100–142`; OIDC `discovery/mod.rs:308–336` | Authorize each configured/discovered endpoint independently. Existing transport declarations require static lifetimes; give dynamic identity configuration a real owner, never leak strings or inherit metadata-provider authority. |
+| Code exchange POST | OAuth2 `token/mod.rs:190–235`, `endpoint.rs:72–154`; C1 `fasti-api/src/trailbase.rs:929–960` | Extend the existing governed owner after handoff. Current authorized client exposes GET only (`transport.rs:199`). Bind exact endpoint and method, not only origin; authorize before loading client credentials or constructing secret-bearing requests. |
+| Userinfo GET | OIDC `user_info.rs:176–187,302–330` | Preauthorize the endpoint; pass the subject from verified ID claims. Validate token header syntax before invoking the library. Its bearer constructor can panic and does not mark the header sensitive. Normalize sensitive headers in the governed conversion. |
+| Browser authorization/logout | Library URL builders and existing C1 ceremony/browser owner | Validate destination and return URI independently of server-fetch policy. Token-free logout construction does not prove provider acceptance. Do not retain an ID token just for a logout hint. |
+| Refresh/revocation POST | OAuth2 `token/mod.rs:310–339`, `revocation.rs:255–307`; OIDC `client.rs:511,1278` | Same governed POST owner. Revocation URL needs explicit configuration; do not invent discovery support. Default sign-in retains no refresh token; persistence requires the separate named capability and C3 custody gate. |
+| Response/error processing | `transport.rs:105–124`; OAuth2 `error.rs:111–134`; OIDC `user_info.rs:200–204` | Bound stream reads before vendor parsing. Vendor errors can retain raw response bytes. Convert to fixed Fasti errors; never debug/log/serialize vendor errors or secret-bearing requests. |
+| Cancellation and one use | C1 `trailbase.rs:500–508,628–699,1107–1149`; store `human_access.rs:325–405` | Reuse claim/take/cancel and the 64-entry vault. Dispatched-but-unknown exchanges cannot be retried. Recheck final authority/epochs and account lifecycle; no new ceremony store. |
+
+The current resolver allows at most eight answers and five seconds; transport
+concurrency is four (`transport.rs:11–14`). These separate queue/DNS/HTTP bounds
+are not one end-to-end ceremony deadline. Preserve them and define the complete
+deadline before integration. No new numeric production limit is chosen here.
+
+**Custody gate remains open.** `oauth2::PkceCodeVerifier` is an ordinary String
+wrapper (`types.rs:417–423`, macro `154–175`), and endpoint serialization creates
+ordinary encoded String/Vec buffers (`endpoint.rs:149–154`) before HTTP dispatch.
+The C1 zeroizing vault cannot establish erasure of those hidden transient copies.
+Likewise, `IdToken::into_claims` does not itself prove token-buffer erasure.
+No-persistence/discard and in-memory erasure are distinct requirements. Do not
+claim the latter, weaken it, or adopt the runtime until a supported mechanism or
+explicit dependency amendment resolves it. No test-owned protocol substitute.
+
+These source findings permit further isolated qualification, not production I1.
+The minimum eventual integration is the existing transport's governed POST and
+bounded/redacted request conversion plus its existing ceremony owner. It is not
+another OAuth engine, DNS resolver, HTTP pool, scheduler or session platform.
+
+### Next isolated check segment
+
+Before Q2 transport integration, extend only the existing qualification harness:
+verify the exact token POST and PKCE/client/redirect form, missing-ID-token caller
+obligation, one request on lost-response failure, retained vendor error bodies,
+and user-info subject matching against verified ID-token claims. Use synthetic
+inputs and the existing in-memory HTTP seam. Do not add a test-owned callback,
+transport policy, token store, custom protocol or network service. A passing
+wire-shape check cannot prove credential-read ordering or production erasure.
+Run the same isolated offline/network-namespace, lint and independent-review
+checks, then record exact source and remaining Q1/Q2 obligations.
+
 Intake performed: official sparse-index identity matched archive SHA-256; nine
 selected source files were compared byte-for-byte with archive members, including
 manifest, VCS metadata, licence, verifier, discovery, claims, logout, client and
 library root. The subsequent isolated [qualification harness](../../qualification/access-e1/README.md)
-now has ten passing library checks, also run in a fresh network namespace, with
+now has fifteen passing library checks, also run in a fresh network namespace, with
 strict Clippy passing. Its README binds results to file hashes and lists the
 remaining Q1/Q2 evidence. This is not a clean-head delivery or runtime claim.
 
