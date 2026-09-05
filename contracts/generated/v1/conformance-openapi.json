@@ -1456,6 +1456,7 @@
                             "browser_session_expired",
                             "browser_session_revoked",
                             "capability_unavailable",
+                            "capacity_exceeded",
                             "forbidden",
                             "idempotency_conflict",
                             "identity_conflict",
@@ -4245,7 +4246,7 @@
                       "next_actions": [
                         {
                           "id": "release_capacity",
-                          "label": "Release retained capacity before retrying"
+                          "label": "Increase or release governed capacity before retrying"
                         }
                       ],
                       "param": null,

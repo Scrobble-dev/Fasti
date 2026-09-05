@@ -148,6 +148,15 @@ The daemon and container launcher therefore remain the only owners of
 `FASTI_LISTEN`, `FASTI_PORT`, `FASTI_PORT_FALLBACK`, and bound-address
 publication. Settings does not present an unconsumed listener control.
 
+Both the daemon and embedded kernel read
+`FASTI_SEARCH_ACTION_RECEIPT_MAX_ROWS` and
+`FASTI_SEARCH_ACTION_RECEIPT_MAX_BYTES` when the Store opens. They default to
+10,000 rows and 163,840,000 canonical JSON bytes per workspace. Configured
+values can raise, but cannot lower, that supported floor. At a ceiling, existing
+receipts remain readable and replayable; only new Search Record actions return
+`capacity_exceeded` until an operator raises the applicable value and restarts
+the process. No network client can set these limits.
+
 The prepared source launcher preserves that boundary:
 
 ```bash

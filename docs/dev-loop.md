@@ -107,6 +107,16 @@ the fallback), `FASTI_PUBLIC_URL` (show a separate reverse-proxy origin), and
 `FASTI_DEV_SCOPE` (name this worktree's container so multiple worktrees can
 run containers side by side).
 
+Search action receipts are immutable replay evidence. New actions accept up to
+10,000 receipts and 163,840,000 bytes of canonical receipt JSON per workspace by
+default. Local operators can raise those admission ceilings with
+`FASTI_SEARCH_ACTION_RECEIPT_MAX_ROWS` and
+`FASTI_SEARCH_ACTION_RECEIPT_MAX_BYTES`; values below the supported defaults,
+zero, non-decimal or oversized values stop Store startup. Replays and reads stay
+available at the ceiling. Only new actions return `capacity_exceeded` (HTTP 507),
+and raising the ceiling then permits them. Fasti does not delete or compact this
+audit history automatically.
+
 ## Browser and daemon QA
 
 Check the daemon by hand, using the URL `./scripts/dev.sh` printed (or

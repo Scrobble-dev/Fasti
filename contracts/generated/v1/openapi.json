@@ -6317,7 +6317,7 @@
                       "next_actions": [
                         {
                           "id": "release_capacity",
-                          "label": "Release retained capacity before retrying"
+                          "label": "Increase or release governed capacity before retrying"
                         }
                       ],
                       "param": null,
@@ -6532,7 +6532,7 @@
                       "next_actions": [
                         {
                           "id": "release_capacity",
-                          "label": "Release retained capacity before retrying"
+                          "label": "Increase or release governed capacity before retrying"
                         }
                       ],
                       "param": null,
@@ -6747,7 +6747,7 @@
                       "next_actions": [
                         {
                           "id": "release_capacity",
-                          "label": "Release retained capacity before retrying"
+                          "label": "Increase or release governed capacity before retrying"
                         }
                       ],
                       "param": null,
@@ -6952,7 +6952,7 @@
                       "next_actions": [
                         {
                           "id": "release_capacity",
-                          "label": "Release retained capacity before retrying"
+                          "label": "Increase or release governed capacity before retrying"
                         }
                       ],
                       "param": null,
@@ -7167,7 +7167,7 @@
                       "next_actions": [
                         {
                           "id": "release_capacity",
-                          "label": "Release retained capacity before retrying"
+                          "label": "Increase or release governed capacity before retrying"
                         }
                       ],
                       "param": null,
@@ -7939,7 +7939,7 @@
                       "next_actions": [
                         {
                           "id": "release_capacity",
-                          "label": "Release retained capacity before retrying"
+                          "label": "Increase or release governed capacity before retrying"
                         }
                       ],
                       "param": null,
@@ -10546,6 +10546,16 @@
               }
             },
             "description": "Local storage is unavailable"
+          },
+          "507": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Retained Search action receipt capacity is exhausted"
           }
         },
         "security": [
@@ -10571,6 +10581,7 @@
           "browser_session_expired",
           "browser_session_revoked",
           "capability_unavailable",
+          "capacity_exceeded",
           "forbidden",
           "idempotency_conflict",
           "identity_conflict",
@@ -11259,6 +11270,16 @@
               }
             },
             "description": "Storage is unavailable"
+          },
+          "507": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Search action receipt capacity is exhausted"
           }
         },
         "security": [
@@ -11289,6 +11310,7 @@
           "browser_session_expired",
           "browser_session_revoked",
           "capability_unavailable",
+          "capacity_exceeded",
           "forbidden",
           "idempotency_conflict",
           "identity_conflict",
@@ -11677,6 +11699,16 @@
               }
             },
             "description": "Storage is unavailable"
+          },
+          "507": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Search action receipt capacity is exhausted"
           }
         },
         "security": [
@@ -11707,6 +11739,7 @@
           "browser_session_expired",
           "browser_session_revoked",
           "capability_unavailable",
+          "capacity_exceeded",
           "forbidden",
           "idempotency_conflict",
           "identity_conflict",

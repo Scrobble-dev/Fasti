@@ -823,6 +823,19 @@ Same-client credential rotation and same-subject browser-session rotation retain
 stable actor identity. Sharing a client/profile does not let a different browser
 subject replay another actor's operation.
 
+Action receipts are immutable and do not expire, compact or disappear when a
+client is revoked. New actions have one per-workspace admission envelope:
+10,000 rows and 163,840,000 canonical receipt JSON bytes by default, which is
+one worst-case 16 KiB receipt for each Record in the supported 10,000-Record
+workload. The node checks current authority and exact replay before the quota,
+then rechecks row and byte use inside the same immediate commit transaction.
+Existing reads and exact replay remain available at or above the ceiling. Only
+new operations return `capacity_exceeded` without partial Record, identifier,
+metadata or receipt state. A local operator can raise either ceiling and restart;
+configured values cannot reduce the supported floor. No client can set the
+limits, and no automatic sweeper deletes audit history. This admission policy
+changes no schema or archive bytes.
+
 Durable action evidence needs a new versioned archive stream, not an extension
 of published archive v5 or a disguised observation/metadata-refresh receipt.
 M4 allocates archive v6 for that durable owner; activation must accompany its

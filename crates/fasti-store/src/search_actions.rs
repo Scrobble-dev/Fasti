@@ -13,7 +13,6 @@ use fasti_domain::{
 use rusqlite::{params, OptionalExtension, Transaction, TransactionBehavior};
 
 const CAPABILITY: CapabilityKey = CapabilityKey::AttachIdentifier;
-const MAX_RECEIPT_BYTES: usize = 16 * 1024;
 
 fn problem(code: ProblemCode, id: RequestCorrelationId) -> Box<FastiProblem> {
     Box::new(FastiProblem::from_code(code, CAPABILITY, id))
@@ -50,7 +49,7 @@ pub(crate) fn decode_receipt(
     json: &str,
     id: RequestCorrelationId,
 ) -> ApplicationResult<SearchCandidateActionReceipt> {
-    if json.len() > MAX_RECEIPT_BYTES {
+    if json.len() > MAX_SEARCH_ACTION_RECEIPT_BYTES {
         return Err(problem(ProblemCode::IntegrityFailed, id));
     }
     let receipt: SearchCandidateActionReceipt =
@@ -132,7 +131,7 @@ pub(crate) fn decode_provider_identifier_receipt(
     json: &str,
     id: RequestCorrelationId,
 ) -> ApplicationResult<ProviderIdentifierActionReceipt> {
-    if json.len() > MAX_RECEIPT_BYTES {
+    if json.len() > MAX_SEARCH_ACTION_RECEIPT_BYTES {
         return Err(problem(ProblemCode::IntegrityFailed, id));
     }
     let receipt: ProviderIdentifierActionReceipt =
@@ -165,6 +164,37 @@ pub(crate) fn decode_provider_identifier_receipt(
         return Err(problem(ProblemCode::IntegrityFailed, id));
     }
     Ok(receipt)
+}
+
+fn ensure_receipt_capacity(
+    tx: &Transaction<'_>,
+    workspace_id: fasti_domain::WorkspaceId,
+    limits: SearchActionReceiptLimits,
+    proposed_json_bytes: Option<usize>,
+    id: RequestCorrelationId,
+) -> ApplicationResult<()> {
+    let (rows, bytes) = map_sql(
+        tx.query_row(
+            "SELECT COUNT(*), COALESCE(SUM(length(CAST(receipt_json AS BLOB))), 0) FROM search_action_receipts WHERE workspace_id = ?1",
+            [workspace_id.to_string()],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+        ),
+        CAPABILITY,
+        id,
+    )?;
+    let rows = u64::try_from(rows).map_err(|_| problem(ProblemCode::IntegrityFailed, id))?;
+    let bytes = u64::try_from(bytes).map_err(|_| problem(ProblemCode::IntegrityFailed, id))?;
+    let proposed = u64::try_from(proposed_json_bytes.unwrap_or_default())
+        .map_err(|_| problem(ProblemCode::CapacityExceeded, id))?;
+    if rows >= limits.max_rows()
+        || bytes
+            .checked_add(proposed)
+            .is_none_or(|total| total > limits.max_receipt_json_bytes())
+        || (proposed_json_bytes.is_none() && bytes >= limits.max_receipt_json_bytes())
+    {
+        return Err(problem(ProblemCode::CapacityExceeded, id));
+    }
+    Ok(())
 }
 
 fn replay(
@@ -205,6 +235,7 @@ fn replay(
 fn prepare_tx(
     tx: &Transaction<'_>,
     command: &SearchCandidateActionCommand,
+    limits: SearchActionReceiptLimits,
 ) -> ApplicationResult<SearchCandidateActionPreparation> {
     let request = &command.request;
     let id = request.correlation_id;
@@ -215,6 +246,7 @@ fn prepare_tx(
     let search =
         authorize_application_transaction(tx, CapabilityKey::SearchMetadata, &request.access, id)
             .map_err(|error| search_problem(&error, id))?;
+    ensure_receipt_capacity(tx, access.workspace_id(), limits, None, id)?;
     let candidate = read_search_candidate(tx, request, search)
         .map_err(|error| search_problem(&error, id))?
         .ok_or_else(|| problem(ProblemCode::ValidationFailed, id))?;
@@ -257,9 +289,16 @@ pub(crate) fn prepare(
         CAPABILITY,
         id,
     )?;
-    let result = prepare_tx(&tx, command)?;
-    map_sql(tx.commit(), CAPABILITY, id)?;
-    Ok(result)
+    match prepare_tx(&tx, command, kernel.inner.search_action_receipt_limits) {
+        Ok(result) => {
+            map_sql(tx.commit(), CAPABILITY, id)?;
+            Ok(result)
+        }
+        Err(error) => {
+            map_sql(tx.rollback(), CAPABILITY, id)?;
+            Err(error)
+        }
+    }
 }
 
 fn replay_provider_identifier(
@@ -305,6 +344,7 @@ fn replay_provider_identifier(
 fn prepare_provider_identifier_tx(
     tx: &Transaction<'_>,
     command: &ProviderIdentifierActionCommand,
+    limits: SearchActionReceiptLimits,
 ) -> ApplicationResult<ProviderIdentifierActionPreparation> {
     let id = command.correlation_id;
     let access = authorize_application_transaction(tx, CAPABILITY, &command.access, id)?;
@@ -315,6 +355,7 @@ fn prepare_provider_identifier_tx(
     }
     authorize_application_transaction(tx, CapabilityKey::SearchMetadata, &command.access, id)
         .map_err(|error| search_problem(&error, id))?;
+    ensure_receipt_capacity(tx, access.workspace_id(), limits, None, id)?;
     let mapping = provider_identity_mapping_for_grain(command.provider.as_str(), command.grain)
         .ok_or_else(|| problem(ProblemCode::InvalidIdentifier, id))?;
     mapping
@@ -346,9 +387,16 @@ pub(crate) fn prepare_provider_identifier(
         CAPABILITY,
         id,
     )?;
-    let result = prepare_provider_identifier_tx(&tx, command)?;
-    map_sql(tx.commit(), CAPABILITY, id)?;
-    Ok(result)
+    match prepare_provider_identifier_tx(&tx, command, kernel.inner.search_action_receipt_limits) {
+        Ok(result) => {
+            map_sql(tx.commit(), CAPABILITY, id)?;
+            Ok(result)
+        }
+        Err(error) => {
+            map_sql(tx.rollback(), CAPABILITY, id)?;
+            Err(error)
+        }
+    }
 }
 
 pub(crate) fn commit_provider_identifier(
@@ -364,7 +412,17 @@ pub(crate) fn commit_provider_identifier(
         CAPABILITY,
         id,
     )?;
-    let current = prepare_provider_identifier_tx(&tx, command)?;
+    let current = match prepare_provider_identifier_tx(
+        &tx,
+        command,
+        kernel.inner.search_action_receipt_limits,
+    ) {
+        Ok(current) => current,
+        Err(error) => {
+            map_sql(tx.rollback(), CAPABILITY, id)?;
+            return Err(error);
+        }
+    };
     if let ProviderIdentifierActionPreparation::Replay(receipt) = current {
         map_sql(tx.commit(), CAPABILITY, id)?;
         return Ok(*receipt);
@@ -452,6 +510,16 @@ pub(crate) fn commit_provider_identifier(
     let json =
         serde_json::to_string(&receipt).map_err(|_| problem(ProblemCode::IntegrityFailed, id))?;
     let receipt = decode_provider_identifier_receipt(&json, id)?;
+    if let Err(error) = ensure_receipt_capacity(
+        &tx,
+        access.workspace_id(),
+        kernel.inner.search_action_receipt_limits,
+        Some(json.len()),
+        id,
+    ) {
+        map_sql(tx.rollback(), CAPABILITY, id)?;
+        return Err(error);
+    }
     map_sql(
         tx.execute(
             "INSERT INTO search_action_receipts(workspace_id,operation_id,profile_id,actor_client_id,actor_subject_id,record_id,semantic_digest,receipt_json) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
@@ -483,7 +551,13 @@ pub(crate) fn commit(
         CAPABILITY,
         id,
     )?;
-    let current = prepare_tx(&tx, command)?;
+    let current = match prepare_tx(&tx, command, kernel.inner.search_action_receipt_limits) {
+        Ok(current) => current,
+        Err(error) => {
+            map_sql(tx.rollback(), CAPABILITY, id)?;
+            return Err(error);
+        }
+    };
     if let SearchCandidateActionPreparation::Replay(receipt) = current {
         map_sql(tx.commit(), CAPABILITY, id)?;
         return Ok(*receipt);
@@ -668,6 +742,16 @@ pub(crate) fn commit(
     let json =
         serde_json::to_string(&receipt).map_err(|_| problem(ProblemCode::IntegrityFailed, id))?;
     let receipt = decode_receipt(&json, id)?;
+    if let Err(error) = ensure_receipt_capacity(
+        &tx,
+        access.workspace_id(),
+        kernel.inner.search_action_receipt_limits,
+        Some(json.len()),
+        id,
+    ) {
+        map_sql(tx.rollback(), CAPABILITY, id)?;
+        return Err(error);
+    }
     map_sql(tx.execute("INSERT INTO search_action_receipts(workspace_id,operation_id,profile_id,actor_client_id,actor_subject_id,record_id,semantic_digest,receipt_json) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
         params![receipt.workspace_id.to_string(), receipt.operation_id.to_string(), receipt.profile_id.to_string(),
             receipt.actor_client_id.to_string(), receipt.actor_subject_id.map(|value| value.to_string()),

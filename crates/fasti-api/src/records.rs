@@ -129,7 +129,8 @@ pub(crate) async fn create_record(
         (status = 422, description = "Record ID, grain, or namespace does not satisfy the domain contract", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 500, description = "Durable state failed an integrity check", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 501, description = "This capability is not available in the current runtime body", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 503, description = "Local storage is unavailable", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 503, description = "Local storage is unavailable", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 507, description = "Retained Search action receipt capacity is exhausted", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 pub(crate) async fn attach_identifier(
