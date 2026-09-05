@@ -11,7 +11,7 @@ import json
 import os
 from pathlib import Path
 import shutil
-import subprocess
+import subprocess  # nosec B404 -- this gate launches explicit local test artifacts.
 import sys
 import tempfile
 import time
@@ -21,7 +21,8 @@ ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location(
     "desktop_driver_helpers", ROOT / "scripts/smoke-desktop-access-webdriver.py"
 )
-assert SPEC and SPEC.loader
+if SPEC is None or SPEC.loader is None:
+    raise ImportError("desktop driver helpers could not be loaded")
 native = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(native)
 SEED_TEST = "artwork::native_fixture::seed_native_artwork_fixture"
@@ -48,7 +49,8 @@ def enter_namespace() -> None:
         executable = native._command_path(None, "unshare")
         environment = dict(os.environ)
         environment["FASTI_ARTWORK_PARENT_NETNS"] = os.readlink("/proc/self/ns/net")
-        os.execve(executable, [str(executable), "--user", "--map-root-user", "--net",
+        # Resolved unshare and this script only; argv is not interpreted by a shell.
+        os.execve(executable, [str(executable), "--user", "--map-root-user", "--net",  # nosec B606
                               "--", sys.executable, "-B", str(Path(__file__).resolve()),
                               *sys.argv[1:]], environment)
     network_evidence()
@@ -142,7 +144,7 @@ def run(arguments: argparse.Namespace) -> Path:
                     workspace, tools[2], tools[3], environment
                 )
                 receipt["stage"] = "seed"
-                seed = subprocess.run(
+                seed = subprocess.run(  # nosec B603 -- validated local seeder, fixed argv, no shell.
                     [str(seeder), "--exact", SEED_TEST, "--ignored", "--test-threads=1"],
                     env=environment, stdin=subprocess.DEVNULL, capture_output=True, timeout=60,
                 )
@@ -178,13 +180,17 @@ def run(arguments: argparse.Namespace) -> Path:
                 receipt["checks"]["reload_image"] = wait_image(driver, expected_sources, dimensions)
                 receipt["stage"] = "reject-query"
                 rejected_source = image["src"] + "?denied=1"
-                driver.execute("""
+                driver._request("POST", driver._session_path("/execute/sync"), {
+                    "script": """
                     const image = document.querySelector('img.main-poster');
                     window.__fastiArtworkRejected = null;
                     image.addEventListener('error', () => {
                         window.__fastiArtworkRejected = image.src;
                     }, {once: true});
-                    image.src = """ + json.dumps(rejected_source) + "; return true;")
+                    image.src = arguments[0]; return true;
+                    """,
+                    "args": [rejected_source],
+                })
                 receipt["checks"]["query_rejected"] = wait_image(driver, (rejected_source,), (0, 0))
                 receipt["stage"] = "restore-route"
                 driver.navigate(route)
@@ -260,7 +266,8 @@ def self_test() -> None:
                 accepted = False
             else:
                 accepted = True
-        assert accepted == expected, f"image predicate differs: {changes}"
+        if accepted != expected:
+            raise AssertionError(f"image predicate differs: {changes}")
 
     # Stop before paths, processes, namespaces, or fixture writes.
     with patch.dict(os.environ, {"DISPLAY": ""}), \
@@ -269,7 +276,8 @@ def self_test() -> None:
         try:
             run(argparse.Namespace())
         except native.GateError as error:
-            assert "disposable native display" in str(error)
+            if "disposable native display" not in str(error):
+                raise AssertionError("missing display returned the wrong failure") from error
         else:
             raise AssertionError("missing display must stop the harness")
         namespace.assert_called_once_with()

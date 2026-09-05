@@ -435,6 +435,8 @@ mod restore_capture_tests {
                 "--ignored",
                 "--nocapture",
             ])
+            // The deliberate 1 KiB file limit also truncates LLVM's regular-file profile.
+            .env("LLVM_PROFILE_FILE", "/dev/null")
             .env(WRITE_FAILURE_ROOT_ENV, root.path())
             .env(WRITE_FAILURE_ARCHIVE_ENV, &archive)
             .output()
