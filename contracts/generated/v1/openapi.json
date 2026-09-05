@@ -3246,6 +3246,244 @@
         ],
         "type": "string"
       },
+      "SearchCandidateActionReceiptDto": {
+        "additionalProperties": false,
+        "description": "Immutable acceptance history, not current Record state or current freshness.\nInternal actor, authorization and query-context data never enter this DTO.",
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/SearchRecordActionDto"
+          },
+          "candidate_receipt_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^scr_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          },
+          "committed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "disposition": {
+            "$ref": "#/components/schemas/SearchRecordActionDispositionDto"
+          },
+          "evidence_mode": {
+            "$ref": "#/components/schemas/SearchCandidateEvidenceModeDto"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "fetched_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "grain": {
+            "type": "string"
+          },
+          "initial_status": {
+            "$ref": "#/components/schemas/SearchEvidenceStatusDto"
+          },
+          "operation_id": {
+            "maxLength": 35,
+            "minLength": 35,
+            "pattern": "^op_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          },
+          "provider_id": {
+            "type": "string"
+          },
+          "record_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation_id",
+          "candidate_receipt_id",
+          "provider_id",
+          "grain",
+          "action",
+          "evidence_mode",
+          "record_id",
+          "disposition",
+          "fetched_at",
+          "initial_status",
+          "committed_at"
+        ],
+        "type": "object"
+      },
+      "SearchCandidateActionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/SearchRecordActionDto"
+          },
+          "evidence_mode": {
+            "$ref": "#/components/schemas/SearchCandidateEvidenceModeDto"
+          },
+          "operation_id": {
+            "maxLength": 35,
+            "minLength": 35,
+            "pattern": "^op_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation_id",
+          "action",
+          "evidence_mode"
+        ],
+        "type": "object"
+      },
+      "SearchCandidateActionResponse": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "outcome": {
+                "enum": [
+                  "saved"
+                ],
+                "type": "string"
+              },
+              "receipt": {
+                "$ref": "#/components/schemas/SearchCandidateActionReceiptDto"
+              }
+            },
+            "required": [
+              "receipt",
+              "outcome"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "outcome": {
+                "enum": [
+                  "unavailable"
+                ],
+                "type": "string"
+              },
+              "problem_code": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "problem_code",
+              "outcome"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "SearchCandidateDetailsQueryParameters": {
+        "additionalProperties": false,
+        "properties": {
+          "offline": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "offline"
+        ],
+        "type": "object"
+      },
+      "SearchCandidateDetailsResponse": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "outcome": {
+                "enum": [
+                  "missing"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "outcome"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "outcome": {
+                "enum": [
+                  "snapshot"
+                ],
+                "type": "string"
+              },
+              "snapshot": {
+                "$ref": "#/components/schemas/SearchCandidateSnapshotDto"
+              }
+            },
+            "required": [
+              "snapshot",
+              "outcome"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "details": {
+                "$ref": "#/components/schemas/SearchCandidateDto"
+              },
+              "locale": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "outcome": {
+                "enum": [
+                  "refetched"
+                ],
+                "type": "string"
+              },
+              "snapshot": {
+                "$ref": "#/components/schemas/SearchCandidateSnapshotDto"
+              }
+            },
+            "required": [
+              "snapshot",
+              "details",
+              "outcome"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "outcome": {
+                "enum": [
+                  "unavailable"
+                ],
+                "type": "string"
+              },
+              "problem_code": {
+                "type": "string"
+              },
+              "snapshot": {
+                "$ref": "#/components/schemas/SearchCandidateSnapshotDto"
+              }
+            },
+            "required": [
+              "snapshot",
+              "problem_code",
+              "outcome"
+            ],
+            "type": "object"
+          }
+        ]
+      },
       "SearchCandidateDto": {
         "additionalProperties": false,
         "properties": {
@@ -3312,6 +3550,13 @@
         ],
         "type": "object"
       },
+      "SearchCandidateEvidenceModeDto": {
+        "enum": [
+          "cached",
+          "refetch"
+        ],
+        "type": "string"
+      },
       "SearchCandidateReceiptDto": {
         "additionalProperties": false,
         "properties": {
@@ -3334,6 +3579,36 @@
           "candidate"
         ],
         "type": "object"
+      },
+      "SearchCandidateSnapshotDto": {
+        "additionalProperties": false,
+        "description": "Original Search evidence. Its lifetime never describes a subsequent refetch.",
+        "properties": {
+          "lifetime": {
+            "$ref": "#/components/schemas/SearchReceiptLifetimeDto"
+          },
+          "locale": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "receipt": {
+            "$ref": "#/components/schemas/SearchCandidateReceiptDto"
+          }
+        },
+        "required": [
+          "receipt",
+          "lifetime"
+        ],
+        "type": "object"
+      },
+      "SearchEvidenceStatusDto": {
+        "enum": [
+          "fresh",
+          "stale"
+        ],
+        "type": "string"
       },
       "SearchProviderPageRequest": {
         "additionalProperties": false,
@@ -3493,6 +3768,56 @@
           "expires_at"
         ],
         "type": "object"
+      },
+      "SearchRecordActionDispositionDto": {
+        "enum": [
+          "created",
+          "reused",
+          "attached",
+          "already_attached"
+        ],
+        "type": "string"
+      },
+      "SearchRecordActionDto": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "enum": [
+                  "create"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "enum": [
+                  "attach"
+                ],
+                "type": "string"
+              },
+              "record_id": {
+                "maxLength": 36,
+                "minLength": 36,
+                "pattern": "^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "record_id",
+              "kind"
+            ],
+            "type": "object"
+          }
+        ]
       },
       "SelectBrowserSessionProfileRequest": {
         "additionalProperties": false,
@@ -10212,6 +10537,442 @@
         ],
         "x-fasti-required-scopes": [
           "metadata_projection_read"
+        ],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/v1/search/candidates/{provider_id}/{grain}/{candidate_receipt_id}": {
+      "get": {
+        "operationId": "read_search_candidate",
+        "parameters": [
+          {
+            "description": "Registered provider identity",
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Canonical candidate grain",
+            "in": "path",
+            "name": "grain",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque Search candidate receipt identity",
+            "in": "path",
+            "name": "candidate_receipt_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offline",
+            "required": true,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchCandidateDetailsResponse"
+                }
+              }
+            },
+            "description": "Original snapshot, refetched details, source failure with snapshot, or non-enumerating missing outcome"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Malformed request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Authentication is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Search authority or browser boundary denied"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Current session or receipt authority changed"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Request exceeds the Search body limit"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unsupported request content type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Invalid candidate locator or query"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Receipt state failed integrity checks"
+          },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Provider capability is unavailable"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Storage is unavailable"
+          },
+          "507": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Receipt capacity is exhausted"
+          }
+        },
+        "security": [
+          {
+            "credential_bearer": []
+          },
+          {
+            "browser_session_cookie": []
+          }
+        ],
+        "tags": [
+          "search"
+        ],
+        "x-fasti-authorization": "scoped_or_browser_session",
+        "x-fasti-capability-id": "metadata.search",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "browser_session_expired",
+          "browser_session_revoked",
+          "capability_unavailable",
+          "capacity_exceeded",
+          "forbidden",
+          "idempotency_conflict",
+          "integrity_failed",
+          "malformed_json",
+          "payload_too_large",
+          "session_policy_changed",
+          "storage_unavailable",
+          "unsupported_media_type",
+          "validation_failed"
+        ],
+        "x-fasti-required-scopes": [
+          "metadata_search"
+        ],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/v1/search/candidates/{provider_id}/{grain}/{candidate_receipt_id}/actions": {
+      "post": {
+        "operationId": "save_search_candidate",
+        "parameters": [
+          {
+            "description": "Registered provider identity",
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Canonical candidate grain",
+            "in": "path",
+            "name": "grain",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque Search candidate receipt identity",
+            "in": "path",
+            "name": "candidate_receipt_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchCandidateActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchCandidateActionResponse"
+                }
+              }
+            },
+            "description": "Atomic Record action acceptance or explicit source failure; saved receipt is historical, including on replay"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Malformed JSON"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Authentication is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Current identity-write authority, new-save Search authority or browser boundary denied"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Target Record is not accessible"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Operation intent, identity or session state conflicts"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Request exceeds the Search body limit"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Content-Type is not application/json"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "identity.identifier.attach.validation_failed": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "identity.identifier.attach",
+                      "code": "validation_failed",
+                      "correlation_id": "req_018f0e0e7f7b70008000000000000022",
+                      "detail": "request representation does not satisfy the governed contract",
+                      "next_actions": [
+                        {
+                          "id": "correct_request",
+                          "label": "Correct the request representation and retry"
+                        }
+                      ],
+                      "param": null,
+                      "retryability": "retry_after_correction",
+                      "safe_state": "no_mutation",
+                      "status": 422,
+                      "title": "Validation failed",
+                      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed",
+                      "violations": [
+                        {
+                          "actual": null,
+                          "code": "invalid_representation",
+                          "expected": "the documented request schema",
+                          "pointer": "/",
+                          "reason": "request JSON does not match the governed schema"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Invalid candidate locator or action intent"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Receipt state failed integrity checks"
+          },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Provider capability is unavailable"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "credential_bearer": []
+          },
+          {
+            "browser_session_cookie": [],
+            "csrf_cookie": [],
+            "csrf_header": []
+          }
+        ],
+        "tags": [
+          "search"
+        ],
+        "x-fasti-authorization": "scoped_or_browser_session",
+        "x-fasti-capability-id": "identity.identifier.attach",
+        "x-fasti-example-ids": [
+          "identity.identifier.attach.validation_failed"
+        ],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "browser_session_expired",
+          "browser_session_revoked",
+          "capability_unavailable",
+          "forbidden",
+          "idempotency_conflict",
+          "identity_conflict",
+          "integrity_failed",
+          "invalid_identifier",
+          "malformed_json",
+          "payload_too_large",
+          "record_not_found",
+          "session_policy_changed",
+          "storage_unavailable",
+          "unsupported_media_type",
+          "validation_failed"
+        ],
+        "x-fasti-required-scopes": [
+          "identity_write"
         ],
         "x-fasti-runtime-availability": "implemented"
       }

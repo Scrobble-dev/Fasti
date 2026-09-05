@@ -194,7 +194,29 @@ const PRODUCTION_BOOTSTRAP_OPERATIONS: [ConformanceOperation; 2] = [
 /// surface. Kept separate from `PRODUCTION_BOOTSTRAP_OPERATIONS` because that
 /// array also drives the bootstrap-only SDK slice in
 /// `render_production_bootstrap_contract`, which must not grow to include them.
-const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 41] = [
+const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 43] = [
+    ConformanceOperation {
+        alias: "saveSearchCandidate",
+        operation_id: "save_search_candidate",
+        method: "post",
+        path: "/api/v1/search/candidates/{provider_id}/{grain}/{candidate_receipt_id}/actions",
+        capability_id: "identity.identifier.attach",
+        authenticated: true,
+        request: Some("SearchCandidateActionRequest"),
+        response: Some("SearchCandidateActionResponse"),
+        retry: "stable_body_operation_id",
+    },
+    ConformanceOperation {
+        alias: "readSearchCandidate",
+        operation_id: "read_search_candidate",
+        method: "get",
+        path: "/api/v1/search/candidates/{provider_id}/{grain}/{candidate_receipt_id}",
+        capability_id: "metadata.search",
+        authenticated: true,
+        request: None,
+        response: Some("SearchCandidateDetailsResponse"),
+        retry: "safe",
+    },
     ConformanceOperation {
         alias: "searchProviderPage",
         operation_id: "search_provider_page",
@@ -1953,19 +1975,26 @@ fn enrich_production_openapi(
             .context("anime grouping policy change variant must be an object")?
             .insert("additionalProperties".to_owned(), Value::Bool(false));
     }
-    let search_outcomes = openapi
-        .pointer_mut("/components/schemas/SearchProviderPageResponse/oneOf")
-        .and_then(Value::as_array_mut)
-        .context("SearchProviderPageResponse variants are absent")?;
-    ensure!(
-        search_outcomes.len() == 2,
-        "Search page outcome count changed"
-    );
-    for variant in search_outcomes {
-        variant
-            .as_object_mut()
-            .context("Search outcome must be an object")?
-            .insert("additionalProperties".to_owned(), Value::Bool(false));
+    for (name, count) in [
+        ("SearchProviderPageResponse", 2),
+        ("SearchCandidateDetailsResponse", 4),
+        ("SearchCandidateActionResponse", 2),
+        ("SearchRecordActionDto", 2),
+    ] {
+        let search_outcomes = openapi
+            .pointer_mut(&format!("/components/schemas/{name}/oneOf"))
+            .and_then(Value::as_array_mut)
+            .context("SearchProviderPageResponse variants are absent")?;
+        ensure!(
+            search_outcomes.len() == count,
+            "Search page outcome count changed"
+        );
+        for variant in search_outcomes {
+            variant
+                .as_object_mut()
+                .context("Search outcome must be an object")?
+                .insert("additionalProperties".to_owned(), Value::Bool(false));
+        }
     }
     let capabilities = array_at(public_registry, "/capabilities")?;
     for expected in PRODUCTION_BOOTSTRAP_OPERATIONS
@@ -2362,6 +2391,7 @@ fn validate_production_operation_security(
         }])),
         "submit_observation"
         | "search_provider_page"
+        | "save_search_candidate"
         | "create_record"
         | "attach_identifier"
         | "register_namespace"
@@ -2395,6 +2425,7 @@ fn validate_production_operation_security(
     let expected = match operation_id {
         "initialize_node" => vec!["bootstrap_bearer"],
         "list_records"
+        | "read_search_candidate"
         | "list_tracking_dispositions"
         | "get_nuvio_collections"
         | "resolve_identity_route"
@@ -3584,6 +3615,10 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         "AnimeGroupingPolicySourceDto",
         "AnimeGroupingPolicyChangeDto",
         "SearchCacheStateDto",
+        "SearchCandidateEvidenceModeDto",
+        "SearchRecordActionDispositionDto",
+        "SearchEvidenceStatusDto",
+        "SearchRecordActionDto",
     ] {
         let schema = schemas
             .get(name)
@@ -3629,6 +3664,12 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         "RefreshMetadataClaimsRequest",
         "SearchProviderPageRequest",
         "SearchProviderPageResponse",
+        "SearchCandidateDetailsQueryParameters",
+        "SearchCandidateDetailsResponse",
+        "SearchCandidateSnapshotDto",
+        "SearchCandidateActionRequest",
+        "SearchCandidateActionResponse",
+        "SearchCandidateActionReceiptDto",
         "SearchCandidateReceiptDto",
         "SearchCandidateDto",
         "SearchReceiptLifetimeDto",
@@ -3850,6 +3891,22 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         (
             "parseSearchProviderPageResponse",
             "SearchProviderPageResponse",
+        ),
+        (
+            "parseSearchCandidateDetailsQueryParameters",
+            "SearchCandidateDetailsQueryParameters",
+        ),
+        (
+            "parseSearchCandidateDetailsResponse",
+            "SearchCandidateDetailsResponse",
+        ),
+        (
+            "parseSearchCandidateActionRequest",
+            "SearchCandidateActionRequest",
+        ),
+        (
+            "parseSearchCandidateActionResponse",
+            "SearchCandidateActionResponse",
         ),
         (
             "parseRefreshMetadataClaimsRequest",

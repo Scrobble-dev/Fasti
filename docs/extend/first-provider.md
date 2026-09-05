@@ -59,10 +59,41 @@ is separate from HTTP caching. Offline mode does not access the credential vault
 or fetch from providers. An eligible stale page remains distinguishable from a
 fresh page. No matching cache entry produces an explicit unavailable outcome.
 
-Acquiring a page does not create a Record or change Library state. Candidate
-details, explicit Record actions, local Search transport and Workbench Search
-composition remain separate M4 integration gates. The current transport tests
-prove real SQLite offline behavior; they are not live-provider network evidence.
+Acquiring a page does not create a Record or change Library state. Local Search
+transport and Workbench Search composition remain separate M4 integration gates.
+The current transport tests prove real SQLite offline behavior; they are not
+live-provider network evidence.
+
+### Candidate details and Record actions
+
+`GET /api/v1/search/candidates/{provider_id}/{grain}/{candidate_receipt_id}`
+requires an explicit `offline=true` or `offline=false` query parameter. The SDK
+operation is `readSearchCandidate(providerId, grain, receiptId, query, options)`.
+This read accepts current Search authority without browser CSRF mutation proof.
+Offline reads return the original authorized snapshot, including its original
+lifetime. They do not renew the receipt or access the provider credential vault.
+Online reads refetch the stored provider coordinate and recheck authority before
+returning details or a source failure. Refetched fields stay separate from the
+snapshot; its lifetime is not the refetch time. Missing or inaccessible evidence
+returns the same missing outcome. All outcomes remain private/no-store.
+
+`POST` to that candidate path followed by `/actions` accepts only an
+`operation_id`, an `action` and an `evidence_mode`. Actions are `{ "kind": "create" }`
+or `{ "kind": "attach", "record_id": "rec_…" }`; evidence mode is `cached` or
+`refetch`. The SDK operation is `saveSearchCandidate(providerId, grain, receiptId,
+request, options)`. No caller metadata, provider URL or authorization fields are
+accepted. Browser saves require CSRF proof. Current `identity_write` permission
+is checked first. A new save also requires Search authority. A completed exact
+replay does not require its ephemeral Search receipt or Search permission, but
+still requires current identity-write authority and the original actor/profile.
+
+The existing transaction creates or reuses a Record, or attaches evidence to the
+explicit target. It does not change Library, progress or watched state. Refetch
+failure never silently saves cached evidence. The SDK may retry with the same
+operation ID and identical serialized body; changed intent conflicts. A saved
+response is immutable acceptance history, not current Record state. Its original
+timestamps and initial status remain unchanged on replay, even after expiry.
+Read the Record through its canonical route for current state.
 
 The unmerged v16 migration adds Search permission only to the enrolled node-owner
 grant. C1's first human administrator links that same grant. Delegated grants are

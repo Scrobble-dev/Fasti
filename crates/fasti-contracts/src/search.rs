@@ -1,6 +1,9 @@
 //! Provider Search representations. Receipt authority remains server-side.
 
-use fasti_application::{SearchCacheState, SearchCandidateReceipt, SearchReceiptLifetime};
+use fasti_application::{
+    SearchCacheState, SearchCandidate, SearchCandidateReceipt, SearchReceiptLifetime,
+    StoredSearchCandidate,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -136,28 +139,294 @@ pub struct SearchCandidateDto {
 
 impl From<&SearchCandidateReceipt> for SearchCandidateReceiptDto {
     fn from(value: &SearchCandidateReceipt) -> Self {
-        let data = value.candidate().data();
         Self {
             candidate_receipt_id: value.id().to_string(),
             grain: value.candidate().identifier().grain().as_str().to_owned(),
-            candidate: SearchCandidateDto {
-                provider: data.provider.clone(),
-                provider_id: data.provider_id.clone(),
-                kind: data.kind.clone(),
-                title: data.title.clone(),
-                original_title: data.original_title.clone(),
-                release_year: data.release_year,
-                authors: data.authors.clone(),
-                image_url: data.image_url.clone(),
-                overview: data.overview.clone(),
+            candidate: value.candidate().into(),
+        }
+    }
+}
+
+impl From<&SearchCandidate> for SearchCandidateDto {
+    fn from(value: &SearchCandidate) -> Self {
+        let data = value.data();
+        Self {
+            provider: data.provider.clone(),
+            provider_id: data.provider_id.clone(),
+            kind: data.kind.clone(),
+            title: data.title.clone(),
+            original_title: data.original_title.clone(),
+            release_year: data.release_year,
+            authors: data.authors.clone(),
+            image_url: data.image_url.clone(),
+            overview: data.overview.clone(),
+        }
+    }
+}
+
+#[derive(
+    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema, utoipa::IntoParams,
+)]
+#[serde(deny_unknown_fields)]
+#[into_params(parameter_in = Query)]
+pub struct SearchCandidateDetailsQueryParameters {
+    pub offline: bool,
+}
+
+/// Original Search evidence. Its lifetime never describes a subsequent refetch.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SearchCandidateSnapshotDto {
+    pub receipt: SearchCandidateReceiptDto,
+    pub lifetime: SearchReceiptLifetimeDto,
+    pub locale: Option<String>,
+}
+
+impl From<&StoredSearchCandidate> for SearchCandidateSnapshotDto {
+    fn from(value: &StoredSearchCandidate) -> Self {
+        Self {
+            receipt: (&value.receipt).into(),
+            lifetime: value.receipt.lifetime().into(),
+            locale: value
+                .context
+                .locale()
+                .map(|locale| locale.as_str().to_owned()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(tag = "outcome", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SearchCandidateDetailsResponse {
+    Missing {},
+    Snapshot {
+        snapshot: SearchCandidateSnapshotDto,
+    },
+    Refetched {
+        snapshot: SearchCandidateSnapshotDto,
+        details: SearchCandidateDto,
+        locale: Option<String>,
+    },
+    Unavailable {
+        snapshot: SearchCandidateSnapshotDto,
+        problem_code: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SearchCandidateActionRequest {
+    #[schemars(
+        length(equal = 35),
+        regex(pattern = r"^op_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$")
+    )]
+    #[schema(
+        min_length = 35,
+        max_length = 35,
+        pattern = r"^op_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+    )]
+    pub operation_id: String,
+    pub action: SearchRecordActionDto,
+    pub evidence_mode: SearchCandidateEvidenceModeDto,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SearchRecordActionDto {
+    Create {},
+    Attach {
+        #[schemars(
+            length(equal = 36),
+            regex(pattern = r"^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$")
+        )]
+        #[schema(
+            min_length = 36,
+            max_length = 36,
+            pattern = r"^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+        )]
+        record_id: String,
+    },
+}
+
+impl From<fasti_application::SearchRecordAction> for SearchRecordActionDto {
+    fn from(value: fasti_application::SearchRecordAction) -> Self {
+        match value {
+            fasti_application::SearchRecordAction::Create => Self::Create {},
+            fasti_application::SearchRecordAction::Attach(record_id) => Self::Attach {
+                record_id: record_id.to_string(),
             },
         }
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchCandidateEvidenceModeDto {
+    Cached,
+    Refetch,
+}
+
+impl From<SearchCandidateEvidenceModeDto> for fasti_application::SearchCandidateEvidenceMode {
+    fn from(value: SearchCandidateEvidenceModeDto) -> Self {
+        match value {
+            SearchCandidateEvidenceModeDto::Cached => Self::Cached,
+            SearchCandidateEvidenceModeDto::Refetch => Self::Refetch,
+        }
+    }
+}
+
+impl From<fasti_application::SearchCandidateEvidenceMode> for SearchCandidateEvidenceModeDto {
+    fn from(value: fasti_application::SearchCandidateEvidenceMode) -> Self {
+        match value {
+            fasti_application::SearchCandidateEvidenceMode::Cached => Self::Cached,
+            fasti_application::SearchCandidateEvidenceMode::Refetch => Self::Refetch,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchRecordActionDispositionDto {
+    Created,
+    Reused,
+    Attached,
+    AlreadyAttached,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchEvidenceStatusDto {
+    Fresh,
+    Stale,
+}
+
+/// Immutable acceptance history, not current Record state or current freshness.
+/// Internal actor, authorization and query-context data never enter this DTO.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SearchCandidateActionReceiptDto {
+    #[schemars(
+        length(equal = 35),
+        regex(pattern = r"^op_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$")
+    )]
+    #[schema(
+        min_length = 35,
+        max_length = 35,
+        pattern = r"^op_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+    )]
+    pub operation_id: String,
+    #[schemars(
+        length(equal = 36),
+        regex(pattern = r"^scr_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$")
+    )]
+    #[schema(
+        min_length = 36,
+        max_length = 36,
+        pattern = r"^scr_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+    )]
+    pub candidate_receipt_id: String,
+    pub provider_id: String,
+    pub grain: String,
+    pub action: SearchRecordActionDto,
+    pub evidence_mode: SearchCandidateEvidenceModeDto,
+    #[schemars(
+        length(equal = 36),
+        regex(pattern = r"^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$")
+    )]
+    #[schema(
+        min_length = 36,
+        max_length = 36,
+        pattern = r"^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+    )]
+    pub record_id: String,
+    pub disposition: SearchRecordActionDispositionDto,
+    #[schemars(extend("format" = "date-time"))]
+    #[schema(format = "date-time")]
+    pub fetched_at: String,
+    #[schemars(extend("format" = "date-time"))]
+    #[schema(format = "date-time")]
+    pub expires_at: Option<String>,
+    pub initial_status: SearchEvidenceStatusDto,
+    #[schemars(extend("format" = "date-time"))]
+    #[schema(format = "date-time")]
+    pub committed_at: String,
+}
+
+impl TryFrom<&fasti_application::SearchCandidateActionReceipt> for SearchCandidateActionReceiptDto {
+    type Error = &'static str;
+    fn try_from(
+        value: &fasti_application::SearchCandidateActionReceipt,
+    ) -> Result<Self, Self::Error> {
+        use fasti_application::SearchRecordActionDisposition as Disposition;
+        let initial_status = match value.initial_status {
+            fasti_domain::FieldClaimStatus::Fresh => SearchEvidenceStatusDto::Fresh,
+            fasti_domain::FieldClaimStatus::Stale => SearchEvidenceStatusDto::Stale,
+            _ => return Err("Search action receipt has invalid historical status"),
+        };
+        Ok(Self {
+            operation_id: value.operation_id.to_string(),
+            candidate_receipt_id: value.candidate_receipt_id.to_string(),
+            provider_id: value.provider.clone(),
+            grain: value.grain.as_str().to_owned(),
+            action: value.action.into(),
+            evidence_mode: value.evidence_mode.into(),
+            record_id: value.record_id.to_string(),
+            disposition: match value.disposition {
+                Disposition::Created => SearchRecordActionDispositionDto::Created,
+                Disposition::Reused => SearchRecordActionDispositionDto::Reused,
+                Disposition::Attached => SearchRecordActionDispositionDto::Attached,
+                Disposition::AlreadyAttached => SearchRecordActionDispositionDto::AlreadyAttached,
+            },
+            fetched_at: value.fetched_at.to_rfc3339(),
+            expires_at: value.expires_at.map(|at| at.to_rfc3339()),
+            initial_status,
+            committed_at: value.committed_at.to_rfc3339(),
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(tag = "outcome", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SearchCandidateActionResponse {
+    Saved {
+        receipt: SearchCandidateActionReceiptDto,
+    },
+    Unavailable {
+        problem_code: String,
+    },
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn create_action_rejects_attach_target_and_caller_metadata() {
+        assert!(serde_json::from_value::<SearchRecordActionDto>(
+            serde_json::json!({"kind":"create"})
+        )
+        .is_ok());
+        for extra in ["record_id", "title", "provider_id", "provenance"] {
+            let mut value = serde_json::json!({"kind":"create"});
+            value[extra] = "not-authorized-input".into();
+            assert!(
+                serde_json::from_value::<SearchRecordActionDto>(value).is_err(),
+                "{extra}"
+            );
+        }
+    }
+
+    #[test]
+    fn missing_candidate_cannot_carry_hidden_evidence() {
+        assert!(serde_json::from_value::<SearchCandidateDetailsResponse>(
+            serde_json::json!({"outcome":"missing"})
+        )
+        .is_ok());
+        assert!(serde_json::from_value::<SearchCandidateDetailsResponse>(
+            serde_json::json!({"outcome":"missing", "snapshot":{}})
+        )
+        .is_err());
+    }
 
     #[test]
     fn search_request_rejects_authority_fields_and_requires_explicit_mode() {
