@@ -631,6 +631,7 @@ fn read_candidates(
 #[cfg(test)]
 pub(crate) mod tests {
     include!("search_details_tests.rs");
+    include!("search_metadata_tests.rs");
     use super::*;
     use crate::test_support::TestNode;
     use fasti_application::{

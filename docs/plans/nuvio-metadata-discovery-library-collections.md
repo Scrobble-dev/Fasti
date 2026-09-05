@@ -730,6 +730,66 @@ Each result opens a real details route without first creating a Record:
 
 Changing title or slug redirects to the canonical Record route. Record URLs never use a provider ID as the durable key.
 
+### M4 atomic candidate-action disposition — 2026-09-05
+
+Create and Attach remain explicit actions. Both reuse the existing
+`AttachIdentifier` authorization, matching provider-backed Record creation today:
+current `IdentityWrite` and a real browser mutation proof or credential. A new
+operation also requires current Search authorization and a valid scoped candidate
+receipt. Do not add Search permission to ordinary identifier attachment or
+fabricate credential context from a browser session. Add `IdempotencyConflict`
+to this existing capability when the operation-bearing action is implemented;
+reuse its existing identity-conflict and missing-target problems. Secondary
+Search errors must be explicitly mapped to permitted action problems.
+
+The normal online action retains exact governed refetch and post-I/O authority
+rechecks. An **explicit cached-evidence action** is also permitted for offline
+operation. This refines the original online-only data-flow shorthand; it does
+not replace online refetch or rescue a failed authorization or invalid provider
+response. Cached action evidence keeps the validated exact identifier, original
+Search response digest, original observation time and freshness boundary, and
+effective locale. It never stamps save time or renews freshness. A historical
+zero-freshness snapshot becomes an initially Stale claim without a new expiry;
+it cannot project fresh. Expired, revoked or mismatched candidate receipts cannot
+start an action in either mode. Title similarity never authorizes identity.
+
+One immediate transaction reauthorizes, resolves the exact target, uses the
+existing namespace/identifier/metadata writers, records the durable result and
+commits. Namespace registration, if required, participates in that transaction;
+it cannot commit separately. Create preserves exact-match reuse behavior; Attach
+cannot redirect an identifier already owned by another Record. No Library intent,
+progress, completion, rating, note, override or Collection state changes are
+implicit in either action.
+
+One durable action-receipt family binds workspace operation uniqueness, actor
+kind, stable actor and attribution client, profile, Create/Attach and explicit
+target, candidate receipt/route and selected evidence mode. The immutable result
+retains the actual Record, action outcome and minimal accepted source provenance,
+including snapshot-versus-refetch basis. Random proposed claim IDs are not proof
+that those IDs were inserted: identical existing claims keep their original IDs.
+Changed operation semantics or actor must conflict, not perform another save.
+
+Reauthorize current identity-mutation authority before every replay. A completed
+exact retry returns its historical result without refetching or requiring the
+ephemeral candidate, its Search grant or current provider configuration. It does
+not assert that the Record is still active or the metadata is freshly fetched.
+Same-client credential rotation and same-subject browser-session rotation retain
+stable actor identity. Sharing a client/profile does not let a different browser
+subject replay another actor's operation.
+
+Durable action evidence needs a new versioned archive stream, not an extension
+of published archive v5 or a disguised observation/metadata-refresh receipt.
+M4 allocates archive v6 for that durable owner; activation must accompany its
+strict exporter/importer, schema-v16 compatibility and historical v1–v5 tests.
+Until that implementation lands, the current archive remains v5 with 34 streams.
+Ephemeral Search pages and candidates remain excluded. A historical browser
+subject ID is typed audit evidence, with no foreign key to excluded accounts or
+sessions; it never recreates authentication or grants. Profile/client/Record
+references remain validated. Recovery creates a new client and human bootstrap
+creates a new subject: neither inherits an imported actor's replay rights.
+Historical operations remain reserved and readable only through authorized
+history; restore must not claim seamless retry as a newly created actor.
+
 Do not make TMDB the only search path.
 
 Direct catalog search must remain available for content that has no TMDB match.
@@ -2145,7 +2205,7 @@ There are **0 critical gaps**: no row is unrescued, untested, and silent.
 | Cross-profile credential or state access | Medium | High | Workspace/profile/connection/grant authorization before lookup and again before commit. |
 | Rotating Nuvio token race | High | High | Durable per-connection lease and token-generation transaction. |
 | Malicious pack/add-on response | High | High | Streaming bounds, depth/node/string caps, schemas, inert imported URLs, separate activation authorization. |
-| Candidate title collision attaches wrong identity | Medium | High | Exact route re-fetch; title similarity cannot authorize attach. |
+| Candidate title collision attaches wrong identity | Medium | High | Exact route re-fetch or explicit authorized cached evidence with the original exact identifier; title similarity cannot authorize attach. |
 | Public catalog leaks private Library data | Medium | High | Explicit publication descriptor, field allowlist, cache partition, negative fixtures. |
 | Idempotency-key replay with stale or changed authority | Medium | High | Server-derived workspace/profile/client/credential/grant/capability/object/lane/revision/digest/restore scope; reject without prior receipt disclosure. |
 | Cursor tampering, long-lived stream leakage, or cross-grant reuse | Medium | High | Integrity-bound scope/epoch digest, browser-safe authentication, bounded recheck, close on every invalidation. |
@@ -2213,7 +2273,7 @@ NEW UX FLOWS
 
 NEW DATA FLOWS
   provider -> claims -> projection
-  candidate -> exact re-fetch -> Record transaction
+  candidate -> exact re-fetch or explicit original cached evidence -> atomic Record transaction
   account state -> connection grant -> profile state
   profile state -> journal/delta -> Nuvio client
   profile state -> approved read projection -> Stremio/local share
