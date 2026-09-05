@@ -5,11 +5,12 @@ use crate::{providers, SqliteKernel};
 use chrono::Duration;
 use fasti_application::{
     ApplicationAccessContext, ApplicationResult, AuthorizedActor, AuthorizedApplicationAccess,
-    CapabilityKey, FastiProblem, OutboundAccessPolicy, PreparedSearchPage, ProblemCode,
-    ReadSearchCandidateRequest, SearchCandidate, SearchCandidateReceipt, SearchPageContext,
-    SearchPageRequest, SearchPersistencePort, SearchReceiptLifetime, SearchReceiptPartition,
-    StoredSearchCandidate, StoredSearchPage, MAX_SEARCH_PAGE_CANDIDATES, SEARCH_FRESH_SECONDS,
-    SEARCH_RECEIPT_SECONDS, SEARCH_STALE_ON_ERROR_SECONDS,
+    CapabilityKey, FastiProblem, OutboundAccessPolicy, PreparedSearchCandidateDetails,
+    PreparedSearchPage, ProblemCode, ProviderCapabilityState, ReadSearchCandidateRequest,
+    SearchCandidate, SearchCandidateReceipt, SearchPageContext, SearchPageRequest,
+    SearchPersistencePort, SearchReceiptLifetime, SearchReceiptPartition, StoredSearchCandidate,
+    StoredSearchPage, MAX_SEARCH_PAGE_CANDIDATES, SEARCH_FRESH_SECONDS, SEARCH_RECEIPT_SECONDS,
+    SEARCH_STALE_ON_ERROR_SECONDS,
 };
 use fasti_domain::{RequestCorrelationId, SearchCandidateReceiptId, Sha256Digest};
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
@@ -52,18 +53,28 @@ fn prepare(
     )
 }
 
-fn prepare_partition(
+fn provider_snapshot(
     transaction: &Transaction<'_>,
-    access: AuthorizedApplicationAccess,
-    context: &SearchPageContext,
+    workspace_id: fasti_domain::WorkspaceId,
+    provider: &str,
+    provider_capability: &str,
     outbound_policy: &OutboundAccessPolicy,
-    terms_revision: &str,
     id: RequestCorrelationId,
-) -> ApplicationResult<PreparedSearchPage> {
-    let state = map_sql(transaction.query_row(
-        &providers::state_select("WHERE workspace_id = ?1 AND provider_id = ?2 AND capability_id = 'metadata.search'"),
-        params![access.workspace_id().to_string(), context.provider()], providers::read_state,
-    ).optional(), CAPABILITY, id)?.ok_or_else(|| failure(ProblemCode::CapabilityUnavailable, id))?;
+) -> ApplicationResult<(ProviderCapabilityState, Sha256Digest)> {
+    let state = map_sql(
+        transaction
+            .query_row(
+                &providers::state_select(
+                    "WHERE workspace_id = ?1 AND provider_id = ?2 AND capability_id = ?3",
+                ),
+                params![workspace_id.to_string(), provider, provider_capability],
+                providers::read_state,
+            )
+            .optional(),
+        CAPABILITY,
+        id,
+    )?
+    .ok_or_else(|| failure(ProblemCode::CapabilityUnavailable, id))?;
     if !matches!(
         state.capability_status(),
         fasti_application::ProviderCapabilityStatus::Available
@@ -75,8 +86,8 @@ fn prepare_partition(
         .validate_identifiers()
         .map_err(|_| failure(ProblemCode::Forbidden, id))?;
     let authority_version: i64 = map_sql(transaction.query_row(
-        "SELECT authority_version FROM provider_capability_states WHERE workspace_id = ?1 AND provider_id = ?2 AND capability_id = 'metadata.search'",
-        params![access.workspace_id().to_string(), context.provider()], |r| r.get(0)
+        "SELECT authority_version FROM provider_capability_states WHERE workspace_id = ?1 AND provider_id = ?2 AND capability_id = ?3",
+        params![workspace_id.to_string(), provider, provider_capability], |r| r.get(0)
     ), CAPABILITY, id)?;
     let configuration = digest(
         &(
@@ -92,6 +103,25 @@ fn prepare_partition(
                 .map(|reference| reference.as_str()),
             outbound_policy,
         ),
+        id,
+    )?;
+    Ok((state, configuration))
+}
+
+fn prepare_partition(
+    transaction: &Transaction<'_>,
+    access: AuthorizedApplicationAccess,
+    context: &SearchPageContext,
+    outbound_policy: &OutboundAccessPolicy,
+    terms_revision: &str,
+    id: RequestCorrelationId,
+) -> ApplicationResult<PreparedSearchPage> {
+    let (state, configuration) = provider_snapshot(
+        transaction,
+        access.workspace_id(),
+        context.provider(),
+        "metadata.search",
+        outbound_policy,
         id,
     )?;
     let mut statement = map_sql(
@@ -384,6 +414,41 @@ impl SearchPersistencePort for SqliteKernel {
         map_sql(transaction.commit(), CAPABILITY, id)?;
         Ok(result)
     }
+
+    fn prepare_search_candidate_details(
+        &self,
+        request: &ReadSearchCandidateRequest,
+    ) -> ApplicationResult<Option<PreparedSearchCandidateDetails>> {
+        let id = request.correlation_id;
+        let mut connection = self
+            .inner
+            .connection
+            .lock()
+            .map_err(|_| failure(ProblemCode::StorageUnavailable, id))?;
+        let transaction = map_sql(connection.transaction(), CAPABILITY, id)?;
+        let access =
+            authorize_application_transaction(&transaction, CAPABILITY, &request.access, id)?;
+        let result = if let Some(candidate) = read_search_candidate(&transaction, request, access)?
+        {
+            let (provider_state, provider_authority_fingerprint) = provider_snapshot(
+                &transaction,
+                access.workspace_id(),
+                candidate.context.provider(),
+                "metadata.read",
+                &request.outbound_policy,
+                id,
+            )?;
+            Some(PreparedSearchCandidateDetails {
+                candidate,
+                provider_state,
+                provider_authority_fingerprint,
+            })
+        } else {
+            None
+        };
+        map_sql(transaction.commit(), CAPABILITY, id)?;
+        Ok(result)
+    }
 }
 
 fn read_search_candidate(
@@ -565,6 +630,7 @@ fn read_candidates(
 
 #[cfg(test)]
 pub(crate) mod tests {
+    include!("search_details_tests.rs");
     use super::*;
     use crate::test_support::TestNode;
     use fasti_application::{
@@ -576,9 +642,13 @@ pub(crate) mod tests {
     use fasti_domain::SearchQuery;
 
     pub(crate) fn state(version: u64) -> ProviderCapabilityState {
+        state_for("metadata.search", version)
+    }
+
+    pub(crate) fn state_for(capability: &str, version: u64) -> ProviderCapabilityState {
         ProviderCapabilityState::try_new(
             ProviderId::try_new("tmdb").unwrap(),
-            ProviderCapabilityId::try_new("metadata.search").unwrap(),
+            ProviderCapabilityId::try_new(capability).unwrap(),
             ProviderCapabilityStatus::Available,
             version,
             CredentialRequirement::BearerToken,

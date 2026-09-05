@@ -1543,6 +1543,13 @@ mod tests {
             .kernel
             .put_provider_capability_state(fixture.workspace_id, crate::search::tests::state(1))
             .unwrap();
+        fixture
+            .kernel
+            .put_provider_capability_state(
+                fixture.workspace_id,
+                crate::search::tests::state_for("metadata.read", 1),
+            )
+            .unwrap();
         let session = create_session(&fixture, &fixture.grants[..2], fixture.grants[0], 0);
         let id = fasti_domain::RequestCorrelationId::new_v7();
         let request = fasti_application::SearchPageRequest {
@@ -1619,6 +1626,12 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(original.receipt, saved.candidates[0]);
+        let prepared = fixture
+            .kernel
+            .prepare_search_candidate_details(&candidate_receipt_read(&created, id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(prepared.candidate, original);
         let rotated = fixture
             .kernel
             .rotate_browser_session(mutation_command(
@@ -1633,6 +1646,19 @@ mod tests {
                 .kernel
                 .read_search_candidate(&candidate_receipt_read(&created, id)),
             ProblemCode::BrowserSessionRevoked,
+        );
+        assert_problem(
+            fixture
+                .kernel
+                .prepare_search_candidate_details(&candidate_receipt_read(&created, id)),
+            ProblemCode::BrowserSessionRevoked,
+        );
+        assert_eq!(
+            fixture
+                .kernel
+                .prepare_search_candidate_details(&candidate_receipt_read(&rotated, id))
+                .unwrap(),
+            Some(prepared.clone())
         );
         assert_eq!(
             fixture
@@ -1658,6 +1684,11 @@ mod tests {
             .read_search_candidate(&candidate_receipt_read(&selected, id))
             .unwrap()
             .is_none());
+        assert!(fixture
+            .kernel
+            .prepare_search_candidate_details(&candidate_receipt_read(&selected, id))
+            .unwrap()
+            .is_none());
         let returned = fixture
             .kernel
             .select_browser_session_profile(SelectBrowserSessionProfileCommand::new(
@@ -1677,6 +1708,13 @@ mod tests {
                 .unwrap(),
             Some(original)
         );
+        assert_eq!(
+            fixture
+                .kernel
+                .prepare_search_candidate_details(&candidate_receipt_read(&returned, id))
+                .unwrap(),
+            Some(prepared)
+        );
         fixture
             .kernel
             .revoke_current_browser_session(mutation_command(
@@ -1692,6 +1730,12 @@ mod tests {
                 .read_search_candidate(&candidate_receipt_read(&returned, id)),
             ProblemCode::BrowserSessionRevoked,
         );
+        assert_problem(
+            fixture
+                .kernel
+                .prepare_search_candidate_details(&candidate_receipt_read(&returned, id)),
+            ProblemCode::BrowserSessionRevoked,
+        );
     }
 
     #[test]
@@ -1704,6 +1748,12 @@ mod tests {
             fixture
                 .kernel
                 .read_search_candidate(&candidate_receipt_read(&expired, id)),
+            ProblemCode::BrowserSessionExpired,
+        );
+        assert_problem(
+            fixture
+                .kernel
+                .prepare_search_candidate_details(&candidate_receipt_read(&expired, id)),
             ProblemCode::BrowserSessionExpired,
         );
         let other_subject = AuthSubjectId::new_v7();
@@ -1736,7 +1786,7 @@ mod tests {
         // only the stable subject differs. A successful miss must retain activity.
         assert!(fixture
             .kernel
-            .read_search_candidate(&candidate_receipt_read(&other, id))
+            .prepare_search_candidate_details(&candidate_receipt_read(&other, id))
             .unwrap()
             .is_none());
         let last_seen: String = fixture
@@ -1760,6 +1810,11 @@ mod tests {
             .unwrap()
                 > fixture.created_at
         );
+        assert!(fixture
+            .kernel
+            .read_search_candidate(&candidate_receipt_read(&other, id))
+            .unwrap()
+            .is_none());
     }
 
     #[test]
