@@ -654,7 +654,7 @@ override-only and empty fields, and corruption despite a winning override.
 Query-plan checks distinguish narrow-key sorting, covering existence reads and
 primary-key payload reads. Increasing a selected field from 256 to 4,096 claims
 does not increase the measured VM work or the eight constant-field scan steps.
-With the final covering read, the bundled-library regression records 40,275
+With the final covering read, the bundled-library regression records 40,787
 VM steps at both depths. The final sparse 10,000-Record Search run remains green:
 p50 1.427837 ms, p95 1.448247 ms, max 1.482007 ms over 100 samples.
 One test agent owned only `metadata_batch_tests.rs`; independent reviews and
