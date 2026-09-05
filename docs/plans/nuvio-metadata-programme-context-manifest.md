@@ -1276,3 +1276,50 @@ composition are still required. Existing parallel maps cover that next step and
 response-header policy; they are preparation, not activated contracts. M4 retains
 v16/archive v6 and all shared surfaces. No M4 PR/merge, v17 allocation or C2
 activation release has occurred. Codex Security remains prohibited.
+
+### M4 exact selector verification and next workfront — 2026-09-05
+
+The complete canonical PR gate passed on clean commit
+`25c5bde0db0d3c16417bba73044ca6d4c259ac2e`, tree
+`9979d8c9cfe42d4608fbd03a8d82492fb6e74a4c`. Both generated local receipts
+identify that exact source: all 27 contract gates and 11 portable gates pass;
+documentation verification passes. The earlier run at 4ed87c7d stopped because
+the mutation sentinel still expected 384 problems; the added ListRecords
+ValidationFailed case correctly makes 385. The assertion was updated, not removed.
+The passing run includes 140 JavaScript tests and full workspace Rust/Clippy.
+This is software verification, not deployed/live-provider or hardware evidence.
+
+Compact parallel allocation continues within this checkpoint:
+
+- Commander: sole shared-surface writer; next integrate host/Workbench exact
+  Record routes, then local/provider Search transport and composition. Preserve
+  committed outage correction and selector results. No M4 merge/release yet.
+- Store agent: completed read-only detail-route map. Retain URL intent across
+  profile-authority resets; clear loaded profile data. Keep selected native
+  RecordSummary.grain for canonical routes rather than inferring it from display
+  mediaKind. Direct selection must be independent of the bounded Library page,
+  tracking permission and Library errors. Guard success/error/finally by route,
+  generation and authority; refresh selected details after metadata changes.
+- Contract agent: completed transport and bounded M5 preparation. Provider page
+  acquisition must be POST with browser mutation proof/CSRF and no automatic
+  retry because cache misses create immutable receipts. Snapshot/details remain
+  GET/read-proof operations. Do not globally require mutation proof for all
+  SearchMetadata operations. Add its existing bounded-JSON problem applicability
+  with the actual POST binding. M5 exact tracking selection can reuse its own
+  profile-state owner and existing key; it does not implement saved intent and
+  has no allocated migration or public API yet.
+- Local-search agent: completed cache-policy and fixture maps. HTTP private is
+  not an account-data classification; the current pinned public-metadata routes
+  remain actor/profile/grant partitioned. Do not turn no-store into zero-TTL disk
+  writes. Response-policy enforcement remains open. Real-store HTTP fixtures can
+  prove offline/cache-hit/CSRF behavior using a counting vault; existing runtime
+  closure tests prove online orchestration separately. Those layers are not one
+  successful online HTTP-to-provider-to-store integration proof. Do not expose
+  private test helpers or weaken production TLS/egress to claim that proof.
+
+Browser route verification must cover legacy and canonical reload, Record 501,
+initial sign-in/profile switch/expiry, reversed responses, missing or malformed
+routes, unavailable tracking, keyboard navigation and status announcements.
+Wrong-grain canonicalization needs an explicit disposition before implementation;
+slug is never identity. No new roadmap, framework, scope reduction or speculative
+production interface is authorized by these read-only maps.
