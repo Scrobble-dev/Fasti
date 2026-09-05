@@ -10,6 +10,8 @@ test("local and receipt-backed provider Search survive a partial source failure"
   await mockAuthenticatedAccess(page);
   await page.addInitScript(() => {
     const receiptId = "scr_01991f588e0070008000000000000001";
+    const duplicateReceiptId = "scr_01991f588e0070008000000000000002";
+    const differentYearReceiptId = "scr_01991f588e0070008000000000000003";
     const candidate = {
       provider: "tmdb",
       provider_id: "693134",
@@ -72,6 +74,19 @@ test("local and receipt-backed provider Search survive a partial source failure"
         writable: true,
         testable: true,
         docs_url: "https://developers.google.com/books/docs/v1/using",
+      },
+      {
+        provider: "tvdb",
+        capability_id: "metadata.search",
+        label: "TVDB",
+        purpose: "Search film and television metadata",
+        credential_requirement: "api_key",
+        credential_state: "valid",
+        state: "available",
+        source: "environment",
+        writable: false,
+        testable: true,
+        docs_url: "https://thetvdb.github.io/v4-api/",
       },
     ];
     const browserWindow = window as typeof window & {
@@ -139,17 +154,40 @@ test("local and receipt-backed provider Search survive a partial source failure"
                 "Google Books Search is temporarily unavailable.",
               );
             }
+            const isDuplicate = input?.provider_id === "tvdb";
             return {
               outcome: "page",
-              provider_id: "tmdb",
+              provider_id: isDuplicate ? "tvdb" : "tmdb",
               page: 1,
-              candidates: [
-                {
-                  candidate_receipt_id: receiptId,
-                  grain: "film",
-                  candidate,
-                },
-              ],
+              candidates: isDuplicate
+                ? [
+                    {
+                      candidate_receipt_id: duplicateReceiptId,
+                      grain: "film",
+                      candidate: {
+                        ...candidate,
+                        provider: "tvdb",
+                        provider_id: "movies/341029",
+                      },
+                    },
+                    {
+                      candidate_receipt_id: differentYearReceiptId,
+                      grain: "film",
+                      candidate: {
+                        ...candidate,
+                        provider: "tvdb",
+                        provider_id: "movies/341030",
+                        release_year: 1984,
+                      },
+                    },
+                  ]
+                : [
+                    {
+                      candidate_receipt_id: receiptId,
+                      grain: "film",
+                      candidate,
+                    },
+                  ],
               next_page: null,
               cache_state: "observed",
               lifetime: {
@@ -232,16 +270,26 @@ test("local and receipt-backed provider Search survive a partial source failure"
   await page.getByRole("button", { name: "Search", exact: true }).click();
 
   await expect(page.getByRole("heading", { name: "Local Dune" })).toBeVisible();
-  const providerResult = page.getByRole("listitem").filter({
-    has: page.getByRole("heading", { name: "Dune: Part Two" }),
-  });
+  const providerResult = page
+    .getByRole("listitem")
+    .filter({
+      has: page.getByRole("heading", { name: "Dune: Part Two" }),
+    })
+    .filter({ has: page.getByText("tmdb", { exact: true }) });
   await expect(providerResult).toBeVisible();
+  await expect(
+    page.getByText("Possible match across 2 results.", { exact: false }),
+  ).toBeVisible();
+  await expect(page.getByText(/Possible match across/)).toHaveCount(1);
+  await expect(
+    page.getByText("Fasti has not merged these candidates."),
+  ).toBeVisible();
   await expect(page.getByRole("alert")).toContainText(
     "Google Books Search is temporarily unavailable.",
   );
   await expect
     .poll(() => page.evaluate(() => window.__SEARCH_PAGE_INPUTS__?.length))
-    .toBe(2);
+    .toBe(3);
 
   await providerResult.getByRole("link", { name: "View details" }).click();
   await expect(page).toHaveURL(
