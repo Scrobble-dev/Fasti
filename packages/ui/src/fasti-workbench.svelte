@@ -858,7 +858,7 @@
   let mediaRecords = $state<MediaRecord[]>([]);
   let recordsLoading = $state(false);
   let recordsProblem = $state<string | undefined>(undefined);
-  let recordsNotice = $state<string>();
+  let recordsNotices = $state<string[]>([]);
   let recordActionProblem = $state<string | undefined>(undefined);
   let recordActionNotice = $state<string | undefined>(undefined);
   let recordsLoaded = false;
@@ -1009,7 +1009,8 @@
     const showLoading = mediaRecords.length === 0;
     if (showLoading) recordsLoading = true;
     recordsProblem = undefined;
-    recordsNotice = undefined;
+    recordsNotices = [];
+    let trackingProblem: string | undefined;
     try {
       const statesPromise = host.listTrackingDispositions
         ? host
@@ -1026,13 +1027,13 @@
             })
             .catch((error) => {
               const detail = hostProblemText(error, "Fasti request failed.");
+              trackingProblem = `Could not load profile tracking state. Records still use their activity fallback. ${detail}`;
               if (
                 generation === recordsGeneration &&
                 trackingReadRevision === trackingRevision
               ) {
                 trackingStates = [];
                 trackingStatesComplete = false;
-                recordsNotice = `Could not load profile tracking state. Records still use their activity fallback. ${detail}`;
               }
               return { states: [], truncated: false };
             })
@@ -1042,18 +1043,20 @@
         statesPromise,
       ]);
       if (generation !== recordsGeneration) return false;
-      recordsNotice =
-        [
-          recordsNotice,
-          recordPage.truncated
-            ? "Only the first 500 records are shown. Additional records remain stored."
-            : undefined,
-          statePage.truncated
-            ? "Only the first 500 profile tracking states are shown. Additional states remain stored."
-            : undefined,
-        ]
-          .filter(Boolean)
-          .join(" ") || undefined;
+      if (recordPage.truncated) {
+        recordsNotices.push(
+          "Only the first 500 records are shown. Additional records remain stored.",
+        );
+      }
+      if (trackingReadRevision === trackingRevision && trackingProblem) {
+        recordsNotices.push(trackingProblem);
+      } else if (
+        trackingReadRevision === trackingRevision && statePage.truncated
+      ) {
+        recordsNotices.push(
+          "Only the first 500 profile tracking states are shown. Additional states remain stored.",
+        );
+      }
       const dispositions = new Map(
         trackingStates.map((state) => [state.record_id, state.disposition]),
       );
@@ -1084,7 +1087,7 @@
     recordsLoaded = false;
     recordsLoading = false;
     recordsProblem = undefined;
-    recordsNotice = undefined;
+    recordsNotices = [];
     trackingStates = [];
     trackingStatesComplete = false;
     recordActionProblem = undefined;
@@ -1662,8 +1665,12 @@
 </script>
 
 {#snippet recordStatus()}
-  {#if recordsNotice && !recordActionNotice}
-    <p class="alert alert-info" role="status">{recordsNotice}</p>
+  {#if recordsNotices.length && !recordActionNotice}
+    <div class="alert alert-info d-block" role="status">
+      {#each recordsNotices as notice}
+        <p class="m-0">{notice}</p>
+      {/each}
+    </div>
   {/if}
   {#if recordsLoading}
     <p class="record-load-status alert alert-info" role="status">

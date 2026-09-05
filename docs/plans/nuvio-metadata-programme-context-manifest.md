@@ -3439,3 +3439,33 @@ must be preserved in the next normal merge into the published M4 branch; no
 history rewriting is authorized. This merge is still pending a clean M4 tree.
 M4 retains schema 17/archive 7 and all previously recorded acceptance gaps.
 No next-migration allocation or shared-runtime release occurred.
+
+### 2026-09-05 — Browser race and reflow correction verified
+
+After Access released the browser slot, the 320 px Library regression passed
+with all ten filter controls visible, zero horizontal overflow and zero Axe
+violations. Actual before/after screenshots were inspected. The deferred tracking
+fixtures initially returned an invalid truncated exact-Record response; the
+production selector correctly rejected it. That fixture error was corrected
+before recording two meaningful RED failures: each obsolete tracking notice was
+visible after a newer confirmed tracking mutation, while Record truncation was
+still correctly present.
+
+Workbench now retains a tracking failure locally and publishes tracking notices
+only while both the Record-load generation and tracking revision remain current.
+Record truncation is independent. Notices use separate paragraphs in the existing
+Tabler alert. All 24 affected browser tests passed in
+`.gstack/qa-reports/m4-review-race-green`, including both RED/GREEN races, prior
+exact-detail/profile-lifetime tests and local/partial provider Search. This is
+browser presentation evidence, not a real-provider or SQLite end-to-end claim.
+Only the two new regression files were extended; existing tests were not changed.
+
+Read-only M5 preparation confirmed that local Search uses Search authorization
+and active Record identity, not saved/progress/watched/rating predicates. The
+existing Library projection infers `plan_to_watch` from no activity, although
+approved semantics forbid deriving saved intent from Record existence. M4's
+local-Record wording correction and M5's independent authored state remain
+required. Reuse existing `profile_state` owners and the prepared exact tracking
+selector; do not turn Search cursors/action receipts into Library state. Native
+Collection membership is still the required M7 prerequisite for the full M5
+Collection filter, not the raw Nuvio settings envelope.
