@@ -1037,3 +1037,12 @@ Focused authored-contract checks pass: 45 tests, including 23 new archive
 regressions for v3–v6 versions, missing/reordered streams, stale checksums,
 correctly rechecksummed changed prefixes, external references and malformed
 schema compilation. Scoped formatting and the full formatting gate pass.
+
+The next exact run passed those checks and typechecking, then exposed one stale
+generated-contract inventory expectation: AttachIdentifier's authored
+IdempotencyConflict makes 384 canonical problems, not 383. The fixed-count
+sentinel is updated to that verified single policy addition; it is not removed
+or replaced with a permissive bound. Other 138 mutation/SDK checks passed in that
+run; no complete verification receipt was emitted. Public Search action wiring
+must also review the shared conflict next-action wording, which still mentions
+an observation despite its existing metadata/Search uses.
