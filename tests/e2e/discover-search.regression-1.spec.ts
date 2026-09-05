@@ -27,6 +27,25 @@ test("local and receipt-backed provider Search survive a partial source failure"
       source,
       is_stale: false,
     });
+    const localRecord = {
+      record_id: "rec_01991f588e0070008000000000000001",
+      grain: "film",
+      status: "active",
+      title: field("Local Dune", "manual"),
+      poster: field(null),
+      original_title: field(null),
+      overview: field(null),
+      release_year: field("1984", "manual"),
+      identifiers: [],
+      latest_activity: null,
+      poster_asset_path: null,
+    };
+    const createdRecord = {
+      ...localRecord,
+      record_id: "rec_01991f588e0070008000000000000002",
+      title: field("Dune: Part Two", "tmdb"),
+      release_year: field("2024", "tmdb"),
+    };
     const providers = [
       {
         provider: "tmdb",
@@ -57,11 +76,13 @@ test("local and receipt-backed provider Search survive a partial source failure"
     ];
     const browserWindow = window as typeof window & {
       __SEARCH_PAGE_INPUTS__?: unknown[];
+      __SEARCH_ACTION_INPUTS__?: unknown[];
       __TAURI_INTERNALS__: {
         invoke: (command: string, arguments_?: unknown) => Promise<unknown>;
       };
     };
     browserWindow.__SEARCH_PAGE_INPUTS__ = [];
+    browserWindow.__SEARCH_ACTION_INPUTS__ = [];
     browserWindow.__TAURI_INTERNALS__ = {
       invoke: async (command, arguments_) => {
         switch (command) {
@@ -90,28 +111,20 @@ test("local and receipt-backed provider Search survive a partial source failure"
             };
           case "provider_credential_status":
             return providers;
-          case "list_records":
+          case "list_records": {
+            const recordId = (arguments_ as { query?: { record_id?: string } })
+              ?.query?.record_id;
+            return {
+              records:
+                recordId === createdRecord.record_id ? [createdRecord] : [],
+              truncated: false,
+            };
+          }
           case "list_reviews":
-            return command === "list_records"
-              ? { records: [], truncated: false }
-              : [];
+            return [];
           case "search_records":
             return {
-              records: [
-                {
-                  record_id: "rec_01991f588e0070008000000000000001",
-                  grain: "film",
-                  status: "active",
-                  title: field("Local Dune", "manual"),
-                  poster: field(null),
-                  original_title: field(null),
-                  overview: field(null),
-                  release_year: field("1984", "manual"),
-                  identifiers: [],
-                  latest_activity: null,
-                  poster_asset_path: null,
-                },
-              ],
+              records: [localRecord],
               next: null,
             };
           case "search_provider_page": {
@@ -150,14 +163,26 @@ test("local and receipt-backed provider Search survive a partial source failure"
           }
           case "read_search_candidate":
             return {
-              outcome: "refetched_without_snapshot",
-              candidate_receipt_id: receiptId,
-              provider_id: "tmdb",
-              grain: "film",
+              outcome: "refetched",
+              snapshot: {
+                receipt: {
+                  candidate_receipt_id: receiptId,
+                  grain: "film",
+                  candidate,
+                },
+                lifetime: {
+                  created_at: "2026-09-05T12:00:00Z",
+                  fresh_until: "2026-09-05T12:02:00Z",
+                  stale_until: "2026-09-05T12:10:00Z",
+                  expires_at: "2026-09-06T12:00:00Z",
+                },
+                locale: "en-US",
+              },
               details: { ...candidate, overview: "Expanded provider details." },
               locale: "en-US",
             };
           case "save_search_candidate": {
+            browserWindow.__SEARCH_ACTION_INPUTS__?.push(arguments_);
             const request = (
               arguments_ as {
                 input?: {
@@ -218,16 +243,50 @@ test("local and receipt-backed provider Search survive a partial source failure"
     .poll(() => page.evaluate(() => window.__SEARCH_PAGE_INPUTS__?.length))
     .toBe(2);
 
-  await providerResult.getByRole("button", { name: "View details" }).click();
+  await providerResult.getByRole("link", { name: "View details" }).click();
+  await expect(page).toHaveURL(
+    `/explore/tmdb/film/scr_01991f588e0070008000000000000001/dune-part-two`,
+  );
   await expect(
-    providerResult.getByText("Expanded provider details."),
+    page.getByRole("heading", { name: "Dune: Part Two", level: 1 }),
   ).toBeVisible();
-  await providerResult.getByRole("button", { name: "Create Record" }).click();
+  await expect(page.getByText("Expanded provider details.")).toBeVisible();
+
+  await page.getByRole("button", { name: "Back to Search" }).click();
+  await expect(page).toHaveURL("/discover");
+  await expect(page.getByRole("heading", { name: "Local Dune" })).toBeVisible();
+  await providerResult.getByRole("link", { name: "View details" }).click();
+
+  await page.reload();
   await expect(
-    providerResult.getByRole("button", { name: "Record ready" }),
-  ).toHaveAttribute("aria-disabled", "true");
+    page.getByRole("heading", { name: "Dune: Part Two", level: 1 }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Create Record" }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const input = window.__SEARCH_ACTION_INPUTS__?.at(-1) as
+          { input?: { request?: { evidence_mode?: string } } } | undefined;
+        return input?.input?.request?.evidence_mode;
+      }),
+    )
+    .toBe("refetch");
+  await expect(page).toHaveURL(
+    `/records/film/rec_01991f588e0070008000000000000002/dune-part-two`,
+  );
   await page.screenshot({
     path: ".gstack/qa-reports/screenshots/discover-search-verified.png",
     fullPage: true,
   });
+
+  await page.goto(
+    "/explore/tmdb/film/scr_01991f588e0070008000000000000001/old-title",
+  );
+  await expect(page).toHaveURL(
+    `/explore/tmdb/film/scr_01991f588e0070008000000000000001/dune-part-two`,
+  );
+  await page.goto("/explore/tmdb/film/not-a-receipt/title");
+  await expect(page.getByRole("alert")).toContainText(
+    "This candidate link is invalid.",
+  );
 });

@@ -36,6 +36,7 @@
   import { hostProblemText } from "./host-problem.js";
   import { newOperationId } from "./operation-id.js";
   import { projectRecordSummary } from "./record-projection.js";
+  import { routeSlug, type SearchCandidateRoute } from "./route-slug.js";
   import type {
     ActiveNavSection,
     AccessProjectionResponse,
@@ -266,7 +267,38 @@
       settingsTab = settingsTabFromPath(path);
       return "settings";
     }
-    if (path === "/discover") return "discover";
+    if (path === "/discover") {
+      candidateRoute = undefined;
+      candidateRouteProblem = undefined;
+      return "discover";
+    }
+    if (path.startsWith("/explore/")) {
+      candidateRoute = undefined;
+      candidateRouteProblem = undefined;
+      const segments = path.split("/");
+      try {
+        if (segments.length !== 6 || !segments[5])
+          throw new Error("Invalid candidate route");
+        const providerId = decodeURIComponent(segments[2]);
+        const grain = decodeURIComponent(segments[3]);
+        const candidateReceiptId = decodeURIComponent(segments[4]);
+        const slug = decodeURIComponent(segments[5]);
+        if (
+          !/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(providerId) ||
+          !/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(grain) ||
+          !/^scr_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/.test(
+            candidateReceiptId,
+          ) ||
+          !slug
+        )
+          throw new Error("Invalid candidate route");
+        candidateRoute = { providerId, grain, candidateReceiptId, slug };
+      } catch {
+        candidateRouteProblem =
+          "This candidate link is invalid. Start a new Search.";
+      }
+      return "discover";
+    }
     if (path === "/reconciliation" || path === "/reviews")
       return "reconciliation";
     if (path === "/library") return "library";
@@ -308,6 +340,8 @@
   let selectedRecordId = $state<string | null>(null);
   let detailRouteProblem = $state<string>();
   let selectedRecordTab = $state<"overview" | "sources">("overview");
+  let candidateRoute = $state<SearchCandidateRoute>();
+  let candidateRouteProblem = $state<string>();
 
   // A prior session's localStorage predates nav items or context-menu items
   // added since (e.g. "settings", "connections") -- without this, those
@@ -514,6 +548,10 @@
 
   function select(section: Section): void {
     mobileNavigationOpen = false;
+    if (section === "discover") {
+      candidateRoute = undefined;
+      candidateRouteProblem = undefined;
+    }
     activeSection = section;
     if (section !== "first_run") accessCallbackMarker = undefined;
     if (typeof window === "undefined") return;
@@ -840,16 +878,32 @@
   let metadataProjectionGeneration = 0;
 
   function canonicalRecordPath(summary: RecordSummary): string {
-    const slug =
-      (summary.title.value ?? "record")
-        .normalize("NFKD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-|-$/g, "")
-        .slice(0, 120)
-        .replace(/-$/g, "") || "record";
-    return `/records/${encodeURIComponent(summary.grain)}/${summary.record_id}/${slug}`;
+    return `/records/${encodeURIComponent(summary.grain)}/${summary.record_id}/${routeSlug(summary.title.value ?? "record")}`;
+  }
+
+  function canonicalCandidatePath(receipt: SearchCandidateReceiptDto): string {
+    return `/explore/${encodeURIComponent(receipt.candidate.provider)}/${encodeURIComponent(receipt.grain)}/${receipt.candidate_receipt_id}/${routeSlug(receipt.candidate.title)}`;
+  }
+
+  function openSearchCandidate(receipt: SearchCandidateReceiptDto): void {
+    candidateRoute = {
+      providerId: receipt.candidate.provider,
+      grain: receipt.grain,
+      candidateReceiptId: receipt.candidate_receipt_id,
+      slug: routeSlug(receipt.candidate.title),
+    };
+    candidateRouteProblem = undefined;
+    activeSection = "discover";
+    const path = canonicalCandidatePath(receipt);
+    if (window.location.pathname !== path)
+      window.history.pushState({}, "", path);
+    window.requestAnimationFrame(() =>
+      document.getElementById("candidate-detail-title")?.focus(),
+    );
+  }
+
+  function closeSearchCandidate(): void {
+    window.history.back();
   }
 
   function clearDetailState(): void {
@@ -1213,14 +1267,29 @@
     receipt: SearchCandidateReceiptDto,
     offline: boolean,
   ): Promise<SearchCandidateDetailsResponse> {
+    return readSearchCandidateRoute(
+      {
+        providerId: receipt.candidate.provider,
+        grain: receipt.grain,
+        candidateReceiptId: receipt.candidate_receipt_id,
+        slug: routeSlug(receipt.candidate.title),
+      },
+      offline,
+    );
+  }
+
+  async function readSearchCandidateRoute(
+    route: SearchCandidateRoute,
+    offline: boolean,
+  ): Promise<SearchCandidateDetailsResponse> {
     if (!canAccessProfileData || !host.readSearchCandidate) {
       throw new Error("Sign in before reading provider details.");
     }
     const authorityIdentity = profileAuthorityIdentity;
     const result = await host.readSearchCandidate(
-      receipt.candidate.provider,
-      receipt.grain,
-      receipt.candidate_receipt_id,
+      route.providerId,
+      route.grain,
+      route.candidateReceiptId,
       offline,
     );
     if (authorityIdentity !== profileAuthorityIdentity) {
@@ -1795,6 +1864,14 @@
               : undefined}
             onReadCandidate={canAccessProfileData && host.readSearchCandidate
               ? readSearchCandidate
+              : undefined}
+            {candidateRoute}
+            {candidateRouteProblem}
+            onOpenCandidate={openSearchCandidate}
+            onCloseCandidateRoute={closeSearchCandidate}
+            onReadCandidateRoute={canAccessProfileData &&
+            host.readSearchCandidate
+              ? readSearchCandidateRoute
               : undefined}
           />
         {/key}
