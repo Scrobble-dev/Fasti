@@ -4147,3 +4147,79 @@ Parallel preparation remains read-only and attached to this checkpoint:
 These preparations do not authorize multiple shared writers, reduce scope,
 allocate migration18, or claim M4 complete. Commander owns the active integration;
 future M5/M8/M9a/M11a lanes retain their predecessor and ownership gates.
+
+### M4 bounded identifier hydration and navigation evidence — 2026-09-06
+
+This continuation makes implementation progress after the tooling-only user
+reaffirmation. Published base remains `cffd0a84af071760597a620eee2d4efb06d9aa31`,
+tree `b2b1c141fc85cf96e4a3384076f4ee342b631cff`. Its clean 27-contract/11-portable
+receipts were inspected again and all gates pass with exit 0. That resolves the
+earlier formatting-failed attempt recorded above; those receipts do not certify
+the later changes described here.
+
+Search now calls the existing complete-identifier batch reader once when a page
+fits. Overflow uses at most eight bounded prefix probes for 100 matching Records;
+it retains complete identifier vectors and resumes after the last admitted
+Record, including originally-final pages. No payload sort, index, migration,
+capability or production dependency was added. The shared identifier owner also
+reuses a lazily built lookup of already-validated selected Record IDs rather than
+allocating/decoding a Record ID for every identifier row. It retains workspace,
+active-Record, namespace/grain, byte-budget and ordering checks. Its existing
+selection bound remains 500; Search passes at most 100.
+
+The test-only SQLite trace feature counts actual completed identifier statements,
+including prepared-cache reuse, with serialized per-connection setup and unwind
+cleanup. Tests prove zero statements for no matches, one for a full fitting page,
+and at most eight for overflow. Additional evidence covers a 37/100 complete
+prefix with no skipped/duplicated continuation and indexed hydration of 100
+selected Records beside 10,000 unrelated Records/identifiers, with zero full-scan
+steps and zero SQLite sorts.
+
+Verified on this working increment:
+
+- Full `fasti-store` library: 473 passed, six explicitly ignored; strict
+  all-target store clippy and formatting/diff checks pass.
+- Focused Search store suite before the shared decoding optimization: 24 passed,
+  one release fixture ignored; the later full suite includes those same checks.
+- Forty ordinary Chromium Search/Attach/Record regressions pass. The three new
+  held-response cases cover candidate A-to-B, candidate route exit and pending
+  Search route exit. This is stale-result isolation, not network cancellation.
+- Release 10,000-Record fixture: both observed-policy modes pass the unchanged
+  p95 below 250 ms gate. Baseline p95 is 16.33/18.06 ms, identifier-populated
+  full-fit p95 14.53/15.03 ms, and dense complete-identifier overflow p95
+  155.41/139.14 ms. Each scenario has five warmups and 100 measured samples.
+  The test process peaks at 22,064 KiB RSS; this is not whole-daemon or packaged
+  runtime memory acceptance. Measurement used ordinary host activity, not an
+  isolated-host claim. No quiet resource reservation remains.
+- Independent native review of batching, actual query counting and the shared
+  typed-ID lookup is clear. Existing unrelated advisory debt is not erased.
+
+Failed diagnostic attempts remain explicit: a build caught an intermediate test
+edit that reacquired its held connection mutex; only that owned stalled test was
+terminated, and frozen-source reruns pass. The first dense fixture query collided
+with preceding substring postings; its label was corrected, not Search behavior.
+The original repeated-ID-decoding implementation then measured 291.77 ms p95
+under host contention and failed. The unchanged threshold passes after the
+shared-reader optimization; no failed run is presented as acceptance.
+
+Parallel allocation stayed file-exact: commander owned both production readers
+and integration; one agent owned bounds tests, one the navigation/performance
+test leaf, and one the test-only trace leaf. Independent review and next-slice
+preparation were read-only. No concurrent production writer was introduced.
+
+The next M4 details contract is recorded in the canonical plan: true no-store
+results require full details on a distinct live coordinate route ending in the
+literal `candidate`. Do not persist a provider-derived title slug or invent an
+SCR. Reuse existing provider mapping, metadata.search authority, metadata.read
+provider snapshot and governed fetch, with post-I/O authority recheck and no
+durable writes. Decode coordinates once and let the provider mapping own grammar.
+The upcoming API/SDK/host/Workbench implementation must prove reload, offline
+before network/vault access, invalid/mismatched identity, changed authority and
+unchanged explicit Create/Attach actions. This preparation is not implementation
+evidence or permission for another shared writer.
+
+Exact committed-head canonical/runtime delivery gates follow this increment.
+PR128 remains open; all ten domain filters, retained/live continuation, live
+details, cancellation, public-provider acceptance and remaining M stages stay in
+scope. M4 retains schema17/archive7/shared surfaces; no migration18 or ownership
+handoff is made. The permanent tooling exclusion at the top remains controlling.
