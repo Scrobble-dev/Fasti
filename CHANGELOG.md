@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - B8b non-publishing release-readiness evidence: per-architecture checksums, CycloneDX SBOM (Rust and npm), an in-toto/SLSA-shaped provenance statement, a `cargo-deny` final security review, a manual rollback runbook, and mechanical release-notes extraction, gated behind a fail-closed `cargo xtask test milestone --body B8b`.
 - `cargo-deny` (`deny.toml`) license, advisory, and source policy for the main workspace and the isolated Tauri benchmark shell.
 - Exact TrailBase `v0.33.5` native and OCI development packaging, private lifecycle operations, full-depot backup and restore, hermetic account/social/TOTP conformance, combined resource enforcement, and a test-only `v0.33.4` adjacent upgrade and rollback fixture.
+- Checked domain/application models for named clients, personal access tokens, consent revisions, bounded inventories, and one-time issuance results. These are an internal [C2 foundation](docs/plans/fasti-access-c2-foundation.md), not callable token or client-administration operations.
 
 ### Changed
 
@@ -42,6 +43,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Replaced hypothetical physical-device B1 qualification with same-attempt x86_64 and aarch64 cgroup-v2 envelope evidence while preserving the governed memory, CPU, and timing budgets.
 - Made unavailable workbench actions fail closed and removed sample media state from product surfaces.
 - Kept TrailBase account and OAuth routes loopback-only because the pinned release accepts unsafe protocol-relative redirects; the exact limitation and recovery action are part of Access B conformance evidence.
+- Recorded merged ordinary-browser C1 delivery across the status guides while keeping packaged Tauri authentication and public-release support unclaimed.
+- Retained the exact licence text and a version-specific licence exception for the already-locked `webpki-root-certs 1.0.9` dependency; no dependency version changed.
 
 ### Fixed
 
@@ -50,6 +53,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Recovered the capability policy source after a malformed formatting-only write; the recovery changed no behavior.
 - Made the local developer launcher track and stop only the process groups it starts.
 - Canonicalized unknown web routes to the workbench root.
+- Rejected wrong-kind identifiers during typed deserialization and used the existing zeroization dependency for owned secret cleanup.
+- Resolved two Nuvio application-reference links so warning-denied Rust documentation builds pass.
 
 ### Removed
 
