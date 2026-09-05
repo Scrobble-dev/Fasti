@@ -1873,3 +1873,54 @@ packaged-host behavior. It adds no dependency, schema or archive change. Rollbac
 must retain restriction-aware readers/actions; prefer forward correction and do
 not erase user Records or durable action history. M4 retains v16/archive v6 and
 shared integration ownership; no v17 or C2 activation release is granted.
+
+### 2026-09-05 — Candidate exact gate and explicit v17/v7 allocation
+
+Candidate-policy commit `e675fde2e23451ac356a63825c4c0d90e695bbdb`, tree
+`3315db74d81142129b4100b52304c913020356f6`, passed the complete canonical PR
+gate. Both receipts were machine-checked against that exact clean source:
+27/27 contract and 11/11 portable checks, each passing with exit 0. The canonical
+SDK inventory passed 292 checks. This later checkpoint documentation is not part
+of that tested tree. No old receipt is transferred to a newer source.
+
+Access explicitly confirmed no competing owner and allocated **append-only
+migration v17 and archive v7 to M4**. Preserve v16/v6 and all earlier published
+bytes. The Access programme's next migration is **v18**, conditional on M4's
+exact merged commit/tree and explicit shared-file handoff. Access remains
+read-only. This supersedes only the previous v16-only allocation, not any
+programme gate, scope or preservation requirement. No schema/archive write has
+yet occurred for this allocation; M4 is still local, unmerged and without a PR.
+
+Next-writer preparation is complete and read-only:
+
+- **Application/runtime:** carry required response-wide policy in existing
+  provider commit commands; do not duplicate it per field or overload provenance.
+  Empty responses and the existing separate rating batch need the same gate.
+  Pair refetched Search fields with their actual policy; Cached mode derives it
+  from the reauthorized receipt. Preserve original Search expiry and observation.
+  Validate the entire batch after current authorization/completed replay but
+  before the first namespace, Record, identifier, claim or receipt payload write.
+- **Store:** the existing immutable `metadata_claims` registry can carry bounded
+  nullable policy JSON without a new table. Validate new provider admission
+  before `write_field_claim_inner` inserts the payload, not only before its
+  later registry INSERT. NULL remains explicit unknown history, not invented
+  upstream permission. Preserve user overrides and define same-source
+  supersession before filtering so a denied newest claim cannot expose an older
+  permissive response. Single and batched Record projections must agree.
+- **Migration/archive:** append v17 and pin a genuine v16 schema fingerprint.
+  Keep the existing 35-entity v6 list frozen; v7 adds no entity. Carry archive
+  version through the existing stream selection, row decoder and post-import
+  re-export verifier. Formats through v6 retain the five-column MetadataClaims
+  row; v7 carries policy. Merely accepting absent input is insufficient: emitting
+  a new null during exact old-stream verification would break compatibility.
+  Prove populated v16-to-v17 upgrade and real v6-to-v17 restore with unchanged
+  Records, claims, Search action history and revisions; reject crossed versions,
+  forged fingerprints and malformed policy. Policy-bearing rows must be checked
+  in the existing bounded preflight if rejection is to precede staged payload
+  admission: field streams arrive before the claim registry during import, and
+  restore staging uses DELETE journaling rather than WAL.
+
+No new adapter, queue, cache service or roadmap is introduced by this preparation.
+M5 remains a read-only next lane; it cannot reuse Search receipt actions as
+Library intent. The commander remains the sole integration writer. Codex Security
+remains prohibited, and no packaged authentication investigation is in scope.
