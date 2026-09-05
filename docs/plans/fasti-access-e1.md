@@ -64,8 +64,10 @@ token-printing examples into Fasti.
 The qualification harness should first test `default-features = false` with a
 custom in-memory HTTP client. This is a candidate feature profile, not a changed
 workspace dependency. Production TLS/HTTP must reuse the governed transport after
-its POST/error-boundary review. Transitive licences, advisories, secret custody,
-resource use and complete feature/lock resolution remain unqualified.
+its POST/error-boundary review. The harness README records the resolved-graph
+licence check and an unresolved RSA advisory; neither approves runtime adoption.
+Secret custody, resource use and full production feature/lock qualification
+remain open.
 
 | Requirement | Exact source finding | Qualification obligation |
 | --- | --- | --- |
@@ -186,9 +188,9 @@ The minimum eventual integration is the existing transport's governed POST and
 bounded/redacted request conversion plus its existing ceremony owner. It is not
 another OAuth engine, DNS resolver, HTTP pool, scheduler or session platform.
 
-### Next isolated check segment
+### Completed isolated check segment
 
-Before Q2 transport integration, extend only the existing qualification harness:
+Before Q2 transport integration, the isolated harness was extended to
 verify the exact token POST and PKCE/client/redirect form, missing-ID-token caller
 obligation, one request on lost-response failure, retained vendor error bodies,
 and user-info subject matching against verified ID-token claims. Use synthetic
@@ -197,6 +199,22 @@ transport policy, token store, custom protocol or network service. A passing
 wire-shape check cannot prove credential-read ordering or production erasure.
 Run the same isolated offline/network-namespace, lint and independent-review
 checks, then record exact source and remaining Q1/Q2 obligations.
+
+### A+C integration test reuse — read-only preparation
+
+The 2026-09-05 parallel preparation review mapped existing owners on base
+`62e10d2e`; it changed no UI and ran no browser tests. Extend the existing
+`packages/ui/src/account-security-view.svelte` and
+`tests/e2e/access-c1.spec.ts` after M4 releases shared files.
+
+| Required behavior | Existing owner to extend | Remaining proof |
+| --- | --- | --- |
+| Permanent A, separate resumable C | `task_map` / `first_run`, server-projected `firstIncompleteStep`; A/C separation test | OIDC linking resumes only confirmed server state; no second wizard store. |
+| Leave versus cancel | Existing preserve-versus-cancel test and completion notice focus | Real ceremony cancellation and expired/lost callback behavior, not fixture DELETE alone. |
+| Failure and recovery | Persistent problem/next-action UI and stale-result tests | Denied linking, provider outage and expired recent authentication preserve safe state. |
+| Named Authentik management | Existing visible external-identity region | Implement the planned states/actions through real management authority; its current unavailable control is not management support. |
+| Remove management credential | Canonical section 14's separate OIDC and management ownership | `Manual management` preserves OIDC/public discovery; repair is unavailable, not falsely reported complete. Removal is not disconnect or account deletion. |
+| Keyboard and accessibility | Existing focus/target helpers, theme/reflow/Axe matrix and shell skip-link | Extend to new controls; real accessible-authentication journeys and clause evidence remain required. Fixture/Axe passes alone do not establish conformance. |
 
 Intake performed: official sparse-index identity matched archive SHA-256; nine
 selected source files were compared byte-for-byte with archive members, including

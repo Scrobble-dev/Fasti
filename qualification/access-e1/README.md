@@ -56,12 +56,59 @@ Rust `1.96.0 (ac68faa20 2026-05-25)`; Cargo `1.96.0 (30a34c682 2026-05-25)`.
 
 | Input | SHA-256 |
 | --- | --- |
-| `Cargo.toml` | `bc7a15fd6aff0fc9678bd3151304fc9d41529ee5c5597bad1276df220079fe95` |
+| `Cargo.toml` | `b7b1c9d658adf8897dab86ee3b043e1d17ad2d8e1d01beae2d6ec9ef13d68016` |
 | `Cargo.lock` | `695a432152097118ddd6d97678c07fde9fc472e111aa686e571eeb223e692ee3` |
 | `qualification.rs` | `48ebfb322e80d9843729a5c339d991b3a16a1d867f3a37b12b73425efe1cb81a` |
 | `token_rejection.rs` | `45bb6bde0d75ba2215d7b55748a326ebe12b2dd38e5bb7d983f07fb603dbb48c` |
 | `synthetic-test-key.pem` | `20a63565470ef8c42e48675edd8478c3d2c9c3e9cb727702a64adc48c98660f4` |
 | `synthetic-rotation-key.pem` | `d2604c19f88ee96466dce9e6f702516d21a303d78a1f9c7920d69a9b72f00774` |
+
+## Dependency and delivery checks
+
+The 2026-09-05 independent full-diff review at `c09e2c5c` found no
+actionable test or evidence-consistency issue. Subsequent dependency checks
+found the harness's missing licence declaration. It now declares the same
+`AGPL-3.0-or-later` licence as Fasti; no dependency version or lock changed.
+The combined 19 tests, strict Clippy and formatting passed after this correction.
+
+Run the existing dependency policy with test-dependency licence coverage enabled:
+
+```zsh
+cargo deny --locked --offline --manifest-path qualification/access-e1/Cargo.toml \
+  --config <(sed '/^\[licenses\]$/a include-dev = true' deny.toml) \
+  check licenses bans sources --show-stats
+cargo audit --file qualification/access-e1/Cargo.lock --json
+```
+
+The first command derives a stricter policy in memory; it does not edit the root
+policy or add exceptions. With cargo-deny `0.20.2`, licence checks exclude
+dev-dependencies by default, even when the graph includes them. The explicit
+check passed: licences zero errors, seven unused-policy warnings and 147 notes;
+bans and sources zero errors or warnings. This covers its 147-crate resolved
+graph, not every optional package in the 180-package lock inventory.
+
+**The advisory audit is not green.** It exited 1 for `rsa 0.9.10`,
+[RUSTSEC-2023-0071](https://rustsec.org/advisories/RUSTSEC-2023-0071.html).
+The fetched advisory database was commit
+`5a0ebedfe8bdd2e295b171f4162f8c977bcad9a5`; no patched version was listed.
+The harness signs only with the two public synthetic fixtures and starts no
+listener. There is no private installation/person key to recover here.
+That limits this test package's exposure; it does not fix the dependency,
+approve production use, or justify suppressing the advisory. No ignore was added.
+Independent CSO diff review traced reachable RSA private-key operations during
+test signing; it did not find a concrete exploit against this public-fixture,
+listener-free package. Reassess key custody and exposure before runtime adoption.
+This scoped AI-assisted review is not a professional security audit.
+
+The first canonical `cargo xtask test pr` run stopped in four existing snapshot
+tests: SQLite refused the symlinked `/home/ryan/.cache/tmp` path with `CannotOpen`
+(extended code 1550). The unchanged store suite passed with the physical path:
+`TMPDIR=/mnt/secondary-ssd/cache/home/tmp cargo test --locked --offline -p fasti-store --lib --quiet`
+(291 passed, zero failed, three ignored). No SQLite flag or source changed.
+On rerun, the contract subprocesses passed, but the receipt writer correctly
+refused the uncommitted licence/documentation changes. Commit the coherent slice
+and rerun on clean source. The complete canonical gate remains pending; focused
+results do not replace it. No PR, merge or production support follows from this record.
 
 ## What these checks establish
 
