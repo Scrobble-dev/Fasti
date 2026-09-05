@@ -1924,3 +1924,78 @@ No new adapter, queue, cache service or roadmap is introduced by this preparatio
 M5 remains a read-only next lane; it cannot reuse Search receipt actions as
 Library intent. The commander remains the sole integration writer. Codex Security
 remains prohibited, and no packaged authentication investigation is in scope.
+
+### 2026-09-05 — v17/archive v7 carrier and exact verification
+
+Committed carrier implementation `9012d8fa2191920b1e41512b122ab567443e7abd`
+and its generator-format ownership correction
+`48e90c020af8ce3acd16b98a47dd803b4dfe1b7c`, tree
+`8c5e50320ba45c7b785c5a873347aa4a7dad2178`. The latter exact clean head passed
+`TMPDIR=/mnt/secondary-ssd/cache/home/tmp PKG_CONFIG=/usr/bin/pkg-config cargo xtask test pr`.
+Both receipts were machine-checked for source commit/tree, dirty=false, exact
+gate count, and every pass/exit 0: 27 contract and 11 portable gates. Its workspace
+test output includes 419 store tests passed and 5 expected subprocess helpers
+ignored; the JavaScript contract/SDK inventory passed 297 checks. This later
+checkpoint is documentation, not part of that tested tree. The first carrier
+gate stopped on formatting; the correction extends the existing generated-file
+ownership exclusion to v7 and formats the authored validator. No gate was weakened.
+
+The allocated append-only v17 adds bounded nullable `response_policy_json` to
+the existing immutable `metadata_claims` registry. SQL rejects no-store and
+malformed coarse shapes; shared application canonical decoding rejects duplicate,
+unknown, omitted and normalized representations without conflating valid
+observation syntax with storage permission. NULL remains historical unknown.
+No table, service, dependency, capability or public transport was added.
+
+Archive v7 retains the frozen 35-entity v6 inventory. The current registry row
+carries policy; old formats retain their exact five-column decoder and SELECT
+for post-import descriptor verification. Migration v1–v16 function bytes and
+checked-in archive v1–v6 artifacts were compared and remain unchanged. The
+genuine v16 schema fingerprint is
+`sha256:d7ae3b1ab15c0223245d1a9008833049e58e9ec882a6e1ba70a2a080fa3fd7a6`.
+Populated real-v16/v6 restore into v17 and v7 NULL/valid-policy roundtrips compare
+all 35 stream descriptors and bytes, preserving claims, Search/refresh receipts,
+overrides and profile policy. Hostile field and rating policy cases prove
+preflight rejection before named staging or SQLite creation. Native review found
+and closed crossed-version preflight acceptance by retaining independent bounded
+legacy/v7 row issues until the final manifest selects the version.
+
+This is the durable carrier, not completed metadata policy enforcement. The
+commander retains all shared production ownership. The next bounded native
+workfront is prepared, without production edits:
+
+- **Restore input hardening:** caller-owned `ReadSeek` bytes can still change
+  between passes. Existing digest checks reject changed imports, but cannot prove
+  zero earlier staged payload writes. Reuse archive.rs's private unnamed
+  `O_TMPFILE` primitive for one bounded input capture and a non-Clone private
+  file/preflight carrier. Both passes must consume that inode, never reread the
+  original. Preserve original-source rewind, cancellation and recovery behavior.
+  Count compressed capture plus database/blob/cleanup against total scratch;
+  after capture, check remaining free space only for still-unwritten bytes.
+  Prove mutating-reader/file isolation, limit+1, failures, cancellation and
+  descriptor cleanup before claiming immutable-input admission. No extra importer
+  or named recovery artifact is needed.
+- **Whole-response writers:** carry required policy through existing Create,
+  Apply and refresh commands; pair refetched Search fields with detail-response
+  policy and retain current receipt policy for Cached mode. Fix the existing
+  `ProviderCandidate::metadata_fields` conversion-time freshness renewal first.
+  Validate the whole batch after authorization/completed replay but before the
+  first namespace, Record, identifier or payload INSERT. Encode once per response,
+  insert with immutable registry rows, and include policy in identical field and
+  rating claim comparisons. No-store must not rely on transaction rollback.
+- **Selected-field readers:** single/batch field loaders, rating loaders and
+  cached-refresh raw claim views must consume registry policy. Validate all
+  selected evidence before overrides can hide corruption. Suppress older claims
+  in the same provider/namespace/source-ID/locale/region variant before applying
+  eligibility, so a restricted newest observation cannot revive older payloads.
+  Preserve other-source fallback, user overrides, original Search expiry and
+  constant-query selected-ID batching. Raw Search grams remain candidate indexes,
+  never permission to disclose a hidden title.
+
+Response-wide writer/reader integration, immutable archive capture, real Save and
+refresh, Desktop ordering, Workbench, governed live-provider proof and programme
+delivery remain required active work. Headless tests do not prove rendered or
+packaged-host accessibility. Rollback is forward correction; retain claims and
+policy-aware archive readers rather than downgrade v17 or erase user data.
+There is no push, PR, merge or shared-file release. M4 still owns v17/archive v7;
+Access v18 remains conditional on an exact merged commit/tree and explicit handoff.
