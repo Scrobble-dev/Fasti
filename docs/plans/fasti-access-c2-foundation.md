@@ -131,3 +131,9 @@ to keep a dependent branch compiling.
 No fresh tests, PR, merge, production availability, performance improvement,
 complete secret-erasure guarantee, or accessibility conformance is claimed
 by this preparation record. Append exact evidence as the gates execute.
+
+The developer-reference gate also found two inherited unresolved rustdoc links
+in `crates/fasti-application/src/nuvio.rs`. Metadata released only those two
+header links for crate qualification. This documentation-only correction adds
+no import, runtime behavior or shared contract. Verify with
+`RUSTDOCFLAGS="-D warnings" cargo doc -p fasti-domain -p fasti-application --all-features --no-deps --locked --offline`.
