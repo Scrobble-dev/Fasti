@@ -564,9 +564,9 @@ impl ChecksummedWorkspaceManifestDto {
 mod tests {
     use super::*;
     use fasti_application::{
-        WORKSPACE_ARCHIVE_FORMAT_VERSION, WORKSPACE_ARCHIVE_V1_FORMAT_VERSION,
-        WORKSPACE_ARCHIVE_V2_FORMAT_VERSION, WORKSPACE_ARCHIVE_V3_FORMAT_VERSION,
-        WORKSPACE_ARCHIVE_V4_FORMAT_VERSION, WORKSPACE_ARCHIVE_V5_FORMAT_VERSION,
+        WORKSPACE_ARCHIVE_V1_FORMAT_VERSION, WORKSPACE_ARCHIVE_V2_FORMAT_VERSION,
+        WORKSPACE_ARCHIVE_V3_FORMAT_VERSION, WORKSPACE_ARCHIVE_V4_FORMAT_VERSION,
+        WORKSPACE_ARCHIVE_V5_FORMAT_VERSION,
     };
     use schemars::generate::SchemaSettings;
     use std::num::NonZeroU64;
@@ -859,7 +859,7 @@ mod tests {
         );
         assert_eq!(
             current.manifest.format_version,
-            WORKSPACE_ARCHIVE_FORMAT_VERSION
+            fasti_application::WORKSPACE_ARCHIVE_V6_FORMAT_VERSION
         );
         assert_eq!(current.manifest.streams.len(), 35);
         assert_eq!(current.manifest.streams[..34], previous.manifest.streams);
@@ -885,6 +885,29 @@ mod tests {
                 Sha256Digest::from_bytes(&Sha256::digest(bytes).into()).to_string();
             assert!(invalid.try_into_application(limits()).is_err());
         }
+    }
+
+    #[test]
+    fn archive_v7_retains_v6_inventory_with_a_distinct_manifest_version() {
+        let dto: ChecksummedWorkspaceManifestDto = serde_json::from_str(include_str!(
+            "../../../contracts/portability/v7/workspace-manifest.example.json"
+        ))
+        .unwrap();
+        assert_eq!(dto.manifest.format_version, 7);
+        let verified = dto.clone().try_into_application(limits()).unwrap();
+        assert_eq!(
+            verified
+                .manifest()
+                .streams()
+                .iter()
+                .map(|stream| stream.entity())
+                .collect::<Vec<_>>(),
+            WorkspaceExportEntity::V6
+        );
+        let projection =
+            CanonicalWorkspaceManifestProjection::try_from_application(verified.manifest().clone())
+                .unwrap();
+        assert_eq!(projection.dto(), &dto);
     }
 
     #[test]

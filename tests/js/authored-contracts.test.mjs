@@ -29,6 +29,7 @@ const withContracts = async (mutate, assertRejected) => {
       "contracts/portability/v4",
       "contracts/portability/v5",
       "contracts/portability/v6",
+      "contracts/portability/v7",
     ]) {
       await mkdir(join(root, directory), { recursive: true });
       await cp(join(repositoryRoot, directory), join(root, directory), {
@@ -82,19 +83,19 @@ test("portability manifest mutation invalidates the JCS checksum", async () => {
   );
 });
 
-for (const version of [3, 4, 5, 6]) {
+for (const version of [3, 4, 5, 6, 7]) {
   for (const [label, mutate, refreshDigest, expected] of [
     [
       "wrong format version",
       (manifest) => (manifest.format_version = version - 1),
       true,
-      /portability v[3-6] example errors/u,
+      /portability v[3-7] example errors/u,
     ],
     [
       "missing final stream",
       (manifest) => manifest.streams.pop(),
       true,
-      /portability v[3-6] example errors/u,
+      /portability v[3-7] example errors/u,
     ],
     [
       "reordered streams",
@@ -105,7 +106,7 @@ for (const version of [3, 4, 5, 6]) {
         ];
       },
       true,
-      /portability v[3-6] example errors/u,
+      /portability v[3-7] example errors/u,
     ],
     [
       "stale manifest checksum",

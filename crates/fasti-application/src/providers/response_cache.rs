@@ -28,6 +28,22 @@ pub struct ProviderResponseCachePolicy {
 }
 
 impl ProviderResponseCachePolicy {
+    /// Private persisted observation bound, not a provider body or public DTO.
+    pub const MAX_JSON_BYTES: usize = 1024;
+
+    pub fn to_canonical_json(&self) -> String {
+        serde_json::to_string(self).expect("bounded response policy has JSON-safe fields")
+    }
+
+    /// Representation validation does not grant storage or reuse permission.
+    pub fn from_canonical_json(value: &str) -> Option<Self> {
+        if value.len() > Self::MAX_JSON_BYTES {
+            return None;
+        }
+        let policy: Self = serde_json::from_str(value).ok()?;
+        (policy.to_canonical_json() == value).then_some(policy)
+    }
+
     pub const fn new(
         reuse: ProviderResponseReuse,
         received_at: DateTime<Utc>,

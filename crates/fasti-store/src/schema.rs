@@ -7,7 +7,7 @@ use fasti_domain::{Grain, MetadataClaimId, MAX_EXTERNAL_IDENTIFIER_BYTES};
 use rusqlite::{Connection, Result, Transaction, TransactionBehavior};
 use std::fmt::Write as _;
 
-pub(crate) const SCHEMA_VERSION: i64 = 16;
+pub(crate) const SCHEMA_VERSION: i64 = 17;
 
 pub(crate) fn migrate(connection: &Connection) -> Result<()> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -91,12 +91,42 @@ pub(crate) fn migrate(connection: &Connection) -> Result<()> {
     }
 
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version == 16 {
+        migrate_v17(connection)?;
+    }
+
+    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if version == SCHEMA_VERSION {
         let transaction = Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
         repair_legacy_provider_coordinates_v1(&transaction)?;
         transaction.commit()?;
     }
     Ok(())
+}
+
+fn migrate_v17(connection: &Connection) -> Result<()> {
+    let transaction = Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+    // NULL preserves historical claims without inventing upstream permission.
+    // This constraint is containment, not payload admission: writers must check
+    // canonical policy and observation/fetch binding before writing any payload.
+    transaction.execute_batch(r#"
+        ALTER TABLE metadata_claims ADD COLUMN response_policy_json TEXT CHECK (
+            response_policy_json IS NULL OR COALESCE(CASE
+                WHEN json_valid(response_policy_json) THEN
+                    length(CAST(response_policy_json AS BLOB)) <= 1024
+                    AND json_type(response_policy_json) = 'object'
+                    AND json_type(response_policy_json, '$.reuse') IS 'text'
+                    AND json_extract(response_policy_json, '$.reuse') IN (
+                        'reusable', 'validate_when_stale', 'validate_every_reuse')
+                    AND json_type(response_policy_json, '$.received_at') IS 'text'
+                    AND json_type(response_policy_json, '$.corrected_initial_age') IS 'object'
+                    AND json_type(response_policy_json, '$.source_freshness') IN ('object', 'null')
+                    AND json_type(response_policy_json, '$.source_stale_if_error') IN ('object', 'null')
+                ELSE 0 END, 0)
+        );
+        PRAGMA user_version = 17;
+    "#)?;
+    transaction.commit()
 }
 
 fn migrate_v16(connection: &Connection) -> Result<()> {
@@ -3555,6 +3585,25 @@ pub(crate) fn workspace_revision(connection: &Connection, workspace_id: &str) ->
 
 #[cfg(test)]
 mod tests {
+    include!("metadata_policy_migration_tests.rs");
+    #[test]
+    fn published_v16_schema_fingerprint() {
+        let connection = Connection::open_in_memory().unwrap();
+        migrate_to_version_fourteen(&connection);
+        migrate_v15(&connection).unwrap();
+        migrate_v16(&connection).unwrap();
+        let fingerprint = crate::portability::schema_fingerprint(
+            &connection,
+            fasti_domain::RequestCorrelationId::new_v7(),
+        )
+        .unwrap();
+        assert_eq!(fingerprint.migration_version(), 16);
+        assert_eq!(
+            fingerprint.digest().as_str(),
+            "sha256:d7ae3b1ab15c0223245d1a9008833049e58e9ec882a6e1ba70a2a080fa3fd7a6"
+        );
+    }
+
     include!("search_scope_migration_tests.rs");
     use super::*;
     use crate::access::FULL_ADMIN_SCOPES;
@@ -3828,6 +3877,7 @@ mod tests {
                     &connection,
                     workspace,
                     entity,
+                    5,
                     limits,
                     &mut bytes,
                     &mut || Ok(()),

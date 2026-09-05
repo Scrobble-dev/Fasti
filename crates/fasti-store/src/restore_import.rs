@@ -35,6 +35,7 @@ use fasti_application::{
     WorkspaceExportEntity, MAX_CORRECTION_REASON_BYTES, WORKSPACE_ARCHIVE_V1_FORMAT_VERSION,
     WORKSPACE_ARCHIVE_V2_FORMAT_VERSION, WORKSPACE_ARCHIVE_V3_FORMAT_VERSION,
     WORKSPACE_ARCHIVE_V4_FORMAT_VERSION, WORKSPACE_ARCHIVE_V5_FORMAT_VERSION,
+    WORKSPACE_ARCHIVE_V6_FORMAT_VERSION,
 };
 use fasti_contracts::VerifiedInboundWorkspaceManifest;
 use fasti_domain::{
@@ -596,6 +597,7 @@ fn visit_import_entries(
                 entity,
                 size,
                 reader,
+                manifest.format_version(),
                 manifest.workspace_id(),
                 &manifest.streams()[stream_index],
                 limits.max_entry_bytes.get(),
@@ -652,6 +654,7 @@ fn import_stream(
     entity: WorkspaceExportEntity,
     declared_size: u64,
     reader: &mut ArchiveEntryReader<'_>,
+    format_version: u32,
     workspace_id: WorkspaceId,
     expected: &fasti_application::WorkspaceStreamDescriptor,
     max_row_bytes: u64,
@@ -684,7 +687,14 @@ fn import_stream(
         if row_count >= expected.row_count() {
             return Err(RestoreImportError::StreamDescriptor { path: path.clone() });
         }
-        let key = import_row(transaction, entity, &line, workspace_id, &path)?;
+        let key = import_row(
+            transaction,
+            entity,
+            format_version,
+            &line,
+            workspace_id,
+            &path,
+        )?;
         if prior_key.as_ref().is_some_and(|prior| prior >= &key) {
             return Err(RestoreImportError::RowOrder { path: path.clone() });
         }
@@ -842,6 +852,7 @@ fn accepted_archive_schema(
         || (format_version == WORKSPACE_ARCHIVE_V3_FORMAT_VERSION && version == 12)
         || (format_version == WORKSPACE_ARCHIVE_V4_FORMAT_VERSION && matches!(version, 13 | 14))
         || (format_version == WORKSPACE_ARCHIVE_V5_FORMAT_VERSION && version == 15)
+        || (format_version == WORKSPACE_ARCHIVE_V6_FORMAT_VERSION && version == 16)
     {
         // Continue to the exact historical fingerprint match below.
     } else if format_version == fasti_application::WORKSPACE_ARCHIVE_FORMAT_VERSION
@@ -868,6 +879,7 @@ fn accepted_archive_schema(
             13 => "sha256:e470f2e8ae2972aa05fecd5b39642b79ef739de89eda204c37bf1d3e48f892c3",
             14 => "sha256:630bc759b1bc6148931fe1b496e6e149553c5c005cf8d5956da683f2872c0375",
             15 => "sha256:36720ca62ef606e52f960e71cb40452323269f14e4a4af984e2fe875279a155e",
+            16 => "sha256:d7ae3b1ab15c0223245d1a9008833049e58e9ec882a6e1ba70a2a080fa3fd7a6",
             _ => return false,
         }
 }
@@ -898,6 +910,7 @@ fn verify_imported_archive(
             transaction,
             manifest.workspace_id(),
             expected.entity(),
+            manifest.format_version(),
             limits,
             &mut sink,
             &mut || {
@@ -1314,6 +1327,7 @@ enum RowKey {
 fn import_row(
     transaction: &Transaction<'_>,
     entity: WorkspaceExportEntity,
+    format_version: u32,
     line: &[u8],
     workspace_id: WorkspaceId,
     path: &str,
@@ -1876,7 +1890,19 @@ fn import_row(
             ))
         }
         WorkspaceExportEntity::MetadataClaims => {
-            let row: MetadataClaimRow = decode_row(line, path)?;
+            let row = if format_version <= WORKSPACE_ARCHIVE_V6_FORMAT_VERSION {
+                let legacy: MetadataClaimRow = decode_row(line, path)?;
+                MetadataClaimV7Row {
+                    claim_id: legacy.claim_id,
+                    claim_kind: legacy.claim_kind,
+                    created_at: legacy.created_at,
+                    record_id: legacy.record_id,
+                    response_policy_json: None,
+                    workspace_id: legacy.workspace_id,
+                }
+            } else {
+                decode_metadata_claim_v7(line, path)?
+            };
             require_workspace(row.workspace_id, workspace_id)?;
             if !matches!(row.claim_kind.as_str(), "field" | "rating") {
                 return Err(RestoreImportError::DomainInvariant);
@@ -1886,8 +1912,8 @@ fn import_row(
                 transaction,
                 entity,
                 transaction.execute(
-                    "INSERT INTO metadata_claims(claim_id, workspace_id, record_id, claim_kind, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-                    params![row.claim_id.to_string(), row.workspace_id.to_string(), row.record_id.to_string(), row.claim_kind, row.created_at],
+                    "INSERT INTO metadata_claims(claim_id, workspace_id, record_id, claim_kind, created_at, response_policy_json) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    params![row.claim_id.to_string(), row.workspace_id.to_string(), row.record_id.to_string(), row.claim_kind, row.created_at, row.response_policy_json],
                 ),
             )?;
             Ok(RowKey::One(row.claim_id.to_string()))
@@ -2392,6 +2418,29 @@ fn import_row(
     }
 }
 
+pub(crate) fn validate_metadata_claim_legacy(line: &[u8]) -> bool {
+    decode_row::<MetadataClaimRow>(line, "metadata_claims.ndjson").is_ok()
+}
+
+pub(crate) fn validate_metadata_claim_v7(line: &[u8]) -> bool {
+    decode_metadata_claim_v7(line, "metadata_claims.ndjson").is_ok()
+}
+
+fn decode_metadata_claim_v7(
+    line: &[u8],
+    path: &str,
+) -> Result<MetadataClaimV7Row, RestoreImportError> {
+    let row: MetadataClaimV7Row = decode_row(line, path)?;
+    if let Some(json) = &row.response_policy_json {
+        let policy = fasti_application::ProviderResponseCachePolicy::from_canonical_json(json)
+            .ok_or(RestoreImportError::DomainInvariant)?;
+        if policy.reuse() == fasti_application::ProviderResponseReuse::NoStore {
+            return Err(RestoreImportError::DomainInvariant);
+        }
+    }
+    Ok(row)
+}
+
 fn decode_row<T>(line: &[u8], path: &str) -> Result<T, RestoreImportError>
 where
     T: DeserializeOwned + Serialize,
@@ -2808,6 +2857,14 @@ archive_row!(MetadataClaimRow {
     claim_kind: String,
     created_at: String,
     record_id: RecordId,
+    workspace_id: WorkspaceId,
+});
+archive_row!(MetadataClaimV7Row {
+    claim_id: MetadataClaimId,
+    claim_kind: String,
+    created_at: String,
+    record_id: RecordId,
+    response_policy_json: Option<String>,
     workspace_id: WorkspaceId,
 });
 archive_row!(MetadataClaimProvenanceRow {
@@ -3254,6 +3311,7 @@ fn cleanup_attempt(
 
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
+    include!("metadata_policy_archive_tests.rs");
     include!("search_action_archive_tests.rs");
     use super::*;
     use crate::archive::ArchiveWriter;
@@ -4122,7 +4180,8 @@ mod tests {
             digest(&entry.1),
         );
         let manifest = verified.manifest();
-        let rebuilt = WorkspaceManifest::try_new(
+        let rebuilt = WorkspaceManifest::try_new_for_format(
+            manifest.format_version(),
             manifest.workspace_id(),
             manifest.workspace_revision(),
             manifest.contract_version().to_owned(),
@@ -4235,8 +4294,26 @@ mod tests {
         writer.finish().expect("finish archive-v2 fixture")
     }
 
+    fn legacy_metadata_claims_fixture(archive: &[u8]) -> Vec<u8> {
+        rewrite_stream(archive, WorkspaceExportEntity::MetadataClaims, |bytes| {
+            let mut legacy = Vec::new();
+            for line in bytes.split_inclusive(|byte| *byte == b'\n') {
+                let mut row: serde_json::Value = serde_json::from_slice(line).unwrap();
+                if let Some(policy) = row.as_object_mut().unwrap().remove("response_policy_json") {
+                    assert!(
+                        policy.is_null(),
+                        "never strip actual policy from historical fixtures"
+                    );
+                }
+                legacy.extend(serde_json::to_vec(&row).unwrap());
+                legacy.push(b'\n');
+            }
+            *bytes = legacy;
+        })
+    }
+
     fn archive_v3_from_v4(archive: &[u8]) -> Vec<u8> {
-        let mut entries = archive_entries(archive);
+        let mut entries = archive_entries(&legacy_metadata_claims_fixture(archive));
         let manifest_bytes = entries.pop().expect("manifest entry").1;
         let verified =
             VerifiedInboundWorkspaceManifest::try_from_canonical_json(&manifest_bytes, limits())
@@ -4280,7 +4357,7 @@ mod tests {
     }
 
     fn archive_v4_from_v5(archive: &[u8]) -> Vec<u8> {
-        let mut entries = archive_entries(archive);
+        let mut entries = archive_entries(&legacy_metadata_claims_fixture(archive));
         let manifest_bytes = entries.pop().expect("manifest entry").1;
         let verified =
             VerifiedInboundWorkspaceManifest::try_from_canonical_json(&manifest_bytes, limits())
@@ -5426,9 +5503,19 @@ mod tests {
         for format in 1..=5 {
             assert!(!accepted_archive_schema(format, 16, "current", "current"));
         }
-        assert!(accepted_archive_schema(6, 16, "current", "current"));
+        assert!(accepted_archive_schema(
+            6,
+            16,
+            "sha256:d7ae3b1ab15c0223245d1a9008833049e58e9ec882a6e1ba70a2a080fa3fd7a6",
+            "current"
+        ));
+        assert!(!accepted_archive_schema(6, 16, "current", "current"));
         assert!(!accepted_archive_schema(6, 16, "forged", "current"));
         assert!(!accepted_archive_schema(6, 15, digest, "current"));
+        assert!(accepted_archive_schema(7, 17, "current", "current"));
+        assert!(!accepted_archive_schema(7, 17, "forged", "current"));
+        assert!(!accepted_archive_schema(7, 16, "current", "current"));
+        assert!(!accepted_archive_schema(6, 17, "current", "current"));
     }
 
     #[test]

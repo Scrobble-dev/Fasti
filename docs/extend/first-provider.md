@@ -37,6 +37,14 @@ or changed destinations according to the provider network policy.
 
 ### Response policy observation
 
+Schema v17/archive v7 retain bounded canonical policy evidence in the existing
+immutable claim registry. Use `ProviderResponseCachePolicy`'s canonical methods;
+do not introduce an adapter-specific parser or overload provenance. Representation
+validation and storage/reuse permission are separate: a canonical no-store
+observation remains valid evidence but cannot enter durable claim storage.
+NULL is historical unknown policy. The carrier and archive checks do not complete
+the required response-wide admission and selected-field integration below.
+
 The shared JSON response boundary records cache policy and the time headers
 arrive, before the bounded body is read. Search pages retain that observation
 even when empty or filtered; detail candidates retain it too. Raw headers and

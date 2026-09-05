@@ -191,4 +191,145 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn response_cache_canonical_policy_preserves_all_modes_and_duration_extremes() {
+        for reuse in [
+            ProviderResponseReuse::NoStore,
+            ProviderResponseReuse::ValidateEveryReuse,
+            ProviderResponseReuse::ValidateWhenStale,
+            ProviderResponseReuse::Reusable,
+        ] {
+            for (age, fresh, stale) in [
+                (Duration::ZERO, None, None),
+                (Duration::ZERO, Some(Duration::ZERO), Some(Duration::ZERO)),
+                (
+                    Duration::new(17, 250_000_000),
+                    Some(Duration::new(90, 1)),
+                    Some(Duration::new(30, 999_999_999)),
+                ),
+                (Duration::MAX, Some(Duration::MAX), Some(Duration::MAX)),
+            ] {
+                let original =
+                    ProviderResponseCachePolicy::new(reuse, observed(), age, fresh, stale);
+                let encoded = original.to_canonical_json();
+                assert!(encoded.len() <= ProviderResponseCachePolicy::MAX_JSON_BYTES);
+                let decoded = ProviderResponseCachePolicy::from_canonical_json(&encoded)
+                    .expect("canonical observation, including saturated upstream age");
+                assert_eq!(decoded, original);
+                assert_eq!(decoded.to_canonical_json(), encoded);
+                assert_eq!(
+                    decoded.deadlines(seconds(120), seconds(600)),
+                    original.deadlines(seconds(120), seconds(600))
+                );
+                if reuse == ProviderResponseReuse::NoStore {
+                    // Valid representation is not durable payload admission.
+                    assert_eq!(decoded.deadlines(seconds(120), seconds(600)), None);
+                }
+            }
+        }
+        let absent = policy(ProviderResponseReuse::Reusable, 0, None, None);
+        let zero = policy(ProviderResponseReuse::Reusable, 0, Some(0), Some(0));
+        assert_ne!(absent.to_canonical_json(), zero.to_canonical_json());
+        assert_eq!(
+            absent.to_canonical_json(),
+            concat!(
+                "{\"reuse\":\"reusable\",",
+                "\"received_at\":\"2026-09-05T12:00:00.123456789Z\",",
+                "\"corrected_initial_age\":{\"secs\":0,\"nanos\":0},",
+                "\"source_freshness\":null,\"source_stale_if_error\":null}"
+            )
+        );
+    }
+
+    #[test]
+    fn response_cache_canonical_policy_rejects_serde_normalized_representations() {
+        let encoded = policy(ProviderResponseReuse::Reusable, 0, None, None).to_canonical_json();
+        for alternate in [
+            encoded.replace("{\"secs\":0,\"nanos\":0}", "[0,0]"),
+            encoded.replace("\"nanos\":0", "\"nanos\":1000000000"),
+            encoded.replace(".123456789Z", ".123456789+00:00"),
+            encoded.replace(",\"source_freshness\":null", ""),
+            encoded.replace(",\"source_stale_if_error\":null", ""),
+            encoded.replace("\"reusable\"", "\"reus\\u0061ble\""),
+            encoded.replace("{\"secs\":0,\"nanos\":0}", "{\"nanos\":0,\"secs\":0}"),
+            format!(" {encoded}"),
+            format!("{encoded}\n"),
+        ] {
+            assert_ne!(alternate, encoded, "fixture must alter persisted bytes");
+            assert!(
+                serde_json::from_str::<ProviderResponseCachePolicy>(&alternate).is_ok(),
+                "valid but noncanonical serde representation: {alternate}"
+            );
+            assert!(
+                ProviderResponseCachePolicy::from_canonical_json(&alternate).is_none(),
+                "noncanonical observation: {alternate}"
+            );
+        }
+    }
+
+    #[test]
+    fn response_cache_canonical_policy_rejects_duplicate_unknown_and_malformed_state() {
+        let encoded = policy(ProviderResponseReuse::Reusable, 0, None, None).to_canonical_json();
+        for malformed in [
+            encoded.replace("\"reuse\":", "\"reuse\":\"no_store\",\"reuse\":"),
+            encoded.replace("\"reuse\":", "\"unknown\":true,\"reuse\":"),
+            encoded.replace("\"reusable\"", "\"allow_all\""),
+            encoded.replace(
+                "\"source_freshness\":null",
+                "\"source_freshness\":null,\"source_freshness\":null",
+            ),
+            encoded.replace(
+                "\"source_stale_if_error\":null",
+                "\"source_stale_if_error\":null,\"source_stale_if_error\":null",
+            ),
+            encoded.replace("\"secs\":0", "\"secs\":0,\"secs\":1"),
+            encoded.replace("\"nanos\":0", "\"nanos\":0,\"nanos\":1"),
+            encoded.replace("\"secs\":0", "\"unknown\":0,\"secs\":0"),
+            encoded.replace("\"secs\":0", "\"secs\":-1"),
+            encoded.replace("\"secs\":0", "\"secs\":0.5"),
+            encoded.replace("\"secs\":0", "\"secs\":18446744073709551616"),
+            encoded.replace("\"nanos\":0", "\"nanos\":4294967296"),
+            encoded.replace(
+                "{\"secs\":0,\"nanos\":0}",
+                "{\"secs\":18446744073709551615,\"nanos\":1000000000}",
+            ),
+            encoded.replace("{\"secs\":0,\"nanos\":0}", "null"),
+            encoded.replace("\"secs\":0,", ""),
+            encoded.replace(",\"nanos\":0", ""),
+            encoded.replace("2026-09-05T12:00:00.123456789Z", "not-a-time"),
+            encoded.replace("\"reuse\":\"reusable\",", ""),
+            encoded.replace("\"received_at\":\"2026-09-05T12:00:00.123456789Z\",", ""),
+            encoded.replace("\"corrected_initial_age\":{\"secs\":0,\"nanos\":0},", ""),
+            String::new(),
+            "null".to_owned(),
+            "{}".to_owned(),
+            "[]".to_owned(),
+            format!("{encoded}{encoded}"),
+        ] {
+            assert_ne!(malformed, encoded, "fixture must alter persisted bytes");
+            assert!(
+                ProviderResponseCachePolicy::from_canonical_json(&malformed).is_none(),
+                "malformed observation: {malformed}"
+            );
+        }
+    }
+
+    #[test]
+    fn response_cache_canonical_policy_rejects_bounded_and_oversized_padding() {
+        let original = policy(ProviderResponseReuse::Reusable, 0, None, None);
+        let encoded = original.to_canonical_json();
+        for length in [
+            ProviderResponseCachePolicy::MAX_JSON_BYTES,
+            ProviderResponseCachePolicy::MAX_JSON_BYTES + 1,
+        ] {
+            let padded = format!("{encoded}{}", " ".repeat(length - encoded.len()));
+            assert_eq!(padded.len(), length);
+            assert_eq!(
+                serde_json::from_str::<ProviderResponseCachePolicy>(&padded).unwrap(),
+                original
+            );
+            assert!(ProviderResponseCachePolicy::from_canonical_json(&padded).is_none());
+        }
+    }
 }

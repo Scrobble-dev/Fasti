@@ -186,14 +186,14 @@ mod search_action_archive_tests {
     }
 
     #[test]
-    fn archive_v6_search_actions_roundtrip_and_reexport_without_local_authority_or_candidates() {
+    fn archive_v7_search_actions_roundtrip_and_reexport_without_local_authority_or_candidates() {
         let fixture = fixture();
         let entries = archive_entries(&fixture.archive);
         let manifest_bytes = &entries.last().unwrap().1;
         let verified =
             VerifiedInboundWorkspaceManifest::try_from_canonical_json(manifest_bytes, limits())
                 .unwrap();
-        assert_eq!(verified.manifest().format_version(), 6);
+        assert_eq!(verified.manifest().format_version(), 7);
         assert_eq!(verified.manifest().streams().len(), 35);
         assert_eq!(
             verified.manifest().streams().last().unwrap().entity(),
@@ -241,6 +241,7 @@ mod search_action_archive_tests {
                 &database,
                 fixture.credential.workspace_id,
                 descriptor.entity(),
+                verified.manifest().format_version(),
                 limits(),
                 &mut bytes,
                 &mut || Ok(()),
