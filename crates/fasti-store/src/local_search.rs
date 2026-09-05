@@ -1,11 +1,13 @@
 //! Rebuildable substring postings. Metadata resolution remains the authority.
 
-use crate::identity::load_record_summaries;
+use crate::identity::{
+    json_string_bytes, load_record_identifiers_batch, load_record_summary_fields,
+};
 use crate::kernel::{authorize_application_transaction, map_sql};
 use crate::SqliteKernel;
 use fasti_application::{
     normalize_local_search_text, ApplicationResult, CapabilityKey, FastiProblem, LocalSearchCursor,
-    LocalSearchPage, LocalSearchRequest,
+    LocalSearchPage, LocalSearchRequest, MAX_LOCAL_SEARCH_RESPONSE_BYTES,
 };
 use fasti_domain::{Grain, RecordId, ORIGINAL_TITLE_FIELD_KEY, TITLE_FIELD_KEY};
 use rusqlite::{params, Connection, TransactionBehavior};
@@ -160,17 +162,17 @@ pub(crate) fn search(
     drop(statement);
     let more = candidates.len() > PAGE_SIZE;
     let mut candidates: Vec<_> = candidates.into_values().take(PAGE_SIZE).collect();
-    let next = if more {
+    let mut next = if more {
         candidates.last().map(|(record, _)| LocalSearchCursor {
             last_record_id: *record,
-            context_digest: context,
+            context_digest: context.clone(),
         })
     } else {
         None
     };
     // Filter after the inspected-ID bound; a sparse grain must not scan all postings.
     candidates.retain(|(_, grain)| request.grains.is_empty() || request.grains.contains(grain));
-    let mut records = load_record_summaries(
+    let mut records = load_record_summary_fields(
         &transaction,
         access.workspace_id(),
         access.profile_id(),
@@ -187,8 +189,73 @@ pub(crate) fn search(
                     .is_some_and(|value| normalize_local_search_text(value).contains(&needle))
             })
     });
+    // The envelope/cursor has a fixed small shape. Each complete Record consumes
+    // escaped-string budget with fixed field-shape headroom. The API additionally
+    // enforces the serialized byte limit. No identifier evidence is truncated.
+    let mut remaining = MAX_LOCAL_SEARCH_RESPONSE_BYTES - 1024;
+    let mut complete: Vec<fasti_application::RecordSummary> = Vec::new();
+    for record in records {
+        let field_bytes = [
+            record.title(),
+            record.poster(),
+            record.original_title(),
+            record.overview(),
+            record.release_year(),
+        ]
+        .into_iter()
+        .fold(2048usize, |bytes, field| {
+            bytes
+                .saturating_add(field.value().map_or(0, json_string_bytes))
+                .saturating_add(
+                    field
+                        .source()
+                        .map_or(0, |source| json_string_bytes(source.as_str())),
+                )
+        });
+        let field_bytes = field_bytes.saturating_add(
+            record
+                .latest_activity()
+                .and_then(|activity| activity.occurred_at())
+                .map_or(0, |at| json_string_bytes(at.claim().original())),
+        );
+        let identifiers = if let Some(budget) = remaining.checked_sub(field_bytes) {
+            load_record_identifiers_batch(
+                &transaction,
+                access.workspace_id(),
+                &[record.record_id()],
+                CAPABILITY,
+                id,
+                Some(budget),
+            )?
+        } else {
+            None
+        };
+        let Some((mut identifiers, bytes)) = identifiers else {
+            let Some(last) = complete.last() else {
+                return Err(Box::new(FastiProblem::from_code(
+                    fasti_application::ProblemCode::CapacityExceeded,
+                    CAPABILITY,
+                    id,
+                )));
+            };
+            // Revisit any unmatched postings between this Record and the last
+            // returned match. Advancing to the old inspected boundary would skip
+            // the deferred matching Record, including on an originally final page.
+            next = Some(LocalSearchCursor {
+                last_record_id: last.record_id(),
+                context_digest: context,
+            });
+            break;
+        };
+        remaining -= field_bytes + bytes;
+        let values = identifiers.remove(&record.record_id()).unwrap_or_default();
+        complete.push(record.with_identifiers(values));
+    }
     map_sql(transaction.commit(), CAPABILITY, id)?;
-    Ok(LocalSearchPage { records, next })
+    Ok(LocalSearchPage {
+        records: complete,
+        next,
+    })
 }
 
 #[cfg(test)]

@@ -311,6 +311,43 @@ pub(crate) fn load_record_summaries(
     capability: CapabilityKey,
     correlation_id: fasti_domain::RequestCorrelationId,
 ) -> ApplicationResult<Vec<RecordSummary>> {
+    let record_ids: Vec<_> = records.iter().map(|(id, _)| *id).collect();
+    let summaries = load_record_summary_fields(
+        connection,
+        workspace_id,
+        profile_id,
+        records,
+        capability,
+        correlation_id,
+    )?;
+    let (mut identifiers, _) = load_record_identifiers_batch(
+        connection,
+        workspace_id,
+        &record_ids,
+        capability,
+        correlation_id,
+        None,
+    )?
+    .expect("an unbounded identifier read cannot exhaust a supplied budget");
+    Ok(summaries
+        .into_iter()
+        .map(|summary| {
+            let identifiers = identifiers.remove(&summary.record_id()).unwrap_or_default();
+            summary.with_identifiers(identifiers)
+        })
+        .collect())
+}
+
+/// Intermediate fields only. Callers must complete identifiers before publishing
+/// a RecordSummary; Search can first discard nonmatching title projections.
+pub(crate) fn load_record_summary_fields(
+    connection: &Connection,
+    workspace_id: WorkspaceId,
+    profile_id: fasti_domain::ProfileId,
+    records: Vec<(RecordId, Grain)>,
+    capability: CapabilityKey,
+    correlation_id: fasti_domain::RequestCorrelationId,
+) -> ApplicationResult<Vec<RecordSummary>> {
     let field_keys = [
         FieldKey::try_new(TITLE_FIELD_KEY).expect("canonical record summary field key"),
         FieldKey::try_new(POSTER_FIELD_KEY).expect("canonical record summary field key"),
@@ -325,13 +362,6 @@ pub(crate) fn load_record_summaries(
         profile_id,
         &record_ids,
         &field_keys,
-        capability,
-        correlation_id,
-    )?;
-    let mut identifiers = load_record_identifiers_batch(
-        connection,
-        workspace_id,
-        &record_ids,
         capability,
         correlation_id,
     )?;
@@ -355,7 +385,7 @@ pub(crate) fn load_record_summaries(
             metadata.resolve(record_id, &field_keys[2], capability, correlation_id)?,
             metadata.resolve(record_id, &field_keys[3], capability, correlation_id)?,
             metadata.resolve(record_id, &field_keys[4], capability, correlation_id)?,
-            identifiers.remove(&record_id).unwrap_or_default(),
+            Vec::new(),
             activities.remove(&record_id),
         ));
     }
@@ -393,49 +423,76 @@ pub(crate) fn selected_record_ids_json(
         .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))
 }
 
-fn load_record_identifiers_batch(
+pub(crate) const SELECT_RECORD_IDENTIFIERS: &str = r#"
+    WITH page_records AS (
+        SELECT record_id FROM records
+        WHERE workspace_id = ?1 AND status = 'active'
+          AND record_id IN (SELECT value FROM json_each(?2))
+    )
+    SELECT identifier.record_id, identifier.namespace,
+           identifier.grain, identifier.value
+    FROM external_identifiers identifier
+    JOIN page_records page ON page.record_id = identifier.record_id
+    WHERE identifier.workspace_id = ?1
+"#;
+
+/// Compact serde_json string length, without allocating or copying SQLite text.
+pub(crate) fn json_string_bytes(value: &str) -> usize {
+    value.bytes().fold(2usize, |size, byte| {
+        size.saturating_add(match byte {
+            b'"' | b'\\' | b'\n' | b'\r' | b'\t' | 8 | 12 => 2,
+            0..=31 => 6,
+            _ => 1,
+        })
+    })
+}
+
+type RecordIdentifierBatch = (HashMap<RecordId, Vec<RecordIdentifier>>, usize);
+
+pub(crate) fn load_record_identifiers_batch(
     connection: &Connection,
     workspace_id: WorkspaceId,
     record_ids: &[RecordId],
     capability: CapabilityKey,
     correlation_id: fasti_domain::RequestCorrelationId,
-) -> ApplicationResult<HashMap<RecordId, Vec<RecordIdentifier>>> {
+    budget: Option<usize>,
+) -> ApplicationResult<Option<RecordIdentifierBatch>> {
     let record_ids_json = selected_record_ids_json(record_ids, capability, correlation_id)?;
-    let mut statement = map_sql(
-        connection.prepare(
-            r#"
-            WITH page_records AS (
-                SELECT record_id FROM records
-                WHERE workspace_id = ?1 AND status = 'active'
-                  AND record_id IN (SELECT value FROM json_each(?2))
-            )
-            SELECT identifier.record_id, identifier.namespace,
-                   identifier.grain, identifier.value
-            FROM external_identifiers identifier
-            JOIN page_records page ON page.record_id = identifier.record_id
-            WHERE identifier.workspace_id = ?1
-            ORDER BY identifier.record_id, identifier.namespace,
-                     identifier.grain, identifier.value
-            "#,
-        ),
-        capability,
-        correlation_id,
-    )?;
-    let rows = map_sql(
-        statement.query_map(params![workspace_id.to_string(), record_ids_json], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-            ))
-        }),
+    // Bounded readers must see rows before any unbounded SQLite value sort.
+    // Establish the same canonical order in memory only after complete admission.
+    let sql = if budget.is_some() {
+        SELECT_RECORD_IDENTIFIERS.to_owned()
+    } else {
+        format!("{SELECT_RECORD_IDENTIFIERS} ORDER BY identifier.record_id, identifier.namespace, identifier.grain, identifier.value")
+    };
+    let mut statement = map_sql(connection.prepare_cached(&sql), capability, correlation_id)?;
+    let mut rows = map_sql(
+        statement.query(params![workspace_id.to_string(), record_ids_json]),
         capability,
         correlation_id,
     )?;
     let mut identifiers: HashMap<RecordId, Vec<RecordIdentifier>> = HashMap::new();
-    for row in rows {
-        let (record_id, namespace, grain, value) = map_sql(row, capability, correlation_id)?;
+    let mut bytes = 0usize;
+    while let Some(row) = map_sql(rows.next(), capability, correlation_id)? {
+        // Borrow SQLite text before allocating, charging actual escaped strings
+        // plus object keys/separators and a comma. Do not charge ASCII as six
+        // bytes: that incorrectly rejects complete Records which fit the page.
+        let size = (1..=3).try_fold(
+            r#"{"namespace":,"grain":,"value":},"#.len(),
+            |size, column| {
+                let value = row.get_ref(column)?.as_str()?;
+                Ok::<_, rusqlite::Error>(size.saturating_add(json_string_bytes(value)))
+            },
+        );
+        bytes = bytes.saturating_add(map_sql(size, capability, correlation_id)?);
+        if budget.is_some_and(|budget| bytes > budget) {
+            return Ok(None);
+        }
+        let (record_id, namespace, grain, value): (String, String, String, String) = map_sql(
+            (|| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))(),
+            capability,
+            correlation_id,
+        )?;
         let record_id = record_id
             .parse::<RecordId>()
             .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
@@ -449,7 +506,18 @@ fn load_record_identifiers_batch(
             .or_default()
             .push(RecordIdentifier::new(namespace, grain, value));
     }
-    Ok(identifiers)
+    if budget.is_some() {
+        for values in identifiers.values_mut() {
+            values.sort_unstable_by(|a, b| {
+                (a.namespace().as_str(), a.grain().as_str(), a.value()).cmp(&(
+                    b.namespace().as_str(),
+                    b.grain().as_str(),
+                    b.value(),
+                ))
+            });
+        }
+    }
+    Ok(Some((identifiers, bytes)))
 }
 
 fn load_latest_activities_batch(
@@ -1113,7 +1181,8 @@ mod tests {
     }
 
     #[test]
-    fn exact_record_selector_uses_primary_key_and_constant_selects_at_10000_records() {
+    fn exact_record_selector_uses_primary_key_and_constant_cold_select_preparations_at_10000_records(
+    ) {
         let node = TestNode::new();
         let selected = RecordId::new_v7();
         let selects = Arc::new(AtomicUsize::new(0));
@@ -1158,6 +1227,14 @@ mod tests {
                 tx.commit().unwrap();
             }
             previous = total;
+            // SQLite's authorizer counts preparation, not execution. Compare
+            // cold preparations so statement reuse cannot hide query growth.
+            node.kernel
+                .inner
+                .connection
+                .lock()
+                .unwrap()
+                .flush_prepared_statement_cache();
             selects.store(0, Ordering::Relaxed);
             let page = exact_record(&node, node.access, selected).unwrap();
             assert!(!page.truncated());
@@ -1168,7 +1245,7 @@ mod tests {
         assert_eq!(
             counts,
             vec![counts[0]; 3],
-            "exact selection must not add per-record queries"
+            "exact selection must not add cold per-record SELECT preparations"
         );
         assert!(counts[0] <= 40, "same bounded enrichment owner: {counts:?}");
         let connection = node.kernel.inner.connection.lock().unwrap();
@@ -1542,7 +1619,9 @@ mod tests {
                 records,
                 capability,
                 correlation_id,
+                None,
             )
+            .map(|value| value.expect("unbounded fixture read").0)
         };
         let activities = |workspace, records: &[RecordId]| {
             load_latest_activities_batch(

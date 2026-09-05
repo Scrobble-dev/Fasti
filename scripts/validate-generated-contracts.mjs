@@ -185,6 +185,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     "/api/v1/search/candidates/{provider_id}/{grain}/{candidate_receipt_id}",
     "/api/v1/search/candidates/{provider_id}/{grain}/{candidate_receipt_id}/actions",
     "/api/v1/search/providers/{provider_id}",
+    "/api/v1/search/records",
   ]);
   assert.deepEqual(Object.keys(openapi.components.securitySchemes), [
     "auth_binding_cookie",
@@ -201,6 +202,11 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     "list_records security must match hybrid authorization",
   );
   const nuvioCollections = openapi.paths["/api/v1/profile/nuvio-collections"];
+  assert.equal(
+    openapi.paths["/api/v1/search/records"].post["x-fasti-max-response-bytes"],
+    4 * 1024 * 1024,
+    "local Search must publish its operation-specific response byte limit",
+  );
   const hybridReadSecurity = [
     { credential_bearer: [] },
     { browser_session_cookie: [] },
@@ -480,6 +486,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     "select_browser_session_profile",
   ]);
   const hybridOperations = new Set([
+    "search_local_records",
     "save_search_candidate",
     "read_search_candidate",
     "search_provider_page",

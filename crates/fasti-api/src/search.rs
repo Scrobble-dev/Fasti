@@ -446,8 +446,108 @@ pub(crate) async fn save_search_candidate(
         .into_response())
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/search/records",
+    operation_id = "search_local_records",
+    tag = "search",
+    security(("credential_bearer" = []), ("browser_session_cookie" = [])),
+    request_body(content = fasti_contracts::LocalSearchRequestDto, content_type = "application/json"),
+    responses(
+        (status = 200, description = "Complete local Record projections and inspected-position continuation; no provider access", body = fasti_contracts::LocalSearchResponseDto),
+        (status = 400, description = "Malformed JSON", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 401, description = "Authentication is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "Search authority or browser read boundary denied", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "Session authority changed", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 413, description = "Request exceeds the Search body limit", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 415, description = "Content-Type is not application/json", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "Invalid Search query, grain or continuation", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 500, description = "Local state failed integrity checks", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 501, description = "Search capability is unavailable", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 503, description = "Storage is unavailable", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 507, description = "One complete Record exceeds the bounded page capacity; no evidence was omitted", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub(crate) async fn search_local_records(
+    State(state): State<SearchApiState>,
+    SearchAccess { id, access }: SearchAccess<false>,
+    body: Result<Json<fasti_contracts::LocalSearchRequestDto>, JsonRejection>,
+) -> Result<Response, HttpProblem> {
+    let body = body
+        .map_err(|error| json_rejection(CAPABILITY, id, error))?
+        .0;
+    if body.grains.len() > Grain::ALL.len() {
+        return Err(invalid(id, "/grains"));
+    }
+    let request = fasti_application::LocalSearchRequest {
+        correlation_id: id,
+        access,
+        query: SearchQuery::try_new(body.query).map_err(|_| invalid(id, "/query"))?,
+        grains: body
+            .grains
+            .into_iter()
+            .map(|grain| grain.parse::<Grain>())
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| invalid(id, "/grains"))?,
+        after: body
+            .after
+            .map(|cursor| {
+                Ok::<_, HttpProblem>(fasti_application::LocalSearchCursor {
+                    last_record_id: cursor
+                        .last_record_id
+                        .parse()
+                        .map_err(|_| invalid(id, "/after/last_record_id"))?,
+                    context_digest: cursor
+                        .context_digest
+                        .parse()
+                        .map_err(|_| invalid(id, "/after/context_digest"))?,
+                })
+            })
+            .transpose()?,
+    };
+    let persistence = Arc::clone(&state.persistence);
+    // Only the existing local index/metadata owner runs. No provider gate or
+    // credential access is needed, including while other sources are offline.
+    let bytes = tokio::task::spawn_blocking(move || {
+        let page = persistence.search_local_records(&request)?;
+        let response = fasti_contracts::LocalSearchResponseDto {
+            records: page
+                .records
+                .into_iter()
+                .map(crate::records::record_summary_dto)
+                .collect(),
+            next: page.next.map(Into::into),
+        };
+        let mut buffer = vec![0; fasti_application::MAX_LOCAL_SEARCH_RESPONSE_BYTES];
+        let mut remaining = buffer.as_mut_slice();
+        serde_json::to_writer(&mut remaining, &response).map_err(|_| {
+            Box::new(FastiProblem::from_code(
+                fasti_application::ProblemCode::CapacityExceeded,
+                CAPABILITY,
+                id,
+            ))
+        })?;
+        let written = fasti_application::MAX_LOCAL_SEARCH_RESPONSE_BYTES - remaining.len();
+        buffer.truncate(written);
+        buffer.shrink_to_fit();
+        Ok::<_, Box<FastiProblem>>(buffer)
+    })
+    .await
+    .map_err(|_| application_problem(Box::new(FastiProblem::storage_unavailable(CAPABILITY, id))))?
+    .map_err(application_problem)?;
+    Ok((
+        [
+            (header::CACHE_CONTROL, "private, no-store"),
+            (header::CONTENT_TYPE, "application/json"),
+        ],
+        bytes,
+    )
+        .into_response())
+}
+
 pub(crate) fn router() -> Router<SearchApiState> {
     Router::new()
+        .route("/api/v1/search/records", post(search_local_records))
         .route(
             "/api/v1/search/candidates/{provider_id}/{grain}/{candidate_receipt_id}/actions",
             post(save_search_candidate),

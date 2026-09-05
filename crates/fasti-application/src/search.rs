@@ -26,6 +26,9 @@ pub fn normalize_local_search_text(value: &str) -> String {
     value.to_lowercase()
 }
 
+/// Whole-Record local Search page budget, shared by storage and transports.
+pub const MAX_LOCAL_SEARCH_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
+
 #[derive(Debug, Clone)]
 pub struct LocalSearchRequest {
     pub correlation_id: RequestCorrelationId,

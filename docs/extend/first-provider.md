@@ -59,10 +59,34 @@ is separate from HTTP caching. Offline mode does not access the credential vault
 or fetch from providers. An eligible stale page remains distinguishable from a
 fresh page. No matching cache entry produces an explicit unavailable outcome.
 
-Acquiring a page does not create a Record or change Library state. Local Search
-transport and Workbench Search composition remain separate M4 integration gates.
+Acquiring a page does not create a Record or change Library state. Workbench
+Search composition remains a separate M4 integration gate.
 The current transport tests prove real SQLite offline behavior; they are not
 live-provider network evidence.
+
+### Local Record Search
+
+`POST /api/v1/search/records` searches the durable local index without contacting
+providers or accessing credentials. Use `searchRecords(request, options)` in the
+SDK. The body contains `query` (1–256 UTF-8 bytes), `grains` (up to 16; empty means
+all grains), and optional `after`. This is a Search-authorized read: browser CSRF
+is not required, and safe retries preserve the same serialized body. The query
+does not appear in the URL. Responses are private and not HTTP-cacheable.
+
+Each page returns up to 100 complete existing Record summaries, including all
+identifiers, resolved fields and latest activity. The response limit is 4 MiB,
+published on the OpenAPI operation and used by the SDK. The store reserves small
+fixed envelope/field headroom and charges actual escaped string bytes before
+copying identifiers. A page stops before a Record would exceed that budget; it
+never drops identifiers. A single Record that exceeds the bounded page capacity
+returns a typed capacity error without deleting evidence or skipping that Record.
+
+Pass the returned `next` cursor unchanged, including after an empty page. It
+tracks inspected positions, not only returned matches, and binds the server's
+current workspace, profile, authority and query. Missing `next` means complete.
+An unrelated large Record cannot block matching results: title resolution happens
+before identifier hydration. Local Search works offline; provider-cache Search
+continues to use the separate provider operation above.
 
 ### Candidate details and Record actions
 

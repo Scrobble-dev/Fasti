@@ -10,6 +10,54 @@ use utoipa::ToSchema;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(deny_unknown_fields)]
+pub struct LocalSearchRequestDto {
+    #[schemars(length(min = 1, max = 256))]
+    #[schema(min_length = 1, max_length = 256)]
+    pub query: String,
+    #[schemars(length(max = 16))]
+    #[schema(max_items = 16)]
+    pub grains: Vec<String>,
+    pub after: Option<LocalSearchCursorDto>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LocalSearchCursorDto {
+    #[schemars(
+        length(equal = 36),
+        regex(pattern = r"^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$")
+    )]
+    #[schema(
+        min_length = 36,
+        max_length = 36,
+        pattern = r"^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+    )]
+    pub last_record_id: String,
+    #[schemars(length(equal = 71), regex(pattern = r"^sha256:[0-9a-f]{64}$"))]
+    #[schema(min_length = 71, max_length = 71, pattern = r"^sha256:[0-9a-f]{64}$")]
+    pub context_digest: String,
+}
+
+impl From<fasti_application::LocalSearchCursor> for LocalSearchCursorDto {
+    fn from(value: fasti_application::LocalSearchCursor) -> Self {
+        Self {
+            last_record_id: value.last_record_id.to_string(),
+            context_digest: value.context_digest.to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LocalSearchResponseDto {
+    #[schemars(length(max = 100))]
+    #[schema(max_items = 100)]
+    pub records: Vec<crate::RecordSummaryDto>,
+    pub next: Option<LocalSearchCursorDto>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct SearchProviderPageRequest {
     #[schemars(length(min = 1, max = 256))]
     #[schema(min_length = 1, max_length = 256)]

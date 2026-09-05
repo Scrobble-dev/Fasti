@@ -884,6 +884,12 @@ impl RecordSummary {
         &self.identifiers
     }
 
+    /// Complete a display projection after its bounded identifier read.
+    pub fn with_identifiers(mut self, identifiers: Vec<RecordIdentifier>) -> Self {
+        self.identifiers = identifiers;
+        self
+    }
+
     pub const fn latest_activity(&self) -> Option<&RecordActivity> {
         self.latest_activity.as_ref()
     }

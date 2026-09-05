@@ -1547,3 +1547,62 @@ active work, followed by the mapped response-cache policy and full programme
 scope. Rollback this transport with the matching SDK; no database downgrade or
 receipt deletion is needed for this additive slice. M4 still owns v16/archive v6
 and all shared integration files; no PR, merge, v17 or C2 activation release.
+
+### 2026-09-05 — Durable local Search transport and complete Record paging
+
+Preserved base `6339775c762e8a1e4893ba45124f669de02efc9c`, tree
+`ac38e93652e67845a107390b5101509d87a4307c`, passed the canonical PR gate on
+that exact clean source: contract receipt 27/27 and portable receipt 11/11.
+Those receipts close the preceding candidate-transport checkpoint, not this diff.
+
+- **Implementation:** `POST /api/v1/search/records` and SDK `searchRecords` reuse
+  the durable local index, current Search authority, existing Record summary
+  projection, metadata resolver and identifier owner. The body holds the query;
+  no provider operation, gate, DNS or credential vault is needed. Browser POST
+  is a read without CSRF mutation proof; generic listeners remain bearer-only.
+- **Completeness and bounds:** pages contain at most 100 complete Records.
+  OpenAPI and generated SDK publish the application-owned 4 MiB response cap.
+  Metadata/title matching precedes identifier hydration. SQLite streams the
+  selected Record index without sorting unbounded identifier payloads. Escaped
+  strings and identifier syntax are charged before copying; only completely
+  admitted identifiers are sorted and exposed. Fixed headroom reserves 2,048
+  bytes per Record and 1,024 for the envelope. The final serializer is bounded.
+  A deferred Record resumes after the last complete match, including on an
+  otherwise final page. A single over-capacity Record fails without skipping it
+  or deleting evidence. This is a response/hydration bound, not a claim of whole
+  process memory bounds or newly bounded historical-activity SQL work.
+- **Native findings resolved:** the initial six-times escape estimate rejected
+  a valid roughly 763 KiB ASCII-identifier Record. Exact escaped-string sizing
+  now admits it. Cold SELECT preparation checks flush the statement cache so
+  cached preparation does not distort the comparison; they do not claim to count
+  executed statements. Current authority precedes malformed body responses.
+  SDK cursor/grain bindings are captured before awaits and safe retries preserve
+  identical bytes. First-page cursor authority remains server-owned.
+- **Focused evidence:** 8 store-bound regressions passed, including 2,500-identifier
+  admission, two complete 8,000-identifier Records across pages, 16,000-identifier
+  capacity failure, nonmatching oversized evidence, JSON escaping equality and
+  indexed query-plan evidence. Six real-router local Search checks passed with
+  605 Records, empty continuation, profile rotation, scope revocation and no
+  provider/vault access. The local SDK leaf passed 29 checks; the broader selected
+  SDK/contracts run passed 105 before the final constant-equality check was added.
+  The whole store library passed 388 tests with 5 explicit ignored worker/perf
+  tests. Strict clippy and documentation validation passed. The release-only
+  10,000-Record fixture passed 100 measured samples: p50 1.670 ms, p95 1.742 ms,
+  max 1.857 ms. These are local synthetic-corpus measurements, not device or
+  live-provider latency claims. A new clean exact-head canonical gate is required
+  after commit; prior receipts cannot substitute for it.
+- **Parallel allocation:** commander retained all shared production writes.
+  Store, HTTP and SDK agents each owned only their named new regression leaf;
+  all leaves are released. Independent read-only review validated the size fix,
+  cursor behavior and authority ordering. The HTTP agent now prepares the bounded
+  host/Workbench handoff read-only; existing M5/M8 and later-lane maps remain
+  preparation only. No competing writer, new roadmap or speculative API was added.
+
+Ponytail reused the existing owners, stdlib and installed serializer; no dependency,
+migration or archive change was needed. Codex Security remains prohibited and was
+not invoked. No new browser UI, packaged-host or successful live-provider proof is
+claimed by this headless slice. Next work remains Workbench local/provider composition,
+host bindings and governed response-cache policy, followed by the full approved
+programme. Roll back this additive route with its SDK binding; do not downgrade the
+database or delete Search evidence. M4 retains v16/archive v6 and shared ownership;
+no PR, merge, v17 allocation or C2 activation release has occurred.

@@ -2,6 +2,7 @@ import {
   B1_CONFORMANCE_OPERATIONS,
   LOCAL_BOOTSTRAP_OPERATIONS,
   LOCAL_RUNTIME_OPERATIONS,
+  LOCAL_SEARCH_MAX_RESPONSE_BYTES,
   FastiContractParseError,
   parseAcceptObservationRequest,
   parseAcceptObservationResponse,
@@ -24,6 +25,8 @@ import {
   parseInitializeNodeRequest,
   parseInitializeNodeResponse,
   parseListRecordsResponse,
+  parseLocalSearchRequestDto,
+  parseLocalSearchResponseDto,
   parseListRecordsQueryParameters,
   parseListBrowserSessionsResponse,
   parseListProvidersResponse,
@@ -86,6 +89,8 @@ import {
   type InitializeNodeRequest,
   type InitializeNodeResponse,
   type ListRecordsResponse,
+  type LocalSearchRequestDto,
+  type LocalSearchResponseDto,
   type ListRecordsQueryParameters,
   type ListBrowserSessionsResponse,
   type ListProvidersResponse,
@@ -903,6 +908,64 @@ export class FastiClient {
         return response;
       },
       responseLabel: "Provider health response",
+      options,
+    });
+  }
+
+  searchRecords(
+    request: LocalSearchRequestDto,
+    options: CallOptions = {},
+  ): Promise<LocalSearchResponseDto> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.searchRecords;
+    const body = parseOutgoing(
+      parseLocalSearchRequestDto,
+      request,
+      "Local Search request",
+    );
+    // Bind the response to immutable input, even if the caller mutates its DTO
+    // while credentials or a retry are pending. The server owns cursor authority.
+    const afterId = body.after?.last_record_id;
+    const afterDigest = body.after?.context_digest;
+    const grains = new Set(body.grains);
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      body,
+      maxResponseBytes: LOCAL_SEARCH_MAX_RESPONSE_BYTES,
+      responseParser: (value) => {
+        const response = parseLocalSearchResponseDto(value);
+        let previous = afterId;
+        for (const record of response.records) {
+          if (
+            record.record_id.length !== 36 ||
+            RECORD_ID.exec(record.record_id)?.[0] !== record.record_id ||
+            (previous !== undefined && record.record_id <= previous) ||
+            (grains.size > 0 && !grains.has(record.grain)) ||
+            (response.next != null &&
+              record.record_id > response.next.last_record_id)
+          ) {
+            throw new FastiContractParseError(
+              "Local Search records do not match the requested page",
+            );
+          }
+          previous = record.record_id;
+        }
+        if (
+          response.next != null &&
+          ((afterId !== undefined && response.next.last_record_id <= afterId) ||
+            (afterDigest !== undefined &&
+              response.next.context_digest !== afterDigest))
+        ) {
+          throw new FastiContractParseError(
+            "Local Search cursor does not continue the requested page",
+          );
+        }
+        return response;
+      },
+      responseLabel: "Local Search response",
       options,
     });
   }
