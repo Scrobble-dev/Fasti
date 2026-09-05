@@ -3002,3 +3002,57 @@ selected-poster and current-credential rechecks; add a no-request-polled check f
 fresh/expired/no-cache/must-revalidate and removal-after-projection cases. Do not
 claim offline image delivery from locator generation or the Store query alone.
 This is retained M4 implementation work, not a dropped capability or a new stage.
+
+### 2026-09-05 — M4 Search vertical slice and browser QA checkpoint
+
+The clean implementation and QA head before this checkpoint is
+`ea8a3d37818cf54da6bd3c520b9087f74bfb7d86`, tree
+`d58860f1f8fa710e2314fd921eb7042ed5e9d364`. The active branch remains local and
+unmerged. No push, PR, merge, v18 allocation, archive change or shared-file
+release occurred.
+
+The real local-first Search flow now crosses Store, application, contracts, API,
+SDK, native and browser hosts, and the existing Discover/Workbench owner. It:
+
+- searches local Records without a configured provider and keeps cache-only
+  native artwork delivery from causing a network request;
+- searches the stable automatic provider or an explicit bounded all-provider
+  selection, preserving successful local/provider results when another source
+  fails;
+- carries durable candidate receipts through details and retry-safe atomic Record
+  creation, while blocking stale-on-error cached saves when offline;
+- retains independent stable local and provider continuation state; and
+- lets the user change provider during an in-flight Search so the existing
+  revision guard discards the superseded result.
+
+The focused browser QA found three medium issues and fixed all three without a new
+component or framework: the selected-provider accessible name, preservation of
+the established automatic provider choice, and provider switching during an
+in-flight request. Commits `b2761ae8`, `2c3666a2` and `6e656507` carry those fixes;
+`cd93645e` and `94563267` add the receipt-backed browser regression, and
+`ea8a3d37` aligns older host fixtures with the now-required local Search surface
+and exact Record selector. The complete browser gate passed 131 tests. The QA
+report is `.gstack/qa-reports/qa-report-fasti-local-2026-09-05.md`; its visual
+evidence is under `.gstack/qa-reports/screenshots/`. Both are ignored local
+evidence, not source or release artifacts.
+
+Exact local verification for this head passed `pnpm test`, `pnpm test:ui`, strict
+workspace clippy, and the complete Rust workspace test suite. The observed Rust
+suites include provider runtime 97 passed, Store 460 passed with 6 explicit
+ignores, daemon 13 passed and xtask 104 passed; JavaScript reported 328 passed
+with 2 explicit skips. These are local source checks, not merged-head, packaged,
+cross-platform or deployment evidence.
+
+M4 is not complete. Candidate duplicate grouping and the canonical durable
+candidate deep-link remain implementation work. The current-head 10,000-Record
+release fixture and final landing gates must be rerun after those changes. The
+existing main-bundle size warning and dense synthetic Search latency concern stay
+visible; no unsupported sub-second device claim is made. Live upstream provider
+calls remain optional smoke evidence and require an actually configured provider;
+fixtures and contract checks do not impersonate that evidence.
+
+The commander remains the sole writer for v17/archive v7 and the named shared
+surfaces. M5 and M8 preparation remains read-only until an exact M4 merge and
+ownership handoff. ~~Codex Security~~ remains removed by the current tooling
+override and was not used for this slice; ordinary review, negative tests and
+product safeguards remain active.
