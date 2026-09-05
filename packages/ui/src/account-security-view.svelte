@@ -232,7 +232,6 @@
     const failedCallback = callbackMarker === "failed";
     if (callbackMarker !== undefined) onCallbackConsumed?.();
     viewState = { kind: "loading" };
-    notice = initialNotice ?? "";
     if (resumeFromCallback) {
       const continuationOutcome = await loadContinuation(
         currentRead.generation,
@@ -576,6 +575,7 @@
   }
 
   onMount(() => {
+    notice = initialNotice ?? "";
     void load().then(async () => {
       if (!initialNotice) return;
       await new Promise<void>((resolve) =>

@@ -8,6 +8,47 @@ Base: `62e10d2e9bd738ed5da425c008eb839f89cdbea5`.
 
 ## Ownership and purpose
 
+### Resumed notice and delivery authority, 2026-09-05
+
+The user approved resuming with Fasti's existing version conventions and the
+minimal reserved-space notice correction, preserving confirmation text, focus,
+recovery controls and all remaining gates. No generic VERSION file or runtime
+dependency will be added. This resolves the earlier shipping-convention stop;
+it does not approve C3 runtime, waive advisory policy or release M4 shared files.
+The metadata commander has been notified of the bounded component extension.
+
+Written execution gates:
+
+1. Prove confirmed-result loss on a read-only Retry with a new browser regression.
+   Seed initialNotice once at mount, not in every load. Preserve sign-in's explicit
+   reset and all existing mutation/error/focus paths. Commit this verified fix.
+2. Keep an empty, persistent status region at the existing notice location. Use
+   the existing Tabler alert inside it, with its original focus ID and no nested
+   live roles. Reserve typography-relative space with natural growth, not fixed
+   clipping, hidden acknowledgement, overlays or delayed confirmation.
+3. Verify notice insertion and recovery at 320/375/768/1440px in Light/Dark, plus
+   enlarged text. Retain existing C1 and header/mobile tests unchanged. Measure
+   geometry without calling raw displacement a CLS/INP score. Longer content
+   must remain visible even if it exceeds the reserved minimum.
+4. Independent source review and applicable QA/design/Impeccable, developer,
+   security, Ponytail and exact-head canonical/CI gates precede merge into dev.
+   Tauri authentication stays deferred. C3 qualification delivery may proceed
+   independently; no speculative production writer crosses M4's ownership.
+
+Rollback each notice correction independently while preserving its evidence.
+No API, SDK, schema, archive, authorization or credential changes are involved.
+
+Notice-retention checkpoint: the new regression first failed at the held Retry
+assertion because `#access-notice` disappeared. The earlier attempt returned an
+incorrect 204 fixture for revocation and is retained as a test-fixture failure,
+not product evidence. Moving initial notice seeding from `load()` to `onMount`
+then passed the new regression and all seven existing parallel regressions
+(8/8, zero skipped). Independent read-only review found no introduced defect.
+Evidence: `.gstack/qa-reports/notice-retention-red-contract.json` and
+`.gstack/qa-reports/notice-retention-green.json`. These are controlled browser
+tests, not real authentication or full accessibility conformance. Layout and
+exact final delivery gates remain pending.
+
 The metadata commander explicitly released a new isolated
 `tests/e2e/access-parallel-regressions.spec.ts` for Access tests on 2026-09-05.
 This is not a shared-file handoff. M4 retains migration v17, archive v7 and
