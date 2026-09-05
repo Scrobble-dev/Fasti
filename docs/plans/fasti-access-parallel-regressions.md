@@ -1,8 +1,9 @@
 # Access A+C parallel regressions
 
 Status: bounded header fix and seven regressions implemented and independently
-reviewed. Existing C1 plus new cases pass 31/31. Canonical and remaining delivery
-gates pending; unshipped. Base: `62e10d2e9bd738ed5da425c008eb839f89cdbea5`.
+reviewed. Existing C1 plus new cases pass 31/31. Canonical verification passed on
+implementation commit `bf8526ad`; remaining delivery gates are pending. Unshipped.
+Base: `62e10d2e9bd738ed5da425c008eb839f89cdbea5`.
 
 ## Ownership and purpose
 
@@ -41,7 +42,10 @@ technology and full viewport/theme review remain separate gates.
 
 No API, SDK, OpenAPI, AsyncAPI, JSON-LD, schema or archive changes are proposed.
 No runtime performance claim is made. All fixture state is per-test memory.
-Rollback is exclusion of this new test file and plan; existing work is preserved.
+Before integration, rollback is exclusion of this whole slice. After integration,
+revert its header guard and associated regression additions together, preserving
+unrelated work and historical failure evidence. This restores the prior header
+exit defect; do not describe that rollback as a repaired first-run flow.
 
 ## Scoped production-fix authorization, 2026-09-05
 
@@ -134,4 +138,21 @@ source review found no concrete correctness issue and no new dead end; Ponytail
 review confirms reuse of existing state and native HTML without new dependencies
 or abstractions. This does not claim real-backend authentication, packaged
 desktop support, manual assistive-technology evidence or whole-product conformance.
-Canonical PR verification and remaining applicable reviews/delivery are next.
+Canonical PR verification passed on clean implementation commit
+`bf8526ad4ecbfc270a475428d9120708c7ac60cc`, tree
+`a002ced61f6998299a1033ef6adb171360416e42`. Its 27 contract and 11 portable gates
+passed. Four ignored tests and the existing Tauri unused-app warning remain in
+the raw log; this is not a zero-warning or zero-ignore claim.
+
+A fresh post-commit browser run passed the same 31 cases with zero failures,
+skips or flaky cases. Its JSON is `.gstack/parallel-exact-bf8526ad.json`, SHA-256
+`f2c8498b581113ba1d9ed95660ab678640fd43516337030a8dc8073b6788335d`.
+An additional pass reused the existing resume and pending-confirmation tests at
+1440 and 375 CSS pixels: four passed. Rendered screenshots preserve the Tabler
+controls and disabled header state. The Impeccable detector returned no findings.
+These checks do not substitute for manual assistive-technology, all-browser,
+layout-shift or complete accessibility proof.
+
+This documentation follow-up does not change those verified UI or test bytes.
+Remaining applicable reviews, final-head gates, the shipping-convention
+disposition, hosted CI, PR, merge and integrated-tree proof remain pending.
