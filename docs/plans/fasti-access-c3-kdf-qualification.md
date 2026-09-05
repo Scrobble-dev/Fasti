@@ -1,6 +1,6 @@
 # C3 KDF qualification preservation and runner repair
 
-Status: PLAN REVIEW; production profile and recovery remain unapproved.
+Status: PACKAGE IMPLEMENTATION RELEASED; production profile and recovery remain unapproved.
 
 ## Scope and authority
 
@@ -67,6 +67,9 @@ untested timeout/crash/enforcement failures. During implementation, establish
 the smallest bounded output handling compatible with the fixed protocol;
 do not claim complete hostile-child isolation from a parser alone. Oracle
 output must be exactly 32 bytes, with EOF checked within its existing deadline.
+Bound both record size and queued output. Collection and EOF, including cold
+output after child exit, stay inside the existing watchdog deadline. Reader
+cleanup must neither leak a detached allocator nor hang on early rejection.
 Any change beyond these protocol/cleanup boundaries needs a written delta
 review before code changes.
 
@@ -141,5 +144,13 @@ there is no production state migration to undo.
 
 ## GSTACK REVIEW REPORT
 
-Independent source review found the two concrete defects above. Written-plan
-review remains pending. No production implementation is released yet.
+Independent source review found the two concrete defects above. Independent
+written-plan review found no blocking omission and required bounded queued
+output plus deadline-covered EOF; both are incorporated above. Commander
+review confirms one child owner, shared parser, existing dependencies and no
+shared production change. Five named package paths are released to one writer.
+Source writing can proceed while local builds/measurements wait for M4's
+actual resource-slot release. Test, measurement and delivery gates remain open.
+
+NO UNRESOLVED DECISIONS within this isolated package repair scope. This does
+not approve the production crypto profile, recovery policy or measurement result.
