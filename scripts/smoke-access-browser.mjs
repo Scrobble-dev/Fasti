@@ -139,11 +139,13 @@ async function runM4SearchJourney() {
     await page.goto(`${FASTI_ORIGIN}/discover`);
     await page.getByRole("heading", { name: "Discover", level: 1 }).waitFor();
     await searchFixtureFilm();
+    // Fresh describes reuse eligibility, including a just-persisted response.
+    // The TLS fixture's exact request count separately proves the upstream call.
     await page
       .getByRole("region", { name: "Search results" })
       .getByRole("status")
       .filter({
-        hasText: "These results were observed from the provider now.",
+        hasText: "These results came from fresh cache evidence.",
       })
       .waitFor();
     await requireNoAccessibilityViolations("live provider Search results");

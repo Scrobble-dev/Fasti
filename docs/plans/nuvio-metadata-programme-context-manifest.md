@@ -4063,3 +4063,12 @@ preconstruction identity failure, last-field kernel lock lifetime, and no live
 kernel/guard use or drop in a fork child. The handoff also includes isolated C3
 framing qualification, not production crypto activation. Schema17/archive7 and
 the shared writer remain M4-owned; no migration18 allocation is implied.
+
+The post-handoff attempt at `ab05a074` also ended without an acceptance receipt.
+The scoped locator exposed the second incorrect test assumption: a cacheable
+just-persisted page is already `Fresh` under `SearchReceiptLifetime::cache_state`,
+as returned by `commit_search_page`. `Observed` is not a generic network-origin
+flag. The harness must expect the actual Fresh projection on first Search as
+well as cached Search. Keep the exact one-upstream-search request assertion to
+prove the initial provider exchange; do not change the application contract or
+weaken the zero-extra-requests/cache/restart checks to fit the test.
