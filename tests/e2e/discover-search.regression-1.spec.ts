@@ -195,7 +195,12 @@ test("local and receipt-backed provider Search survive a partial source failure"
   });
 
   await page.goto("/discover");
-  await page.getByLabel("Metadata provider").selectOption("all");
+  const provider = page.getByLabel("Metadata provider");
+  await expect(provider).toHaveValue("tmdb");
+  await expect(
+    page.getByRole("searchbox", { name: "Search TMDB" }),
+  ).toBeVisible();
+  await provider.selectOption("all");
   await page
     .getByRole("searchbox", { name: "Search your Library and providers" })
     .fill("Dune");
