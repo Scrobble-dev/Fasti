@@ -79,6 +79,7 @@ Generated files are outputs, not sources of truth.
 - Derive app-managed credential accounts from `SqliteKernel::data_root_identity()`, not from a configured path. Bind the identity to the opened root descriptor and its persisted random lock nonce. Renaming an opened root must keep its account; replacing that path with another root must select another account.
 - Keep node connection settings separate from provider outbound policy. A provider allow list must not block an operator-selected `.internal` Fasti service URL.
 - Bound memory, files, requests, archives, and retries.
+- Keep data-root lock release with the existing `LockedDataRoot` owner and its failed-acquisition cleanup. Preserve `KernelInner.data_root` as the last dropped field. Inherited descriptors must not prolong a completed owner; a live Rust guard/kernel must not transfer or run its destructor across fork. Do not replace this boundary with acquisition retries or test serialization.
 - Validate recovery and interruption paths.
 
 Performance targets remain:

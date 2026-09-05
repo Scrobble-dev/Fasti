@@ -50,6 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Released data-root locks when their final kernel owner drops, even while a child temporarily retains an inherited descriptor. Failed identity initialization also releases its acquired lock without hiding the original error.
 - Prevented consumed enrollment proofs from panicking when the kernel returns `bootstrap_closed`.
 - Prevented ambiguous or cross-workspace credential grants from panicking when authentication fails closed.
 - Recovered the capability policy source after a malformed formatting-only write; the recovery changed no behavior.

@@ -481,3 +481,81 @@ recovery authority and native distribution remain outside this authorization.
 One finding incorporated; zero unresolved decisions within the seven-file scope.
 
 NO UNRESOLVED DECISIONS
+
+## Scope amendment: data-root owner release — 2026-09-05
+
+PR130 coverage run `33992610599`, job `101377414251`, failed the unchanged
+`full_import_activation_survives_owner_drop_and_opens_exact_database` test:
+290 passed, one failed, three ignored. Its initial recovery lock reacquisition
+returned `DataRootLocked` after the test dropped its sole restored kernel.
+The executed PR merge was `2850990cd59035516573cf1568ad2c1a29c2cd1c`
+(head `41a359e5` into dev `3d775bf7`). No rerun or suppression replaces that
+failure. The exact competing descriptor holder in CI is not known.
+
+Root and independent source review found that closing the guard's file does
+not release its Linux lock while another process still inherits the same open
+file description. A first-run bounded probe using the actual public
+`LockedDataRoot` reproduced the mechanism: hold an owned child before exec,
+drop the parent guard, observe reacquisition fail, then exec/reap the child
+and observe success. Its syscall trace confirms CLOEXEC and that sequence.
+This proves the owner-lifetime defect, not the identity of the CI holder.
+See [Rust File unlock](https://doc.rust-lang.org/std/fs/struct.File.html#method.unlock)
+and [Linux flock](https://man7.org/linux/man-pages/man2/flock.2.html).
+
+On 2026-09-05 M4 explicitly released only
+`crates/fasti-store/src/kernel.rs` and colocated regression tests to the
+Commander. That path is added to this PR's prior qualification/doc allowlist.
+Keep the repair as one separate coherent commit with its reviewed patch and
+exact source/tree handoff to M4. This is a shared store correctness fix, not
+runtime crypto activation. No migration, archive, provider, API, SDK, transport
+or capability changes are authorized by this amendment.
+
+The implementation gate is written before code:
+
+1. Add a deterministic regression using a duplicate of the guard's private
+   file descriptor. A live owner must exclude another acquire. After the
+   final kernel owner drops, a retained duplicate must not prolong its lock;
+   closing that old duplicate must not unlock the new independent owner.
+   Record the first failure against unchanged production behavior.
+2. Use standard-library explicit unlock in `LockedDataRoot::Drop`, with ordinary
+   close as non-panicking fallback. Preserve `KernelInner.data_root` as its last
+   field and all current live-owner/path/nonce checks. Do not retry acquisition,
+   add sleeps, serialize tests, add a dependency or weaken fail-closed errors.
+3. Also unlock when fallible identity initialization fails after acquisition
+   but before the guard is formed. Independent review identified that cleanup
+   gap; preserve the original error. Cover malformed identity rejection and
+   subsequent corrected acquisition with focused tests.
+4. Document that a live Rust kernel/guard owner must not be transferred or
+   used across fork. Descriptor inheritance until exec is distinct. Do not
+   claim fork-safe Rust-owner destruction or guaranteed immediate unlock if
+   the OS unlock itself fails. No speculative PID ownership framework.
+5. Run the regression RED/GREEN, full store tests, strict Clippy, canonical
+   verification and all unchanged qualification suites. Recheck the original
+   restore test without filters replacing its full-suite gate. Independent
+   source review and fresh exact-head hosted coverage remain required.
+
+Retained first-run probe artifacts (ignored local review directory):
+`lock-inheritance-probe.rs`, `lock-inheritance-run-1.log`, and
+`lock-inheritance-trace-1.log`. Source SHA-256:
+`a2cca1d78059e7640f0c5d17e1bcbe73a0b4f5a1da949f7a29a91225cf567e59`;
+trace SHA-256:
+`99355710638a83db5f78b1cb37347c0e249cc4c9b6624751c4a9eb548d2d199a`.
+The probe reused a compiled store artifact; the committed regression must
+rebuild current source before claiming RED/GREEN. Earlier qualification and
+measurement receipts are not relabelled as proof of this store change.
+
+The new retained regression rebuilt unchanged production behavior and failed
+on its first run with `DataRootLocked` (one test failed; exit 101): ledger
+`2026-09-05T21-38-38-437Z-lock-owner-red-453870-e387eec9.log`.
+After the owner/error cleanup fix, all ten focused data-root tests passed:
+`2026-09-05T21-39-50-880Z-lock-owner-green-459600-9664e654.log`.
+Independent exact-diff review found no concrete defect. The identity-error
+test proves rejection and corrected reacquisition, not inherited-descriptor
+fault injection before guard construction. Full store verification passed
+293 unit tests and three integration tests, with the existing three unit
+and one documentation test skips unchanged (ledger
+`2026-09-05T21-41-07-027Z-store-lock-regression-463465-caee4b2c.log`).
+Strict all-target store Clippy also passed (ledger
+`2026-09-05T21-41-08-384Z-store-lock-clippy-463756-ff98215d.log`).
+Canonical and hosted coverage gates remain open at this checkpoint. The AGENTS lock instruction
+and CHANGELOG entry describe this scope amendment; no other M4 file is edited.
