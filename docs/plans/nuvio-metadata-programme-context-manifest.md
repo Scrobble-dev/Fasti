@@ -4088,3 +4088,62 @@ release. The strict free-port check correctly refused one immediate restart
 while sockets were still unavailable; no process takeover or port-check bypass
 occurred. Retry only after the prior process handle is terminal and the same
 free-port preflight succeeds.
+
+### M4 real-process Search acceptance — verified local increment
+
+Clean `f45c6bad37295e15466c0b108c9d9457febf3b59`, tree
+`39f710fb8fcf71c895ad9e6dc3c55b0ff549740f`, passes the complete ordinary-browser
+journey. `target/fasti-receipts/m4-search-ordinary-browser.json` binds that exact
+commit/tree and `dirty: false`. Chromium 151.0.7922.34 performs real TrailBase
+sign-in, Search, both canonical candidate detail reads, Create, Attach through
+the local picker, cached-only Search, daemon restart, fresh sign-in and canonical
+Record reload with both exact `tmdb.movie` identifiers. The browser observes
+three provider Search requests, two candidate reads, two action requests and
+four local Record searches. The fixture independently observes exactly two
+configuration requests, one Search and two detail requests for each candidate;
+the restart adds none. The stopped-daemon database oracle proves one film,
+two exact identifiers, both complete provenance sources and the exact paired
+action receipts, unchanged after restart. Axe checks on the exercised surfaces
+pass. This is not comprehensive accessibility or packaged-auth conformance.
+
+The receipt explicitly classifies upstream input as
+`disposable_loopback_tmdb_tls_fixture`, records the isolated daemon digest and
+feature, and sets public-provider acceptance to false. Real public TMDB/MDBList/
+Nuvio acceptance remains a distinct required gate; this result does not replace
+it. All managed listeners were released. Intermediate failed attempts emitted
+no acceptance receipt. Final table assertions identify the exact namespace
+column rather than also matching the provenance column with identical text.
+
+The canonical attempt on this same head stopped at the formatter: the new
+details locator needed the existing formatter's line wrapping. Correct only
+that file's formatting, then rerun on a clean committed head. Do not report
+27+11 for this failed attempt or inherit earlier canonical evidence.
+
+Parallel preparation remains read-only and attached to this checkpoint:
+
+- No-store details: direct Create/Attach already uses the provider-identifier
+  owner and stays visible. Add a separately frozen coordinate-details contract,
+  never a fabricated SCR or `RefetchedWithoutSnapshot` without its real prior
+  receipt. Reuse current authorization, exact mapping, governed fetch and
+  post-I/O authority fences; no table/migration is justified. Live pagination
+  needs cross-page exact-coordinate suppression plus a frozen aggregate memory
+  or page-replacement policy before implementation. Retained keyset pagination
+  is a separate remaining gate, not satisfied by upstream page numbers.
+- Navigation: existing generation/authority fences look correct. Add held
+  candidate A-to-B/exit, pending Search-to-route-exit, and held details-to-profile/
+  sign-out regressions before changing production. Record A/B/ABA and profile
+  tests already exist. Current host signatures do not actively cancel transport;
+  late-result isolation must not be described as network cancellation.
+- Media domains and performance: all ten remain required. Current exact
+  coordinate owners prove Movie/Show/Book/Anime; source-backed coordinates for
+  the other domains still need to freeze, without inferring them from Grain or
+  treating unknown as Custom. Reuse overlapping exact identity/lifecycle
+  classification and exact selected-ID batches, not full assertion JSON or
+  sparse first-to-last ranges. Remove the current per-Record identifier hydration
+  from the Search hot path. Existing indexes appear sufficient pending measured
+  0/100/10,000-Record query plans, bounded execution counts and p95 below 250 ms.
+  Empty domain filters must preserve existing context/digest bytes and cursors.
+
+These preparations do not authorize multiple shared writers, reduce scope,
+allocate migration18, or claim M4 complete. Commander owns the active integration;
+future M5/M8/M9a/M11a lanes retain their predecessor and ownership gates.
