@@ -1,8 +1,9 @@
 # Access A+C parallel regressions
 
-Status: bounded header fix and seven regressions implemented and independently
-reviewed. Existing C1 plus new cases pass 31/31. Canonical verification passed on
-implementation commit `bf8526ad`; remaining delivery gates are pending. Unshipped.
+Status: bounded header and mobile layout fixes implemented and independently
+reviewed. Combined source-byte-identical browser evidence is 41/41; fresh pending
+matrix is 6/6. Canonical verification passed on clean implementation commit
+`3cbd52b6`. Remaining delivery gates are pending. Unshipped.
 Base: `62e10d2e9bd738ed5da425c008eb839f89cdbea5`.
 
 ## Ownership and purpose
@@ -217,3 +218,64 @@ Ponytail review found no unnecessary dependency, abstraction or duplicate fixtur
 the fix uses native CSS at the shared cause. `pnpm lint:ui`, focused Prettier and
 `git diff --check` passed. Canonical and review receipts for the earlier head
 do not qualify the new head; exact-head delivery verification remains required.
+
+## Exact implementation checkpoint and parallel preparation
+
+Clean implementation commit `3cbd52b65d26b12eb57f00b8a16d16e2a1bf4fd8`, tree
+`e6d31d26db96390d0b5c4127f48df44dcce33577`, passed all 27 contract and 11 portable
+checks with exit zero. Receipt source bindings identify that commit/tree and
+`dirty:false`; execution is local and unpublished. Canonical log SHA-256:
+`2ae28e5ef3e72d519a276115bc13166e3dd0a1e4203ff890837f333925e1e90e`.
+
+The fresh Light/Dark pending matrix at 320/768/1440 passed six cases, zero failed,
+skipped or flaky. Pending-state Axe violations/incomplete checks and console
+errors were zero. JSON SHA-256:
+`ae981df3f23013cce5e063c8c97346d60584e8edfced8d34b4a90f7f0a1a69bd`.
+Playwright JSON does not embed Git identity; provenance uses the recorded clean
+execution boundary. The earlier 41 passes remain pre-commit evidence, not a new
+exact-commit rerun. Notice displacement remains 106px at 320 and 82px in affected
+wider cases. Raw shift/event observations are not canonical CLS or INP results.
+
+Developer-experience review covered local contributor commands, three settled
+public-docs searches, error recovery, contribution surfaces and repository
+artifacts. It completed with concerns, score 6.875/10 as bounded reviewer judgment.
+Cold installation, real account setup and human time-to-first-success were not
+measured. The deployed docs were not bound to this unpublished source. Existing
+docs friction does not authorize expanding this component patch into shared docs.
+
+Two read-only preparation lanes completed alongside that review:
+
+- Notice: a persistent typography-relative status region is the smallest
+  candidate. Preserve Tabler alerts, message timing, focus, natural expansion,
+  announcements and all recovery controls. The region alone cannot guarantee
+  zero shift for arbitrary content. Existing Retry calls `load()`, which resets
+  notice text; retention through retry needs an explicit behavior decision.
+  No notice implementation or design approval follows from preparation.
+- Vault/recovery: isolated signing qualification already has exact local
+  receipts. Native-notice inventory is already 48 entries; do not repeat its
+  older 45-to-48 task. Next independent work is full referenced licence texts,
+  hashes, provenance and remaining-header coverage. This does not approve a
+  crypto/recovery profile, dependency adoption or shared-file access.
+
+This checkpoint changes documentation only. It does not claim the resulting
+documentation tree already has fresh canonical receipts. Preserve all raw
+failure evidence. No PR, push, merge, migration/archive allocation or shared-file
+release has occurred here; packaged Tauri authentication stays deferred.
+
+## GSTACK REVIEW REPORT
+
+| Review | Trigger | Why | Runs | Status | Findings |
+| --- | --- | --- | --- | --- | --- |
+| CEO Review | Not rerun | Approved premise retained | 0 here | Not reopened | No framework or programme change |
+| Eng Review | `/review` | Exact diff and tests | 1 logged | STALE TREE | f60c3da0 review predates mobile CSS/test addition |
+| Adversarial Review | Native subagent | Independent scrutiny | 1 logged plus bounded follow-up | PARTIAL CURRENT | No concrete mobile-source finding; not a full refreshed gate |
+| Design Review | QA/design workflow | UI and performance evidence | In progress | OPEN | Separate notice shift and final disposition remain |
+| DX Review | `/devex-review` | Contributor experience | 1 | DONE WITH CONCERNS | 6.875/10; six observed/partial, two inferred dimensions; TTHW unmeasured |
+
+**VERDICT:** Not cleared for merge; fresh engineering review and remaining
+applicable delivery gates are required. Canonical implementation evidence is
+green on 3cbd52b6, not a blanket qualification of later documentation commits.
+
+**UNRESOLVED DECISIONS:**
+- Shipping-convention disposition for the helper's missing VERSION assumption.
+- Separate notice design/behavior scope and performance-gate disposition.
