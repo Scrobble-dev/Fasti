@@ -137,3 +137,41 @@ in `crates/fasti-application/src/nuvio.rs`. Metadata released only those two
 header links for crate qualification. This documentation-only correction adds
 no import, runtime behavior or shared contract. Verify with
 `RUSTDOCFLAGS="-D warnings" cargo doc -p fasti-domain -p fasti-application --all-features --no-deps --locked --offline`.
+
+### Exact-head JavaScript advisory repair gate (2026-09-05)
+
+PR #125 at `c1396f16` passed local canonical verification, but its remote
+JavaScript audit failed on inherited `fast-uri 3.1.5`. The workspace manifest
+and pnpm lockfile are unchanged from the merged base. This is an in-scope
+security gate failure, not part of the packaged-Tauri deferral.
+
+The official [v3.1.6 release](https://github.com/fastify/fast-uri/releases/tag/v3.1.6)
+addresses GHSA-5jgf-p345-68v8, GHSA-fph4-wmhf-6fwf,
+GHSA-f65p-4m7j-42xc and GHSA-jqff-g426-hqxp. Its source commit is
+`6f970b2951fd896aa0f3a7ff28eeb6640c137d33`; the npm package retains BSD-3-Clause.
+AJV supplies the sole installed version to the existing schema, OpenAPI,
+AsyncAPI and SBOM tooling. No custom URL parser or suppression is warranted.
+
+The bounded repair order is:
+
+1. Metadata released its existing dependency repair commit
+   `06c5b698c2011051b72781dc3ee5e2b75b39b1e0`, limited to `pnpm-lock.yaml`,
+   `pnpm-workspace.yaml` and `tests/js/patched-dependencies.test.mjs`.
+   Keep every other M4 surface read-only.
+2. Reuse that exact patch, rather than the initially proposed `3.1.6` update.
+   It selects `fast-uri 3.1.7` within AJV's existing range and narrowly
+   overrides affected `qs` versions to `6.16.0`. The newer
+   [URI release](https://github.com/fastify/fast-uri/releases/tag/v3.1.7)
+   also fixes GHSA-qw65-cvwx-89v3 and GHSA-58mr-gqgx-xq4g; the
+   [qs advisory](https://github.com/ljharb/qs/security/advisories/GHSA-x5fp-wj9c-mxmx)
+   requires `6.16.0` for bounded comma arrays. Both retain BSD-3-Clause.
+   Preserve every unrelated resolution, build policy, patch and audit exception.
+3. Verify package integrity against the registry, frozen installation,
+   `pnpm audit`, contract validation and the canonical PR gate. Independently
+   review the dependency diff and its callers. Keep the old failed receipt.
+4. Add a signed forward commit and refresh the PR's exact-head evidence.
+   Require fresh remote gates before merge; no force push or CI weakening.
+
+This adds no direct dependency, framework, endpoint, schema or migration.
+Do not restore the vulnerable version as a convenience rollback; use a
+reviewed non-vulnerable resolution if the patch exposes a compatibility issue.
