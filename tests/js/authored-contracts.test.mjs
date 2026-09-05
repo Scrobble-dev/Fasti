@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { cp, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
+
+import canonicalize from "canonicalize";
 
 import { validateAuthoredContracts } from "../../scripts/validate-authored-contracts.mjs";
 
@@ -22,6 +25,11 @@ const withContracts = async (mutate, assertRejected) => {
       "contracts/examples/v1",
       "contracts/portability/v1",
       "contracts/portability/v2",
+      "contracts/portability/v3",
+      "contracts/portability/v4",
+      "contracts/portability/v5",
+      "contracts/portability/v6",
+      "contracts/portability/v7",
     ]) {
       await mkdir(join(root, directory), { recursive: true });
       await cp(join(repositoryRoot, directory), join(root, directory), {
@@ -72,6 +80,103 @@ test("portability manifest mutation invalidates the JCS checksum", async () => {
       await writeFile(path, `${JSON.stringify(document, null, 2)}\n`);
     },
     (result) => assert.rejects(result, /manifest_digest must cover RFC 8785/u),
+  );
+});
+
+for (const version of [3, 4, 5, 6, 7]) {
+  for (const [label, mutate, refreshDigest, expected] of [
+    [
+      "wrong format version",
+      (manifest) => (manifest.format_version = version - 1),
+      true,
+      /portability v[3-7] example errors/u,
+    ],
+    [
+      "missing final stream",
+      (manifest) => manifest.streams.pop(),
+      true,
+      /portability v[3-7] example errors/u,
+    ],
+    [
+      "reordered streams",
+      (manifest) => {
+        [manifest.streams[0], manifest.streams[1]] = [
+          manifest.streams[1],
+          manifest.streams[0],
+        ];
+      },
+      true,
+      /portability v[3-7] example errors/u,
+    ],
+    [
+      "stale manifest checksum",
+      (manifest) => (manifest.workspace_revision += 1),
+      false,
+      /manifest_digest must cover RFC 8785/u,
+    ],
+    [
+      "changed frozen prefix with a valid checksum",
+      (manifest) => (manifest.streams[0].row_count += 1),
+      true,
+      /frozen.*stream prefix/u,
+    ],
+  ]) {
+    test(`archive v${version} rejects ${label}`, async () => {
+      await withContracts(
+        async (root) => {
+          const path = join(
+            root,
+            `contracts/portability/v${version}/workspace-manifest.example.json`,
+          );
+          const document = JSON.parse(await readFile(path, "utf8"));
+          mutate(document.manifest);
+          if (refreshDigest) {
+            const bytes = canonicalize(document.manifest);
+            assert.equal(typeof bytes, "string");
+            document.manifest_digest = `sha256:${createHash("sha256")
+              .update(bytes, "utf8")
+              .digest("hex")}`;
+          }
+          await writeFile(path, `${JSON.stringify(document, null, 2)}\n`);
+        },
+        (result) => assert.rejects(result, expected),
+      );
+    });
+  }
+}
+
+for (const [label, reference] of [
+  ["HTTP", "https://example.invalid/manifest.schema.json"],
+  ["file", "file:///etc/hosts"],
+]) {
+  test(`archive v6 schema rejects ${label} references before resolution`, async () => {
+    await withContracts(
+      async (root) => {
+        const path = join(
+          root,
+          "contracts/portability/v6/workspace-manifest.schema.json",
+        );
+        const document = JSON.parse(await readFile(path, "utf8"));
+        document.$ref = reference;
+        await writeFile(path, `${JSON.stringify(document, null, 2)}\n`);
+      },
+      (result) => assert.rejects(result, /forbidden external reference/u),
+    );
+  });
+}
+
+test("archive v6 schema is compiled before validating its example", async () => {
+  await withContracts(
+    async (root) => {
+      const path = join(
+        root,
+        "contracts/portability/v6/workspace-manifest.schema.json",
+      );
+      const document = JSON.parse(await readFile(path, "utf8"));
+      document.type = "not-a-json-schema-type";
+      await writeFile(path, `${JSON.stringify(document, null, 2)}\n`);
+    },
+    (result) => assert.rejects(result, /schema is invalid/u),
   );
 });
 

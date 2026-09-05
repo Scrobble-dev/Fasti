@@ -19,32 +19,30 @@
   import NetworkSettings from "./network-settings.svelte";
   import TmdbAttribution from "./tmdb-attribution.svelte";
   import { hostProblemText } from "./host-problem.js";
-  import {
-    IconKey,
-    IconPalette,
-    IconLayoutSidebar,
-    IconPin,
-    IconArrowUp,
-    IconArrowDown,
-    IconEye,
-    IconEyeOff,
-    IconRotate2,
-    IconDevices,
-    IconUserCheck,
-    IconBell,
-    IconDatabaseImport,
-    IconCode,
-    IconPlus,
-    IconTrash,
-    IconDeviceTv,
-    IconExternalLink,
-    IconSettings,
-    IconWorld,
-    IconTags,
-    IconDatabase,
-    IconFileDownload,
-    IconBug,
-  } from "@tabler/icons-svelte";
+  import IconKey from "@tabler/icons-svelte/icons/key";
+  import IconPalette from "@tabler/icons-svelte/icons/palette";
+  import IconLayoutSidebar from "@tabler/icons-svelte/icons/layout-sidebar";
+  import IconPin from "@tabler/icons-svelte/icons/pin";
+  import IconArrowUp from "@tabler/icons-svelte/icons/arrow-up";
+  import IconArrowDown from "@tabler/icons-svelte/icons/arrow-down";
+  import IconEye from "@tabler/icons-svelte/icons/eye";
+  import IconEyeOff from "@tabler/icons-svelte/icons/eye-off";
+  import IconRotate2 from "@tabler/icons-svelte/icons/rotate-2";
+  import IconDevices from "@tabler/icons-svelte/icons/devices";
+  import IconUserCheck from "@tabler/icons-svelte/icons/user-check";
+  import IconBell from "@tabler/icons-svelte/icons/bell";
+  import IconDatabaseImport from "@tabler/icons-svelte/icons/database-import";
+  import IconCode from "@tabler/icons-svelte/icons/code";
+  import IconPlus from "@tabler/icons-svelte/icons/plus";
+  import IconTrash from "@tabler/icons-svelte/icons/trash";
+  import IconDeviceTv from "@tabler/icons-svelte/icons/device-tv";
+  import IconExternalLink from "@tabler/icons-svelte/icons/external-link";
+  import IconSettings from "@tabler/icons-svelte/icons/settings";
+  import IconWorld from "@tabler/icons-svelte/icons/world";
+  import IconTags from "@tabler/icons-svelte/icons/tags";
+  import IconDatabase from "@tabler/icons-svelte/icons/database";
+  import IconFileDownload from "@tabler/icons-svelte/icons/file-download";
+  import IconBug from "@tabler/icons-svelte/icons/bug";
 
   interface Props {
     customFields: CustomFieldDefinition[];

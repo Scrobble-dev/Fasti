@@ -1,11 +1,22 @@
 <script lang="ts">
   import type {
     CreateRecordResult,
+    LocalSearchCursorDto,
+    LocalSearchResponseDto,
     ProviderCredentialStatus,
     ProviderSearchCandidate,
+    SearchCandidateDto,
+    SearchCandidateDetailsResponse,
+    SearchCandidateReceiptDto,
+    SearchProviderPageResponse,
+    SearchRecordActionDto,
   } from "./types.js";
+  import { onDestroy, untrack } from "svelte";
+  import { dialogFocus } from "./dialog-focus.js";
+  import { routeSlug, type SearchCandidateRoute } from "./route-slug.js";
   import { hostProblemText } from "./host-problem.js";
-  import { IconCompass, IconSearch } from "@tabler/icons-svelte";
+  import IconCompass from "@tabler/icons-svelte/icons/compass";
+  import IconSearch from "@tabler/icons-svelte/icons/search";
 
   interface Props {
     providerCredentials?: ProviderCredentialStatus[];
@@ -15,11 +26,37 @@
       provider: string,
       query: string,
     ) => Promise<ProviderSearchCandidate[]>;
+    onSearchLocal?: (
+      query: string,
+      after?: LocalSearchCursorDto,
+    ) => Promise<LocalSearchResponseDto>;
+    onSearchAttachTargets?: (
+      query: string,
+      grain: string,
+      after?: LocalSearchCursorDto,
+    ) => Promise<LocalSearchResponseDto>;
+    onSearchProviderPage?: (
+      provider: string,
+      query: string,
+      page: number,
+      offline: boolean,
+    ) => Promise<SearchProviderPageResponse>;
     onOpenSettings: () => void;
     onRetry: () => void;
+    onOpenRecord?: (recordId: string) => void;
     onCandidateAction?: (
       candidate: ProviderSearchCandidate,
+      action?: SearchRecordActionDto,
     ) => Promise<CreateRecordResult | void>;
+    onCandidateReceiptAction?: (
+      receipt: SearchCandidateReceiptDto,
+      evidenceMode: "cached" | "refetch",
+      action?: SearchRecordActionDto,
+    ) => Promise<CreateRecordResult | void>;
+    onReadCandidate?: (
+      receipt: SearchCandidateReceiptDto,
+      offline: boolean,
+    ) => Promise<SearchCandidateDetailsResponse>;
     embedded?: boolean;
     actionLabel?: string;
     pendingLabel?: string;
@@ -29,6 +66,14 @@
     actionUnavailableText?: string;
     selectedProviderId?: string;
     selectionExplicit?: boolean;
+    candidateRoute?: SearchCandidateRoute;
+    candidateRouteProblem?: string;
+    onOpenCandidate?: (receipt: SearchCandidateReceiptDto) => void;
+    onCloseCandidateRoute?: () => void;
+    onReadCandidateRoute?: (
+      route: SearchCandidateRoute,
+      offline: boolean,
+    ) => Promise<SearchCandidateDetailsResponse>;
   }
 
   let {
@@ -36,9 +81,15 @@
     loading = false,
     hostProblem,
     onSearch,
+    onSearchLocal,
+    onSearchAttachTargets,
+    onSearchProviderPage,
     onOpenSettings,
     onRetry,
+    onOpenRecord,
     onCandidateAction,
+    onCandidateReceiptAction,
+    onReadCandidate,
     embedded = false,
     actionLabel = "Create Record",
     pendingLabel = "Creating…",
@@ -48,12 +99,52 @@
     actionUnavailableText = "Search does not create a Record. Record creation is unavailable until the host can save the Record, identifier, and metadata together.",
     selectedProviderId = $bindable(""),
     selectionExplicit = $bindable(false),
+    candidateRoute,
+    candidateRouteProblem,
+    onOpenCandidate,
+    onCloseCandidateRoute,
+    onReadCandidateRoute,
   }: Props = $props();
   let query = $state("");
-  let results: ProviderSearchCandidate[] = $state([]);
+  interface ProviderResult {
+    candidate: ProviderSearchCandidate;
+    receipt?: SearchCandidateReceiptDto;
+    cacheState?: "observed" | "fresh" | "stale_on_error";
+  }
+  interface ProviderPage {
+    providerId: string;
+    results: ProviderResult[];
+    nextPage?: number;
+    cacheState?: "observed" | "fresh" | "stale_on_error";
+  }
+  interface ProviderPages {
+    results: ProviderResult[];
+    nextPages: Record<string, number>;
+    cacheState?: ProviderPage["cacheState"];
+    problem?: string;
+  }
+  interface GroupedProviderResult {
+    result: ProviderResult;
+    index: number;
+    groupIndex: number;
+    groupPosition: number;
+    groupSize: number;
+    providers: string[];
+  }
+  let results: ProviderResult[] = $state([]);
+  let providerNextPages = $state<Record<string, number>>({});
+  let providerCacheState: ProviderPage["cacheState"] = $state();
+  let cachedOnly = $state(false);
+  let detailKey = $state("");
+  let candidateDetails = $state<Record<string, ProviderSearchCandidate>>({});
+  let candidateDetailProblems = $state<Record<string, string>>({});
+  let localResults: LocalSearchResponseDto["records"] = $state([]);
+  let localNext: LocalSearchCursorDto | undefined = $state();
+  let localProblem = $state("");
   let searching = $state(false);
   let problem = $state("");
   let searched = $state(false);
+  let completedProviderCount = $state(0);
   let completedQuery = $state("");
   let actionKey = $state("");
   let completedKeys = $state<Set<string>>(new Set());
@@ -62,30 +153,352 @@
   let actionProblemKey = $state("");
   let searchRevision = 0;
   let searchProviderId = "";
+  let routeCandidate = $state<ProviderSearchCandidate>();
+  let routeReceipt = $state<SearchCandidateReceiptDto>();
+  let routeLoading = $state(false);
+  let routeProblem = $state("");
+  let routeGeneration = 0;
+  let attachDialog = $state<HTMLDialogElement>();
+  let attachResult = $state<{ result: ProviderResult; index: number }>();
+  let attachQuery = $state("");
+  let attachCompletedQuery = "";
+  let attachRecords = $state<LocalSearchResponseDto["records"]>([]);
+  let attachNext = $state<LocalSearchCursorDto>();
+  let attachRecordId = $state("");
+  let attachLoading = $state(false);
+  let attachSearched = $state(false);
+  let attachProblem = $state("");
+  let attachGeneration = 0;
+  const ALL_PROVIDERS = "all";
 
-  function candidateKey(candidate: ProviderSearchCandidate): string {
-    return `${candidate.provider}:${candidate.kind}:${candidate.provider_id}`;
+  function canonicalCandidatePath(
+    providerId: string,
+    grain: string,
+    receiptId: string,
+    title: string,
+  ): string {
+    return `/explore/${encodeURIComponent(providerId)}/${encodeURIComponent(grain)}/${receiptId}/${routeSlug(title)}`;
+  }
+
+  function routeSnapshot(
+    response: SearchCandidateDetailsResponse,
+  ): SearchCandidateReceiptDto | undefined {
+    return response.outcome === "snapshot" ||
+      response.outcome === "refetched" ||
+      response.outcome === "unavailable"
+      ? response.snapshot.receipt
+      : undefined;
+  }
+
+  function routeDetails(
+    response: SearchCandidateDetailsResponse,
+  ): ProviderSearchCandidate | undefined {
+    if (
+      response.outcome === "refetched" ||
+      response.outcome === "refetched_without_snapshot"
+    )
+      return providerCandidate(response.details);
+    const receipt = routeSnapshot(response);
+    return receipt ? providerCandidate(receipt.candidate) : undefined;
+  }
+
+  async function loadCandidateRoute(
+    route: SearchCandidateRoute,
+    generation: number,
+    offline: boolean,
+  ): Promise<void> {
+    if (!onReadCandidateRoute) {
+      routeProblem = "Sign in to read this provider candidate.";
+      return;
+    }
+    routeLoading = true;
+    routeProblem = "";
+    try {
+      const response = await onReadCandidateRoute(route, offline);
+      if (generation !== routeGeneration) return;
+      routeCandidate = routeDetails(response);
+      routeReceipt = routeSnapshot(response);
+      if (response.outcome === "missing") {
+        routeProblem =
+          "This candidate is no longer available. Start a new Search.";
+      } else if (
+        response.outcome === "unavailable" ||
+        response.outcome === "unavailable_without_snapshot"
+      ) {
+        routeProblem = `Provider details are unavailable (${response.problem_code}).`;
+      }
+      if (routeCandidate) {
+        const receiptId =
+          routeReceipt?.candidate_receipt_id ?? route.candidateReceiptId;
+        const providerId = routeReceipt?.candidate.provider ?? route.providerId;
+        const grain = routeReceipt?.grain ?? route.grain;
+        const path = canonicalCandidatePath(
+          providerId,
+          grain,
+          receiptId,
+          routeCandidate.title,
+        );
+        if (window.location.pathname !== path)
+          window.history.replaceState(window.history.state, "", path);
+      }
+    } catch (error) {
+      if (generation !== routeGeneration) return;
+      routeProblem = hostProblemText(
+        error,
+        "Fasti could not read the candidate details.",
+      );
+    } finally {
+      if (generation === routeGeneration) routeLoading = false;
+    }
+  }
+
+  $effect(() => {
+    const route = candidateRoute;
+    const offline = providerOffline();
+    const generation = ++routeGeneration;
+    untrack(closeAttachPicker);
+    routeCandidate = undefined;
+    routeReceipt = undefined;
+    routeLoading = false;
+    routeProblem = candidateRouteProblem ?? "";
+    if (route && !candidateRouteProblem)
+      void loadCandidateRoute(route, generation, offline);
+    return () => {
+      routeGeneration += 1;
+    };
+  });
+
+  onDestroy(() => {
+    searchRevision += 1;
+    attachGeneration += 1;
+  });
+
+  function closeAttachPicker(): void {
+    attachGeneration += 1;
+    attachDialog?.close();
+    attachResult = undefined;
+    attachRecords = [];
+    attachNext = undefined;
+    attachRecordId = "";
+    attachProblem = "";
+    attachLoading = false;
+    attachSearched = false;
+  }
+
+  function openAttachPicker(result: ProviderResult, index: number): void {
+    if (!onSearchAttachTargets || searching || actionKey || detailKey) return;
+    closeAttachPicker();
+    attachQuery = result.candidate.title;
+    attachResult = { result, index };
+  }
+
+  $effect(() => {
+    if (attachResult && attachDialog && !attachDialog.open)
+      attachDialog.showModal();
+  });
+
+  async function searchAttachTargets(
+    after?: LocalSearchCursorDto,
+  ): Promise<void> {
+    const selection = attachResult;
+    const value = after ? attachCompletedQuery : attachQuery.trim();
+    if (
+      !selection ||
+      !onSearchAttachTargets ||
+      attachLoading ||
+      actionKey ||
+      !value
+    )
+      return;
+    const generation = ++attachGeneration;
+    attachLoading = true;
+    attachProblem = "";
+    if (!after) {
+      attachRecords = [];
+      attachNext = undefined;
+      attachRecordId = "";
+      attachSearched = false;
+    }
+    try {
+      const page = await onSearchAttachTargets(
+        value,
+        selection.result.candidate.grain,
+        after,
+      );
+      if (generation !== attachGeneration) return;
+      if (
+        page.records.some(
+          (record) => record.grain !== selection.result.candidate.grain,
+        )
+      )
+        throw new Error(
+          "The host returned a Record with an incompatible identity grain.",
+        );
+      attachRecords = after
+        ? [...attachRecords, ...page.records]
+        : [...page.records];
+      attachNext = page.next ?? undefined;
+      attachCompletedQuery = value;
+      attachSearched = true;
+    } catch (error) {
+      if (generation === attachGeneration)
+        attachProblem = hostProblemText(
+          error,
+          "Fasti could not search local Records.",
+        );
+    } finally {
+      if (generation === attachGeneration) attachLoading = false;
+    }
+  }
+
+  async function confirmAttach(): Promise<void> {
+    const selection = attachResult;
+    if (
+      !selection ||
+      attachLoading ||
+      !attachRecords.some((record) => record.record_id === attachRecordId)
+    )
+      return;
+    const generation = attachGeneration;
+    const outcome = await runCandidateAction(
+      selection.result,
+      selection.index,
+      {
+        kind: "attach",
+        record_id: attachRecordId,
+      },
+    );
+    if (generation !== attachGeneration) return;
+    if (outcome) {
+      closeAttachPicker();
+      onOpenRecord?.(outcome.record_id);
+    } else {
+      attachProblem = actionProblem;
+    }
+  }
+
+  function candidateKey(result: ProviderResult, index: number): string {
+    return (
+      result.receipt?.candidate_receipt_id ??
+      `${result.candidate.provider}:${result.candidate.kind}:${result.candidate.provider_id}:${index}`
+    );
   }
 
   async function runCandidateAction(
-    candidate: ProviderSearchCandidate,
-  ): Promise<void> {
-    const key = candidateKey(candidate);
-    if (!onCandidateAction || actionKey || completedKeys.has(key)) return;
+    result: ProviderResult,
+    index: number,
+    recordAction: SearchRecordActionDto = { kind: "create" },
+  ): Promise<CreateRecordResult | undefined> {
+    const key = candidateKey(result, index);
+    const action = result.receipt
+      ? onCandidateReceiptAction
+        ? () =>
+            onCandidateReceiptAction(
+              result.receipt!,
+              providerOffline() ? "cached" : "refetch",
+              recordAction,
+            )
+        : undefined
+      : onCandidateAction
+        ? () => onCandidateAction(result.candidate, recordAction)
+        : undefined;
+    if (
+      !action ||
+      searching ||
+      actionKey ||
+      detailKey ||
+      completedKeys.has(key)
+    )
+      return;
+    const revision = searchRevision;
+    const routeRevision = routeGeneration;
     actionKey = key;
     actionProblem = "";
     actionProblemKey = "";
     try {
-      const result = await onCandidateAction(candidate);
+      const outcome = await action();
+      if (revision !== searchRevision || routeRevision !== routeGeneration)
+        return;
       completedKeys = new Set([...completedKeys, key]);
-      if (result) {
-        createdRecordIds = { ...createdRecordIds, [key]: result.record_id };
+      if (outcome) {
+        createdRecordIds = { ...createdRecordIds, [key]: outcome.record_id };
+        return outcome;
       }
     } catch (error) {
+      if (revision !== searchRevision || routeRevision !== routeGeneration)
+        return;
       actionProblem = hostProblemText(error, actionProblemFallback);
       actionProblemKey = key;
     } finally {
-      actionKey = "";
+      if (revision === searchRevision && actionKey === key) actionKey = "";
+    }
+  }
+
+  async function runRoutedCandidateAction(): Promise<void> {
+    const candidate = routeCandidate;
+    const receipt = routeReceipt;
+    if (!candidate || !receipt) return;
+    const outcome = await runCandidateAction({ candidate, receipt }, 0);
+    if (outcome) onOpenRecord?.(outcome.record_id);
+  }
+
+  async function readCandidateDetails(
+    result: ProviderResult,
+    index: number,
+  ): Promise<void> {
+    if (
+      !result.receipt ||
+      !onReadCandidate ||
+      searching ||
+      actionKey ||
+      detailKey
+    )
+      return;
+    const key = candidateKey(result, index);
+    const revision = searchRevision;
+    detailKey = key;
+    candidateDetailProblems = { ...candidateDetailProblems, [key]: "" };
+    try {
+      const response = await onReadCandidate(result.receipt, providerOffline());
+      if (revision !== searchRevision) return;
+      const details =
+        response.outcome === "refetched" ||
+        response.outcome === "refetched_without_snapshot"
+          ? response.details
+          : response.outcome === "snapshot" ||
+              response.outcome === "unavailable"
+            ? response.snapshot.receipt.candidate
+            : undefined;
+      if (details) {
+        candidateDetails = {
+          ...candidateDetails,
+          [key]: providerCandidate(details),
+        };
+      }
+      if (
+        response.outcome === "missing" ||
+        response.outcome === "unavailable" ||
+        response.outcome === "unavailable_without_snapshot"
+      ) {
+        candidateDetailProblems = {
+          ...candidateDetailProblems,
+          [key]:
+            response.outcome === "missing"
+              ? "Candidate details are no longer available."
+              : `Provider details are unavailable (${response.problem_code}).`,
+        };
+      }
+    } catch (error) {
+      if (revision !== searchRevision) return;
+      candidateDetailProblems = {
+        ...candidateDetailProblems,
+        [key]: hostProblemText(
+          error,
+          "Fasti could not read the candidate details.",
+        ),
+      };
+    } finally {
+      if (revision === searchRevision && detailKey === key) detailKey = "";
     }
   }
   const supportedProviders = $derived(
@@ -106,14 +519,61 @@
       (provider) => provider.provider === selectedProviderId,
     ),
   );
+  const selectedProviders = $derived(
+    selectedProviderId === ALL_PROVIDERS
+      ? supportedProviders.filter(providerAvailable)
+      : selectedProvider && providerAvailable(selectedProvider)
+        ? [selectedProvider]
+        : [],
+  );
+  const searchAvailable = $derived(
+    Boolean(onSearchLocal) || selectedProviders.length > 0,
+  );
+  const groupedProviderResults = $derived.by(() => {
+    const groups = new Map<
+      string,
+      Array<{ result: ProviderResult; index: number }>
+    >();
+    results.forEach((result, index) => {
+      const title = result.candidate.title
+        .normalize("NFKC")
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}]+/gu, " ")
+        .trim();
+      const grain = result.candidate.grain;
+      const key =
+        title && result.candidate.release_year
+          ? `${grain}\u001f${result.candidate.release_year}\u001f${title}`
+          : `unique\u001f${candidateKey(result, index)}`;
+      const group = groups.get(key) ?? [];
+      group.push({ result, index });
+      groups.set(key, group);
+    });
+    return Array.from(groups.values()).flatMap((group, groupIndex) => {
+      const providers = Array.from(
+        new Set(group.map(({ result }) => result.candidate.provider)),
+      );
+      return group.map(
+        ({ result, index }, groupPosition): GroupedProviderResult => ({
+          result,
+          index,
+          groupIndex,
+          groupPosition,
+          groupSize: group.length,
+          providers,
+        }),
+      );
+    });
+  });
 
   $effect(() => {
     if (supportedProviders.length === 0) return;
     if (
       selectionExplicit &&
-      supportedProviders.some(
-        (provider) => provider.provider === selectedProviderId,
-      )
+      (selectedProviderId === ALL_PROVIDERS ||
+        supportedProviders.some(
+          (provider) => provider.provider === selectedProviderId,
+        ))
     ) {
       return;
     }
@@ -130,9 +590,17 @@
     searchRevision += 1;
     searching = false;
     results = [];
+    providerNextPages = {};
+    providerCacheState = undefined;
+    localResults = [];
+    localNext = undefined;
+    localProblem = "";
     problem = "";
     actionProblem = "";
     actionProblemKey = "";
+    detailKey = "";
+    candidateDetails = {};
+    candidateDetailProblems = {};
     searched = false;
     completedQuery = "";
   });
@@ -141,44 +609,246 @@
     selectionExplicit = true;
     selectedProviderId = provider;
   }
+
+  function providerCandidate(
+    candidate: SearchCandidateDto,
+  ): ProviderSearchCandidate {
+    return {
+      ...candidate,
+      authors: [...candidate.authors],
+      image_url: candidate.image_url ?? null,
+      original_title: candidate.original_title ?? undefined,
+      overview: candidate.overview ?? undefined,
+      release_year: candidate.release_year ?? undefined,
+    };
+  }
+
+  function providerOffline(): boolean {
+    return (
+      cachedOnly ||
+      (typeof navigator !== "undefined" && navigator.onLine === false)
+    );
+  }
+
+  async function searchProviderResults(
+    provider: ProviderCredentialStatus,
+    value: string,
+    page: number,
+  ): Promise<ProviderPage> {
+    if (!onSearchProviderPage) {
+      return {
+        providerId: provider.provider,
+        results: (await onSearch(provider.provider, value)).map(
+          (candidate) => ({
+            candidate,
+          }),
+        ),
+      };
+    }
+    const response = await onSearchProviderPage(
+      provider.provider,
+      value,
+      page,
+      providerOffline(),
+    );
+    if (response.outcome === "unavailable") {
+      throw new Error(
+        `${provider.label} is unavailable (${response.problem_code}).`,
+      );
+    }
+    if (response.outcome === "live") {
+      return {
+        providerId: provider.provider,
+        results: response.candidates.map((candidate) => ({
+          candidate: providerCandidate(candidate),
+        })),
+        nextPage: response.next_page ?? undefined,
+      };
+    }
+    return {
+      providerId: provider.provider,
+      results: response.candidates.map((receipt) => ({
+        candidate: providerCandidate(receipt.candidate),
+        receipt,
+        cacheState: response.cache_state,
+      })),
+      nextPage: response.next_page ?? undefined,
+      cacheState: response.cache_state,
+    };
+  }
+
+  async function searchProviders(
+    providers: ProviderCredentialStatus[],
+    value: string,
+    pages: Record<string, number>,
+  ): Promise<ProviderPages> {
+    const settled = await Promise.allSettled(
+      providers.map((provider) =>
+        searchProviderResults(provider, value, pages[provider.provider] ?? 1),
+      ),
+    );
+    const completed = settled.flatMap((outcome) =>
+      outcome.status === "fulfilled" ? [outcome.value] : [],
+    );
+    const problems = settled.flatMap((outcome, index) =>
+      outcome.status === "rejected"
+        ? [
+            hostProblemText(
+              outcome.reason,
+              `${providers[index].label} Search is unavailable.`,
+            ),
+          ]
+        : [],
+    );
+    const nextPages = Object.fromEntries(
+      settled.flatMap((outcome, index) =>
+        outcome.status === "rejected"
+          ? [[providers[index].provider, pages[providers[index].provider] ?? 1]]
+          : outcome.value.nextPage
+            ? [[outcome.value.providerId, outcome.value.nextPage]]
+            : [],
+      ),
+    );
+    const states = completed
+      .map((page) => page.cacheState)
+      .filter((state): state is NonNullable<typeof state> => Boolean(state));
+    return {
+      results: completed.flatMap((page) => page.results),
+      nextPages,
+      cacheState:
+        states.length === completed.length &&
+        states.length > 0 &&
+        states.every((state) => state === states[0])
+          ? states[0]
+          : undefined,
+      problem: problems.length > 0 ? problems.join(" ") : undefined,
+    };
+  }
+
   async function search(event: SubmitEvent): Promise<void> {
     event.preventDefault();
     const value = query.trim();
-    if (
-      !value ||
-      !selectedProvider ||
-      !providerAvailable(selectedProvider) ||
-      searching
-    )
-      return;
+    if (!value || searching || actionKey || detailKey) return;
     if (
       /[\u0000-\u001f\u007f]/u.test(value) ||
       new TextEncoder().encode(value).byteLength > 256
     ) {
       problem = "Use 1 to 256 UTF-8 bytes and no control characters.";
       results = [];
+      providerNextPages = {};
+      providerCacheState = undefined;
+      localResults = [];
+      localNext = undefined;
       searched = false;
       return;
     }
-    const provider = selectedProvider;
+    const providers = [...selectedProviders];
     const revision = ++searchRevision;
     searching = true;
     problem = "";
+    localProblem = "";
     actionProblem = "";
     actionProblemKey = "";
+    detailKey = "";
+    candidateDetails = {};
+    candidateDetailProblems = {};
     searched = false;
     try {
-      const nextResults = await onSearch(provider.provider, value);
+      const [localOutcome, providerOutcome] = await Promise.allSettled([
+        onSearchLocal?.(value),
+        providers.length > 0
+          ? searchProviders(providers, value, {})
+          : undefined,
+      ]);
       if (revision !== searchRevision) return;
-      results = nextResults;
+      if (localOutcome.status === "fulfilled" && localOutcome.value) {
+        localResults = [...localOutcome.value.records];
+        localNext = localOutcome.value.next ?? undefined;
+      } else {
+        localResults = [];
+        localNext = undefined;
+        if (localOutcome.status === "rejected") {
+          localProblem = hostProblemText(
+            localOutcome.reason,
+            "Fasti could not search local Records.",
+          );
+        }
+      }
+      if (providerOutcome.status === "fulfilled") {
+        results = providerOutcome.value?.results ?? [];
+        providerNextPages = providerOutcome.value?.nextPages ?? {};
+        providerCacheState = providerOutcome.value?.cacheState;
+        problem = providerOutcome.value?.problem ?? "";
+      } else {
+        results = [];
+        providerNextPages = {};
+        providerCacheState = undefined;
+        problem = hostProblemText(
+          providerOutcome.reason,
+          "Provider Search failed. Local results are still available.",
+        );
+      }
       completedQuery = value;
+      completedProviderCount = providers.length;
       searched = true;
+    } finally {
+      if (revision === searchRevision) searching = false;
+    }
+  }
+
+  async function loadMoreProvider(): Promise<void> {
+    const providers = selectedProviders.filter(
+      (provider) => providerNextPages[provider.provider],
+    );
+    if (
+      providers.length === 0 ||
+      !onSearchProviderPage ||
+      searching ||
+      actionKey ||
+      detailKey
+    )
+      return;
+    const revision = ++searchRevision;
+    searching = true;
+    problem = "";
+    try {
+      const page = await searchProviders(
+        providers,
+        completedQuery,
+        providerNextPages,
+      );
+      if (revision !== searchRevision) return;
+      results = [...results, ...page.results];
+      providerNextPages = page.nextPages;
+      providerCacheState = page.cacheState;
+      problem = page.problem ?? "";
     } catch (error) {
       if (revision !== searchRevision) return;
-      results = [];
       problem = hostProblemText(
         error,
-        `${provider.label} search failed. Check the provider credential and network policy.`,
+        "Fasti could not load the next provider Search page.",
+      );
+    } finally {
+      if (revision === searchRevision) searching = false;
+    }
+  }
+
+  async function loadMoreLocal(): Promise<void> {
+    if (!onSearchLocal || !localNext || searching || actionKey || detailKey)
+      return;
+    const revision = ++searchRevision;
+    searching = true;
+    localProblem = "";
+    try {
+      const page = await onSearchLocal(completedQuery, localNext);
+      if (revision !== searchRevision) return;
+      localResults = [...localResults, ...page.records];
+      localNext = page.next ?? undefined;
+    } catch (error) {
+      if (revision !== searchRevision) return;
+      localProblem = hostProblemText(
+        error,
+        "Fasti could not load the next local Search page.",
       );
     } finally {
       if (revision === searchRevision) searching = false;
@@ -186,7 +856,90 @@
   }
 </script>
 
-<div class="discover-container" class:embedded>
+<div
+  class="discover-container"
+  class:embedded
+  class:candidate-active={Boolean(candidateRoute || candidateRouteProblem)}
+>
+  {#if candidateRoute || candidateRouteProblem}
+    <section class="candidate-detail" aria-busy={routeLoading}>
+      <button
+        type="button"
+        class="btn btn-outline-secondary"
+        onclick={onCloseCandidateRoute}
+        disabled={!onCloseCandidateRoute || Boolean(actionKey)}
+        >Back to Search</button
+      >
+      <h1 id="candidate-detail-title" tabindex="-1">
+        {routeCandidate?.title ?? "Candidate details"}
+      </h1>
+      {#if routeLoading}
+        <p class="alert alert-info" role="status">Loading candidate…</p>
+      {/if}
+      {#if routeProblem}
+        <p class="problem" role="alert">{routeProblem}</p>
+      {/if}
+      {#if routeCandidate}
+        {#if routeCandidate.original_title}
+          <p>Original title: {routeCandidate.original_title}</p>
+        {/if}
+        {#if routeCandidate.authors.length > 0}
+          <p>By {routeCandidate.authors.join(", ")}</p>
+        {/if}
+        {#if routeCandidate.overview}
+          <p class="result-overview">{routeCandidate.overview}</p>
+        {/if}
+        <dl>
+          <div>
+            <dt>Provider</dt>
+            <dd>{routeCandidate.provider}</dd>
+          </div>
+          <div>
+            <dt>Type</dt>
+            <dd>{routeCandidate.kind}</dd>
+          </div>
+          {#if routeCandidate.release_year}
+            <div>
+              <dt>Year</dt>
+              <dd>{routeCandidate.release_year}</dd>
+            </div>
+          {/if}
+          <div>
+            <dt>Provider ID</dt>
+            <dd><code>{routeCandidate.provider_id}</code></dd>
+          </div>
+        </dl>
+        {#if routeReceipt && onCandidateReceiptAction}
+          <button
+            type="button"
+            class="btn btn-primary"
+            aria-disabled={Boolean(actionKey) || routeLoading}
+            onclick={runRoutedCandidateAction}
+            >{actionKey ? pendingLabel : actionLabel}</button
+          >
+          {#if onSearchAttachTargets}
+            <button
+              type="button"
+              class="btn btn-outline-secondary"
+              disabled={Boolean(actionKey) ||
+                routeLoading ||
+                completedKeys.has(routeReceipt.candidate_receipt_id)}
+              onclick={() =>
+                openAttachPicker(
+                  { candidate: routeCandidate!, receipt: routeReceipt! },
+                  0,
+                )}>Attach to existing Record</button
+            >
+          {/if}
+        {/if}
+        {#if !attachResult && actionProblem && actionProblemKey === routeReceipt?.candidate_receipt_id}
+          <p class="problem" role="alert">{actionProblem}</p>
+        {/if}
+      {:else if !routeLoading && !routeProblem}
+        <p>Candidate details are unavailable.</p>
+      {/if}
+    </section>
+  {/if}
   {#if !embedded}
     <header class="discover-header">
       <div class="heading-row">
@@ -194,10 +947,115 @@
         <h1 id="discover-title" class="view-title" tabindex="-1">Discover</h1>
       </div>
       <p class="view-subtitle">
-        Search configured metadata providers through the trusted Fasti host.
+        Search local Records first, then a configured metadata provider.
       </p>
     </header>
   {/if}
+
+  <form class="search-form" onsubmit={search} role="search">
+    <label for="provider-search">
+      Search {selectedProvider?.label ?? "local Records and providers"}
+    </label>
+    <div class="search-row">
+      <input
+        id="provider-search"
+        type="search"
+        class="form-control"
+        required
+        maxlength="256"
+        bind:value={query}
+        disabled={searching ||
+          Boolean(actionKey) ||
+          Boolean(detailKey) ||
+          !searchAvailable}
+        placeholder="Title or provider identifier"
+        autocomplete="off"
+      />
+      <button
+        type="submit"
+        class="btn btn-primary"
+        disabled={searching ||
+          Boolean(actionKey) ||
+          Boolean(detailKey) ||
+          !searchAvailable ||
+          !query.trim()}
+      >
+        <IconSearch size={18} aria-hidden="true" />
+        {searching ? "Searching…" : "Search"}
+      </button>
+    </div>
+  </form>
+
+  <section
+    class="results"
+    aria-labelledby="local-search-results-title"
+    aria-busy={searching}
+  >
+    <svelte:element
+      this={embedded ? "h4" : "h2"}
+      id="local-search-results-title"
+    >
+      Local Records
+    </svelte:element>
+    {#if localProblem}
+      <p class="problem" role="alert">{localProblem}</p>
+    {/if}
+    {#if searched && localResults.length === 0 && !localProblem}
+      <p role="status">
+        No local Records found {localNext ? "on this page" : ""} for
+        {completedQuery}.
+      </p>
+    {:else if localResults.length > 0}
+      <p role="status">
+        {localResults.length}
+        {localResults.length === 1 ? "local Record" : "local Records"} for
+        {completedQuery}.
+      </p>
+      <ol>
+        {#each localResults as record (record.record_id)}
+          <li>
+            <svelte:element this={embedded ? "h5" : "h3"} class="result-title">
+              {record.title.value ?? "Untitled Record"}
+            </svelte:element>
+            <dl>
+              <div>
+                <dt>Source</dt>
+                <dd>Local Record</dd>
+              </div>
+              <div>
+                <dt>Type</dt>
+                <dd>{record.grain}</dd>
+              </div>
+              {#if record.release_year?.value}
+                <div>
+                  <dt>Year</dt>
+                  <dd>{record.release_year.value}</dd>
+                </div>
+              {/if}
+            </dl>
+            {#if onOpenRecord}
+              <button
+                type="button"
+                class="track-btn"
+                onclick={() => onOpenRecord(record.record_id)}
+                >Open Record</button
+              >
+            {/if}
+          </li>
+        {/each}
+      </ol>
+    {:else if !searched}
+      <p>Local Records remain searchable without a network connection.</p>
+    {/if}
+    {#if localNext}
+      <button
+        type="button"
+        class="btn btn-outline-secondary"
+        disabled={searching || Boolean(actionKey) || Boolean(detailKey)}
+        onclick={loadMoreLocal}>Load more local Records</button
+      >
+    {/if}
+  </section>
 
   {#if loading}
     <p role="status">Loading provider status…</p>
@@ -213,7 +1071,7 @@
         Retry host connection
       </button>
     </div>
-  {:else if supportedProviders.length === 0 || !selectedProvider}
+  {:else if supportedProviders.length === 0}
     <section class="unavailable" aria-labelledby="discover-setup-title">
       <svelte:element this={embedded ? "h4" : "h2"} id="discover-setup-title">
         No search provider is available
@@ -230,8 +1088,10 @@
         id="provider-choice"
         class="form-select"
         value={selectedProviderId}
+        disabled={Boolean(actionKey) || Boolean(detailKey)}
         onchange={(event) => selectProvider(event.currentTarget.value)}
       >
+        <option value={ALL_PROVIDERS}>All available providers</option>
         {#each supportedProviders as provider (provider.provider)}
           <option value={provider.provider}>
             {provider.label}{providerAvailable(provider)
@@ -240,9 +1100,20 @@
           </option>
         {/each}
       </select>
+      {#if onSearchProviderPage}
+        <label class="form-check">
+          <input
+            class="form-check-input"
+            type="checkbox"
+            bind:checked={cachedOnly}
+            disabled={searching || Boolean(actionKey) || Boolean(detailKey)}
+          />
+          <span class="form-check-label">Use cached provider results only</span>
+        </label>
+      {/if}
     </div>
 
-    {#if !providerAvailable(selectedProvider)}
+    {#if selectedProviderId !== ALL_PROVIDERS && selectedProvider && !providerAvailable(selectedProvider)}
       <section class="unavailable" aria-labelledby="discover-setup-title">
         <svelte:element this={embedded ? "h4" : "h2"} id="discover-setup-title">
           {selectedProvider.label} needs a credential
@@ -255,33 +1126,6 @@
         >
       </section>
     {:else}
-      <form class="search-form" onsubmit={search} role="search">
-        <label for="provider-search">Search {selectedProvider.label}</label>
-        <div class="search-row">
-          <input
-            id="provider-search"
-            type="search"
-            class="form-control"
-            required
-            maxlength="256"
-            bind:value={query}
-            disabled={searching}
-            placeholder={selectedProvider.provider === "google-books"
-              ? "Title, author, or ISBN"
-              : "Movie or series title"}
-            autocomplete="off"
-          />
-          <button
-            type="submit"
-            class="btn btn-primary"
-            disabled={searching || !query.trim()}
-          >
-            <IconSearch size={18} aria-hidden="true" />
-            {searching ? "Searching…" : "Search"}
-          </button>
-        </div>
-      </form>
-
       <section
         class="results"
         aria-labelledby="search-results-title"
@@ -291,68 +1135,157 @@
           Search results
         </svelte:element>
         {#if searching}
-          <p role="status">Searching {selectedProvider.label}…</p>
-        {:else if problem}
+          <p role="status">
+            Searching {selectedProvider?.label ?? "configured providers"}…
+          </p>
+        {:else if problem && results.length === 0}
           <p class="problem" role="alert">{problem}</p>
+        {:else if searched && completedProviderCount === 0}
+          <p role="status">
+            No provider was queried. Local results are shown above.
+          </p>
         {:else if searched && results.length === 0}
-          <p role="status">No compatible titles found for {completedQuery}.</p>
+          <p role="status">
+            No compatible titles found {Object.keys(providerNextPages).length >
+            0
+              ? "on this page"
+              : ""} for {completedQuery}.
+          </p>
         {:else if results.length > 0}
+          {#if problem}
+            <p class="problem" role="alert">{problem}</p>
+          {/if}
           <p role="status">
             {results.length}
             {results.length === 1 ? "result" : "results"} for
             {completedQuery}.
+            {#if providerCacheState === "stale_on_error"}
+              The provider is unavailable, so these results use retained cache
+              evidence.
+            {:else if providerCacheState === "fresh"}
+              These results came from fresh cache evidence.
+            {:else if providerCacheState === "observed"}
+              These results were observed from the provider now.
+            {/if}
           </p>
-          {#if !onCandidateAction}
+          {#if !onCandidateAction && !onCandidateReceiptAction}
             <p id="candidate-action-unavailable" class="result-action-note">
               {actionUnavailableText}
             </p>
           {/if}
           <ol>
-            {#each results as result (candidateKey(result))}
-              {@const resultKey = candidateKey(result)}
-              <li>
+            {#each groupedProviderResults as grouped (candidateKey(grouped.result, grouped.index))}
+              {@const { result, index } = grouped}
+              {@const candidate = result.candidate}
+              {@const resultKey = candidateKey(result, index)}
+              <li
+                class:possible-duplicate={grouped.groupSize > 1}
+                aria-describedby={grouped.groupSize > 1
+                  ? `candidate-group-${grouped.groupIndex}`
+                  : undefined}
+              >
+                {#if grouped.groupSize > 1 && grouped.groupPosition === 0}
+                  <p
+                    id={`candidate-group-${grouped.groupIndex}`}
+                    class="duplicate-intro"
+                  >
+                    <strong
+                      >Possible match across {grouped.groupSize} results.</strong
+                    >
+                    Sources: {grouped.providers.join(", ")}. Review each source;
+                    Fasti has not merged these candidates.
+                  </p>
+                {/if}
                 <svelte:element
                   this={embedded ? "h5" : "h3"}
                   class="result-title"
                 >
-                  {result.title}
+                  {candidate.title}
                 </svelte:element>
-                {#if result.original_title}
-                  <p>Original title: {result.original_title}</p>
+                {#if candidate.original_title}
+                  <p>Original title: {candidate.original_title}</p>
                 {/if}
-                {#if result.authors.length > 0}
-                  <p>By {result.authors.join(", ")}</p>
+                {#if candidate.authors.length > 0}
+                  <p>By {candidate.authors.join(", ")}</p>
                 {/if}
-                {#if result.overview}
-                  <p class="result-overview">{result.overview}</p>
+                {#if candidate.overview}
+                  <p class="result-overview">{candidate.overview}</p>
                 {/if}
                 <dl>
                   <div>
                     <dt>Provider</dt>
-                    <dd>{result.provider}</dd>
+                    <dd>{candidate.provider}</dd>
                   </div>
                   <div>
                     <dt>Type</dt>
-                    <dd>{result.kind}</dd>
+                    <dd>{candidate.kind}</dd>
                   </div>
-                  {#if result.release_year}
+                  {#if candidate.release_year}
                     <div>
                       <dt>Year</dt>
-                      <dd>{result.release_year}</dd>
+                      <dd>{candidate.release_year}</dd>
                     </div>
                   {/if}
                   <div>
                     <dt>Provider ID</dt>
-                    <dd><code>{result.provider_id}</code></dd>
+                    <dd><code>{candidate.provider_id}</code></dd>
                   </div>
                 </dl>
-                {#if onCandidateAction}
+                {#if result.receipt && onOpenCandidate}
+                  <a
+                    class="btn btn-outline-secondary"
+                    href={canonicalCandidatePath(
+                      result.receipt.candidate.provider,
+                      result.receipt.grain,
+                      result.receipt.candidate_receipt_id,
+                      result.receipt.candidate.title,
+                    )}
+                    onclick={(event) => {
+                      event.preventDefault();
+                      onOpenCandidate?.(result.receipt!);
+                    }}>View details</a
+                  >
+                {:else if result.receipt && onReadCandidate}
+                  <button
+                    type="button"
+                    class="btn btn-outline-secondary"
+                    disabled={searching ||
+                      Boolean(actionKey) ||
+                      Boolean(detailKey)}
+                    onclick={() => readCandidateDetails(result, index)}
+                  >
+                    {detailKey === resultKey
+                      ? "Loading details…"
+                      : "View details"}
+                  </button>
+                  {#if candidateDetails[resultKey]}
+                    <div class="result-details" role="status">
+                      {#if candidateDetails[resultKey].overview}
+                        <p>{candidateDetails[resultKey].overview}</p>
+                      {/if}
+                      {#if candidateDetails[resultKey].original_title}
+                        <p>
+                          Original title: {candidateDetails[resultKey]
+                            .original_title}
+                        </p>
+                      {/if}
+                    </div>
+                  {/if}
+                  {#if candidateDetailProblems[resultKey]}
+                    <p class="problem" role="alert">
+                      {candidateDetailProblems[resultKey]}
+                    </p>
+                  {/if}
+                {/if}
+                {#if (result.receipt && onCandidateReceiptAction) || (!result.receipt && onCandidateAction)}
                   <button
                     type="button"
                     class="track-btn"
-                    aria-disabled={Boolean(actionKey) ||
+                    aria-disabled={searching ||
+                      Boolean(actionKey) ||
+                      Boolean(detailKey) ||
                       completedKeys.has(resultKey)}
-                    onclick={() => runCandidateAction(result)}
+                    onclick={() => runCandidateAction(result, index)}
                   >
                     {#if completedKeys.has(resultKey)}
                       {completedLabel}
@@ -362,34 +1295,212 @@
                       {actionLabel}
                     {/if}
                   </button>
+                  {#if onSearchAttachTargets}
+                    <button
+                      type="button"
+                      class="btn btn-outline-secondary"
+                      disabled={searching ||
+                        Boolean(actionKey) ||
+                        Boolean(detailKey) ||
+                        completedKeys.has(resultKey)}
+                      onclick={() => openAttachPicker(result, index)}
+                      >Attach to existing Record</button
+                    >
+                  {/if}
                   {#if createdRecordIds[resultKey]}
                     <p class="result-action-status" role="status">
                       Record ID: <code>{createdRecordIds[resultKey]}</code>
                     </p>
                   {/if}
-                  {#if actionProblemKey === resultKey}
+                  {#if !attachResult && actionProblemKey === resultKey}
                     <p class="problem" role="alert">{actionProblem}</p>
                   {/if}
+                  {#if result.cacheState === "stale_on_error" && providerOffline()}
+                    <p class="result-action-note">
+                      Fasti will check whether this retained evidence can still
+                      be used. Expired evidence requires a new provider search.
+                    </p>
+                  {/if}
                 {:else}
-                  <button
-                    type="button"
-                    class="track-btn"
-                    aria-describedby="candidate-action-unavailable"
-                    disabled>{actionUnavailableLabel}</button
+                  <button type="button" class="track-btn" disabled
+                    >{actionUnavailableLabel}</button
                   >
                 {/if}
               </li>
             {/each}
           </ol>
         {:else}
-          <p>Enter a title or provider identifier.</p>
+          <p>
+            Provider results appear here when a configured source is available.
+          </p>
+        {/if}
+        {#if Object.keys(providerNextPages).length > 0 && onSearchProviderPage}
+          <button
+            type="button"
+            class="btn btn-outline-secondary"
+            disabled={searching || Boolean(actionKey) || Boolean(detailKey)}
+            onclick={loadMoreProvider}
+            >Retry or load more provider results</button
+          >
         {/if}
       </section>
     {/if}
   {/if}
 </div>
 
+<dialog
+  class="attach-dialog"
+  bind:this={attachDialog}
+  use:dialogFocus
+  aria-labelledby="attach-record-title"
+  oncancel={(event) => {
+    event.preventDefault();
+    if (!actionKey) closeAttachPicker();
+  }}
+>
+  {#if attachResult}
+    <section class="card m-0">
+      <header class="card-header">
+        <h2 id="attach-record-title" class="card-title">
+          Attach to existing Record
+        </h2>
+      </header>
+      <div class="card-body">
+        <p>
+          Attach {attachResult.result.candidate.provider} identifier
+          <code>{attachResult.result.candidate.provider_id}</code> for
+          <strong>{attachResult.result.candidate.title}</strong> to a Record you select.
+          This does not merge Records or change tracking state.
+        </p>
+        <form
+          onsubmit={(event) => {
+            event.preventDefault();
+            void searchAttachTargets();
+          }}
+        >
+          <label for="attach-record-search" class="form-label"
+            >Search local Records</label
+          >
+          <div class="d-flex flex-wrap gap-2">
+            <input
+              id="attach-record-search"
+              type="search"
+              class="form-control"
+              bind:value={attachQuery}
+              required
+              maxlength="256"
+              autocomplete="off"
+              disabled={attachLoading || Boolean(actionKey)}
+            />
+            <button
+              type="submit"
+              class="btn btn-outline-secondary"
+              disabled={attachLoading ||
+                Boolean(actionKey) ||
+                !attachQuery.trim()}>Find Records</button
+            >
+          </div>
+        </form>
+        <p class="text-secondary mt-2">
+          Only Records with the same identity grain ({attachResult.result
+            .candidate.grain}) can receive this identifier.
+        </p>
+        {#if attachLoading}
+          <p role="status">Searching local Records…</p>
+        {:else if attachSearched && attachRecords.length === 0}
+          <p role="status">
+            No compatible Records found{attachNext ? " on this page" : ""}.
+          </p>
+        {/if}
+        {#if attachRecords.length > 0}
+          <fieldset disabled={Boolean(actionKey) || attachLoading}>
+            <legend class="form-label">Select a Record</legend>
+            {#each attachRecords as record (record.record_id)}
+              <label class="form-check py-2">
+                <input
+                  class="form-check-input"
+                  type="radio"
+                  name="attach-record"
+                  value={record.record_id}
+                  bind:group={attachRecordId}
+                />
+                <span class="form-check-label">
+                  <strong>{record.title.value ?? "Untitled Record"}</strong>
+                  {#if record.release_year?.value}
+                    · {record.release_year.value}{/if}
+                  · {record.grain}
+                  <code class="d-block">{record.record_id}</code>
+                </span>
+              </label>
+            {/each}
+          </fieldset>
+        {/if}
+        {#if attachNext}
+          <button
+            type="button"
+            class="btn btn-outline-secondary"
+            disabled={attachLoading || Boolean(actionKey)}
+            onclick={() => searchAttachTargets(attachNext)}
+            >Load more matching Records</button
+          >
+        {/if}
+        {#if attachProblem}
+          <p class="problem mt-3" role="alert">{attachProblem}</p>
+        {/if}
+        {#if actionKey}
+          <p role="status">Attaching identifier. Waiting for confirmation…</p>
+        {/if}
+      </div>
+      <footer class="card-footer d-flex flex-wrap gap-2">
+        <button
+          type="button"
+          class="btn btn-outline-secondary"
+          disabled={Boolean(actionKey)}
+          onclick={closeAttachPicker}>Cancel</button
+        >
+        <button
+          type="button"
+          class="btn btn-primary"
+          disabled={!attachRecordId || attachLoading || Boolean(actionKey)}
+          onclick={confirmAttach}>Confirm attachment</button
+        >
+      </footer>
+    </section>
+  {/if}
+</dialog>
+
 <style>
+  .attach-dialog {
+    width: min(42rem, calc(100vw - 2rem));
+    max-height: calc(100dvh - 2rem);
+    margin: auto;
+    padding: 0;
+    border: 0;
+    border-radius: calc(
+      var(--tblr-border-radius-lg, 0.5rem) * var(--tblr-border-radius-scale, 1)
+    );
+    background: var(--fasti-surface-paper);
+    color: var(--fasti-text-primary);
+    overflow: auto;
+  }
+
+  .attach-dialog::backdrop {
+    background: rgb(15 23 42 / 58%);
+  }
+
+  .attach-dialog code {
+    overflow-wrap: anywhere;
+  }
+
+  .attach-dialog .form-check {
+    min-height: 44px;
+  }
+
+  .attach-dialog input[type="radio"] {
+    min-height: 0;
+    padding: 0;
+  }
+
   .discover-container {
     max-width: 1000px;
     margin: 0 auto;
@@ -403,6 +1514,10 @@
     margin: 0;
     padding: 0;
     gap: 16px;
+  }
+
+  .discover-container.candidate-active > :not(.candidate-detail) {
+    display: none;
   }
 
   .discover-header {
@@ -480,6 +1595,9 @@
   input,
   select {
     min-height: 44px;
+  }
+
+  .discover-container :is(button, input, select) {
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 35%, transparent);
     border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
@@ -487,7 +1605,7 @@
     color: var(--fasti-text-primary);
   }
 
-  button {
+  .discover-container button {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -510,7 +1628,7 @@
     opacity: 0.68;
   }
 
-  :is(button, input, select):focus-visible {
+  :is(button, input, select, a):focus-visible {
     outline: 3px solid var(--fasti-focus);
     outline-offset: 2px;
   }
@@ -527,6 +1645,20 @@
     padding: 16px 0;
     border-top: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 22%, transparent);
+  }
+
+  .duplicate-intro,
+  .possible-duplicate {
+    border-inline-start: 3px solid var(--fasti-state-attention);
+    padding-inline-start: 16px;
+  }
+
+  .duplicate-intro {
+    background: color-mix(
+      in srgb,
+      var(--fasti-state-attention) 8%,
+      transparent
+    );
   }
 
   .result-title {

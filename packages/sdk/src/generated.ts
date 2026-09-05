@@ -1513,6 +1513,22 @@ const PRODUCTION_SCHEMAS = {
     ],
     "type": "object"
   },
+  "ListRecordsQueryParameters": {
+    "additionalProperties": false,
+    "properties": {
+      "record_id": {
+        "description": "Select one active Record; missing or inaccessible Records return an empty page.",
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "type": "object"
+  },
   "ListRecordsResponse": {
     "additionalProperties": false,
     "properties": {
@@ -1549,6 +1565,86 @@ const PRODUCTION_SCHEMAS = {
     "required": [
       "states",
       "truncated"
+    ],
+    "type": "object"
+  },
+  "LocalSearchCursorDto": {
+    "additionalProperties": false,
+    "properties": {
+      "context_digest": {
+        "maxLength": 71,
+        "minLength": 71,
+        "pattern": "^sha256:[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "last_record_id": {
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "last_record_id",
+      "context_digest"
+    ],
+    "type": "object"
+  },
+  "LocalSearchRequestDto": {
+    "additionalProperties": false,
+    "properties": {
+      "after": {
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "$ref": "#/components/schemas/LocalSearchCursorDto"
+          }
+        ]
+      },
+      "grains": {
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 16,
+        "type": "array"
+      },
+      "query": {
+        "maxLength": 256,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "query",
+      "grains"
+    ],
+    "type": "object"
+  },
+  "LocalSearchResponseDto": {
+    "additionalProperties": false,
+    "properties": {
+      "next": {
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "$ref": "#/components/schemas/LocalSearchCursorDto"
+          }
+        ]
+      },
+      "records": {
+        "items": {
+          "$ref": "#/components/schemas/RecordSummaryDto"
+        },
+        "maxItems": 100,
+        "type": "array"
+      }
+    },
+    "required": [
+      "records"
     ],
     "type": "object"
   },
@@ -2737,6 +2833,132 @@ const PRODUCTION_SCHEMAS = {
     ],
     "type": "object"
   },
+  "ProviderIdentifierActionOriginDto": {
+    "enum": [
+      "user_selected_provider_identifier"
+    ],
+    "type": "string"
+  },
+  "ProviderIdentifierActionReceiptDto": {
+    "additionalProperties": false,
+    "properties": {
+      "action": {
+        "$ref": "#/components/schemas/SearchRecordActionDto"
+      },
+      "committed_at": {
+        "format": "date-time",
+        "type": "string"
+      },
+      "disposition": {
+        "$ref": "#/components/schemas/SearchRecordActionDispositionDto"
+      },
+      "grain": {
+        "type": "string"
+      },
+      "operation_id": {
+        "maxLength": 35,
+        "minLength": 35,
+        "pattern": "^op_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      },
+      "origin": {
+        "$ref": "#/components/schemas/ProviderIdentifierActionOriginDto"
+      },
+      "provider_id": {
+        "type": "string"
+      },
+      "provider_record_id": {
+        "maxLength": 256,
+        "minLength": 1,
+        "type": "string"
+      },
+      "record_id": {
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "operation_id",
+      "provider_id",
+      "provider_record_id",
+      "grain",
+      "action",
+      "origin",
+      "record_id",
+      "disposition",
+      "committed_at"
+    ],
+    "type": "object"
+  },
+  "ProviderIdentifierActionRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "action": {
+        "$ref": "#/components/schemas/SearchRecordActionDto"
+      },
+      "operation_id": {
+        "maxLength": 35,
+        "minLength": 35,
+        "pattern": "^op_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      },
+      "provider_record_id": {
+        "maxLength": 256,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "operation_id",
+      "provider_record_id",
+      "action"
+    ],
+    "type": "object"
+  },
+  "ProviderIdentifierActionResponse": {
+    "oneOf": [
+      {
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "enum": [
+              "saved"
+            ],
+            "type": "string"
+          },
+          "receipt": {
+            "$ref": "#/components/schemas/ProviderIdentifierActionReceiptDto"
+          }
+        },
+        "required": [
+          "receipt",
+          "outcome"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "enum": [
+              "unavailable"
+            ],
+            "type": "string"
+          },
+          "problem_code": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "problem_code",
+          "outcome"
+        ],
+        "type": "object"
+      }
+    ]
+  },
   "ProviderKindDto": {
     "enum": [
       "metadata",
@@ -3288,6 +3510,706 @@ const PRODUCTION_SCHEMAS = {
       "session"
     ],
     "type": "object"
+  },
+  "SearchCacheStateDto": {
+    "enum": [
+      "observed",
+      "fresh",
+      "stale_on_error"
+    ],
+    "type": "string"
+  },
+  "SearchCandidateActionReceiptDto": {
+    "additionalProperties": false,
+    "description": "Immutable acceptance history, not current Record state or current freshness.\nInternal actor, authorization and query-context data never enter this DTO.",
+    "properties": {
+      "action": {
+        "$ref": "#/components/schemas/SearchRecordActionDto"
+      },
+      "candidate_receipt_id": {
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^scr_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      },
+      "committed_at": {
+        "format": "date-time",
+        "type": "string"
+      },
+      "disposition": {
+        "$ref": "#/components/schemas/SearchRecordActionDispositionDto"
+      },
+      "evidence_mode": {
+        "$ref": "#/components/schemas/SearchCandidateEvidenceModeDto"
+      },
+      "expires_at": {
+        "format": "date-time",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "fetched_at": {
+        "format": "date-time",
+        "type": "string"
+      },
+      "grain": {
+        "type": "string"
+      },
+      "initial_status": {
+        "$ref": "#/components/schemas/SearchEvidenceStatusDto"
+      },
+      "operation_id": {
+        "maxLength": 35,
+        "minLength": 35,
+        "pattern": "^op_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      },
+      "provider_id": {
+        "type": "string"
+      },
+      "record_id": {
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "operation_id",
+      "candidate_receipt_id",
+      "provider_id",
+      "grain",
+      "action",
+      "evidence_mode",
+      "record_id",
+      "disposition",
+      "fetched_at",
+      "initial_status",
+      "committed_at"
+    ],
+    "type": "object"
+  },
+  "SearchCandidateActionRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "action": {
+        "$ref": "#/components/schemas/SearchRecordActionDto"
+      },
+      "evidence_mode": {
+        "$ref": "#/components/schemas/SearchCandidateEvidenceModeDto"
+      },
+      "operation_id": {
+        "maxLength": 35,
+        "minLength": 35,
+        "pattern": "^op_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "operation_id",
+      "action",
+      "evidence_mode"
+    ],
+    "type": "object"
+  },
+  "SearchCandidateActionResponse": {
+    "oneOf": [
+      {
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "enum": [
+              "saved"
+            ],
+            "type": "string"
+          },
+          "receipt": {
+            "$ref": "#/components/schemas/SearchCandidateActionReceiptDto"
+          }
+        },
+        "required": [
+          "receipt",
+          "outcome"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "enum": [
+              "unavailable"
+            ],
+            "type": "string"
+          },
+          "problem_code": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "problem_code",
+          "outcome"
+        ],
+        "type": "object"
+      }
+    ]
+  },
+  "SearchCandidateDetailsQueryParameters": {
+    "additionalProperties": false,
+    "properties": {
+      "offline": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "offline"
+    ],
+    "type": "object"
+  },
+  "SearchCandidateDetailsResponse": {
+    "oneOf": [
+      {
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "enum": [
+              "missing"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "outcome"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "enum": [
+              "snapshot"
+            ],
+            "type": "string"
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/SearchCandidateSnapshotDto"
+          }
+        },
+        "required": [
+          "snapshot",
+          "outcome"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "details": {
+            "$ref": "#/components/schemas/SearchCandidateDto"
+          },
+          "locale": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "outcome": {
+            "enum": [
+              "refetched"
+            ],
+            "type": "string"
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/SearchCandidateSnapshotDto"
+          }
+        },
+        "required": [
+          "snapshot",
+          "details",
+          "outcome"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "enum": [
+              "unavailable"
+            ],
+            "type": "string"
+          },
+          "problem_code": {
+            "type": "string"
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/SearchCandidateSnapshotDto"
+          }
+        },
+        "required": [
+          "snapshot",
+          "problem_code",
+          "outcome"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "candidate_receipt_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^scr_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          },
+          "details": {
+            "$ref": "#/components/schemas/SearchCandidateDto"
+          },
+          "grain": {
+            "type": "string"
+          },
+          "locale": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "outcome": {
+            "enum": [
+              "refetched_without_snapshot"
+            ],
+            "type": "string"
+          },
+          "provider_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "candidate_receipt_id",
+          "provider_id",
+          "grain",
+          "details",
+          "outcome"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "candidate_receipt_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^scr_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          },
+          "grain": {
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "unavailable_without_snapshot"
+            ],
+            "type": "string"
+          },
+          "problem_code": {
+            "type": "string"
+          },
+          "provider_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "candidate_receipt_id",
+          "provider_id",
+          "grain",
+          "problem_code",
+          "outcome"
+        ],
+        "type": "object"
+      }
+    ]
+  },
+  "SearchCandidateDto": {
+    "additionalProperties": false,
+    "properties": {
+      "authors": {
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 10,
+        "type": "array"
+      },
+      "grain": {
+        "type": "string"
+      },
+      "image_url": {
+        "maxLength": 2048,
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "kind": {
+        "type": "string"
+      },
+      "original_title": {
+        "maxLength": 512,
+        "minLength": 1,
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "overview": {
+        "maxLength": 4096,
+        "minLength": 1,
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "provider": {
+        "type": "string"
+      },
+      "provider_id": {
+        "type": "string"
+      },
+      "release_year": {
+        "format": "int32",
+        "maximum": 9999,
+        "minimum": 1000,
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "title": {
+        "maxLength": 512,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "provider",
+      "provider_id",
+      "grain",
+      "kind",
+      "title",
+      "authors"
+    ],
+    "type": "object"
+  },
+  "SearchCandidateEvidenceModeDto": {
+    "enum": [
+      "cached",
+      "refetch"
+    ],
+    "type": "string"
+  },
+  "SearchCandidateReceiptDto": {
+    "additionalProperties": false,
+    "properties": {
+      "candidate": {
+        "$ref": "#/components/schemas/SearchCandidateDto"
+      },
+      "candidate_receipt_id": {
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^scr_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      },
+      "grain": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "candidate_receipt_id",
+      "grain",
+      "candidate"
+    ],
+    "type": "object"
+  },
+  "SearchCandidateSnapshotDto": {
+    "additionalProperties": false,
+    "description": "Original Search evidence. Its lifetime never describes a subsequent refetch.",
+    "properties": {
+      "lifetime": {
+        "$ref": "#/components/schemas/SearchReceiptLifetimeDto"
+      },
+      "locale": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "receipt": {
+        "$ref": "#/components/schemas/SearchCandidateReceiptDto"
+      }
+    },
+    "required": [
+      "receipt",
+      "lifetime"
+    ],
+    "type": "object"
+  },
+  "SearchEvidenceStatusDto": {
+    "enum": [
+      "fresh",
+      "stale"
+    ],
+    "type": "string"
+  },
+  "SearchProviderPageRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "grains": {
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 32,
+        "type": "array"
+      },
+      "locale": {
+        "maxLength": 16,
+        "minLength": 2,
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "offline": {
+        "type": "boolean"
+      },
+      "page": {
+        "format": "int32",
+        "minimum": 1,
+        "type": "integer"
+      },
+      "query": {
+        "maxLength": 256,
+        "minLength": 1,
+        "type": "string"
+      },
+      "region": {
+        "description": "Reserved query context; current provider Search routes do not filter by region.",
+        "maxLength": 8,
+        "minLength": 2,
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "query",
+      "page",
+      "grains",
+      "offline"
+    ],
+    "type": "object"
+  },
+  "SearchProviderPageResponse": {
+    "oneOf": [
+      {
+        "additionalProperties": false,
+        "properties": {
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/SearchCandidateDto"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "next_page": {
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "outcome": {
+            "enum": [
+              "live"
+            ],
+            "type": "string"
+          },
+          "page": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "provider_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider_id",
+          "page",
+          "candidates",
+          "outcome"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "cache_state": {
+            "$ref": "#/components/schemas/SearchCacheStateDto"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/SearchCandidateReceiptDto"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "lifetime": {
+            "$ref": "#/components/schemas/SearchReceiptLifetimeDto"
+          },
+          "next_page": {
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "outcome": {
+            "enum": [
+              "page"
+            ],
+            "type": "string"
+          },
+          "page": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "provider_id": {
+            "type": "string"
+          },
+          "upstream_problem": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "provider_id",
+          "page",
+          "candidates",
+          "cache_state",
+          "lifetime",
+          "outcome"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "enum": [
+              "unavailable"
+            ],
+            "type": "string"
+          },
+          "problem_code": {
+            "type": "string"
+          },
+          "provider_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider_id",
+          "problem_code",
+          "outcome"
+        ],
+        "type": "object"
+      }
+    ]
+  },
+  "SearchReceiptLifetimeDto": {
+    "additionalProperties": false,
+    "properties": {
+      "created_at": {
+        "format": "date-time",
+        "type": "string"
+      },
+      "expires_at": {
+        "format": "date-time",
+        "type": "string"
+      },
+      "fresh_until": {
+        "format": "date-time",
+        "type": "string"
+      },
+      "stale_until": {
+        "format": "date-time",
+        "type": "string"
+      }
+    },
+    "required": [
+      "created_at",
+      "fresh_until",
+      "stale_until",
+      "expires_at"
+    ],
+    "type": "object"
+  },
+  "SearchRecordActionDispositionDto": {
+    "enum": [
+      "created",
+      "reused",
+      "attached",
+      "already_attached"
+    ],
+    "type": "string"
+  },
+  "SearchRecordActionDto": {
+    "oneOf": [
+      {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "create"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "attach"
+            ],
+            "type": "string"
+          },
+          "record_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "record_id",
+          "kind"
+        ],
+        "type": "object"
+      }
+    ]
   },
   "SelectBrowserSessionProfileRequest": {
     "additionalProperties": false,
@@ -3843,6 +4765,24 @@ export type AnimeGroupingPolicySourceDto = "client_override" | "profile_default"
 // prettier-ignore
 export type AnimeGroupingPolicyChangeDto = { readonly applied_operation_id: string; readonly kind: "rollback" } | { readonly kind: "inherit_profile" } | { readonly kind: "set"; readonly preference: AnimeGroupingPreferenceDto };
 
+// prettier-ignore
+export type SearchCacheStateDto = "fresh" | "observed" | "stale_on_error";
+
+// prettier-ignore
+export type SearchCandidateEvidenceModeDto = "cached" | "refetch";
+
+// prettier-ignore
+export type SearchRecordActionDispositionDto = "already_attached" | "attached" | "created" | "reused";
+
+// prettier-ignore
+export type ProviderIdentifierActionOriginDto = "user_selected_provider_identifier";
+
+// prettier-ignore
+export type SearchEvidenceStatusDto = "fresh" | "stale";
+
+// prettier-ignore
+export type SearchRecordActionDto = { readonly kind: "attach"; readonly record_id: string } | { readonly kind: "create" };
+
 // The Nuvio wire document intentionally preserves extension fields.
 export type NuvioCollectionsDocumentDto = ReadonlyArray<Record<string, unknown>>;
 
@@ -3928,6 +4868,10 @@ export interface RecordSummaryDto {
 export interface ListRecordsResponse {
   readonly records: ReadonlyArray<RecordSummaryDto>;
   readonly truncated: boolean;
+}
+
+export interface ListRecordsQueryParameters {
+  readonly record_id?: null | string;
 }
 
 export interface AttachIdentifierRequest {
@@ -4035,6 +4979,118 @@ export interface RefreshMetadataClaimsRequest {
   readonly provider_id: string;
   readonly record_id: string;
   readonly region?: null | string;
+}
+
+export interface SearchProviderPageRequest {
+  readonly grains: ReadonlyArray<string>;
+  readonly locale?: null | string;
+  readonly offline: boolean;
+  readonly page: number;
+  readonly query: string;
+  readonly region?: null | string;
+}
+
+export interface LocalSearchRequestDto {
+  readonly after?: LocalSearchCursorDto | null;
+  readonly grains: ReadonlyArray<string>;
+  readonly query: string;
+}
+
+export interface LocalSearchResponseDto {
+  readonly next?: LocalSearchCursorDto | null;
+  readonly records: ReadonlyArray<RecordSummaryDto>;
+}
+
+export interface LocalSearchCursorDto {
+  readonly context_digest: string;
+  readonly last_record_id: string;
+}
+
+// prettier-ignore
+export type SearchProviderPageResponse = { readonly cache_state: SearchCacheStateDto; readonly candidates: ReadonlyArray<SearchCandidateReceiptDto>; readonly lifetime: SearchReceiptLifetimeDto; readonly next_page?: null | number; readonly outcome: "page"; readonly page: number; readonly provider_id: string; readonly upstream_problem?: null | string } | { readonly candidates: ReadonlyArray<SearchCandidateDto>; readonly next_page?: null | number; readonly outcome: "live"; readonly page: number; readonly provider_id: string } | { readonly outcome: "unavailable"; readonly problem_code: string; readonly provider_id: string };
+
+export interface SearchCandidateDetailsQueryParameters {
+  readonly offline: boolean;
+}
+
+// prettier-ignore
+export type SearchCandidateDetailsResponse = { readonly candidate_receipt_id: string; readonly details: SearchCandidateDto; readonly grain: string; readonly locale?: null | string; readonly outcome: "refetched_without_snapshot"; readonly provider_id: string } | { readonly candidate_receipt_id: string; readonly grain: string; readonly outcome: "unavailable_without_snapshot"; readonly problem_code: string; readonly provider_id: string } | { readonly details: SearchCandidateDto; readonly locale?: null | string; readonly outcome: "refetched"; readonly snapshot: SearchCandidateSnapshotDto } | { readonly outcome: "missing" } | { readonly outcome: "snapshot"; readonly snapshot: SearchCandidateSnapshotDto } | { readonly outcome: "unavailable"; readonly problem_code: string; readonly snapshot: SearchCandidateSnapshotDto };
+
+export interface SearchCandidateSnapshotDto {
+  readonly lifetime: SearchReceiptLifetimeDto;
+  readonly locale?: null | string;
+  readonly receipt: SearchCandidateReceiptDto;
+}
+
+export interface SearchCandidateActionRequest {
+  readonly action: SearchRecordActionDto;
+  readonly evidence_mode: SearchCandidateEvidenceModeDto;
+  readonly operation_id: string;
+}
+
+// prettier-ignore
+export type SearchCandidateActionResponse = { readonly outcome: "saved"; readonly receipt: SearchCandidateActionReceiptDto } | { readonly outcome: "unavailable"; readonly problem_code: string };
+
+export interface SearchCandidateActionReceiptDto {
+  readonly action: SearchRecordActionDto;
+  readonly candidate_receipt_id: string;
+  readonly committed_at: string;
+  readonly disposition: SearchRecordActionDispositionDto;
+  readonly evidence_mode: SearchCandidateEvidenceModeDto;
+  readonly expires_at?: null | string;
+  readonly fetched_at: string;
+  readonly grain: string;
+  readonly initial_status: SearchEvidenceStatusDto;
+  readonly operation_id: string;
+  readonly provider_id: string;
+  readonly record_id: string;
+}
+
+export interface ProviderIdentifierActionRequest {
+  readonly action: SearchRecordActionDto;
+  readonly operation_id: string;
+  readonly provider_record_id: string;
+}
+
+// prettier-ignore
+export type ProviderIdentifierActionResponse = { readonly outcome: "saved"; readonly receipt: ProviderIdentifierActionReceiptDto } | { readonly outcome: "unavailable"; readonly problem_code: string };
+
+export interface ProviderIdentifierActionReceiptDto {
+  readonly action: SearchRecordActionDto;
+  readonly committed_at: string;
+  readonly disposition: SearchRecordActionDispositionDto;
+  readonly grain: string;
+  readonly operation_id: string;
+  readonly origin: ProviderIdentifierActionOriginDto;
+  readonly provider_id: string;
+  readonly provider_record_id: string;
+  readonly record_id: string;
+}
+
+export interface SearchCandidateReceiptDto {
+  readonly candidate: SearchCandidateDto;
+  readonly candidate_receipt_id: string;
+  readonly grain: string;
+}
+
+export interface SearchCandidateDto {
+  readonly authors: ReadonlyArray<string>;
+  readonly grain: string;
+  readonly image_url?: null | string;
+  readonly kind: string;
+  readonly original_title?: null | string;
+  readonly overview?: null | string;
+  readonly provider: string;
+  readonly provider_id: string;
+  readonly release_year?: null | number;
+  readonly title: string;
+}
+
+export interface SearchReceiptLifetimeDto {
+  readonly created_at: string;
+  readonly expires_at: string;
+  readonly fresh_until: string;
+  readonly stale_until: string;
 }
 
 export interface MetadataClaimProvenanceDto {
@@ -4431,6 +5487,11 @@ export interface AccessProjectionResponse {
 
 // prettier-ignore
 export const LOCAL_RUNTIME_OPERATIONS = {
+  searchRecords: { operationId: "search_local_records", method: "POST", path: "/api/v1/search/records", capabilityId: "metadata.search", authorization: "scoped_or_browser_session", requiredScopes: ["metadata_search"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: "LocalSearchRequestDto", responseSchema: "LocalSearchResponseDto" },
+  saveSearchCandidate: { operationId: "save_search_candidate", method: "POST", path: "/api/v1/search/candidates/{provider_id}/{grain}/{candidate_receipt_id}/actions", capabilityId: "identity.identifier.attach", authorization: "scoped_or_browser_session", requiredScopes: ["identity_write"], conditionalRequiredScopes: {"new_operation":["metadata_search"]}, problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","capacity_exceeded","forbidden","idempotency_conflict","identity_conflict","integrity_failed","invalid_identifier","malformed_json","payload_too_large","record_not_found","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["identity.identifier.attach.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: "SearchCandidateActionRequest", responseSchema: "SearchCandidateActionResponse" },
+  saveProviderIdentifier: { operationId: "save_provider_identifier", method: "POST", path: "/api/v1/search/providers/{provider_id}/{grain}/actions", capabilityId: "identity.identifier.attach", authorization: "scoped_or_browser_session", requiredScopes: ["identity_write"], conditionalRequiredScopes: {"new_operation":["metadata_search"]}, problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","capacity_exceeded","forbidden","idempotency_conflict","identity_conflict","integrity_failed","invalid_identifier","malformed_json","payload_too_large","record_not_found","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["identity.identifier.attach.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: "ProviderIdentifierActionRequest", responseSchema: "ProviderIdentifierActionResponse" },
+  readSearchCandidate: { operationId: "read_search_candidate", method: "GET", path: "/api/v1/search/candidates/{provider_id}/{grain}/{candidate_receipt_id}", capabilityId: "metadata.search", authorization: "scoped_or_browser_session", requiredScopes: ["metadata_search"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "SearchCandidateDetailsResponse" },
+  searchProviderPage: { operationId: "search_provider_page", method: "POST", path: "/api/v1/search/providers/{provider_id}", capabilityId: "metadata.search", authorization: "scoped_or_browser_session", requiredScopes: ["metadata_search"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "SearchProviderPageRequest", responseSchema: "SearchProviderPageResponse" },
   submitObservation: { operationId: "submit_observation", method: "POST", path: "/api/v1/observations", capabilityId: "observation.accept", authorization: "scoped_or_browser_session", requiredScopes: ["observation_accept"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","invalid_observation","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["observation.accept.capacity_exceeded","observation.accept.receipt","observation.accept.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: "SubmitObservationRequest", responseSchema: "SubmitObservationResponse" },
   nuvioWebhook: { operationId: "nuvio_webhook", method: "POST", path: "/api/v1/integrations/nuvio/webhook", capabilityId: "observation.accept", authorization: "scoped", requiredScopes: ["observation_accept"], problemCodes: ["authentication_failed","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","invalid_observation","malformed_json","payload_too_large","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["observation.accept.capacity_exceeded","observation.accept.receipt","observation.accept.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: "IntegrationObservationRequest", responseSchema: "SubmitObservationResponse" },
   tautulliWebhook: { operationId: "tautulli_webhook", method: "POST", path: "/api/v1/integrations/tautulli/webhook", capabilityId: "observation.accept", authorization: "scoped", requiredScopes: ["observation_accept"], problemCodes: ["authentication_failed","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","invalid_observation","malformed_json","payload_too_large","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["observation.accept.capacity_exceeded","observation.accept.receipt","observation.accept.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: "IntegrationObservationRequest", responseSchema: "SubmitObservationResponse" },
@@ -4438,15 +5499,15 @@ export const LOCAL_RUNTIME_OPERATIONS = {
   embyWebhook: { operationId: "emby_webhook", method: "POST", path: "/api/v1/integrations/emby/webhook", capabilityId: "observation.accept", authorization: "scoped", requiredScopes: ["observation_accept"], problemCodes: ["authentication_failed","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","invalid_observation","malformed_json","payload_too_large","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["observation.accept.capacity_exceeded","observation.accept.receipt","observation.accept.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: null, responseSchema: "SubmitObservationResponse" },
   plexWebhook: { operationId: "plex_webhook", method: "POST", path: "/api/v1/integrations/plex/webhook", capabilityId: "observation.accept", authorization: "scoped", requiredScopes: ["observation_accept"], problemCodes: ["authentication_failed","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","invalid_observation","malformed_json","payload_too_large","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["observation.accept.capacity_exceeded","observation.accept.receipt","observation.accept.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: null, responseSchema: "SubmitObservationResponse" },
   createRecord: { operationId: "create_record", method: "POST", path: "/api/v1/records", capabilityId: "identity.record.create", authorization: "scoped_or_browser_session", requiredScopes: ["identity_write"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","integrity_failed","invalid_identifier","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["identity.record.create.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "CreateRecordRequest", responseSchema: "CreateRecordResponse" },
-  listRecords: { operationId: "list_records", method: "GET", path: "/api/v1/records", capabilityId: "identity.record.list", authorization: "scoped_or_browser_session", requiredScopes: ["identity_read"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","integrity_failed","session_policy_changed","storage_unavailable"], exampleIds: ["identity.record.list.forbidden"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ListRecordsResponse" },
-  attachIdentifier: { operationId: "attach_identifier", method: "POST", path: "/api/v1/records/identifiers", capabilityId: "identity.identifier.attach", authorization: "scoped_or_browser_session", requiredScopes: ["identity_write"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","identity_conflict","integrity_failed","invalid_identifier","malformed_json","payload_too_large","record_not_found","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["identity.identifier.attach.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: "AttachIdentifierRequest", responseSchema: "AttachIdentifierResponse" },
+  listRecords: { operationId: "list_records", method: "GET", path: "/api/v1/records", capabilityId: "identity.record.list", authorization: "scoped_or_browser_session", requiredScopes: ["identity_read"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","integrity_failed","session_policy_changed","storage_unavailable","validation_failed"], exampleIds: ["identity.record.list.forbidden"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ListRecordsResponse" },
+  attachIdentifier: { operationId: "attach_identifier", method: "POST", path: "/api/v1/records/identifiers", capabilityId: "identity.identifier.attach", authorization: "scoped_or_browser_session", requiredScopes: ["identity_write"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","capacity_exceeded","forbidden","idempotency_conflict","identity_conflict","integrity_failed","invalid_identifier","malformed_json","payload_too_large","record_not_found","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["identity.identifier.attach.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: "AttachIdentifierRequest", responseSchema: "AttachIdentifierResponse" },
   registerNamespace: { operationId: "register_namespace", method: "POST", path: "/api/v1/namespaces", capabilityId: "identity.namespace.register", authorization: "scoped_or_browser_session", requiredScopes: ["identity_write"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","integrity_failed","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["identity.namespace.register.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: "RegisterNamespaceRequest", responseSchema: "RegisterNamespaceResponse" },
   listTrackingDispositions: { operationId: "list_tracking_dispositions", method: "GET", path: "/api/v1/profile/record-tracking-dispositions", capabilityId: "profile.record.tracking_disposition.list", authorization: "scoped_or_browser_session", requiredScopes: ["profile_state_read"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","integrity_failed","session_policy_changed","storage_unavailable"], exampleIds: ["profile.record.tracking_disposition.list.forbidden"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ListTrackingDispositionsResponse" },
   setTrackingDisposition: { operationId: "set_tracking_disposition", method: "PUT", path: "/api/v1/profile/record-tracking-dispositions/{record_id}", capabilityId: "profile.record.tracking_disposition.set", authorization: "scoped_or_browser_session", requiredScopes: ["profile_state_write"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","integrity_failed","malformed_json","payload_too_large","record_not_found","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["profile.record.tracking_disposition.set.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: "SetTrackingDispositionRequest", responseSchema: "TrackingDispositionStateDto" },
   getNuvioCollections: { operationId: "get_nuvio_collections", method: "GET", path: "/api/v1/profile/nuvio-collections", capabilityId: "profile.nuvio_collections.get", authorization: "scoped_or_browser_session", requiredScopes: ["profile_state_read"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","integrity_failed","session_policy_changed","storage_unavailable"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "NuvioCollectionsStateDto" },
   replaceNuvioCollections: { operationId: "replace_nuvio_collections", method: "PUT", path: "/api/v1/profile/nuvio-collections", capabilityId: "profile.nuvio_collections.replace", authorization: "scoped_or_browser_session", requiredScopes: ["profile_state_write"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","integrity_failed","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: "NuvioCollectionsDocumentDto", responseSchema: "NuvioCollectionsStateDto" },
   clearNuvioCollections: { operationId: "clear_nuvio_collections", method: "DELETE", path: "/api/v1/profile/nuvio-collections", capabilityId: "profile.nuvio_collections.clear", authorization: "scoped_or_browser_session", requiredScopes: ["profile_state_write"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","integrity_failed","session_policy_changed","storage_unavailable"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "NuvioCollectionsStateDto" },
-  listProviders: { operationId: "list_providers", method: "GET", path: "/api/v1/providers", capabilityId: "provider.list", authorization: "scoped", requiredScopes: ["provider_read"], problemCodes: ["authentication_failed","forbidden","integrity_failed","storage_unavailable"], exampleIds: ["provider.list.forbidden"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ListProvidersResponse" },
+  listProviders: { operationId: "list_providers", method: "GET", path: "/api/v1/providers", capabilityId: "provider.list", authorization: "scoped_or_browser_session", requiredScopes: ["provider_read"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","forbidden","integrity_failed","session_policy_changed","storage_unavailable"], exampleIds: ["provider.list.forbidden"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ListProvidersResponse" },
   configureProviderCredential: { operationId: "configure_provider_credential", method: "PUT", path: "/api/v1/providers/{provider_id}/credentials/{capability_id}", capabilityId: "provider.credential.configure", authorization: "scoped", requiredScopes: ["provider_credential_manage"], problemCodes: ["authentication_failed","forbidden","integrity_failed","malformed_json","payload_too_large","provider_credential_invalid","provider_unavailable","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["provider.credential.configure.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "ConfigureProviderCredentialRequest", responseSchema: "ProviderCapabilityResponse" },
   removeProviderCredential: { operationId: "remove_provider_credential", method: "DELETE", path: "/api/v1/providers/{provider_id}/credentials/{capability_id}", capabilityId: "provider.credential.configure", authorization: "scoped", requiredScopes: ["provider_credential_manage"], problemCodes: ["authentication_failed","forbidden","integrity_failed","malformed_json","payload_too_large","provider_credential_invalid","provider_unavailable","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["provider.credential.configure.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: null, responseSchema: "ProviderCapabilityResponse" },
   testProviderCredential: { operationId: "test_provider_credential", method: "POST", path: "/api/v1/providers/{provider_id}/credentials/{capability_id}/tests", capabilityId: "provider.credential.test", authorization: "scoped", requiredScopes: ["provider_credential_manage"], problemCodes: ["authentication_failed","forbidden","integrity_failed","provider_credential_expired","provider_credential_invalid","provider_credential_missing","provider_rate_limited","provider_response_invalid","provider_route_unavailable","provider_unavailable","storage_unavailable"], exampleIds: ["provider.credential.test.provider_credential_missing"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: null, responseSchema: "ProviderCapabilityResponse" },
@@ -4473,9 +5534,21 @@ export const LOCAL_RUNTIME_OPERATIONS = {
   selectBrowserSessionProfile: { operationId: "select_browser_session_profile", method: "PUT", path: "/api/access/v1/browser-session/profile", capabilityId: "browser.session.profile.select", authorization: "browser_session", requiredScopes: [], problemCodes: ["browser_session_expired","browser_session_revoked","forbidden","integrity_failed","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: false, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "SelectBrowserSessionProfileRequest", responseSchema: "SelectBrowserSessionProfileResponse" },
 } as const;
 
+export const LOCAL_SEARCH_MAX_RESPONSE_BYTES = 4194304 as const;
+
 // prettier-ignore
 export function parseSubmitObservationRequest(value: unknown): SubmitObservationRequest {
   return parseProductionDto("SubmitObservationRequest", value);
+}
+
+// prettier-ignore
+export function parseLocalSearchRequestDto(value: unknown): LocalSearchRequestDto {
+  return parseProductionDto("LocalSearchRequestDto", value);
+}
+
+// prettier-ignore
+export function parseLocalSearchResponseDto(value: unknown): LocalSearchResponseDto {
+  return parseProductionDto("LocalSearchResponseDto", value);
 }
 
 // prettier-ignore
@@ -4496,6 +5569,11 @@ export function parseCreateRecordResponse(value: unknown): CreateRecordResponse 
 // prettier-ignore
 export function parseListRecordsResponse(value: unknown): ListRecordsResponse {
   return parseProductionDto("ListRecordsResponse", value);
+}
+
+// prettier-ignore
+export function parseListRecordsQueryParameters(value: unknown): ListRecordsQueryParameters {
+  return parseProductionDto("ListRecordsQueryParameters", value);
 }
 
 // prettier-ignore
@@ -4561,6 +5639,46 @@ export function parseProviderCapabilityResponse(value: unknown): ProviderCapabil
 // prettier-ignore
 export function parseProviderHealthResponse(value: unknown): ProviderHealthResponse {
   return parseProductionDto("ProviderHealthResponse", value);
+}
+
+// prettier-ignore
+export function parseSearchProviderPageRequest(value: unknown): SearchProviderPageRequest {
+  return parseProductionDto("SearchProviderPageRequest", value);
+}
+
+// prettier-ignore
+export function parseSearchProviderPageResponse(value: unknown): SearchProviderPageResponse {
+  return parseProductionDto("SearchProviderPageResponse", value);
+}
+
+// prettier-ignore
+export function parseSearchCandidateDetailsQueryParameters(value: unknown): SearchCandidateDetailsQueryParameters {
+  return parseProductionDto("SearchCandidateDetailsQueryParameters", value);
+}
+
+// prettier-ignore
+export function parseSearchCandidateDetailsResponse(value: unknown): SearchCandidateDetailsResponse {
+  return parseProductionDto("SearchCandidateDetailsResponse", value);
+}
+
+// prettier-ignore
+export function parseSearchCandidateActionRequest(value: unknown): SearchCandidateActionRequest {
+  return parseProductionDto("SearchCandidateActionRequest", value);
+}
+
+// prettier-ignore
+export function parseSearchCandidateActionResponse(value: unknown): SearchCandidateActionResponse {
+  return parseProductionDto("SearchCandidateActionResponse", value);
+}
+
+// prettier-ignore
+export function parseProviderIdentifierActionRequest(value: unknown): ProviderIdentifierActionRequest {
+  return parseProductionDto("ProviderIdentifierActionRequest", value);
+}
+
+// prettier-ignore
+export function parseProviderIdentifierActionResponse(value: unknown): ProviderIdentifierActionResponse {
+  return parseProductionDto("ProviderIdentifierActionResponse", value);
 }
 
 // prettier-ignore
@@ -4689,14 +5807,14 @@ export interface AcceptObservationResponse {
 export interface CapabilityDescriptorDto {
   readonly authorization: "bootstrap_only" | "browser_session" | "local_operator" | "scoped" | "scoped_or_browser_session" | "unauthenticated";
   readonly bounded_context: string;
-  readonly contract_body: "b1" | "b2" | "b3" | "c1" | "m1" | "m2" | "m3";
+  readonly contract_body: "b1" | "b2" | "b3" | "c1" | "m1" | "m2" | "m3" | "m4";
   readonly examples: ReadonlyArray<"client.enroll.forbidden" | "credential.revoke.capability_unavailable" | "credential.rotate.capability_unavailable" | "identity.identifier.attach.validation_failed" | "identity.namespace.register.validation_failed" | "identity.record.create.validation_failed" | "identity.record.list.forbidden" | "integration.status.success" | "listener.configure.capability_unavailable" | "metadata.claim.refresh.metadata_claim_stale" | "metadata.projection.configure.validation_failed" | "node.initialize.validation_failed" | "observation.accept.capacity_exceeded" | "observation.accept.receipt" | "observation.accept.validation_failed" | "profile.record.tracking_disposition.list.forbidden" | "profile.record.tracking_disposition.set.validation_failed" | "profile.select.capability_unavailable" | "provider.credential.configure.validation_failed" | "provider.credential.test.provider_credential_missing" | "provider.health.read.provider_unavailable" | "provider.list.forbidden" | "receipt.replay.receipt_not_found" | "receipt.stream.event" | "receipt.stream.receipt_not_found" | "system.capabilities.forbidden" | "system.capabilities.success" | "system.health.success">;
-  readonly id: "access.identity.bootstrap" | "access.projection.read" | "browser.session.create" | "browser.session.end" | "browser.session.profile.select" | "browser.session.read" | "browser.session.revoke" | "browser.session.rotate" | "browser.sessions.list" | "browser.sessions.revoke_all" | "browser.sessions.revoke_others" | "client.enroll" | "correction.chain.append" | "correction.chain.inspect" | "credential.revoke" | "credential.rotate" | "identity.identifier.attach" | "identity.namespace.register" | "identity.record.create" | "identity.record.list" | "identity.review.defer" | "identity.review.inspect" | "identity.review.resolve" | "identity.review.resume" | "identity.route.resolve" | "integration.status" | "listener.configure" | "metadata.claim.refresh" | "metadata.projection.configure" | "metadata.projection.read" | "node.initialize" | "observation.accept" | "portability.workspace.export" | "portability.workspace.restore" | "portability.workspace.verify" | "profile.anime_grouping_policy.apply" | "profile.anime_grouping_policy.preview" | "profile.anime_grouping_policy.read" | "profile.nuvio_collections.clear" | "profile.nuvio_collections.get" | "profile.nuvio_collections.replace" | "profile.record.tracking_disposition.list" | "profile.record.tracking_disposition.set" | "profile.select" | "provider.credential.configure" | "provider.credential.test" | "provider.health.read" | "provider.list" | "receipt.replay" | "receipt.stream" | "system.capabilities.discover" | "system.health";
+  readonly id: "access.identity.bootstrap" | "access.projection.read" | "browser.session.create" | "browser.session.end" | "browser.session.profile.select" | "browser.session.read" | "browser.session.revoke" | "browser.session.rotate" | "browser.sessions.list" | "browser.sessions.revoke_all" | "browser.sessions.revoke_others" | "client.enroll" | "correction.chain.append" | "correction.chain.inspect" | "credential.revoke" | "credential.rotate" | "identity.identifier.attach" | "identity.namespace.register" | "identity.record.create" | "identity.record.list" | "identity.review.defer" | "identity.review.inspect" | "identity.review.resolve" | "identity.review.resume" | "identity.route.resolve" | "integration.status" | "listener.configure" | "metadata.claim.refresh" | "metadata.projection.configure" | "metadata.projection.read" | "metadata.search" | "node.initialize" | "observation.accept" | "portability.workspace.export" | "portability.workspace.restore" | "portability.workspace.verify" | "profile.anime_grouping_policy.apply" | "profile.anime_grouping_policy.preview" | "profile.anime_grouping_policy.read" | "profile.nuvio_collections.clear" | "profile.nuvio_collections.get" | "profile.nuvio_collections.replace" | "profile.record.tracking_disposition.list" | "profile.record.tracking_disposition.set" | "profile.select" | "provider.credential.configure" | "provider.credential.test" | "provider.health.read" | "provider.list" | "receipt.replay" | "receipt.stream" | "system.capabilities.discover" | "system.health";
   readonly lifecycle: CapabilityLifecycleDto;
   readonly problems: ReadonlyArray<"already_initialized" | "auth_browser_binding_invalid" | "auth_continuation_persistence_failed" | "auth_identity_conflict" | "auth_selection_changed" | "auth_subject_unaffiliated" | "authentication_failed" | "bootstrap_closed" | "browser_session_expired" | "browser_session_revoked" | "capability_unavailable" | "capacity_exceeded" | "forbidden" | "idempotency_conflict" | "identity_conflict" | "identity_service_unavailable" | "integrity_failed" | "invalid_identifier" | "invalid_observation" | "malformed_json" | "metadata_claim_stale" | "payload_too_large" | "provider_credential_expired" | "provider_credential_invalid" | "provider_credential_missing" | "provider_rate_limited" | "provider_response_invalid" | "provider_route_unavailable" | "provider_unavailable" | "receipt_not_found" | "record_not_found" | "session_policy_changed" | "storage_unavailable" | "trailbase_proof_invalid" | "trailbase_session_cleanup_failed" | "trailbase_trust_unavailable" | "trailbase_version_unsupported" | "unsupported_media_type" | "validation_failed">;
-  readonly runtime_body: "b0" | "b1" | "b2" | "b3" | "c1" | "m1" | "m2" | "m3";
-  readonly scopes: ReadonlyArray<"capability_read" | "client_enroll" | "correction_read" | "correction_write" | "credential_manage" | "identity_read" | "identity_write" | "listener_configure" | "metadata_claim_refresh" | "metadata_projection_configure" | "metadata_projection_read" | "observation_accept" | "profile_select" | "profile_state_read" | "profile_state_write" | "provider_credential_manage" | "provider_read" | "receipt_read" | "review_read" | "review_write" | "workspace_export" | "workspace_verify">;
-  readonly surface_profile: "b1_durable_bootstrap" | "b1_http_fixture" | "b1_integration_status" | "b1_observation_accept" | "b1_receipt_replay" | "b1_receipt_stream" | "b1_records" | "b2_profile_state" | "c1_access_projection" | "c1_browser_session_foundation" | "c1_identity_bootstrap" | "health" | "later_b2" | "later_b3" | "m1_providers" | "m2_metadata" | "m3_identity_routing";
+  readonly runtime_body: "b0" | "b1" | "b2" | "b3" | "c1" | "m1" | "m2" | "m3" | "m4";
+  readonly scopes: ReadonlyArray<"capability_read" | "client_enroll" | "correction_read" | "correction_write" | "credential_manage" | "identity_read" | "identity_write" | "listener_configure" | "metadata_claim_refresh" | "metadata_projection_configure" | "metadata_projection_read" | "metadata_search" | "observation_accept" | "profile_select" | "profile_state_read" | "profile_state_write" | "provider_credential_manage" | "provider_read" | "receipt_read" | "review_read" | "review_write" | "workspace_export" | "workspace_verify">;
+  readonly surface_profile: "b1_durable_bootstrap" | "b1_http_fixture" | "b1_integration_status" | "b1_observation_accept" | "b1_receipt_replay" | "b1_receipt_stream" | "b1_records" | "b2_profile_state" | "c1_access_projection" | "c1_browser_session_foundation" | "c1_identity_bootstrap" | "health" | "later_b2" | "later_b3" | "m1_providers" | "m2_metadata" | "m3_identity_routing" | "m4_search";
   readonly uat: ReadonlyArray<CapabilityUatDto>;
 }
 
@@ -4710,14 +5828,14 @@ export interface CapabilityDiscoveryResponse {
 
 export interface CapabilityLifecycleDto {
   readonly contract_state: "finalized" | "reserved";
-  readonly introduced_in: "b0" | "b1" | "b2" | "c1" | "m1" | "m2" | "m3";
+  readonly introduced_in: "b0" | "b1" | "b2" | "c1" | "m1" | "m2" | "m3" | "m4";
   readonly runtime_availability: "fixture_only" | "guarded" | "implemented" | "later_body";
 }
 
 export interface CapabilitySurfaceDispositionDto {
   readonly binding?: null | string;
   readonly binding_visibility?: "internal" | "public";
-  readonly body?: "b0" | "b1" | "b2" | "b3" | "c1" | "m1" | "m2" | "m3";
+  readonly body?: "b0" | "b1" | "b2" | "b3" | "c1" | "m1" | "m2" | "m3" | "m4";
   readonly reason?: null | string;
   readonly state: "later_body" | "not_applicable" | "required";
 }
@@ -4906,7 +6024,8 @@ const B1_CONFORMANCE_SCHEMAS = {
           "c1",
           "m1",
           "m2",
-          "m3"
+          "m3",
+          "m4"
         ],
         "type": "string"
       },
@@ -4979,6 +6098,7 @@ const B1_CONFORMANCE_SCHEMAS = {
           "metadata.claim.refresh",
           "metadata.projection.configure",
           "metadata.projection.read",
+          "metadata.search",
           "node.initialize",
           "observation.accept",
           "portability.workspace.export",
@@ -5065,7 +6185,8 @@ const B1_CONFORMANCE_SCHEMAS = {
           "c1",
           "m1",
           "m2",
-          "m3"
+          "m3",
+          "m4"
         ],
         "type": "string"
       },
@@ -5083,6 +6204,7 @@ const B1_CONFORMANCE_SCHEMAS = {
             "metadata_claim_refresh",
             "metadata_projection_configure",
             "metadata_projection_read",
+            "metadata_search",
             "observation_accept",
             "profile_select",
             "profile_state_read",
@@ -5118,7 +6240,8 @@ const B1_CONFORMANCE_SCHEMAS = {
           "later_b3",
           "m1_providers",
           "m2_metadata",
-          "m3_identity_routing"
+          "m3_identity_routing",
+          "m4_search"
         ],
         "type": "string"
       },
@@ -5151,8 +6274,8 @@ const B1_CONFORMANCE_SCHEMAS = {
         "items": {
           "$ref": "#/components/schemas/CapabilityDescriptorDto"
         },
-        "maxItems": 52,
-        "minItems": 52,
+        "maxItems": 53,
+        "minItems": 53,
         "type": "array",
         "uniqueItems": true
       },
@@ -5190,8 +6313,8 @@ const B1_CONFORMANCE_SCHEMAS = {
           },
           "type": "object"
         },
-        "maxProperties": 17,
-        "minProperties": 17,
+        "maxProperties": 18,
+        "minProperties": 18,
         "propertyNames": {
           "enum": [
             "b1_durable_bootstrap",
@@ -5210,7 +6333,8 @@ const B1_CONFORMANCE_SCHEMAS = {
             "later_b3",
             "m1_providers",
             "m2_metadata",
-            "m3_identity_routing"
+            "m3_identity_routing",
+            "m4_search"
           ],
           "type": "string"
         },
@@ -5244,7 +6368,8 @@ const B1_CONFORMANCE_SCHEMAS = {
           "c1",
           "m1",
           "m2",
-          "m3"
+          "m3",
+          "m4"
         ],
         "type": "string"
       },
@@ -5293,7 +6418,8 @@ const B1_CONFORMANCE_SCHEMAS = {
           "c1",
           "m1",
           "m2",
-          "m3"
+          "m3",
+          "m4"
         ],
         "type": [
           "string",
@@ -6088,6 +7214,7 @@ export type CapabilityId =
   | "metadata.claim.refresh"
   | "metadata.projection.configure"
   | "metadata.projection.read"
+  | "metadata.search"
   | "node.initialize"
   | "observation.accept"
   | "portability.workspace.export"
@@ -6120,7 +7247,8 @@ export type CapabilityBody =
   | "c1"
   | "m1"
   | "m2"
-  | "m3";
+  | "m3"
+  | "m4";
 
 // prettier-ignore
 export type ContractState =
@@ -6614,7 +7742,9 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "browser_session_expired",
         "browser_session_revoked",
         "capability_unavailable",
+        "capacity_exceeded",
         "forbidden",
+        "idempotency_conflict",
         "identity_conflict",
         "integrity_failed",
         "invalid_identifier",
@@ -6723,7 +7853,8 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "forbidden",
         "integrity_failed",
         "session_policy_changed",
-        "storage_unavailable"
+        "storage_unavailable",
+        "validation_failed"
       ],
       "runtime_body": "b2",
       "scopes": [
@@ -7004,6 +8135,40 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "metadata_projection_read"
       ],
       "surface_profile": "m2_metadata",
+      "uat": []
+    },
+    {
+      "authorization": "scoped_or_browser_session",
+      "bounded_context": "search.candidates",
+      "contract_body": "m4",
+      "examples": [],
+      "id": "metadata.search",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "m4",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "browser_session_expired",
+        "browser_session_revoked",
+        "capability_unavailable",
+        "capacity_exceeded",
+        "forbidden",
+        "idempotency_conflict",
+        "integrity_failed",
+        "malformed_json",
+        "payload_too_large",
+        "session_policy_changed",
+        "storage_unavailable",
+        "unsupported_media_type",
+        "validation_failed"
+      ],
+      "runtime_body": "m4",
+      "scopes": [
+        "metadata_search"
+      ],
+      "surface_profile": "m4_search",
       "uat": []
     },
     {
@@ -7559,7 +8724,7 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       "uat": []
     },
     {
-      "authorization": "scoped",
+      "authorization": "scoped_or_browser_session",
       "bounded_context": "connections.providers",
       "contract_body": "m1",
       "examples": [
@@ -7573,8 +8738,11 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       },
       "problems": [
         "authentication_failed",
+        "browser_session_expired",
+        "browser_session_revoked",
         "forbidden",
         "integrity_failed",
+        "session_policy_changed",
         "storage_unavailable"
       ],
       "runtime_body": "m1",
@@ -8611,6 +9779,60 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "binding_visibility": "public",
         "state": "required"
       }
+    },
+    "m4_search": {
+      "cli": {
+        "body": "m4",
+        "reason": "Search CLI projection follows the frozen M4 contract.",
+        "state": "later_body"
+      },
+      "domain_application": {
+        "binding_visibility": "internal",
+        "state": "required"
+      },
+      "http_openapi": {
+        "binding": "openapi:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "json_ld": {
+        "reason": "Private query and candidate receipts are not linked data.",
+        "state": "not_applicable"
+      },
+      "json_schema": {
+        "binding": "schema:production-openapi-operation:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "knowledge": {
+        "body": "m4",
+        "reason": "Search recovery guidance follows M4 route integration.",
+        "state": "later_body"
+      },
+      "okf": {
+        "body": "m4",
+        "reason": "Search catalogue projection follows M4 activation.",
+        "state": "later_body"
+      },
+      "package_smoke": {
+        "body": "m4",
+        "reason": "Search runtime package verification remains an M4 gate.",
+        "state": "later_body"
+      },
+      "sdk": {
+        "binding": "sdk:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "sse_asyncapi": {
+        "reason": "Search returns finite result pages without an event stream.",
+        "state": "not_applicable"
+      },
+      "ui": {
+        "body": "m4",
+        "reason": "Search Workbench integration remains an M4 gate.",
+        "state": "later_body"
+      }
     }
   }
 } as const;
@@ -8663,7 +9885,7 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "next_actions": [
         {
           "id": "release_capacity",
-          "label": "Release retained capacity before retrying"
+          "label": "Increase or release governed capacity before retrying"
         }
       ],
       "param": null,
@@ -9041,7 +10263,7 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "next_actions": [
         {
           "id": "release_capacity",
-          "label": "Release retained capacity before retrying"
+          "label": "Increase or release governed capacity before retrying"
         }
       ],
       "param": null,
@@ -10728,6 +11950,24 @@ export const PUBLIC_PROBLEM_CATALOG = {
     },
     {
       "capability_id": "identity.identifier.attach",
+      "code": "capacity_exceeded",
+      "detail": "bounded application capacity has been reached",
+      "next_actions": [
+        {
+          "id": "release_capacity",
+          "label": "Increase or release governed capacity before retrying"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 507,
+      "title": "Capacity exceeded",
+      "type": "https://fasti.scrobble.dev/v1/problems/capacity-exceeded"
+    },
+    {
+      "capability_id": "identity.identifier.attach",
       "code": "forbidden",
       "detail": "request is not authorized for this capability",
       "next_actions": [
@@ -10743,6 +11983,24 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "status": 403,
       "title": "Forbidden",
       "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "identity.identifier.attach",
+      "code": "idempotency_conflict",
+      "detail": "operation ID was already used with different request semantics",
+      "next_actions": [
+        {
+          "id": "use_new_operation_id",
+          "label": "Use a new operation ID for a distinct observation"
+        }
+      ],
+      "param": "/operation_id",
+      "param_policy": "fixed",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 409,
+      "title": "Idempotency conflict",
+      "type": "https://fasti.scrobble.dev/v1/problems/idempotency-conflict"
     },
     {
       "capability_id": "identity.identifier.attach",
@@ -11519,6 +12777,24 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
     },
     {
+      "capability_id": "identity.record.list",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
       "capability_id": "identity.review.defer",
       "code": "capability_unavailable",
       "detail": "requested capability is not available in this body; it is owned by b2",
@@ -11795,7 +13071,7 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "next_actions": [
         {
           "id": "release_capacity",
-          "label": "Release retained capacity before retrying"
+          "label": "Increase or release governed capacity before retrying"
         }
       ],
       "param": null,
@@ -12043,11 +13319,11 @@ export const PUBLIC_PROBLEM_CATALOG = {
     {
       "capability_id": "metadata.claim.refresh",
       "code": "metadata_claim_stale",
-      "detail": "the provider refresh did not produce a fresh claim; the last-known-good claim remains active",
+      "detail": "the provider metadata is unavailable or cannot be reused; existing claims are retained",
       "next_actions": [
         {
           "id": "retry_metadata_refresh",
-          "label": "Retry the metadata refresh or use the labelled last-known-good value"
+          "label": "Start a new metadata refresh or use an available local value"
         }
       ],
       "param": null,
@@ -12527,6 +13803,258 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
     },
     {
+      "capability_id": "metadata.search",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "metadata.search",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "metadata.search",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
+    },
+    {
+      "capability_id": "metadata.search",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by m4",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "metadata.search",
+      "code": "capacity_exceeded",
+      "detail": "bounded application capacity has been reached",
+      "next_actions": [
+        {
+          "id": "release_capacity",
+          "label": "Increase or release governed capacity before retrying"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 507,
+      "title": "Capacity exceeded",
+      "type": "https://fasti.scrobble.dev/v1/problems/capacity-exceeded"
+    },
+    {
+      "capability_id": "metadata.search",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "metadata.search",
+      "code": "idempotency_conflict",
+      "detail": "operation ID was already used with different request semantics",
+      "next_actions": [
+        {
+          "id": "use_new_operation_id",
+          "label": "Use a new operation ID for a distinct observation"
+        }
+      ],
+      "param": "/operation_id",
+      "param_policy": "fixed",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 409,
+      "title": "Idempotency conflict",
+      "type": "https://fasti.scrobble.dev/v1/problems/idempotency-conflict"
+    },
+    {
+      "capability_id": "metadata.search",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "metadata.search",
+      "code": "malformed_json",
+      "detail": "request JSON is malformed",
+      "next_actions": [
+        {
+          "id": "correct_json",
+          "label": "Correct the JSON syntax and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 400,
+      "title": "Malformed JSON",
+      "type": "https://fasti.scrobble.dev/v1/problems/malformed-json"
+    },
+    {
+      "capability_id": "metadata.search",
+      "code": "payload_too_large",
+      "detail": "request body exceeds the bounded transport limit",
+      "next_actions": [
+        {
+          "id": "reduce_request_body",
+          "label": "Reduce the request body and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 413,
+      "title": "Payload too large",
+      "type": "https://fasti.scrobble.dev/v1/problems/payload-too-large"
+    },
+    {
+      "capability_id": "metadata.search",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
+    },
+    {
+      "capability_id": "metadata.search",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "metadata.search",
+      "code": "unsupported_media_type",
+      "detail": "request media type is unsupported",
+      "next_actions": [
+        {
+          "id": "use_supported_media_type",
+          "label": "Use the documented media type and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 415,
+      "title": "Unsupported media type",
+      "type": "https://fasti.scrobble.dev/v1/problems/unsupported-media-type"
+    },
+    {
+      "capability_id": "metadata.search",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
       "capability_id": "node.initialize",
       "code": "already_initialized",
       "detail": "the local node has already completed its one-time initialization",
@@ -12731,7 +14259,7 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "next_actions": [
         {
           "id": "release_capacity",
-          "label": "Release retained capacity before retrying"
+          "label": "Increase or release governed capacity before retrying"
         }
       ],
       "param": null,
@@ -13145,7 +14673,7 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "next_actions": [
         {
           "id": "release_capacity",
-          "label": "Release retained capacity before retrying"
+          "label": "Increase or release governed capacity before retrying"
         }
       ],
       "param": null,
@@ -13397,7 +14925,7 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "next_actions": [
         {
           "id": "release_capacity",
-          "label": "Release retained capacity before retrying"
+          "label": "Increase or release governed capacity before retrying"
         }
       ],
       "param": null,
@@ -15174,6 +16702,42 @@ export const PUBLIC_PROBLEM_CATALOG = {
     },
     {
       "capability_id": "provider.list",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "provider.list",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
+    },
+    {
+      "capability_id": "provider.list",
       "code": "forbidden",
       "detail": "request is not authorized for this capability",
       "next_actions": [
@@ -15207,6 +16771,24 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "status": 500,
       "title": "Integrity check failed",
       "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "provider.list",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
     },
     {
       "capability_id": "provider.list",
@@ -15351,7 +16933,7 @@ type JsonObject = Record<string, unknown>;
 const HEALTH_ALLOWED = ["status", "version"] as const;
 const HEALTH_REQUIRED = ["status", "version"] as const;
 // prettier-ignore
-const CAPABILITY_IDS = ["access.identity.bootstrap", "access.projection.read", "browser.session.create", "browser.session.end", "browser.session.profile.select", "browser.session.read", "browser.session.revoke", "browser.session.rotate", "browser.sessions.list", "browser.sessions.revoke_all", "browser.sessions.revoke_others", "client.enroll", "correction.chain.append", "correction.chain.inspect", "credential.revoke", "credential.rotate", "identity.identifier.attach", "identity.namespace.register", "identity.record.create", "identity.record.list", "identity.review.defer", "identity.review.inspect", "identity.review.resolve", "identity.review.resume", "identity.route.resolve", "integration.status", "listener.configure", "metadata.claim.refresh", "metadata.projection.configure", "metadata.projection.read", "node.initialize", "observation.accept", "portability.workspace.export", "portability.workspace.restore", "portability.workspace.verify", "profile.anime_grouping_policy.apply", "profile.anime_grouping_policy.preview", "profile.anime_grouping_policy.read", "profile.nuvio_collections.clear", "profile.nuvio_collections.get", "profile.nuvio_collections.replace", "profile.record.tracking_disposition.list", "profile.record.tracking_disposition.set", "profile.select", "provider.credential.configure", "provider.credential.test", "provider.health.read", "provider.list", "receipt.replay", "receipt.stream", "system.capabilities.discover", "system.health"] as const;
+const CAPABILITY_IDS = ["access.identity.bootstrap", "access.projection.read", "browser.session.create", "browser.session.end", "browser.session.profile.select", "browser.session.read", "browser.session.revoke", "browser.session.rotate", "browser.sessions.list", "browser.sessions.revoke_all", "browser.sessions.revoke_others", "client.enroll", "correction.chain.append", "correction.chain.inspect", "credential.revoke", "credential.rotate", "identity.identifier.attach", "identity.namespace.register", "identity.record.create", "identity.record.list", "identity.review.defer", "identity.review.inspect", "identity.review.resolve", "identity.review.resume", "identity.route.resolve", "integration.status", "listener.configure", "metadata.claim.refresh", "metadata.projection.configure", "metadata.projection.read", "metadata.search", "node.initialize", "observation.accept", "portability.workspace.export", "portability.workspace.restore", "portability.workspace.verify", "profile.anime_grouping_policy.apply", "profile.anime_grouping_policy.preview", "profile.anime_grouping_policy.read", "profile.nuvio_collections.clear", "profile.nuvio_collections.get", "profile.nuvio_collections.replace", "profile.record.tracking_disposition.list", "profile.record.tracking_disposition.set", "profile.select", "provider.credential.configure", "provider.credential.test", "provider.health.read", "provider.list", "receipt.replay", "receipt.stream", "system.capabilities.discover", "system.health"] as const;
 // prettier-ignore
 const PROBLEM_CODES = ["already_initialized", "auth_browser_binding_invalid", "auth_continuation_persistence_failed", "auth_identity_conflict", "auth_selection_changed", "auth_subject_unaffiliated", "authentication_failed", "bootstrap_closed", "browser_session_expired", "browser_session_revoked", "capability_unavailable", "capacity_exceeded", "forbidden", "idempotency_conflict", "identity_conflict", "identity_service_unavailable", "integrity_failed", "invalid_identifier", "invalid_observation", "malformed_json", "metadata_claim_stale", "payload_too_large", "provider_credential_expired", "provider_credential_invalid", "provider_credential_missing", "provider_rate_limited", "provider_response_invalid", "provider_route_unavailable", "provider_unavailable", "receipt_not_found", "record_not_found", "session_policy_changed", "storage_unavailable", "trailbase_proof_invalid", "trailbase_session_cleanup_failed", "trailbase_trust_unavailable", "trailbase_version_unsupported", "unsupported_media_type", "validation_failed"] as const;
 // prettier-ignore

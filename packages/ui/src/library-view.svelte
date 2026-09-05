@@ -6,16 +6,14 @@
     WatchStatus,
     ContextMenuItemConfig,
   } from "./types.js";
-  import {
-    IconSearch,
-    IconLayoutGrid,
-    IconList,
-    IconStarFilled,
-    IconBookmark,
-    IconEye,
-    IconEyeCheck,
-    IconFolder,
-  } from "@tabler/icons-svelte";
+  import IconSearch from "@tabler/icons-svelte/icons/search";
+  import IconLayoutGrid from "@tabler/icons-svelte/icons/layout-grid";
+  import IconList from "@tabler/icons-svelte/icons/list";
+  import IconStarFilled from "@tabler/icons-svelte/icons/star-filled";
+  import IconBookmark from "@tabler/icons-svelte/icons/bookmark";
+  import IconEye from "@tabler/icons-svelte/icons/eye";
+  import IconEyeCheck from "@tabler/icons-svelte/icons/eye-check";
+  import IconFolder from "@tabler/icons-svelte/icons/folder";
   import FastActionBar from "./fast-action-bar.svelte";
   import ProgressModal from "./progress-modal.svelte";
   import RatingReviewModal from "./rating-review-modal.svelte";
@@ -234,7 +232,7 @@
       </div>
 
       <div
-        class="filter-pills"
+        class="filter-pills flex-wrap"
         role="radiogroup"
         aria-label="Media kind filter"
       >
@@ -252,7 +250,11 @@
         {/each}
       </div>
 
-      <div class="filter-pills" role="radiogroup" aria-label="Status filter">
+      <div
+        class="filter-pills flex-wrap"
+        role="radiogroup"
+        aria-label="Status filter"
+      >
         {#each statuses as s}
           <button
             type="button"

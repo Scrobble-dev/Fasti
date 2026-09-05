@@ -17,6 +17,8 @@ The authored registry at [`registry/v1/capabilities.yaml`](registry/v1/capabilit
 | `examples/v1/`                        | Registry-owned semantic examples, validated against their contract surfaces                                          |
 | `portability/v1/`                     | Frozen internal archive-v1 schema and example; retained for restore compatibility                                    |
 | `portability/v2/`                     | Generated archive-v2 schema and example; adds metadata and profile tracking state                                    |
+| `portability/v3/`–`portability/v6/`    | Frozen claim, refresh, identity-routing and Search-action archive formats retained for restore                      |
+| `portability/v7/`                     | Current staged format; adds nullable response-policy evidence to the existing claim registry, with 35 streams       |
 | `generated/v1/`                       | Deterministic projections: production and conformance OpenAPI, registry, and JSON Schemas                            |
 | `../packages/sdk/`                    | Generated typed TypeScript HTTP/SSE client and parsers                                                               |
 | `../crates/fasti-cli/`                | Local `capability list/show` projection of the generated public registry                                             |
@@ -29,6 +31,21 @@ JSON Schema uses draft 2020-12. JSON-LD and OKF remain separate governed surface
 Run `cargo xtask contract generate` to regenerate checked-in projections. Run `cargo xtask contract verify --locked` to prove deterministic bytes, checked-in drift, semantic examples, standards validation, Rust/TypeScript parity, package truth, and other B1 software gates. The [local TypeScript SDK guide](../packages/sdk/README.md) provides a copy-paste health check and focused black-box contract test. A verifier receipt proves only the software contract spine. B1 remains open until the current aggregate milestone manifest, including Tauri and both low-hardware envelope architectures, passes. B2 is not authorized.
 
 Provider seeds and manifest examples remain future adapter inputs, not working integrations. Durable observation, identity-record, profile tracking, and fixed-direct-listener C1 paths are production HTTP operations in local source. C1 exchange and new session issuance require a verified installation receipt and persisted active TrailBase activation. Identity review and portability remain staged. The pre-production Workbench consumes the generated contract without owning a second API shape. The implemented Access projection UI binding does not claim package smoke. There is no supported install, release, deployed web application, desktop package, or player. C1 ordinary-browser delivery merged in [PR #119](https://github.com/Scrobble-dev/Fasti/pull/119), with exact evidence in the [canonical checkpoint](../docs/plans/trailbase-authentication-remediation.md#24-c1-delivery-and-c2-foundation-checkpoint). Packaged WebView, cross-platform, and packaged assistive-technology proof remain deferred to `C1-TAURI-AUTH`; supported-package and public-release evidence remain separate.
+
+Archive v7 accompanies append-only schema v17. It carries bounded canonical
+`response_policy_json` in `metadata_claims`, for both field and rating claim
+owners. NULL preserves unknown historical policy; it does not grant upstream
+reuse permission. The v1–v6 files remain unchanged. Restore uses the original
+version's row shape for both decoding and exact post-import stream verification.
+Restore captures bounded input once in an owner-only unnamed file under the
+locked data root. Both verification and import consume that private file, never
+rereading the caller's source. Its bounded preflight rejects malformed/no-store
+policy and crossed v6/v7 claim shapes before named staging or SQLite creation.
+The same strict decoder and digest checks run again during import. Capture
+bytes count toward scratch admission. Restore enforces the main-database byte
+allowance with a checked SQLite page limit before migration, retaining the final
+file-size check. This is not a hard peak bound on SQLite journals or temporary
+files.
 
 The [archive-v1 schema](portability/v1/workspace-manifest.schema.json) and
 [example](portability/v1/workspace-manifest.example.json) keep the original 16

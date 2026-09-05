@@ -5,8 +5,8 @@ use fasti_application::{
     MetadataClaimRefreshService, MetadataRefreshFuture, MetadataRefreshMode,
     MetadataRefreshPersistencePort, OutboundAccessPolicy, PrepareMetadataRefreshCommand,
     ProblemCode, ProviderCapabilityId, ProviderCapabilityState, ProviderCapabilityStatus,
-    ProviderId, ProviderMetadataField, ProviderStatePort, ProviderStatePortError,
-    ReadCachedMetadataRefreshCommand, ReadMetadataRefreshReceiptCommand,
+    ProviderId, ProviderMetadataField, ProviderOperationLease, ProviderStatePort,
+    ProviderStatePortError, ReadCachedMetadataRefreshCommand, ReadMetadataRefreshReceiptCommand,
     RefreshMetadataClaimsCommand,
 };
 use fasti_domain::{
@@ -49,6 +49,7 @@ impl ProviderMetadataRefreshService {
     async fn refresh(
         &self,
         command: RefreshMetadataClaimsCommand,
+        lease: ProviderOperationLease,
     ) -> fasti_application::ApplicationResult<fasti_application::RefreshMetadataClaimsOutcome> {
         let capability = CapabilityKey::RefreshMetadataClaims;
         let correlation_id = command.correlation_id();
@@ -64,7 +65,7 @@ impl ProviderMetadataRefreshService {
             command.record_id(),
             provider_id.clone(),
         );
-        if let Some(outcome) = run_blocking(capability, correlation_id, move || {
+        if let Some(outcome) = run_blocking(&lease, capability, correlation_id, move || {
             persistence.authorize_and_read_refresh_receipt(receipt)
         })
         .await?
@@ -79,7 +80,7 @@ impl ProviderMetadataRefreshService {
             provider_id.clone(),
             command.field_groups().to_vec(),
         );
-        let prepared = run_blocking(capability, correlation_id, move || {
+        let prepared = run_blocking(&lease, capability, correlation_id, move || {
             persistence.authorize_and_prepare_refresh(prepare)
         })
         .await?;
@@ -90,7 +91,7 @@ impl ProviderMetadataRefreshService {
             .map_err(|_| problem(ProblemCode::IntegrityFailed, capability, correlation_id))?;
         let provider_state = Arc::clone(&self.provider_state);
         let workspace_id = command.access().workspace_id();
-        let state = run_blocking(capability, correlation_id, move || {
+        let state = run_blocking(&lease, capability, correlation_id, move || {
             provider_state
                 .get_provider_capability_state(workspace_id, &provider, &read_capability)
                 .map_err(|error| state_problem(error, capability, correlation_id))?
@@ -113,15 +114,19 @@ impl ProviderMetadataRefreshService {
             .runtime
             .descriptor(provider_id.as_str())
             .map_err(|error| runtime_problem(error, capability, correlation_id))?;
-        let effective_locale =
-            provider_response_locale(provider_id.as_str(), command.locale(), correlation_id)?;
+        let effective_locale = provider_response_locale(
+            provider_id.as_str(),
+            command.locale(),
+            capability,
+            correlation_id,
+        )?;
         let effective_region = provider_response_region(provider_id.as_str(), command.region());
         let enrichment_keys = cache_keys(
             &command,
             &prepared,
             &state,
             mapping.kind(),
-            descriptor.licence_and_terms,
+            descriptor,
             MetadataCachePurpose::MetadataEnrichment,
             (effective_locale.clone(), effective_region.clone()),
         )?;
@@ -130,7 +135,7 @@ impl ProviderMetadataRefreshService {
             &prepared,
             &state,
             mapping.kind(),
-            descriptor.licence_and_terms,
+            descriptor,
             MetadataCachePurpose::OfflineRead,
             (effective_locale.clone(), effective_region.clone()),
         )?;
@@ -142,7 +147,7 @@ impl ProviderMetadataRefreshService {
                 prepared.clone(),
                 enrichment_keys.clone(),
             );
-            if let Some(outcome) = run_blocking(capability, correlation_id, move || {
+            if let Some(outcome) = run_blocking(&lease, capability, correlation_id, move || {
                 persistence.authorize_and_read_cached_refresh(cached)
             })
             .await?
@@ -157,7 +162,7 @@ impl ProviderMetadataRefreshService {
                     provider_id.clone(),
                     outcome,
                 );
-                return run_blocking(capability, correlation_id, move || {
+                return run_blocking(&lease, capability, correlation_id, move || {
                     persistence.authorize_and_commit_refresh_receipt(receipt)
                 })
                 .await;
@@ -188,7 +193,7 @@ impl ProviderMetadataRefreshService {
                     prepared,
                     provider_id,
                 );
-                run_blocking(capability, correlation_id, move || {
+                run_blocking(&lease, capability, correlation_id, move || {
                     persistence.authorize_and_mark_refresh_unavailable(unavailable)
                 })
                 .await?;
@@ -211,6 +216,9 @@ impl ProviderMetadataRefreshService {
             ));
         }
 
+        let response_policy = *candidate
+            .recorded_response_policy()
+            .map_err(|error| runtime_problem(error, capability, correlation_id))?;
         let fields = candidate
             .metadata_fields(effective_locale.clone(), effective_region.clone())
             .map_err(|error| runtime_problem(error, capability, correlation_id))?
@@ -220,14 +228,7 @@ impl ProviderMetadataRefreshService {
                     .is_some_and(|group| prepared.field_groups().contains(&group))
             })
             .collect::<Vec<_>>();
-        let now = chrono::Utc::now();
-        if !fields.iter().any(|field| {
-            field.claim().initial_status() == fasti_domain::FieldClaimStatus::Fresh
-                && field
-                    .claim()
-                    .expires_at()
-                    .is_none_or(|expires_at| expires_at > now)
-        }) {
+        if fields.is_empty() {
             return Err(stale_problem(capability, correlation_id));
         }
         let attribution = MetadataAttribution::try_new(
@@ -240,6 +241,7 @@ impl ProviderMetadataRefreshService {
             enrichment_keys.into_iter().chain(offline_keys),
             &fields,
             correlation_id,
+            &response_policy,
         )?;
 
         let persistence = Arc::clone(&self.persistence);
@@ -255,8 +257,9 @@ impl ProviderMetadataRefreshService {
             Vec::new(),
             cache_entries,
             attribution,
+            response_policy,
         );
-        run_blocking(capability, correlation_id, move || {
+        run_blocking(&lease, capability, correlation_id, move || {
             persistence.authorize_and_commit_refresh(commit)
         })
         .await
@@ -284,7 +287,8 @@ fn refresh_semantic_digest(
     Ok(Sha256Digest::from_bytes(&Sha256::digest(encoded).into()))
 }
 
-async fn run_blocking<T, F>(
+pub(crate) async fn run_blocking<T, F>(
+    lease: &ProviderOperationLease,
     capability: CapabilityKey,
     correlation_id: fasti_domain::RequestCorrelationId,
     operation: F,
@@ -293,17 +297,22 @@ where
     T: Send + 'static,
     F: FnOnce() -> fasti_application::ApplicationResult<T> + Send + 'static,
 {
-    tokio::task::spawn_blocking(operation)
-        .await
-        .map_err(|_| problem(ProblemCode::StorageUnavailable, capability, correlation_id))?
+    let lease = lease.clone();
+    tokio::task::spawn_blocking(move || {
+        let _lease = lease;
+        operation()
+    })
+    .await
+    .map_err(|_| problem(ProblemCode::StorageUnavailable, capability, correlation_id))?
 }
 
 impl MetadataClaimRefreshService for ProviderMetadataRefreshService {
     fn authorize_and_refresh(
         &self,
         command: RefreshMetadataClaimsCommand,
+        lease: ProviderOperationLease,
     ) -> MetadataRefreshFuture<'_> {
-        Box::pin(self.refresh(command))
+        Box::pin(self.refresh(command, lease))
     }
 }
 
@@ -336,7 +345,7 @@ fn cache_keys(
     prepared: &fasti_application::PreparedMetadataRefresh,
     state: &ProviderCapabilityState,
     kind: &str,
-    terms_revision: &str,
+    descriptor: &crate::ProviderSpec,
     purpose: MetadataCachePurpose,
     response_coordinates: (
         Option<fasti_domain::MetadataLocale>,
@@ -372,7 +381,7 @@ fn cache_keys(
                 configuration_digest.clone(),
                 CACHE_SCHEMA_VERSION,
                 purpose,
-                terms_revision,
+                descriptor.cache_policy,
                 MetadataDataClassification::Public,
             )
             .map_err(|_| problem(ProblemCode::IntegrityFailed, capability, correlation_id))?,
@@ -385,13 +394,22 @@ fn cache_entries(
     keys: impl Iterator<Item = MetadataCacheKey>,
     fields: &[ProviderMetadataField],
     correlation_id: fasti_domain::RequestCorrelationId,
+    response_policy: &fasti_application::ProviderResponseCachePolicy,
 ) -> fasti_application::ApplicationResult<Vec<MetadataCacheEntry>> {
     let capability = CapabilityKey::RefreshMetadataClaims;
-    let created = fields
-        .first()
-        .map(|field| ReceivedAt::from_application_clock(field.claim().fetched_at()))
-        .expect("a successful refresh has at least one fresh claim");
-    let fresh_until = created.value() + chrono::Duration::seconds(METADATA_FRESH_SECONDS);
+    let created = ReceivedAt::from_application_clock(response_policy.received_at());
+    let (fresh_until, stale_until) = response_policy
+        .deadlines(
+            std::time::Duration::from_secs(METADATA_FRESH_SECONDS as u64),
+            std::time::Duration::from_secs(METADATA_STALE_ON_ERROR_SECONDS as u64),
+        )
+        .ok_or_else(|| problem(ProblemCode::ValidationFailed, capability, correlation_id))?;
+    let refreshing_until = fresh_until
+        .checked_add_signed(chrono::Duration::seconds(
+            METADATA_STALE_WHILE_REFRESHING_SECONDS,
+        ))
+        .unwrap_or(fresh_until)
+        .min(stale_until);
     keys.map(|key| {
         let claim_ids = fields
             .iter()
@@ -403,36 +421,23 @@ fn cache_entries(
             claim_ids,
             created,
             fresh_until,
-            fresh_until + chrono::Duration::seconds(METADATA_STALE_WHILE_REFRESHING_SECONDS),
-            created.value() + chrono::Duration::seconds(METADATA_STALE_ON_ERROR_SECONDS),
+            refreshing_until,
+            stale_until,
         )
         .map_err(|_| problem(ProblemCode::IntegrityFailed, capability, correlation_id))
     })
     .collect()
 }
 
-fn provider_response_locale(
+pub(crate) fn provider_response_locale(
     provider: &str,
     requested: Option<&fasti_domain::MetadataLocale>,
-    correlation_id: fasti_domain::RequestCorrelationId,
+    _capability: CapabilityKey,
+    _correlation_id: fasti_domain::RequestCorrelationId,
 ) -> fasti_application::ApplicationResult<Option<fasti_domain::MetadataLocale>> {
-    match provider {
-        crate::TMDB_PROVIDER => requested
-            .cloned()
-            .map_or_else(
-                || fasti_domain::MetadataLocale::try_new("en-US").map(Some),
-                |locale| Ok(Some(locale)),
-            )
-            .map_err(|_| {
-                problem(
-                    ProblemCode::IntegrityFailed,
-                    CapabilityKey::RefreshMetadataClaims,
-                    correlation_id,
-                )
-            }),
-        crate::GOOGLE_BOOKS_PROVIDER => Ok(None),
-        _ => Ok(None),
-    }
+    Ok(fasti_application::provider_metadata_response_locale(
+        provider, requested,
+    ))
 }
 
 fn provider_response_region(
@@ -504,6 +509,39 @@ mod tests {
         MetadataRegion, NamespaceKey, ProfileGrantId, ProfileId, RecordId, WorkspaceId,
     };
 
+    #[tokio::test]
+    async fn cancellation_retains_provider_lease_until_blocking_persistence_finishes() {
+        let gate = Arc::new(tokio::sync::Mutex::new(()));
+        let lease = ProviderOperationLease::new(Arc::clone(&gate).lock_owned().await);
+        let (started, entered) = tokio::sync::oneshot::channel();
+        let (finish, release) = std::sync::mpsc::channel();
+        let caller = tokio::spawn(async move {
+            run_blocking(
+                &lease,
+                CapabilityKey::RefreshMetadataClaims,
+                fasti_domain::RequestCorrelationId::new_v7(),
+                move || {
+                    let _ = started.send(());
+                    let _ = release.recv();
+                    Ok(())
+                },
+            )
+            .await
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(5), entered)
+            .await
+            .expect("bounded persistence start")
+            .expect("entered persistence");
+        caller.abort();
+        assert!(caller.await.expect_err("cancel caller").is_cancelled());
+        let held = gate.try_lock().is_err();
+        finish.send(()).expect("release persistence");
+        let _completed = tokio::time::timeout(std::time::Duration::from_secs(5), gate.lock())
+            .await
+            .expect("completed persistence releases gate");
+        assert!(held);
+    }
+
     fn test_field(at: chrono::DateTime<Utc>) -> ProviderMetadataField {
         let digest = Sha256Digest::parse(format!("sha256:{}", "a".repeat(64))).expect("digest");
         let provenance = FieldClaimProvenance::try_new(
@@ -565,6 +603,13 @@ mod tests {
             .into_iter(),
             &[test_field(at)],
             fasti_domain::RequestCorrelationId::new_v7(),
+            &fasti_application::ProviderResponseCachePolicy::new(
+                fasti_application::ProviderResponseReuse::Reusable,
+                at,
+                std::time::Duration::ZERO,
+                None,
+                None,
+            ),
         )
         .expect("entries");
 
@@ -658,20 +703,39 @@ mod tests {
         )
         .expect("provider state");
 
-        let keys = cache_keys(
-            &command,
-            &prepared,
-            &state,
-            "movie",
-            "terms-v1",
+        let descriptor = crate::registry()
+            .iter()
+            .find(|entry| entry.provider == "tmdb")
+            .unwrap();
+        for purpose in [
             MetadataCachePurpose::MetadataEnrichment,
-            (Some(locale), Some(region)),
-        )
-        .expect("cache keys");
-        assert!(keys.iter().all(|key| {
-            key.locale().map(MetadataLocale::as_str) == Some("fr-fr")
-                && key.region().map(MetadataRegion::as_str) == Some("FR")
-        }));
+            MetadataCachePurpose::OfflineRead,
+        ] {
+            let keys_for = |descriptor| {
+                cache_keys(
+                    &command,
+                    &prepared,
+                    &state,
+                    "movie",
+                    descriptor,
+                    purpose,
+                    (Some(locale.clone()), Some(region.clone())),
+                )
+                .expect("cache keys")
+            };
+            let keys = keys_for(descriptor);
+            assert!(keys.iter().all(|key| {
+                key.locale().map(MetadataLocale::as_str) == Some("fr-fr")
+                    && key.region().map(MetadataRegion::as_str) == Some("FR")
+                    && key.purpose() == purpose
+                    && key.terms_revision() == "fasti.public-metadata-cache.v1"
+            }));
+            let historical = crate::ProviderSpec {
+                cache_policy: descriptor.licence_and_terms,
+                ..*descriptor
+            };
+            assert_ne!(keys, keys_for(&historical));
+        }
     }
 
     #[test]

@@ -1415,6 +1415,812 @@ mod tests {
     }
 
     #[test]
+    fn successful_search_reads_persist_browser_activity_and_read_proof_cannot_commit() {
+        use crate::kernel::now;
+        use fasti_application::{
+            BrowserRequestBoundaryPolicy, BrowserSessionAccessContext, OutboundAccessPolicy,
+            ProviderId, ProviderStatePort, SearchPageRequest, SearchPersistencePort,
+            SearchProviderQuery,
+        };
+        let mut fixture = fixture();
+        fixture.created_at = now() - ChronoDuration::seconds(15);
+        fixture
+            .kernel
+            .inner
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO grant_scopes(grant_id, scope_key) VALUES (?1, 'metadata_search')",
+                [fixture.grants[0].to_string()],
+            )
+            .unwrap();
+        fixture
+            .kernel
+            .put_provider_capability_state(fixture.workspace_id, crate::search::tests::state(1))
+            .unwrap();
+        for cache_read in [false, true] {
+            let created = create_session(&fixture, &fixture.grants[..1], fixture.grants[0], 0);
+            let access = BrowserSessionAccessContext::read(
+                BrowserSessionQuery::new(
+                    fasti_domain::RequestCorrelationId::new_v7(),
+                    secret_copy(created.session_secret()),
+                    now(),
+                ),
+                BrowserRequestBoundaryPolicy::try_new("https://fasti.example", "fasti.example")
+                    .unwrap()
+                    .validate_read(Some("fasti.example"))
+                    .unwrap(),
+            );
+            let request = SearchPageRequest {
+                correlation_id: fasti_domain::RequestCorrelationId::new_v7(),
+                access: access.into(),
+                query: SearchProviderQuery::try_new(
+                    fasti_domain::SearchQuery::try_new("Film").unwrap(),
+                    ProviderId::try_new("tmdb").unwrap(),
+                    1,
+                    None,
+                    None,
+                    vec![],
+                )
+                .unwrap(),
+                outbound_policy: OutboundAccessPolicy::default(),
+                terms_revision: "tmdb-v1".into(),
+            };
+            if cache_read {
+                assert!(fixture
+                    .kernel
+                    .read_cached_search_page(&request, false)
+                    .unwrap()
+                    .is_none());
+            } else {
+                fixture.kernel.prepare_search_page(&request).unwrap();
+            }
+            let last_seen: String = fixture
+                .kernel
+                .inner
+                .connection
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT last_seen_at FROM fasti_browser_sessions WHERE browser_session_id = ?1",
+                    [created.session().id().to_string()],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert!(
+                parse_timestamp(
+                    &last_seen,
+                    CapabilityKey::SearchMetadata,
+                    request.correlation_id
+                )
+                .unwrap()
+                    > fixture.created_at
+            );
+            let prepared = fixture.kernel.prepare_search_page(&request).unwrap();
+            assert_eq!(
+                fixture
+                    .kernel
+                    .commit_search_page(
+                        &request,
+                        &prepared,
+                        &[],
+                        &fasti_domain::Sha256Digest::from_bytes(&[7; 32]),
+                        None,
+                        &crate::search::tests::response_policy(),
+                    )
+                    .unwrap_err()
+                    .code(),
+                ProblemCode::Forbidden
+            );
+        }
+    }
+
+    fn candidate_receipt_fixture() -> (
+        Fixture,
+        CreatedBrowserSession,
+        fasti_application::StoredSearchPage,
+    ) {
+        candidate_receipt_fixture_with_identity(false)
+    }
+
+    fn candidate_receipt_fixture_with_identity(
+        identity_write: bool,
+    ) -> (
+        Fixture,
+        CreatedBrowserSession,
+        fasti_application::StoredSearchPage,
+    ) {
+        use fasti_application::{
+            BrowserSessionAccessContext, ProviderStatePort, SearchPersistencePort,
+        };
+        let mut fixture = fixture();
+        // Older than the 10-second write interval, still inside idle expiry.
+        fixture.created_at = crate::kernel::now() - ChronoDuration::seconds(15);
+        if identity_write {
+            allow_candidate_identity(&fixture);
+        }
+        for grant in &fixture.grants[..2] {
+            fixture
+                .kernel
+                .inner
+                .connection
+                .lock()
+                .unwrap()
+                .execute(
+                    "INSERT INTO grant_scopes(grant_id, scope_key) VALUES (?1, 'metadata_search')",
+                    [grant.to_string()],
+                )
+                .unwrap();
+        }
+        fixture
+            .kernel
+            .put_provider_capability_state(fixture.workspace_id, crate::search::tests::state(1))
+            .unwrap();
+        fixture
+            .kernel
+            .put_provider_capability_state(
+                fixture.workspace_id,
+                crate::search::tests::state_for("metadata.read", 1),
+            )
+            .unwrap();
+        let session = create_session(&fixture, &fixture.grants[..2], fixture.grants[0], 0);
+        let id = fasti_domain::RequestCorrelationId::new_v7();
+        let request = fasti_application::SearchPageRequest {
+            correlation_id: id,
+            access: BrowserSessionAccessContext::mutation(mutation_command(
+                id,
+                secret_copy(session.session_secret()),
+                secret_copy(session.csrf_secret()),
+                crate::kernel::now(),
+            ))
+            .into(),
+            query: fasti_application::SearchProviderQuery::try_new(
+                fasti_domain::SearchQuery::try_new("Film").unwrap(),
+                fasti_application::ProviderId::try_new("tmdb").unwrap(),
+                1,
+                None,
+                None,
+                vec![],
+            )
+            .unwrap(),
+            outbound_policy: fasti_application::OutboundAccessPolicy::default(),
+            terms_revision: "tmdb-v1".into(),
+        };
+        let prepared = fixture.kernel.prepare_search_page(&request).unwrap();
+        let saved = fixture
+            .kernel
+            .commit_search_page(
+                &request,
+                &prepared,
+                &[crate::search::tests::candidate("42")],
+                &fasti_domain::Sha256Digest::from_bytes(&[7; 32]),
+                None,
+                &crate::search::tests::response_policy(),
+            )
+            .unwrap();
+        (fixture, session, saved)
+    }
+
+    fn candidate_receipt_read(
+        session: &CreatedBrowserSession,
+        receipt: fasti_domain::SearchCandidateReceiptId,
+    ) -> fasti_application::ReadSearchCandidateRequest {
+        use fasti_application::{BrowserRequestBoundaryPolicy, BrowserSessionAccessContext};
+        let id = fasti_domain::RequestCorrelationId::new_v7();
+        fasti_application::ReadSearchCandidateRequest {
+            correlation_id: id,
+            access: BrowserSessionAccessContext::read(
+                BrowserSessionQuery::new(
+                    id,
+                    secret_copy(session.session_secret()),
+                    crate::kernel::now(),
+                ),
+                BrowserRequestBoundaryPolicy::try_new("https://fasti.example", "fasti.example")
+                    .unwrap()
+                    .validate_read(Some("fasti.example"))
+                    .unwrap(),
+            )
+            .into(),
+            candidate_receipt_id: receipt,
+            provider: fasti_application::ProviderId::try_new("tmdb").unwrap(),
+            grain: fasti_domain::Grain::Film,
+            outbound_policy: fasti_application::OutboundAccessPolicy::default(),
+            terms_revision: "tmdb-v1".into(),
+        }
+    }
+
+    #[test]
+    fn candidate_receipt_survives_real_browser_rotation_and_profile_return_but_not_revocation() {
+        use fasti_application::SearchPersistencePort;
+        let (fixture, created, saved) = candidate_receipt_fixture();
+        let id = saved.candidates[0].id();
+        let original = fixture
+            .kernel
+            .read_search_candidate(&candidate_receipt_read(&created, id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(original.receipt, saved.candidates[0]);
+        let prepared = fixture
+            .kernel
+            .prepare_search_candidate_details(&candidate_receipt_read(&created, id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(prepared.candidate, original);
+        let rotated = fixture
+            .kernel
+            .rotate_browser_session(mutation_command(
+                fasti_domain::RequestCorrelationId::new_v7(),
+                secret_copy(created.session_secret()),
+                secret_copy(created.csrf_secret()),
+                crate::kernel::now(),
+            ))
+            .unwrap();
+        assert_problem(
+            fixture
+                .kernel
+                .read_search_candidate(&candidate_receipt_read(&created, id)),
+            ProblemCode::BrowserSessionRevoked,
+        );
+        assert_problem(
+            fixture
+                .kernel
+                .prepare_search_candidate_details(&candidate_receipt_read(&created, id)),
+            ProblemCode::BrowserSessionRevoked,
+        );
+        assert_eq!(
+            fixture
+                .kernel
+                .prepare_search_candidate_details(&candidate_receipt_read(&rotated, id))
+                .unwrap(),
+            Some(prepared.clone())
+        );
+        assert_eq!(
+            fixture
+                .kernel
+                .read_search_candidate(&candidate_receipt_read(&rotated, id))
+                .unwrap(),
+            Some(original.clone())
+        );
+        let selected = fixture
+            .kernel
+            .select_browser_session_profile(SelectBrowserSessionProfileCommand::new(
+                mutation_command(
+                    fasti_domain::RequestCorrelationId::new_v7(),
+                    secret_copy(rotated.session_secret()),
+                    secret_copy(rotated.csrf_secret()),
+                    crate::kernel::now(),
+                ),
+                fixture.grants[1],
+            ))
+            .unwrap();
+        assert!(fixture
+            .kernel
+            .read_search_candidate(&candidate_receipt_read(&selected, id))
+            .unwrap()
+            .is_none());
+        assert!(fixture
+            .kernel
+            .prepare_search_candidate_details(&candidate_receipt_read(&selected, id))
+            .unwrap()
+            .is_none());
+        let returned = fixture
+            .kernel
+            .select_browser_session_profile(SelectBrowserSessionProfileCommand::new(
+                mutation_command(
+                    fasti_domain::RequestCorrelationId::new_v7(),
+                    secret_copy(selected.session_secret()),
+                    secret_copy(selected.csrf_secret()),
+                    crate::kernel::now(),
+                ),
+                fixture.grants[0],
+            ))
+            .unwrap();
+        assert_eq!(
+            fixture
+                .kernel
+                .read_search_candidate(&candidate_receipt_read(&returned, id))
+                .unwrap(),
+            Some(original)
+        );
+        assert_eq!(
+            fixture
+                .kernel
+                .prepare_search_candidate_details(&candidate_receipt_read(&returned, id))
+                .unwrap(),
+            Some(prepared)
+        );
+        fixture
+            .kernel
+            .revoke_current_browser_session(mutation_command(
+                fasti_domain::RequestCorrelationId::new_v7(),
+                secret_copy(returned.session_secret()),
+                secret_copy(returned.csrf_secret()),
+                crate::kernel::now(),
+            ))
+            .unwrap();
+        assert_problem(
+            fixture
+                .kernel
+                .read_search_candidate(&candidate_receipt_read(&returned, id)),
+            ProblemCode::BrowserSessionRevoked,
+        );
+        assert_problem(
+            fixture
+                .kernel
+                .prepare_search_candidate_details(&candidate_receipt_read(&returned, id)),
+            ProblemCode::BrowserSessionRevoked,
+        );
+    }
+
+    #[test]
+    fn malformed_record_selector_cannot_mask_browser_revocation() {
+        use fasti_application::{
+            BrowserRequestBoundaryPolicy, BrowserSessionAccessContext, IdentityPort,
+            InvalidRecordSelector, ListRecordsQuery,
+        };
+        let mut fixture = fixture();
+        fixture.created_at = crate::kernel::now();
+        fixture
+            .kernel
+            .inner
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO grant_scopes(grant_id, scope_key) VALUES (?1, 'identity_read')",
+                [fixture.grants[0].to_string()],
+            )
+            .unwrap();
+        let session = create_session(&fixture, &fixture.grants[..1], fixture.grants[0], 0);
+        let query = || {
+            let id = fasti_domain::RequestCorrelationId::new_v7();
+            ListRecordsQuery::new(
+                id,
+                BrowserSessionAccessContext::read(
+                    BrowserSessionQuery::new(
+                        id,
+                        secret_copy(session.session_secret()),
+                        crate::kernel::now(),
+                    ),
+                    BrowserRequestBoundaryPolicy::try_new("https://fasti.example", "fasti.example")
+                        .unwrap()
+                        .validate_read(Some("fasti.example"))
+                        .unwrap(),
+                ),
+            )
+            .with_record_selector(Err(InvalidRecordSelector))
+        };
+        assert_problem(
+            fixture.kernel.list_records(query()),
+            ProblemCode::ValidationFailed,
+        );
+        fixture
+            .kernel
+            .revoke_current_browser_session(mutation_command(
+                fasti_domain::RequestCorrelationId::new_v7(),
+                secret_copy(session.session_secret()),
+                secret_copy(session.csrf_secret()),
+                crate::kernel::now(),
+            ))
+            .unwrap();
+        assert_problem(
+            fixture.kernel.list_records(query()),
+            ProblemCode::BrowserSessionRevoked,
+        );
+    }
+
+    #[test]
+    fn candidate_receipt_denies_an_expired_browser_session_and_a_different_authorized_subject() {
+        use fasti_application::SearchPersistencePort;
+        let (mut fixture, _, saved) = candidate_receipt_fixture();
+        let id = saved.candidates[0].id();
+        let expired = create_session(&fixture, &fixture.grants[..1], fixture.grants[0], -60);
+        assert_problem(
+            fixture
+                .kernel
+                .read_search_candidate(&candidate_receipt_read(&expired, id)),
+            ProblemCode::BrowserSessionExpired,
+        );
+        assert_problem(
+            fixture
+                .kernel
+                .prepare_search_candidate_details(&candidate_receipt_read(&expired, id)),
+            ProblemCode::BrowserSessionExpired,
+        );
+        let other_subject = AuthSubjectId::new_v7();
+        fixture
+            .kernel
+            .create_auth_subject(CreateAuthSubjectCommand::new(
+                fasti_domain::RequestCorrelationId::new_v7(),
+                AuthSubject::try_new(
+                    other_subject,
+                    AuthSubjectLifecycle::Active,
+                    1,
+                    1,
+                    fixture.created_at,
+                    fixture.created_at,
+                )
+                .unwrap(),
+            ))
+            .unwrap();
+        {
+            let connection = fixture.kernel.inner.connection.lock().unwrap();
+            connection.execute("INSERT INTO auth_subject_profile_grants(auth_subject_id, profile_grant_id) VALUES (?1, ?2)",
+                params![other_subject.to_string(), fixture.grants[0].to_string()]).unwrap();
+            connection.execute("INSERT INTO workspace_memberships(membership_id, auth_subject_id, workspace_id, lifecycle, role, created_at, updated_at) VALUES (?1, ?2, ?3, 'active', 'member', ?4, ?4)",
+                params![fasti_domain::MembershipId::new_v7().to_string(), other_subject.to_string(),
+                    fixture.workspace_id.to_string(), timestamp(fixture.created_at)]).unwrap();
+        }
+        fixture.subject_id = other_subject;
+        let other = create_session(&fixture, &fixture.grants[..1], fixture.grants[0], 0);
+        // This actor really authenticates to the same client/profile/grant;
+        // only the stable subject differs. A successful miss must retain activity.
+        assert!(fixture
+            .kernel
+            .prepare_search_candidate_details(&candidate_receipt_read(&other, id))
+            .unwrap()
+            .is_none());
+        let last_seen: String = fixture
+            .kernel
+            .inner
+            .connection
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT last_seen_at FROM fasti_browser_sessions WHERE browser_session_id = ?1",
+                [other.session().id().to_string()],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            parse_timestamp(
+                &last_seen,
+                CapabilityKey::SearchMetadata,
+                fasti_domain::RequestCorrelationId::new_v7()
+            )
+            .unwrap()
+                > fixture.created_at
+        );
+        assert!(fixture
+            .kernel
+            .read_search_candidate(&candidate_receipt_read(&other, id))
+            .unwrap()
+            .is_none());
+    }
+
+    fn browser_candidate_action(
+        session: &CreatedBrowserSession,
+        receipt: fasti_domain::SearchCandidateReceiptId,
+        operation_id: fasti_domain::OperationId,
+    ) -> fasti_application::SearchCandidateActionCommand {
+        let mut request = candidate_receipt_read(session, receipt);
+        request.access =
+            fasti_application::BrowserSessionAccessContext::mutation(mutation_command(
+                request.correlation_id,
+                secret_copy(session.session_secret()),
+                secret_copy(session.csrf_secret()),
+                crate::kernel::now(),
+            ))
+            .into();
+        fasti_application::SearchCandidateActionCommand {
+            request,
+            operation_id,
+            action: fasti_application::SearchRecordAction::Create,
+            evidence_mode: fasti_application::SearchCandidateEvidenceMode::Cached,
+        }
+    }
+
+    fn allow_candidate_identity(fixture: &Fixture) {
+        for grant in &fixture.grants[..2] {
+            fixture
+                .kernel
+                .inner
+                .connection
+                .lock()
+                .unwrap()
+                .execute(
+                    "INSERT INTO grant_scopes(grant_id, scope_key) VALUES (?1, 'identity_write')",
+                    [grant.to_string()],
+                )
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn uncommitted_candidate_action_cannot_commit_after_browser_profile_switch() {
+        use fasti_application::{
+            provider_candidate_metadata_fields, provider_metadata_response_locale,
+            SearchCandidateActionPreparation, SearchCandidateEvidenceMode, SearchPersistencePort,
+        };
+        use fasti_domain::{FieldClaimStatus, OperationId, ReceivedAt, Sha256Digest};
+
+        // Snapshot the action's existing persistence owners and browser activity,
+        // including revision changes that must roll back with a rejected action.
+        let rows = |fixture: &Fixture| {
+            let connection = fixture.kernel.inner.connection.lock().unwrap();
+            [
+                "records",
+                "namespace_definitions",
+                "external_identifiers",
+                "metadata_field_claims",
+                "metadata_claims",
+                "metadata_claim_provenance",
+                "local_search_grams",
+                "search_action_receipts",
+                "workspace_revisions",
+                "fasti_browser_sessions",
+                "profile_record_tracking_dispositions",
+                "metadata_profile_field_overrides",
+                "metadata_projection_policies",
+                "metadata_rating_claims",
+                "profile_nuvio_collections",
+            ]
+            .map(|table| {
+                let mut statement = connection
+                    .prepare(&format!("SELECT * FROM {table} ORDER BY 1,2"))
+                    .unwrap();
+                let columns = statement.column_count();
+                statement
+                    .query_map([], |row| {
+                        (0..columns)
+                            .map(|column| row.get::<_, rusqlite::types::Value>(column))
+                            .collect::<rusqlite::Result<Vec<_>>>()
+                    })
+                    .unwrap()
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .unwrap()
+            })
+        };
+
+        for mode in [
+            SearchCandidateEvidenceMode::Cached,
+            SearchCandidateEvidenceMode::Refetch,
+        ] {
+            let (fixture, created, saved) = candidate_receipt_fixture_with_identity(true);
+            let operation = OperationId::new_v7();
+            let mut command =
+                browser_candidate_action(&created, saved.candidates[0].id(), operation);
+            command.evidence_mode = mode;
+            let prepared = fixture
+                .kernel
+                .prepare_search_candidate_action(&command)
+                .unwrap();
+            let fields = match &prepared {
+                SearchCandidateActionPreparation::Cached(_) => {
+                    assert_eq!(mode, SearchCandidateEvidenceMode::Cached);
+                    None
+                }
+                SearchCandidateActionPreparation::Refetch(details) => {
+                    assert_eq!(mode, SearchCandidateEvidenceMode::Refetch);
+                    let fetched = crate::kernel::now();
+                    Some(
+                        provider_candidate_metadata_fields(
+                            details.candidate.receipt.candidate(),
+                            provider_metadata_response_locale(
+                                "tmdb",
+                                details.candidate.context.locale(),
+                            ),
+                            None,
+                            &Sha256Digest::from_bytes(&[9; 32]),
+                            ReceivedAt::from_application_clock(fetched),
+                            Some(
+                                fetched
+                                    + ChronoDuration::seconds(fasti_domain::METADATA_FRESH_SECONDS),
+                            ),
+                            FieldClaimStatus::Fresh,
+                        )
+                        .unwrap(),
+                    )
+                }
+                SearchCandidateActionPreparation::Replay(_) => {
+                    panic!("the action must remain uncommitted before the profile switch")
+                }
+            };
+            let response_policy = fields.as_ref().map(|fields| {
+                fasti_application::ProviderResponseCachePolicy::new(
+                    fasti_application::ProviderResponseReuse::Reusable,
+                    fields
+                        .first()
+                        .expect("refetch fixture has fields")
+                        .claim()
+                        .fetched_at(),
+                    std::time::Duration::ZERO,
+                    None,
+                    None,
+                )
+            });
+            let selected = fixture
+                .kernel
+                .select_browser_session_profile(SelectBrowserSessionProfileCommand::new(
+                    mutation_command(
+                        fasti_domain::RequestCorrelationId::new_v7(),
+                        secret_copy(created.session_secret()),
+                        secret_copy(created.csrf_secret()),
+                        crate::kernel::now(),
+                    ),
+                    fixture.grants[1],
+                ))
+                .unwrap();
+            // The switch itself legitimately rotates the session. Compare only
+            // subsequent rejected actions with this post-switch baseline.
+            let before = rows(&fixture);
+            for index in [0, 2, 3, 4, 5, 7] {
+                assert!(before[index].is_empty(), "no action has committed");
+            }
+            assert_problem(
+                fixture.kernel.commit_search_candidate_action(
+                    &command,
+                    &prepared,
+                    fields.as_deref().zip(response_policy.as_ref()),
+                ),
+                ProblemCode::BrowserSessionRevoked,
+            );
+            assert_eq!(rows(&fixture), before, "old proof mutated state: {mode:?}");
+
+            let mut switched =
+                browser_candidate_action(&selected, saved.candidates[0].id(), operation);
+            switched.evidence_mode = mode;
+            assert_problem(
+                fixture.kernel.commit_search_candidate_action(
+                    &switched,
+                    &prepared,
+                    fields.as_deref().zip(response_policy.as_ref()),
+                ),
+                ProblemCode::ValidationFailed,
+            );
+            assert_eq!(
+                rows(&fixture),
+                before,
+                "new profile mutated state: {mode:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn candidate_action_browser_replay_survives_rotation_and_cache_deletion_but_requires_mutation_authority(
+    ) {
+        use fasti_application::{SearchCandidateActionPreparation, SearchPersistencePort};
+        let (fixture, created, saved) = candidate_receipt_fixture_with_identity(true);
+        let operation = fasti_domain::OperationId::new_v7();
+        let mut command = browser_candidate_action(&created, saved.candidates[0].id(), operation);
+        command.request = candidate_receipt_read(&created, saved.candidates[0].id());
+        assert_problem(
+            fixture.kernel.prepare_search_candidate_action(&command),
+            ProblemCode::Forbidden,
+        );
+        command = browser_candidate_action(&created, saved.candidates[0].id(), operation);
+        let prepared = fixture
+            .kernel
+            .prepare_search_candidate_action(&command)
+            .unwrap();
+        let receipt = fixture
+            .kernel
+            .commit_search_candidate_action(&command, &prepared, None)
+            .unwrap();
+        assert_eq!(receipt.actor_subject_id, Some(fixture.subject_id));
+        let rotated = fixture
+            .kernel
+            .rotate_browser_session(mutation_command(
+                fasti_domain::RequestCorrelationId::new_v7(),
+                secret_copy(created.session_secret()),
+                secret_copy(created.csrf_secret()),
+                crate::kernel::now(),
+            ))
+            .unwrap();
+        assert_problem(
+            fixture.kernel.prepare_search_candidate_action(&command),
+            ProblemCode::BrowserSessionRevoked,
+        );
+        {
+            let connection = fixture.kernel.inner.connection.lock().unwrap();
+            connection.execute("DELETE FROM search_pages", []).unwrap();
+            connection
+                .execute(
+                    "DELETE FROM grant_scopes WHERE scope_key = 'metadata_search'",
+                    [],
+                )
+                .unwrap();
+        }
+        command = browser_candidate_action(&rotated, saved.candidates[0].id(), operation);
+        assert_eq!(
+            fixture
+                .kernel
+                .prepare_search_candidate_action(&command)
+                .unwrap(),
+            SearchCandidateActionPreparation::Replay(Box::new(receipt.clone()))
+        );
+        assert_eq!(
+            fixture
+                .kernel
+                .commit_search_candidate_action(&command, &prepared, None)
+                .unwrap(),
+            receipt
+        );
+        fixture
+            .kernel
+            .inner
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "DELETE FROM grant_scopes WHERE scope_key = 'identity_write'",
+                [],
+            )
+            .unwrap();
+        assert_problem(
+            fixture.kernel.prepare_search_candidate_action(&command),
+            ProblemCode::Forbidden,
+        );
+        allow_candidate_identity(&fixture);
+        fixture
+            .kernel
+            .revoke_current_browser_session(mutation_command(
+                fasti_domain::RequestCorrelationId::new_v7(),
+                secret_copy(rotated.session_secret()),
+                secret_copy(rotated.csrf_secret()),
+                crate::kernel::now(),
+            ))
+            .unwrap();
+        assert_problem(
+            fixture.kernel.prepare_search_candidate_action(&command),
+            ProblemCode::BrowserSessionRevoked,
+        );
+    }
+
+    #[test]
+    fn candidate_action_never_replays_for_another_authorized_subject_on_the_same_client_and_profile(
+    ) {
+        use fasti_application::SearchPersistencePort;
+        let (mut fixture, created, saved) = candidate_receipt_fixture_with_identity(true);
+        let operation = fasti_domain::OperationId::new_v7();
+        let command = browser_candidate_action(&created, saved.candidates[0].id(), operation);
+        let prepared = fixture
+            .kernel
+            .prepare_search_candidate_action(&command)
+            .unwrap();
+        fixture
+            .kernel
+            .commit_search_candidate_action(&command, &prepared, None)
+            .unwrap();
+        let other_subject = AuthSubjectId::new_v7();
+        fixture
+            .kernel
+            .create_auth_subject(CreateAuthSubjectCommand::new(
+                fasti_domain::RequestCorrelationId::new_v7(),
+                AuthSubject::try_new(
+                    other_subject,
+                    AuthSubjectLifecycle::Active,
+                    1,
+                    1,
+                    fixture.created_at,
+                    fixture.created_at,
+                )
+                .unwrap(),
+            ))
+            .unwrap();
+        {
+            let connection = fixture.kernel.inner.connection.lock().unwrap();
+            connection.execute("INSERT INTO auth_subject_profile_grants(auth_subject_id, profile_grant_id) VALUES (?1, ?2)", params![other_subject.to_string(), fixture.grants[0].to_string()]).unwrap();
+            connection.execute("INSERT INTO workspace_memberships(membership_id, auth_subject_id, workspace_id, lifecycle, role, created_at, updated_at) VALUES (?1, ?2, ?3, 'active', 'member', ?4, ?4)",
+                params![fasti_domain::MembershipId::new_v7().to_string(), other_subject.to_string(), fixture.workspace_id.to_string(), timestamp(fixture.created_at)]).unwrap();
+        }
+        fixture.subject_id = other_subject;
+        let other = create_session(&fixture, &fixture.grants[..1], fixture.grants[0], 0);
+        let command = browser_candidate_action(&other, saved.candidates[0].id(), operation);
+        assert_problem(
+            fixture.kernel.prepare_search_candidate_action(&command),
+            ProblemCode::IdempotencyConflict,
+        );
+        assert_problem(
+            fixture
+                .kernel
+                .commit_search_candidate_action(&command, &prepared, None),
+            ProblemCode::IdempotencyConflict,
+        );
+    }
+
+    #[test]
     fn rotation_revokes_the_old_secret_without_extending_absolute_expiry() {
         let fixture = fixture();
         let created = create_session(&fixture, &fixture.grants[..1], fixture.grants[0], 0);

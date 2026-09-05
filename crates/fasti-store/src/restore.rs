@@ -60,6 +60,8 @@ pub(crate) enum RestorePreflightError {
     StreamCountMismatch,
     #[error("archive stream descriptor does not match {path}")]
     StreamDescriptorMismatch { path: String },
+    #[error("archive metadata claim row {row} has invalid versioned response policy evidence")]
+    MetadataPolicy { row: u64 },
     #[error("archive blob count does not match manifest.json")]
     BlobCountMismatch,
     #[error("archive blob descriptor does not match {path}")]
@@ -87,6 +89,12 @@ struct ObservedBlob {
     path: String,
     byte_length: u64,
     digest: Sha256Digest,
+}
+
+#[derive(Default)]
+struct MetadataClaimIssues {
+    legacy: Option<u64>,
+    v7: Option<u64>,
 }
 
 /// Verified pass-one state retained for the later import pass.
@@ -182,6 +190,7 @@ pub(crate) fn preflight_workspace_archive(
         let mut streams = Vec::with_capacity(WorkspaceExportEntity::ALL.len());
         let mut blobs = Vec::new();
         let mut manifest = None;
+        let mut metadata_policy_issue = MetadataClaimIssues::default();
 
         let archive_summary =
             visit_archive_entries(&mut source, archive_limits, |path, size, reader| {
@@ -194,6 +203,9 @@ pub(crate) fn preflight_workspace_archive(
                             size,
                             reader,
                             limits.max_rows_per_stream.get(),
+                            entity,
+                            limits.max_entry_bytes.get(),
+                            &mut metadata_policy_issue,
                         )?);
                         return Ok(());
                     }
@@ -220,6 +232,16 @@ pub(crate) fn preflight_workspace_archive(
             let manifest = manifest.ok_or(RestorePreflightError::MissingVerifiedManifest)?;
             enforce_ratio(archive_summary, archive_bytes, limits)?;
             verify_observations(&manifest, &streams, &blobs)?;
+            let issue = if manifest.manifest().format_version()
+                > fasti_application::WORKSPACE_ARCHIVE_V6_FORMAT_VERSION
+            {
+                metadata_policy_issue.v7
+            } else {
+                metadata_policy_issue.legacy
+            };
+            if let Some(row) = issue {
+                return Err(RestorePreflightError::MetadataPolicy { row });
+            }
             Ok(VerifiedArchivePreflight {
                 manifest,
                 archive_digest,
@@ -240,6 +262,9 @@ fn inspect_stream(
     declared_size: u64,
     reader: &mut ArchiveEntryReader<'_>,
     max_rows: u64,
+    entity: WorkspaceExportEntity,
+    max_row_bytes: u64,
+    metadata_policy_issue: &mut MetadataClaimIssues,
 ) -> Result<ObservedStream, RestorePreflightError> {
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; MAX_IO_CHUNK_BYTES];
@@ -247,6 +272,10 @@ fn inspect_stream(
     let mut row_count = 0_u64;
     let mut line_has_bytes = false;
     let mut line_has_non_whitespace = false;
+    // The manifest comes last. Retain only the first issue and enforce it once
+    // the verified version is known, leaving frozen <=6 rows unchanged.
+    let policy_row_limit = max_row_bytes.min(4096);
+    let mut policy_line = Vec::new();
     loop {
         let read = reader
             .read(&mut buffer)
@@ -264,6 +293,30 @@ fn inspect_stream(
             }
         })?;
         for byte in &buffer[..read] {
+            if entity == WorkspaceExportEntity::MetadataClaims
+                && (metadata_policy_issue.legacy.is_none() || metadata_policy_issue.v7.is_none())
+            {
+                if policy_line.len() as u64 >= policy_row_limit {
+                    metadata_policy_issue.legacy.get_or_insert(row_count + 1);
+                    metadata_policy_issue.v7.get_or_insert(row_count + 1);
+                    policy_line.clear();
+                } else {
+                    policy_line.push(*byte);
+                    if *byte == b'\n' {
+                        if metadata_policy_issue.legacy.is_none()
+                            && !crate::restore_import::validate_metadata_claim_legacy(&policy_line)
+                        {
+                            metadata_policy_issue.legacy.get_or_insert(row_count + 1);
+                        }
+                        if metadata_policy_issue.v7.is_none()
+                            && !crate::restore_import::validate_metadata_claim_v7(&policy_line)
+                        {
+                            metadata_policy_issue.v7.get_or_insert(row_count + 1);
+                        }
+                        policy_line.clear();
+                    }
+                }
+            }
             if *byte == b'\n' {
                 if !line_has_non_whitespace {
                     return Err(RestorePreflightError::BlankNdjsonLine {

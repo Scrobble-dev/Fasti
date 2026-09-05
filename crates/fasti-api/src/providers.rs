@@ -1,15 +1,20 @@
-use crate::local::{authenticate_request, request_authentication};
+use crate::local::{
+    application_request_authentication, authenticate_application_request, authenticate_request,
+    request_authentication,
+};
 use crate::problem::{application_problem, json_rejection, HttpProblem};
 use crate::ProviderOperationLocks;
 use axum::{
     extract::{rejection::JsonRejection, DefaultBodyLimit, Path, State},
-    http::HeaderMap,
+    http::{header, HeaderMap},
+    response::{IntoResponse, Response},
     routing::get,
     Json, Router,
 };
 use chrono::Utc;
 use fasti_application::{
-    credential_status_after_successful_check, CapabilityKey, ConfigurationDigest,
+    credential_status_after_failed_check, credential_status_after_successful_check,
+    ApplicationAccessContext, BrowserRequestBoundaryPolicy, CapabilityKey, ConfigurationDigest,
     CredentialReference, CredentialRequirement, CredentialSecret, CredentialVaultSource,
     FastiProblem, OutboundAccessPolicy, ProblemCode, ProviderCapabilityId, ProviderCapabilityState,
     ProviderCapabilityStatus, ProviderCheckKind, ProviderCheckMetadata, ProviderCheckStatus,
@@ -37,6 +42,7 @@ pub(crate) struct ProviderApiState {
     pub(crate) provider_state: Arc<dyn ProviderStatePort>,
     pub(crate) runtime: Arc<ProviderRuntime>,
     pub(crate) provider_operation_locks: ProviderOperationLocks,
+    pub(crate) browser_boundary: Option<BrowserRequestBoundaryPolicy>,
 }
 
 impl ProviderApiState {
@@ -45,6 +51,23 @@ impl ProviderApiState {
             .get(provider.provider)
             .expect("resolved providers have operation locks")
     }
+}
+
+async fn run_provider_state_operation<T: Send + 'static>(
+    gate: Arc<tokio::sync::Mutex<()>>,
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+    operation: impl std::future::Future<Output = Result<T, HttpProblem>> + Send + 'static,
+) -> Result<T, HttpProblem> {
+    // Cancelled waiters do nothing. Once admitted, finish vault and state reconciliation
+    // under the same gate even if the request disappears; blocking writes cannot abort.
+    let guard = gate.lock_owned().await;
+    tokio::spawn(async move {
+        let _guard = guard;
+        operation.await
+    })
+    .await
+    .map_err(|_| storage_problem(capability, correlation_id))?
 }
 
 async fn authorize(
@@ -524,10 +547,10 @@ fn descriptor_dto(
     path = "/api/v1/providers",
     operation_id = "list_providers",
     tag = "providers",
-    security(("credential_bearer" = [])),
+    security(("credential_bearer" = []), ("browser_session_cookie" = [])),
     responses(
         (status = 200, description = "Provider inventory scoped to the authenticated workspace", body = ListProvidersResponse),
-        (status = 401, description = "Credential is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 401, description = "Credential or browser session is missing, inactive, or outside its listener boundary", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "Authenticated principal lacks provider-read scope", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 500, description = "Provider state failed an integrity check", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 503, description = "Provider state storage is unavailable", body = ProblemDetails, content_type = "application/problem+json")
@@ -536,12 +559,34 @@ fn descriptor_dto(
 pub(crate) async fn list_providers(
     State(state): State<ProviderApiState>,
     headers: HeaderMap,
-) -> HttpResult<ListProvidersResponse> {
+) -> Result<Response, HttpProblem> {
     let correlation_id = RequestCorrelationId::new_v7();
     let capability = CapabilityKey::ListProviders;
-    let access = authorize(&state, &headers, capability, correlation_id).await?;
-    let mut persisted =
-        list_states(&state, access.workspace_id(), capability, correlation_id).await?;
+    let authentication = application_request_authentication(
+        &headers,
+        state.browser_boundary.as_ref(),
+        false,
+        capability,
+        correlation_id,
+    )?;
+    let kernel = Arc::clone(&state.kernel);
+    let port = Arc::clone(&state.provider_state);
+    let (mut persisted, browser) = tokio::task::spawn_blocking(move || {
+        let access = authenticate_application_request(
+            kernel.as_ref(),
+            authentication,
+            capability,
+            correlation_id,
+        )?;
+        let states = port.authorize_and_list_provider_capability_states(correlation_id, &access)?;
+        Ok::<_, Box<FastiProblem>>((
+            states,
+            matches!(access, ApplicationAccessContext::BrowserSession(_)),
+        ))
+    })
+    .await
+    .map_err(|_| storage_problem(capability, correlation_id))?
+    .map_err(application_problem)?;
     for provider in state
         .runtime
         .descriptors()
@@ -570,14 +615,30 @@ pub(crate) async fn list_providers(
             )
         })
         .collect();
-    Ok(Json(ListProvidersResponse {
+    let mut response = ListProvidersResponse {
         providers: state
             .runtime
             .descriptors()
             .iter()
             .map(|provider| descriptor_dto(&state.runtime, provider, &indexed))
             .collect(),
-    }))
+    };
+    if browser {
+        // Inventory access does not activate bearer-only credential or health operations.
+        for capability in response
+            .providers
+            .iter_mut()
+            .flat_map(|provider| &mut provider.capabilities)
+        {
+            capability.writable = false;
+            capability.testable = false;
+        }
+    }
+    Ok((
+        [(header::CACHE_CONTROL, "private, no-store")],
+        Json(response),
+    )
+        .into_response())
 }
 
 #[utoipa::path(
@@ -611,7 +672,7 @@ pub(crate) async fn configure_provider_credential(
 ) -> HttpResult<ProviderCapabilityResponse> {
     let correlation_id = RequestCorrelationId::new_v7();
     let capability = CapabilityKey::ConfigureProviderCredential;
-    let access = authorize(&state, &headers, capability, correlation_id).await?;
+    authorize(&state, &headers, capability, correlation_id).await?;
     let Json(request) =
         request.map_err(|rejection| json_rejection(capability, correlation_id, rejection))?;
     let secret_bytes = request.secret.into_bytes();
@@ -629,137 +690,140 @@ pub(crate) async fn configure_provider_credential(
         correlation_id,
     )?;
     let operation_lock = state.operation_lock(provider);
-    let _credential_guard = operation_lock.lock().await;
-    let reference = state
-        .runtime
-        .credential_reference(&provider_id)
-        .map_err(|error| runtime_problem(&error, capability, correlation_id))?;
-    let source = state
-        .runtime
-        .credential_source(&reference)
-        .map_err(|error| runtime_problem(&error, capability, correlation_id))?;
-    if matches!(
-        source,
-        CredentialVaultSource::Environment | CredentialVaultSource::OperatorSecretMount
-    ) {
-        return Err(application_problem(Box::new(FastiProblem::from_code(
-            ProblemCode::ProviderCredentialInvalid,
-            capability,
-            correlation_id,
-        ))));
-    }
-    let currents = provider_states(
-        &state,
-        access.workspace_id(),
-        provider,
-        capability,
-        correlation_id,
-    )
-    .await?;
-    let mut pending = Vec::with_capacity(currents.len());
-    for (spec, current) in &currents {
-        let value = next_state(
-            current,
-            ProviderCapabilityStatus::Disabled,
-            Some(reference.clone()),
-            ProviderCredentialStatus::StoredUnverified,
-            state
-                .runtime
-                .configuration_digest(&provider_id, spec.capability_id)
-                .map_err(|error| runtime_problem(&error, capability, correlation_id))?,
-            ProviderCheckMetadata::never_run(),
-            ProviderCheckMetadata::never_run(),
-        )
-        .map_err(|error| state_problem(error, capability, correlation_id))?;
-        put_state(
+    run_provider_state_operation(operation_lock, capability, correlation_id, async move {
+        let access = authorize(&state, &headers, capability, correlation_id).await?;
+        let reference = state
+            .runtime
+            .credential_reference(&provider_id)
+            .map_err(|error| runtime_problem(&error, capability, correlation_id))?;
+        let source = state
+            .runtime
+            .credential_source(&reference)
+            .map_err(|error| runtime_problem(&error, capability, correlation_id))?;
+        if matches!(
+            source,
+            CredentialVaultSource::Environment | CredentialVaultSource::OperatorSecretMount
+        ) {
+            return Err(application_problem(Box::new(FastiProblem::from_code(
+                ProblemCode::ProviderCredentialInvalid,
+                capability,
+                correlation_id,
+            ))));
+        }
+        let currents = provider_states(
             &state,
             access.workspace_id(),
-            value.clone(),
+            provider,
             capability,
             correlation_id,
         )
         .await?;
-        pending.push((*spec, value));
-    }
-    let secret = CredentialSecret::try_from_bytes(secret_bytes).map_err(|_| {
-        application_problem(Box::new(FastiProblem::from_code(
-            ProblemCode::ProviderCredentialInvalid,
-            capability,
-            correlation_id,
-        )))
-    })?;
-    let runtime = Arc::clone(&state.runtime);
-    let replacing = source == CredentialVaultSource::CredentialStore;
-    let vault_reference = reference.clone();
-    let stored = tokio::task::spawn_blocking(move || {
-        if replacing {
-            runtime.replace_credential(&vault_reference, secret)
-        } else {
-            runtime.store_credential(&vault_reference, secret)
-        }
-    })
-    .await
-    .map_err(|_| storage_problem(capability, correlation_id))?;
-    if let Err(error) = stored {
-        for ((_, current), (_, pending)) in currents.iter().zip(&pending) {
-            let restored = next_state(
-                pending,
-                current.capability_status(),
-                current.credential_reference().cloned(),
-                current.credential_status(),
-                current.configuration_digest().clone(),
-                current.health().clone(),
-                current.credential_test().clone(),
+        let mut pending = Vec::with_capacity(currents.len());
+        for (spec, current) in &currents {
+            let value = next_state(
+                current,
+                ProviderCapabilityStatus::Disabled,
+                Some(reference.clone()),
+                ProviderCredentialStatus::StoredUnverified,
+                state
+                    .runtime
+                    .configuration_digest(&provider_id, spec.capability_id)
+                    .map_err(|error| runtime_problem(&error, capability, correlation_id))?,
+                ProviderCheckMetadata::never_run(),
+                ProviderCheckMetadata::never_run(),
             )
-            .map_err(|state_error| state_problem(state_error, capability, correlation_id))?;
+            .map_err(|error| state_problem(error, capability, correlation_id))?;
             put_state(
                 &state,
                 access.workspace_id(),
-                restored,
+                value.clone(),
                 capability,
                 correlation_id,
             )
             .await?;
+            pending.push((*spec, value));
         }
-        return Err(runtime_problem(&error, capability, correlation_id));
-    }
-
-    let mut final_states = Vec::with_capacity(pending.len());
-    for (spec, pending) in pending {
-        let available = next_state(
-            &pending,
-            ProviderCapabilityStatus::Available,
-            Some(reference.clone()),
-            ProviderCredentialStatus::StoredUnverified,
-            pending.configuration_digest().clone(),
-            ProviderCheckMetadata::never_run(),
-            ProviderCheckMetadata::never_run(),
-        )
-        .map_err(|error| state_problem(error, capability, correlation_id))?;
-        put_state(
-            &state,
-            access.workspace_id(),
-            available.clone(),
-            capability,
-            correlation_id,
-        )
-        .await?;
-        final_states.push((spec, available));
-    }
-    Ok(Json(ProviderCapabilityResponse {
-        provider_id,
-        capabilities: final_states
-            .iter()
-            .map(|(spec, value)| {
-                capability_dto(
-                    &state.runtime,
-                    provider.runtime_available,
-                    spec,
-                    Some(value),
+        let secret = CredentialSecret::try_from_bytes(secret_bytes).map_err(|_| {
+            application_problem(Box::new(FastiProblem::from_code(
+                ProblemCode::ProviderCredentialInvalid,
+                capability,
+                correlation_id,
+            )))
+        })?;
+        let runtime = Arc::clone(&state.runtime);
+        let replacing = source == CredentialVaultSource::CredentialStore;
+        let vault_reference = reference.clone();
+        let stored = tokio::task::spawn_blocking(move || {
+            if replacing {
+                runtime.replace_credential(&vault_reference, secret)
+            } else {
+                runtime.store_credential(&vault_reference, secret)
+            }
+        })
+        .await
+        .map_err(|_| storage_problem(capability, correlation_id))?;
+        if let Err(error) = stored {
+            for ((_, current), (_, pending)) in currents.iter().zip(&pending) {
+                let restored = next_state(
+                    pending,
+                    current.capability_status(),
+                    current.credential_reference().cloned(),
+                    current.credential_status(),
+                    current.configuration_digest().clone(),
+                    current.health().clone(),
+                    current.credential_test().clone(),
                 )
-            })
-            .collect(),
-    }))
+                .map_err(|state_error| state_problem(state_error, capability, correlation_id))?;
+                put_state(
+                    &state,
+                    access.workspace_id(),
+                    restored,
+                    capability,
+                    correlation_id,
+                )
+                .await?;
+            }
+            return Err(runtime_problem(&error, capability, correlation_id));
+        }
+
+        let mut final_states = Vec::with_capacity(pending.len());
+        for (spec, pending) in pending {
+            let available = next_state(
+                &pending,
+                ProviderCapabilityStatus::Available,
+                Some(reference.clone()),
+                ProviderCredentialStatus::StoredUnverified,
+                pending.configuration_digest().clone(),
+                ProviderCheckMetadata::never_run(),
+                ProviderCheckMetadata::never_run(),
+            )
+            .map_err(|error| state_problem(error, capability, correlation_id))?;
+            put_state(
+                &state,
+                access.workspace_id(),
+                available.clone(),
+                capability,
+                correlation_id,
+            )
+            .await?;
+            final_states.push((spec, available));
+        }
+        Ok(Json(ProviderCapabilityResponse {
+            provider_id,
+            capabilities: final_states
+                .iter()
+                .map(|(spec, value)| {
+                    capability_dto(
+                        &state.runtime,
+                        provider.runtime_available,
+                        spec,
+                        Some(value),
+                    )
+                })
+                .collect(),
+        }))
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -788,7 +852,7 @@ pub(crate) async fn remove_provider_credential(
 ) -> HttpResult<ProviderCapabilityResponse> {
     let correlation_id = RequestCorrelationId::new_v7();
     let capability = CapabilityKey::ConfigureProviderCredential;
-    let access = authorize(&state, &headers, capability, correlation_id).await?;
+    authorize(&state, &headers, capability, correlation_id).await?;
     let (provider, _) = resolve(
         &state.runtime,
         &provider_id,
@@ -797,128 +861,131 @@ pub(crate) async fn remove_provider_credential(
         correlation_id,
     )?;
     let operation_lock = state.operation_lock(provider);
-    let _credential_guard = operation_lock.lock().await;
-    let reference = state
-        .runtime
-        .credential_reference(&provider_id)
-        .map_err(|error| runtime_problem(&error, capability, correlation_id))?;
-    let source = state
-        .runtime
-        .credential_source(&reference)
-        .map_err(|error| runtime_problem(&error, capability, correlation_id))?;
-    if matches!(
-        source,
-        CredentialVaultSource::Environment | CredentialVaultSource::OperatorSecretMount
-    ) {
-        return Err(application_problem(Box::new(FastiProblem::from_code(
-            ProblemCode::ProviderCredentialInvalid,
-            capability,
-            correlation_id,
-        ))));
-    }
-    let currents = provider_states(
-        &state,
-        access.workspace_id(),
-        provider,
-        capability,
-        correlation_id,
-    )
-    .await?;
-    let mut pending = Vec::with_capacity(currents.len());
-    for (spec, current) in &currents {
-        let value = next_state(
-            current,
-            ProviderCapabilityStatus::Disabled,
-            Some(reference.clone()),
-            current.credential_status(),
-            current.configuration_digest().clone(),
-            current.health().clone(),
-            current.credential_test().clone(),
-        )
-        .map_err(|error| state_problem(error, capability, correlation_id))?;
-        put_state(
+    run_provider_state_operation(operation_lock, capability, correlation_id, async move {
+        let access = authorize(&state, &headers, capability, correlation_id).await?;
+        let reference = state
+            .runtime
+            .credential_reference(&provider_id)
+            .map_err(|error| runtime_problem(&error, capability, correlation_id))?;
+        let source = state
+            .runtime
+            .credential_source(&reference)
+            .map_err(|error| runtime_problem(&error, capability, correlation_id))?;
+        if matches!(
+            source,
+            CredentialVaultSource::Environment | CredentialVaultSource::OperatorSecretMount
+        ) {
+            return Err(application_problem(Box::new(FastiProblem::from_code(
+                ProblemCode::ProviderCredentialInvalid,
+                capability,
+                correlation_id,
+            ))));
+        }
+        let currents = provider_states(
             &state,
             access.workspace_id(),
-            value.clone(),
+            provider,
             capability,
             correlation_id,
         )
         .await?;
-        pending.push((*spec, value));
-    }
-    let revoked = if source == CredentialVaultSource::None {
-        Ok(())
-    } else {
-        let runtime = Arc::clone(&state.runtime);
-        let vault_reference = reference.clone();
-        tokio::task::spawn_blocking(move || runtime.revoke_credential(&vault_reference))
-            .await
-            .map_err(|_| storage_problem(capability, correlation_id))?
-    };
-    if let Err(error) = revoked {
-        for ((_, current), (_, pending)) in currents.iter().zip(&pending) {
-            let restored = next_state(
-                pending,
-                current.capability_status(),
-                current.credential_reference().cloned(),
+        let mut pending = Vec::with_capacity(currents.len());
+        for (spec, current) in &currents {
+            let value = next_state(
+                current,
+                ProviderCapabilityStatus::Disabled,
+                Some(reference.clone()),
                 current.credential_status(),
                 current.configuration_digest().clone(),
                 current.health().clone(),
                 current.credential_test().clone(),
             )
-            .map_err(|state_error| state_problem(state_error, capability, correlation_id))?;
+            .map_err(|error| state_problem(error, capability, correlation_id))?;
             put_state(
                 &state,
                 access.workspace_id(),
-                restored,
+                value.clone(),
                 capability,
                 correlation_id,
             )
             .await?;
+            pending.push((*spec, value));
         }
-        return Err(runtime_problem(&error, capability, correlation_id));
-    }
-
-    let mut removed = Vec::with_capacity(pending.len());
-    for (spec, pending) in pending {
-        let value = next_state(
-            &pending,
-            ProviderCapabilityStatus::Unavailable,
-            None,
-            if pending.credential_requirement() == CredentialRequirement::OptionalApiKey {
-                ProviderCredentialStatus::Optional
-            } else {
-                ProviderCredentialStatus::Missing
-            },
-            pending.configuration_digest().clone(),
-            pending.health().clone(),
-            ProviderCheckMetadata::never_run(),
-        )
-        .map_err(|error| state_problem(error, capability, correlation_id))?;
-        put_state(
-            &state,
-            access.workspace_id(),
-            value.clone(),
-            capability,
-            correlation_id,
-        )
-        .await?;
-        removed.push((spec, value));
-    }
-    Ok(Json(ProviderCapabilityResponse {
-        provider_id,
-        capabilities: removed
-            .iter()
-            .map(|(spec, value)| {
-                capability_dto(
-                    &state.runtime,
-                    provider.runtime_available,
-                    spec,
-                    Some(value),
+        let revoked = if source == CredentialVaultSource::None {
+            Ok(())
+        } else {
+            let runtime = Arc::clone(&state.runtime);
+            let vault_reference = reference.clone();
+            tokio::task::spawn_blocking(move || runtime.revoke_credential(&vault_reference))
+                .await
+                .map_err(|_| storage_problem(capability, correlation_id))?
+        };
+        if let Err(error) = revoked {
+            for ((_, current), (_, pending)) in currents.iter().zip(&pending) {
+                let restored = next_state(
+                    pending,
+                    current.capability_status(),
+                    current.credential_reference().cloned(),
+                    current.credential_status(),
+                    current.configuration_digest().clone(),
+                    current.health().clone(),
+                    current.credential_test().clone(),
                 )
-            })
-            .collect(),
-    }))
+                .map_err(|state_error| state_problem(state_error, capability, correlation_id))?;
+                put_state(
+                    &state,
+                    access.workspace_id(),
+                    restored,
+                    capability,
+                    correlation_id,
+                )
+                .await?;
+            }
+            return Err(runtime_problem(&error, capability, correlation_id));
+        }
+
+        let mut removed = Vec::with_capacity(pending.len());
+        for (spec, pending) in pending {
+            let value = next_state(
+                &pending,
+                ProviderCapabilityStatus::Unavailable,
+                None,
+                if pending.credential_requirement() == CredentialRequirement::OptionalApiKey {
+                    ProviderCredentialStatus::Optional
+                } else {
+                    ProviderCredentialStatus::Missing
+                },
+                pending.configuration_digest().clone(),
+                pending.health().clone(),
+                ProviderCheckMetadata::never_run(),
+            )
+            .map_err(|error| state_problem(error, capability, correlation_id))?;
+            put_state(
+                &state,
+                access.workspace_id(),
+                value.clone(),
+                capability,
+                correlation_id,
+            )
+            .await?;
+            removed.push((spec, value));
+        }
+        Ok(Json(ProviderCapabilityResponse {
+            provider_id,
+            capabilities: removed
+                .iter()
+                .map(|(spec, value)| {
+                    capability_dto(
+                        &state.runtime,
+                        provider.runtime_available,
+                        spec,
+                        Some(value),
+                    )
+                })
+                .collect(),
+        }))
+    })
+    .await
 }
 
 async fn execute_check(
@@ -969,16 +1036,7 @@ async fn execute_check(
             } else {
                 ProviderCheckStatus::Failed
             };
-            let credential_status = if kind == ProviderCheckKind::Credential {
-                match code {
-                    ProblemCode::ProviderCredentialInvalid => ProviderCredentialStatus::Invalid,
-                    ProblemCode::ProviderCredentialExpired => ProviderCredentialStatus::Expired,
-                    ProblemCode::ProviderCredentialMissing => ProviderCredentialStatus::Unavailable,
-                    _ => current.credential_status(),
-                }
-            } else {
-                current.credential_status()
-            };
+            let credential_status = credential_status_after_failed_check(kind, &current, code);
             (Some(code), check_status, credential_status)
         }
     };
@@ -1049,7 +1107,7 @@ pub(crate) async fn test_provider_credential(
 ) -> HttpResult<ProviderCapabilityResponse> {
     let correlation_id = RequestCorrelationId::new_v7();
     let capability = CapabilityKey::TestProviderCredential;
-    let access = authorize(&state, &headers, capability, correlation_id).await?;
+    authorize(&state, &headers, capability, correlation_id).await?;
     let (provider, spec) = resolve(
         &state.runtime,
         &provider_id,
@@ -1058,39 +1116,42 @@ pub(crate) async fn test_provider_credential(
         correlation_id,
     )?;
     let operation_lock = state.operation_lock(provider);
-    let _credential_guard = operation_lock.lock().await;
-    execute_check(
-        &state,
-        access.workspace_id(),
-        &provider_id,
-        spec,
-        ProviderCheckKind::Credential,
-        capability,
-        correlation_id,
-    )
-    .await?;
-    let states = provider_states(
-        &state,
-        access.workspace_id(),
-        provider,
-        capability,
-        correlation_id,
-    )
-    .await?;
-    Ok(Json(ProviderCapabilityResponse {
-        provider_id,
-        capabilities: states
-            .iter()
-            .map(|(item, value)| {
-                capability_dto(
-                    &state.runtime,
-                    provider.runtime_available,
-                    item,
-                    Some(value),
-                )
-            })
-            .collect(),
-    }))
+    run_provider_state_operation(operation_lock, capability, correlation_id, async move {
+        let access = authorize(&state, &headers, capability, correlation_id).await?;
+        execute_check(
+            &state,
+            access.workspace_id(),
+            &provider_id,
+            spec,
+            ProviderCheckKind::Credential,
+            capability,
+            correlation_id,
+        )
+        .await?;
+        let states = provider_states(
+            &state,
+            access.workspace_id(),
+            provider,
+            capability,
+            correlation_id,
+        )
+        .await?;
+        Ok(Json(ProviderCapabilityResponse {
+            provider_id,
+            capabilities: states
+                .iter()
+                .map(|(item, value)| {
+                    capability_dto(
+                        &state.runtime,
+                        provider.runtime_available,
+                        item,
+                        Some(value),
+                    )
+                })
+                .collect(),
+        }))
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -1118,7 +1179,7 @@ pub(crate) async fn read_provider_health(
 ) -> HttpResult<ProviderHealthResponse> {
     let correlation_id = RequestCorrelationId::new_v7();
     let capability = CapabilityKey::ReadProviderHealth;
-    let access = authorize(&state, &headers, capability, correlation_id).await?;
+    authorize(&state, &headers, capability, correlation_id).await?;
     let provider = state
         .runtime
         .descriptor(&provider_id)
@@ -1131,30 +1192,33 @@ pub(crate) async fn read_provider_health(
         ))));
     }
     let operation_lock = state.operation_lock(provider);
-    let _credential_guard = operation_lock.lock().await;
-    let mut capabilities = Vec::with_capacity(provider.capabilities.len());
-    for spec in provider.capabilities {
-        let updated = execute_check(
-            &state,
-            access.workspace_id(),
-            &provider_id,
-            spec,
-            ProviderCheckKind::Health,
-            capability,
-            correlation_id,
-        )
-        .await?;
-        capabilities.push(capability_dto(
-            &state.runtime,
-            provider.runtime_available,
-            spec,
-            Some(&updated),
-        ));
-    }
-    Ok(Json(ProviderHealthResponse {
-        provider_id,
-        capabilities,
-    }))
+    run_provider_state_operation(operation_lock, capability, correlation_id, async move {
+        let access = authorize(&state, &headers, capability, correlation_id).await?;
+        let mut capabilities = Vec::with_capacity(provider.capabilities.len());
+        for spec in provider.capabilities {
+            let updated = execute_check(
+                &state,
+                access.workspace_id(),
+                &provider_id,
+                spec,
+                ProviderCheckKind::Health,
+                capability,
+                correlation_id,
+            )
+            .await?;
+            capabilities.push(capability_dto(
+                &state.runtime,
+                provider.runtime_available,
+                spec,
+                Some(&updated),
+            ));
+        }
+        Ok(Json(ProviderHealthResponse {
+            provider_id,
+            capabilities,
+        }))
+    })
+    .await
 }
 
 pub(crate) fn router() -> Router<ProviderApiState> {
@@ -1182,6 +1246,7 @@ mod tests {
         body::{to_bytes, Body},
         http::{header, Request, StatusCode},
     };
+    use fasti_application::ApplicationResult;
     use fasti_application::{
         AccessAdministrationPort, CredentialVaultError, CredentialVaultPort,
         EnrollFirstClientCommand, InitializeNodeCommand, ProviderStateWriteOutcome, SecretMaterial,
@@ -1198,6 +1263,8 @@ mod tests {
     struct MemoryVault {
         source: CredentialVaultSource,
         value: Mutex<Option<Vec<u8>>>,
+        store_pause: Mutex<Option<WritePause>>,
+        reject_store: std::sync::atomic::AtomicBool,
     }
 
     impl MemoryVault {
@@ -1205,6 +1272,8 @@ mod tests {
             Self {
                 source,
                 value: Mutex::new(None),
+                store_pause: Mutex::new(None),
+                reject_store: std::sync::atomic::AtomicBool::new(false),
             }
         }
     }
@@ -1229,6 +1298,13 @@ mod tests {
             reference: &CredentialReference,
             secret: CredentialSecret,
         ) -> Result<StoredCredential, CredentialVaultError> {
+            let pause = self.store_pause.lock().expect("store pause").take();
+            if let Some(pause) = pause {
+                pause.wait();
+            }
+            if self.reject_store.load(Ordering::SeqCst) {
+                return Err(CredentialVaultError::Rejected);
+            }
             if matches!(
                 self.source,
                 CredentialVaultSource::Environment | CredentialVaultSource::OperatorSecretMount
@@ -1269,7 +1345,136 @@ mod tests {
 
     struct CountingState(AtomicUsize);
 
+    struct WritePause {
+        entered: tokio::sync::oneshot::Sender<()>,
+        release: std::sync::mpsc::Receiver<()>,
+    }
+
+    impl WritePause {
+        fn new() -> (
+            Self,
+            tokio::sync::oneshot::Receiver<()>,
+            std::sync::mpsc::Sender<()>,
+        ) {
+            let (entered, started) = tokio::sync::oneshot::channel();
+            let (finish, release) = std::sync::mpsc::channel();
+            (Self { entered, release }, started, finish)
+        }
+
+        fn wait(self) {
+            let _ = self.entered.send(());
+            // Dropping the test's sender also releases this worker after an assertion failure.
+            let _ = self.release.recv();
+        }
+    }
+
+    struct PausedState {
+        kernel: Arc<SqliteKernel>,
+        pause: Mutex<Option<(ProviderCapabilityStatus, WritePause)>>,
+    }
+
+    impl ProviderStatePort for PausedState {
+        fn authorize_and_list_provider_capability_states(
+            &self,
+            correlation_id: RequestCorrelationId,
+            access: &ApplicationAccessContext,
+        ) -> ApplicationResult<Vec<ProviderCapabilityState>> {
+            self.kernel
+                .authorize_and_list_provider_capability_states(correlation_id, access)
+        }
+
+        fn get_provider_capability_state(
+            &self,
+            workspace_id: WorkspaceId,
+            provider_id: &ProviderId,
+            capability_id: &ProviderCapabilityId,
+        ) -> Result<Option<ProviderCapabilityState>, ProviderStatePortError> {
+            self.kernel
+                .get_provider_capability_state(workspace_id, provider_id, capability_id)
+        }
+
+        fn list_provider_capability_states(
+            &self,
+            workspace_id: WorkspaceId,
+        ) -> Result<Vec<ProviderCapabilityState>, ProviderStatePortError> {
+            self.kernel.list_provider_capability_states(workspace_id)
+        }
+
+        fn put_provider_capability_state(
+            &self,
+            workspace_id: WorkspaceId,
+            state: ProviderCapabilityState,
+        ) -> Result<ProviderStateWriteOutcome, ProviderStatePortError> {
+            let pause = {
+                let mut selected = self.pause.lock().expect("state pause");
+                if selected
+                    .as_ref()
+                    .is_some_and(|(status, _)| *status == state.capability_status())
+                {
+                    selected.take().map(|(_, pause)| pause)
+                } else {
+                    None
+                }
+            };
+            if let Some(pause) = pause {
+                pause.wait();
+            }
+            self.kernel
+                .put_provider_capability_state(workspace_id, state)
+        }
+    }
+
+    async fn cancel_paused_request(
+        app: Router,
+        request: Request<Body>,
+        entered: tokio::sync::oneshot::Receiver<()>,
+        finish: std::sync::mpsc::Sender<()>,
+        gate: &Arc<tokio::sync::Mutex<()>>,
+    ) {
+        let caller = tokio::spawn(app.oneshot(request));
+        let entered = tokio::time::timeout(Duration::from_secs(5), entered)
+            .await
+            .expect("request reaches selected write");
+        if entered.is_err() {
+            let response = caller
+                .await
+                .expect("request task")
+                .expect("request response");
+            let status = response.status();
+            let body = to_bytes(response.into_body(), 8192)
+                .await
+                .expect("problem body");
+            panic!(
+                "request ended before selected write: {status} {}",
+                String::from_utf8_lossy(&body)
+            );
+        }
+        caller.abort();
+        assert!(caller.await.expect_err("cancel request").is_cancelled());
+        let held = gate.try_lock().is_err();
+        finish.send(()).expect("release selected write");
+        let _completed = tokio::time::timeout(Duration::from_secs(5), gate.lock())
+            .await
+            .expect("entire state reconciliation completes");
+        assert!(
+            held,
+            "cancelled request released its gate before the write completed"
+        );
+    }
+
     impl ProviderStatePort for CountingState {
+        fn authorize_and_list_provider_capability_states(
+            &self,
+            correlation_id: RequestCorrelationId,
+            _access: &ApplicationAccessContext,
+        ) -> ApplicationResult<Vec<ProviderCapabilityState>> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Err(Box::new(FastiProblem::forbidden(
+                CapabilityKey::ListProviders,
+                correlation_id,
+            )))
+        }
+
         fn get_provider_capability_state(
             &self,
             _workspace_id: WorkspaceId,
@@ -1330,6 +1535,7 @@ mod tests {
             CredentialVaultSource::None,
         ))));
         let app = router().with_state(ProviderApiState {
+            browser_boundary: None,
             kernel,
             provider_state: state.clone(),
             provider_operation_locks: ProviderOperationLocks::new(&runtime),
@@ -1360,6 +1566,7 @@ mod tests {
             .expect("Google Books operation lock");
         assert!(!Arc::ptr_eq(&tmdb_lock, &google_books_lock));
         let app = router().with_state(ProviderApiState {
+            browser_boundary: None,
             kernel: kernel.clone(),
             provider_state: kernel,
             runtime,
@@ -1422,6 +1629,217 @@ mod tests {
         assert!(!dto.writable);
     }
 
+    #[tokio::test]
+    async fn cancelled_configure_finishes_vault_and_every_capability_state() {
+        let (_root, kernel, workspace_id, credential) = enrolled_kernel();
+        let vault = Arc::new(MemoryVault::new(CredentialVaultSource::None));
+        let (pause, entered, finish) = WritePause::new();
+        *vault.store_pause.lock().expect("pause vault") = Some(pause);
+        let runtime = Arc::new(ProviderRuntime::new(vault.clone()));
+        let locks = ProviderOperationLocks::new(&runtime);
+        let gate = locks.get("tmdb").expect("TMDB gate");
+        let app = router().with_state(ProviderApiState {
+            browser_boundary: None,
+            kernel: kernel.clone(),
+            provider_state: kernel.clone(),
+            runtime,
+            provider_operation_locks: locks,
+        });
+        cancel_paused_request(
+            app,
+            Request::put("/api/v1/providers/tmdb/credentials/metadata.read")
+                .header(header::AUTHORIZATION, format!("Bearer {credential}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"secret":"cancelled-write-fixture"}"#))
+                .expect("request"),
+            entered,
+            finish,
+            &gate,
+        )
+        .await;
+        assert_eq!(
+            vault.value.lock().expect("vault").as_deref(),
+            Some(b"cancelled-write-fixture".as_slice())
+        );
+        let states = kernel
+            .list_provider_capability_states(workspace_id)
+            .expect("states");
+        assert!(states.len() > 1);
+        assert!(states
+            .iter()
+            .all(|state| state.capability_status() == ProviderCapabilityStatus::Available));
+    }
+
+    #[tokio::test]
+    async fn cancelled_remove_or_rollback_finishes_all_state_reconciliation() {
+        for rollback in [false, true] {
+            let (_root, kernel, workspace_id, credential) = enrolled_kernel();
+            let vault = Arc::new(MemoryVault::new(CredentialVaultSource::None));
+            let runtime = Arc::new(ProviderRuntime::new(vault.clone()));
+            let locks = ProviderOperationLocks::new(&runtime);
+            let gate = locks.get("tmdb").expect("TMDB gate");
+            let state = Arc::new(PausedState {
+                kernel: kernel.clone(),
+                pause: Mutex::new(None),
+            });
+            let app = router().with_state(ProviderApiState {
+                browser_boundary: None,
+                kernel: kernel.clone(),
+                provider_state: state.clone(),
+                runtime,
+                provider_operation_locks: locks,
+            });
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::put("/api/v1/providers/tmdb/credentials/metadata.read")
+                        .header(header::AUTHORIZATION, format!("Bearer {credential}"))
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .body(Body::from(r#"{"secret":"original-fixture"}"#))
+                        .expect("seed request"),
+                )
+                .await
+                .expect("seed response");
+            assert_eq!(response.status(), StatusCode::OK);
+            let original = kernel
+                .list_provider_capability_states(workspace_id)
+                .expect("original states");
+            let (pause, entered, finish) = WritePause::new();
+            *state.pause.lock().expect("pause reconciliation") = Some((
+                if rollback {
+                    ProviderCapabilityStatus::Available
+                } else {
+                    ProviderCapabilityStatus::Unavailable
+                },
+                pause,
+            ));
+            vault.reject_store.store(rollback, Ordering::SeqCst);
+            let request = if rollback {
+                Request::put("/api/v1/providers/tmdb/credentials/metadata.read")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::AUTHORIZATION, format!("Bearer {credential}"))
+                    .body(Body::from(r#"{"secret":"rejected-fixture"}"#))
+            } else {
+                Request::delete("/api/v1/providers/tmdb/credentials/metadata.read")
+                    .header(header::AUTHORIZATION, format!("Bearer {credential}"))
+                    .body(Body::empty())
+            }
+            .expect("mutation request");
+            cancel_paused_request(app, request, entered, finish, &gate).await;
+            let current = kernel
+                .list_provider_capability_states(workspace_id)
+                .expect("final states");
+            assert_eq!(current.len(), original.len());
+            for (current, original) in current.iter().zip(&original) {
+                assert_eq!(
+                    current.capability_status(),
+                    if rollback {
+                        original.capability_status()
+                    } else {
+                        ProviderCapabilityStatus::Unavailable
+                    }
+                );
+                assert_eq!(
+                    current.credential_reference(),
+                    if rollback {
+                        original.credential_reference()
+                    } else {
+                        None
+                    }
+                );
+                if rollback {
+                    assert_eq!(
+                        current.configuration_digest(),
+                        original.configuration_digest()
+                    );
+                    assert_eq!(current.credential_status(), original.credential_status());
+                }
+            }
+            assert_eq!(
+                vault.value.lock().expect("vault").as_deref(),
+                if rollback {
+                    Some(b"original-fixture".as_slice())
+                } else {
+                    None
+                }
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn cancelled_provider_checks_finish_their_persisted_result() {
+        for path in [
+            "/api/v1/providers/tmdb/health",
+            "/api/v1/providers/tmdb/credentials/metadata.read/tests",
+        ] {
+            let (_root, kernel, workspace_id, credential) = enrolled_kernel();
+            let runtime = Arc::new(ProviderRuntime::new(Arc::new(MemoryVault::new(
+                CredentialVaultSource::None,
+            ))));
+            let locks = ProviderOperationLocks::new(&runtime);
+            let gate = locks.get("tmdb").expect("TMDB gate");
+            let (pause, entered, finish) = WritePause::new();
+            let state = Arc::new(PausedState {
+                kernel: kernel.clone(),
+                pause: Mutex::new(Some((ProviderCapabilityStatus::Degraded, pause))),
+            });
+            let app = router().with_state(ProviderApiState {
+                browser_boundary: None,
+                kernel: kernel.clone(),
+                provider_state: state,
+                runtime,
+                provider_operation_locks: locks,
+            });
+            let request = if path.ends_with("/health") {
+                Request::get(path)
+            } else {
+                Request::post(path)
+            }
+            .header(header::AUTHORIZATION, format!("Bearer {credential}"))
+            .body(Body::empty())
+            .expect("check request");
+            // Missing configured credentials fails before egress; persist that real outcome.
+            cancel_paused_request(app, request, entered, finish, &gate).await;
+            let states = kernel
+                .list_provider_capability_states(workspace_id)
+                .expect("states");
+            assert_eq!(states.len(), 1);
+            assert_eq!(
+                states[0].capability_status(),
+                ProviderCapabilityStatus::Degraded
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn cancelled_provider_waiter_never_starts_its_operation() {
+        use std::{future::Future, task::Poll};
+        let gate = Arc::new(tokio::sync::Mutex::new(()));
+        let held = gate.lock().await;
+        let calls = Arc::new(AtomicUsize::new(0));
+        {
+            let started = Arc::clone(&calls);
+            let operation = run_provider_state_operation(
+                Arc::clone(&gate),
+                CapabilityKey::ConfigureProviderCredential,
+                RequestCorrelationId::new_v7(),
+                async move {
+                    started.fetch_add(1, Ordering::SeqCst);
+                    Ok(())
+                },
+            );
+            tokio::pin!(operation);
+            assert!(
+                std::future::poll_fn(|cx| Poll::Ready(operation.as_mut().poll(cx)))
+                    .await
+                    .is_pending()
+            );
+        }
+        drop(held);
+        let _available = gate.lock().await;
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
     #[test]
     fn unavailable_provider_capabilities_keep_credential_requirements_truthful() {
         let runtime = ProviderRuntime::new(Arc::new(MemoryVault::new(CredentialVaultSource::None)));
@@ -1444,6 +1862,7 @@ mod tests {
         let writable_vault = Arc::new(MemoryVault::new(CredentialVaultSource::None));
         let writable_runtime = Arc::new(ProviderRuntime::new(writable_vault.clone()));
         let writable = router().with_state(ProviderApiState {
+            browser_boundary: None,
             kernel: kernel.clone(),
             provider_state: kernel.clone(),
             provider_operation_locks: ProviderOperationLocks::new(&writable_runtime),
@@ -1514,6 +1933,7 @@ mod tests {
             CredentialVaultSource::Environment,
         ))));
         let readonly = router().with_state(ProviderApiState {
+            browser_boundary: None,
             kernel: kernel.clone(),
             provider_state: kernel.clone(),
             provider_operation_locks: ProviderOperationLocks::new(&readonly_runtime),
@@ -1555,6 +1975,7 @@ mod tests {
             CredentialVaultSource::None,
         ))));
         let invalid = router().with_state(ProviderApiState {
+            browser_boundary: None,
             kernel: kernel.clone(),
             provider_state: kernel.clone(),
             provider_operation_locks: ProviderOperationLocks::new(&invalid_runtime),

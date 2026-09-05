@@ -12,6 +12,7 @@ pub enum CapabilityBody {
     M1,
     M2,
     M3,
+    M4,
 }
 
 impl CapabilityBody {
@@ -25,6 +26,7 @@ impl CapabilityBody {
             Self::M1 => "M1",
             Self::M2 => "M2",
             Self::M3 => "M3",
+            Self::M4 => "M4",
         }
     }
 }
@@ -111,6 +113,32 @@ macro_rules! define_capabilities {
 }
 
 define_capabilities!(
+    (
+        SearchMetadata,
+        M4,
+        M4,
+        Finalized,
+        Implemented,
+        ScopedOrBrowserSession,
+        [MetadataSearch],
+        [
+            AuthenticationFailed,
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
+            CapabilityUnavailable,
+            CapacityExceeded,
+            Forbidden,
+            IdempotencyConflict,
+            IntegrityFailed,
+            MalformedJson,
+            PayloadTooLarge,
+            SessionPolicyChanged,
+            StorageUnavailable,
+            UnsupportedMediaType,
+            ValidationFailed
+        ],
+        []
+    ),
     (
         SystemHealth,
         B1,
@@ -552,7 +580,9 @@ define_capabilities!(
             BrowserSessionExpired,
             BrowserSessionRevoked,
             CapabilityUnavailable,
+            CapacityExceeded,
             Forbidden,
+            IdempotencyConflict,
             IdentityConflict,
             IntegrityFailed,
             InvalidIdentifier,
@@ -582,7 +612,8 @@ define_capabilities!(
             Forbidden,
             IntegrityFailed,
             SessionPolicyChanged,
-            StorageUnavailable
+            StorageUnavailable,
+            ValidationFailed
         ],
         []
     ),
@@ -875,13 +906,16 @@ define_capabilities!(
         M1,
         Finalized,
         Implemented,
-        Scoped,
+        ScopedOrBrowserSession,
         [ProviderRead],
         [
             AuthenticationFailed,
             Forbidden,
             IntegrityFailed,
-            StorageUnavailable
+            StorageUnavailable,
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
+            SessionPolicyChanged
         ],
         []
     ),
@@ -1380,6 +1414,7 @@ mod tests {
         assert_eq!(
             hybrid,
             [
+                CapabilityKey::SearchMetadata,
                 CapabilityKey::AcceptObservation,
                 CapabilityKey::CreateRecord,
                 CapabilityKey::AttachIdentifier,
@@ -1390,6 +1425,7 @@ mod tests {
                 CapabilityKey::ClearNuvioCollections,
                 CapabilityKey::ListTrackingDispositions,
                 CapabilityKey::SetTrackingDisposition,
+                CapabilityKey::ListProviders,
                 CapabilityKey::ResolveIdentityRoute,
                 CapabilityKey::ReadAnimeGroupingPolicy,
                 CapabilityKey::PreviewAnimeGroupingPolicyChange,

@@ -1,15 +1,13 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import {
-    IconCheck,
-    IconCopy,
-    IconEye,
-    IconEyeOff,
-    IconKey,
-    IconRefresh,
-    IconShieldCheck,
-    IconTrash,
-  } from "@tabler/icons-svelte";
+  import IconCheck from "@tabler/icons-svelte/icons/check";
+  import IconCopy from "@tabler/icons-svelte/icons/copy";
+  import IconEye from "@tabler/icons-svelte/icons/eye";
+  import IconEyeOff from "@tabler/icons-svelte/icons/eye-off";
+  import IconKey from "@tabler/icons-svelte/icons/key";
+  import IconRefresh from "@tabler/icons-svelte/icons/refresh";
+  import IconShieldCheck from "@tabler/icons-svelte/icons/shield-check";
+  import IconTrash from "@tabler/icons-svelte/icons/trash";
   import type {
     ApiClientCredentialSummary,
     CreatedApiClientCredential,

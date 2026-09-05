@@ -269,24 +269,35 @@ pub(crate) async fn refresh_metadata_claims(
         })?;
     let mode = metadata_refresh_mode(request.mode);
     let provider_id_text = provider_id.as_str().to_owned();
-    let operation_lock = state.provider_operation_locks.get(provider_id.as_str());
-    let _credential_guard = match operation_lock.as_ref() {
-        Some(lock) => Some(lock.lock().await),
-        None => None,
-    };
+    let operation_lock = state
+        .provider_operation_locks
+        .get(provider_id.as_str())
+        .ok_or_else(|| {
+            invalid_input(
+                capability,
+                correlation_id,
+                "/provider_id",
+                "provider has no configured runtime",
+                "a configured metadata provider",
+            )
+        })?;
+    let lease = fasti_application::ProviderOperationLease::new(operation_lock.lock_owned().await);
     let outcome = state
         .refresh_service
-        .authorize_and_refresh(RefreshMetadataClaimsCommand::new(
-            correlation_id,
-            access,
-            operation_id,
-            record_id,
-            provider_id,
-            field_groups,
-            locale,
-            region,
-            mode,
-        ))
+        .authorize_and_refresh(
+            RefreshMetadataClaimsCommand::new(
+                correlation_id,
+                access,
+                operation_id,
+                record_id,
+                provider_id,
+                field_groups,
+                locale,
+                region,
+                mode,
+            ),
+            lease,
+        )
         .await
         .map_err(application_problem)?;
     Ok(Json(refresh_metadata_claims_response(
@@ -612,6 +623,7 @@ mod tests {
         fn authorize_and_refresh(
             &self,
             _command: RefreshMetadataClaimsCommand,
+            _lease: fasti_application::ProviderOperationLease,
         ) -> fasti_application::MetadataRefreshFuture<'_> {
             Box::pin(async { panic!("unauthenticated request reached metadata refresh") })
         }

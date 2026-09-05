@@ -235,7 +235,7 @@ define_problem_catalog!(
         detail: ProblemDetail::Static("bounded application capacity has been reached"),
         documentation_path: "v1/problems/capacity-exceeded", safe_state: NoMutation,
         retryability: RetryAfterCorrection,
-        default_next_action: ("release_capacity", "Release retained capacity before retrying"),
+        default_next_action: ("release_capacity", "Increase or release governed capacity before retrying"),
         param_policy: ProblemParamPolicy::None
     },
     CapabilityUnavailable => "capability_unavailable" {
@@ -328,10 +328,10 @@ define_problem_catalog!(
     },
     MetadataClaimStale => "metadata_claim_stale" {
         title: "Metadata claim stale", status: 409,
-        detail: ProblemDetail::Static("the provider refresh did not produce a fresh claim; the last-known-good claim remains active"),
+        detail: ProblemDetail::Static("the provider metadata is unavailable or cannot be reused; existing claims are retained"),
         documentation_path: "v1/problems/metadata-claim-stale", safe_state: PriorStateRetained,
         retryability: RetrySafe,
-        default_next_action: ("retry_metadata_refresh", "Retry the metadata refresh or use the labelled last-known-good value"),
+        default_next_action: ("retry_metadata_refresh", "Start a new metadata refresh or use an available local value"),
         param_policy: ProblemParamPolicy::None
     },
     OperationCanceled => "operation_canceled" {
@@ -699,9 +699,10 @@ impl ProblemCode {
                 CapabilityBody::M1 | CapabilityBody::M2 | CapabilityBody::M3 => {
                     ContractState::Finalized
                 }
-                CapabilityBody::B2 | CapabilityBody::B3 | CapabilityBody::C1 => {
-                    ContractState::Reserved
-                }
+                CapabilityBody::B2
+                | CapabilityBody::B3
+                | CapabilityBody::C1
+                | CapabilityBody::M4 => ContractState::Reserved,
             },
         }
     }

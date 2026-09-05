@@ -72,6 +72,7 @@ async function expectAdjacent(
   second: Locator,
   maximumGap = 16,
 ): Promise<void> {
+  await first.locator("xpath=..").scrollIntoViewIfNeeded();
   const firstBox = await first.boundingBox();
   const secondBox = await second.boundingBox();
   expect(firstBox).not.toBeNull();

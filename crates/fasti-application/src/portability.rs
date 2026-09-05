@@ -35,12 +35,18 @@ pub const WORKSPACE_ARCHIVE_V3_FORMAT_VERSION: u32 = 3;
 /// Frozen fourth archive format retained for restore compatibility.
 pub const WORKSPACE_ARCHIVE_V4_FORMAT_VERSION: u32 = 4;
 
+/// Frozen fifth archive format retained for restore compatibility.
+pub const WORKSPACE_ARCHIVE_V5_FORMAT_VERSION: u32 = 5;
+
+/// Frozen sixth archive format retained for restore compatibility.
+pub const WORKSPACE_ARCHIVE_V6_FORMAT_VERSION: u32 = 6;
+
 /// Internal staged archive format version written by the export adapter.
 ///
 /// A restore implementation must reject any version it does not understand
 /// rather than guessing at the framing. The archive-v1 stream inventory is
 /// frozen, but this does not activate a public format, capability, or route.
-pub const WORKSPACE_ARCHIVE_FORMAT_VERSION: u32 = 5;
+pub const WORKSPACE_ARCHIVE_FORMAT_VERSION: u32 = 7;
 
 /// The sole archive-v1 contract version understood by this executable.
 ///
@@ -201,6 +207,7 @@ pub enum WorkspaceExportEntity {
     ProfileAnimeGroupingPolicies,
     ClientAnimeGroupingPolicies,
     AnimeGroupingPolicyReceipts,
+    SearchActionReceipts,
 }
 
 impl WorkspaceExportEntity {
@@ -321,7 +328,7 @@ impl WorkspaceExportEntity {
     ];
 
     /// Every archive-v5 entity. The frozen v4 order is an exact prefix.
-    pub const ALL: [Self; 34] = [
+    pub const V5: [Self; 34] = [
         Self::Workspaces,
         Self::Profiles,
         Self::Clients,
@@ -358,12 +365,28 @@ impl WorkspaceExportEntity {
         Self::AnimeGroupingPolicyReceipts,
     ];
 
+    /// Archive-v6 appends durable Search actions, never ephemeral candidates.
+    pub const V6: [Self; 35] = {
+        let mut entities = [Self::SearchActionReceipts; 35];
+        let mut index = 0;
+        while index < Self::V5.len() {
+            entities[index] = Self::V5[index];
+            index += 1;
+        }
+        entities
+    };
+
+    /// V7 carries response policy in MetadataClaims; no additional entity.
+    pub const ALL: [Self; 35] = Self::V6;
+
     pub const fn for_format(format_version: u32) -> Option<&'static [Self]> {
         match format_version {
             WORKSPACE_ARCHIVE_V1_FORMAT_VERSION => Some(&Self::V1),
             WORKSPACE_ARCHIVE_V2_FORMAT_VERSION => Some(&Self::V2),
             WORKSPACE_ARCHIVE_V3_FORMAT_VERSION => Some(&Self::V3),
             WORKSPACE_ARCHIVE_V4_FORMAT_VERSION => Some(&Self::V4),
+            WORKSPACE_ARCHIVE_V5_FORMAT_VERSION => Some(&Self::V5),
+            WORKSPACE_ARCHIVE_V6_FORMAT_VERSION => Some(&Self::V6),
             WORKSPACE_ARCHIVE_FORMAT_VERSION => Some(&Self::ALL),
             _ => None,
         }
@@ -406,6 +429,7 @@ impl WorkspaceExportEntity {
             Self::ProfileAnimeGroupingPolicies => "profile_anime_grouping_policies",
             Self::ClientAnimeGroupingPolicies => "client_anime_grouping_policies",
             Self::AnimeGroupingPolicyReceipts => "anime_grouping_policy_receipts",
+            Self::SearchActionReceipts => "search_action_receipts",
         }
     }
 

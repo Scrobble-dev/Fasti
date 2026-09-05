@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
+from contextlib import closing
 import http.server
 import importlib.util
 import json
@@ -23,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 import trailbase_runtime as runtime
+from tmdb_smoke_fixture import TmdbSmokeFixture, PROVIDER_IDS
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -44,13 +47,13 @@ fixture = _load(
 )
 
 
-def _post(path: str, payload: dict[str, object], bearer: str | None = None):
-    headers = {"content-type": "application/json"}
+def _post(path: str, payload: dict[str, object] | None, bearer: str | None = None):
+    headers = {"content-type": "application/json"} if payload is not None else {}
     if bearer:
         headers["authorization"] = f"Bearer {bearer}"
     request = urllib.request.Request(
         FASTI_ORIGIN + path,
-        json.dumps(payload).encode(),
+        json.dumps(payload).encode() if payload is not None else None,
         headers,
         method="POST",
     )
@@ -74,8 +77,17 @@ def _wait_health(process: subprocess.Popen[bytes]) -> None:
     raise RuntimeError("fastid health timed out")
 
 
-def _start_fastid(data_root: Path, trailbase_root: Path) -> subprocess.Popen[bytes]:
+def _start_fastid(
+    data_root: Path, trailbase_root: Path, provider: TmdbSmokeFixture | None = None,
+) -> subprocess.Popen[bytes]:
     environment = dict(os.environ)
+    for variable in (
+        "FASTI_INTEGRATION_LISTEN", "FASTI_INTEGRATION_TLS_TERMINATED",
+        "FASTI_REMOTE_TRUSTED_PROXY", "FASTI_PUBLIC_URL", "FASTI_EXTERNAL_BIND_IP",
+        "FASTI_BOUND_ADDR_FILE", "FASTI_INTEGRATION_BOUND_ADDR_FILE",
+        "FASTI_TMDB_SMOKE_RESOLVE", "FASTI_TMDB_SMOKE_CA_PEM",
+    ):
+        environment.pop(variable, None)
     environment.update(
         FASTI_LISTEN="127.0.0.1:8420",
         FASTI_PORT_FALLBACK="fail",
@@ -83,13 +95,22 @@ def _start_fastid(data_root: Path, trailbase_root: Path) -> subprocess.Popen[byt
         FASTI_TRAILBASE_ROOT=str(trailbase_root),
         FASTI_STATIC_DIR=str(ROOT / "apps/web/dist"),
     )
+    executable = ROOT / "target/debug/fastid"
+    if provider is not None:
+        environment.pop("GOOGLE_BOOKS_API_KEY", None)
+        environment.update(provider.child_environment())
+        executable = ROOT / "target/tmdb-smoke-fixture/debug/fastid"
     process = runtime.start_managed_process_group(
-        [ROOT / "target/debug/fastid"],
+        [executable],
         environment=environment,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    _wait_health(process)
+    try:
+        _wait_health(process)
+    except BaseException:
+        runtime.stop_managed_process_group(process)
+        raise
     return process
 
 
@@ -100,7 +121,7 @@ def _browser(payload: dict[str, object]) -> dict[str, object]:
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         check=False,
-        timeout=60,
+        timeout=120 if payload.get("m4SearchJourney") else 60,
     )
     if completed.returncode != 0:
         raise RuntimeError(completed.stderr.decode(errors="replace")[-4000:])
@@ -227,6 +248,10 @@ def _arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=ROOT / ".dev-trailbase")
     parser.add_argument(
+        "--m4-search-journey", action="store_true",
+        help="also prove real-process Search/Create/Attach/cache/restart with isolated provider TLS",
+    )
+    parser.add_argument(
         "--receipt",
         type=Path,
         default=ROOT / "target/fasti-receipts/access-c1-ordinary-browser.json",
@@ -235,6 +260,7 @@ def _arguments() -> argparse.Namespace:
 
 
 def main() -> None:
+    runtime.install_termination_cleanup()
     arguments = _arguments()
     _execv_failure_self_test()
     if subprocess.check_output(
@@ -242,11 +268,20 @@ def main() -> None:
     ).strip():
         raise RuntimeError("ordinary-browser proof requires a clean tree")
     fixture._require_free_port(4000, "ordinary-browser TrailBase proof")
+    fixture._require_free_port(4001, "ordinary-browser TrailBase admin proof")
     fixture._require_free_port(8420, "ordinary-browser Fasti proof")
+    if arguments.m4_search_journey:
+        for command in [
+            ["cargo", "build", "--locked", "--offline", "-p", "fasti-cli"],
+            ["cargo", "build", "--locked", "--offline", "-p", "fastid",
+             "--features", "tmdb-smoke-fixture", "--target-dir", "target/tmdb-smoke-fixture"],
+        ]:
+            subprocess.run(command, cwd=ROOT, check=True, timeout=900)
 
     trailbase_process = None
     fastid = None
     smtp = None
+    provider = None
     with tempfile.TemporaryDirectory(
         prefix="fasti-c1-browser-", dir=Path.home()
     ) as directory:
@@ -260,17 +295,19 @@ def main() -> None:
         )
         fixture._bootstrap_disposable_installation(smoke, executable, trailbase_root)
         smtp = smoke.SmtpServer(("127.0.0.1", 0))
-        fixture._write_fixture_config(trailbase_root, int(smtp.server_address[1]))
-        runtime.prepare_runtime_lock(trailbase_root)
-        runtime.prepare_installation(trailbase_root, "native")
-        runtime.verify_installation(trailbase_root)
         threading.Thread(target=smtp.serve_forever, daemon=True).start()
-        trailbase_process, _ = smoke.start_fixture_release(
-            executable, trailbase_root, 4000
-        )
-        email, password = fixture._register_verified_human(smoke, smtp.messages)
         try:
-            fastid = _start_fastid(data_root, trailbase_root)
+            fixture._write_fixture_config(trailbase_root, int(smtp.server_address[1]))
+            runtime.prepare_runtime_lock(trailbase_root)
+            runtime.prepare_installation(trailbase_root, "native")
+            runtime.verify_installation(trailbase_root)
+            trailbase_process, _ = smoke.start_fixture_release(
+                executable, trailbase_root, 4000
+            )
+            email, password = fixture._register_verified_human(smoke, smtp.messages)
+            if arguments.m4_search_journey:
+                provider = TmdbSmokeFixture(workspace / "tmdb")
+            fastid = _start_fastid(data_root, trailbase_root, provider)
             secret = (data_root / "bootstrap.secret").read_text().strip()
             status, initialized = _post("/api/v1/node/initialization", {}, secret)
             if status != 200:
@@ -283,17 +320,34 @@ def main() -> None:
                 raise RuntimeError("node enrollment failed")
             secret = ""
             initialized.clear()
+            if provider is not None:
+                bearer = enrolled["credential"]
+                try:
+                    for capability in ("metadata.search", "metadata.read"):
+                        status, checked = _post(
+                            f"/api/v1/providers/tmdb/credentials/{capability}/tests", None, bearer,
+                        )
+                        selected = next(row for row in checked["capabilities"]
+                                        if row["capability_id"] == capability)
+                        if (status != 200 or selected["credential_state"] != "valid"
+                                or selected["credential_test"]["state"] != "passed"):
+                            raise RuntimeError("real provider credential test did not pass")
+                finally:
+                    bearer = ""
             enrolled.clear()
             runtime.stop_managed_process_group(fastid)
             fastid = None
 
             _bootstrap_cli(data_root, trailbase_root, email, password)
-            fastid = _start_fastid(data_root, trailbase_root)
+            fastid = _start_fastid(data_root, trailbase_root, provider)
             evidence = _browser(
-                {"mode": "sign-in", "email": email, "password": password}
+                {"mode": "sign-in", "email": email, "password": password,
+                 "m4SearchJourney": arguments.m4_search_journey}
             )
+            runtime.stop_managed_process_group(fastid)
+            fastid = None
             database = data_root / "current/fasti.sqlite3"
-            with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
+            with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as connection:
                 session_count = connection.execute(
                     "SELECT COUNT(*) FROM fasti_browser_sessions WHERE revoked_at IS NULL"
                 ).fetchone()[0]
@@ -305,6 +359,36 @@ def main() -> None:
                 raise RuntimeError("ordinary browser did not create one active Fasti session")
             if administrator_count != 1:
                 raise RuntimeError("trusted CLI did not create one active administrator")
+            if provider is not None:
+                journey = evidence["m4SearchJourney"]
+                requests = provider.requests()
+                if Counter(requests) != Counter({
+                    "/3/configuration": 2, "/3/search/multi": 1,
+                    **{f"/3/movie/{value}": 2 for value in PROVIDER_IDS},
+                }):
+                    raise RuntimeError("real provider exchange/cache request evidence differs")
+                before = _search_database_evidence(database, journey["recordId"])
+                fastid = _start_fastid(data_root, trailbase_root, provider)
+                restarted = _browser({
+                    "mode": "restart-record", "email": email, "password": password,
+                    "recordId": journey["recordId"], "recordPath": journey["recordPath"],
+                })
+                runtime.stop_managed_process_group(fastid)
+                fastid = None
+                after = _search_database_evidence(database, journey["recordId"])
+                if before != after or provider.requests() != requests:
+                    raise RuntimeError("Record restart changed durable Search evidence or queried TMDB")
+                evidence["m4SearchRestart"] = restarted
+                evidence["m4SearchDatabase"] = after
+                evidence["m4ProviderRequests"] = requests
+                evidence["m4ProviderInput"] = {
+                    "classification": "disposable_loopback_tmdb_tls_fixture",
+                    "public_provider_acceptance": False,
+                    "build_feature": "tmdb-smoke-fixture",
+                    "daemon_sha256": runtime.sha256_file(
+                        ROOT / "target/tmdb-smoke-fixture/debug/fastid"
+                    ),
+                }
             receipt = {
                 "schema_version": "fasti.access-ordinary-browser.v1",
                 "source": {
@@ -346,6 +430,67 @@ def main() -> None:
                 smoke.stop_process(trailbase_process, None)
             if smtp is not None:
                 smtp.shutdown()
+                smtp.server_close()
+            if provider is not None:
+                provider.close()
+
+
+def _search_database_evidence(database: Path, record_id: str) -> dict[str, object]:
+    with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as connection:
+        films = connection.execute(
+            "SELECT record_id FROM records WHERE grain = 'film' AND status = 'active'"
+        ).fetchall()
+        identifiers = connection.execute(
+            "SELECT namespace, grain, value FROM external_identifiers WHERE record_id = ? ORDER BY value",
+            (record_id,),
+        ).fetchall()
+        actions = connection.execute(
+            "SELECT record_id, receipt_json FROM search_action_receipts ORDER BY operation_id"
+        ).fetchall()
+        candidates = connection.execute(
+            "SELECT c.candidate_receipt_id, c.provider_record_id, c.kind, c.candidate_json, p.provider_id "
+            "FROM search_candidate_receipts c LEFT JOIN search_pages p ON p.sequence = c.page_sequence "
+            "ORDER BY c.provider_record_id"
+        ).fetchall()
+        provenance = connection.execute(
+            "SELECT DISTINCT source_record_id FROM metadata_claim_provenance "
+            "WHERE record_id = ? AND provider_id = 'tmdb' AND provenance_state = 'complete' "
+            "AND evidence_digest IS NOT NULL ORDER BY source_record_id", (record_id,),
+        ).fetchall()
+    expected_ids = [str(value) for value in PROVIDER_IDS]
+    receipts = [json.loads(row[1]) for row in actions]
+    candidate_ids = {row[0]: row[1] for row in candidates}
+    expected_actions = {
+        "create": (expected_ids[0], "created"),
+        "attach": (expected_ids[1], "attached"),
+    }
+    if (films != [(record_id,)]
+            or identifiers != [("tmdb.movie", "film", value) for value in expected_ids]
+            or [row[1] for row in candidates] != expected_ids
+            or any(row[0] != record_id for row in actions)
+            or provenance != [(value,) for value in expected_ids]
+            or len(receipts) != 2
+            or sorted(row["action"]["kind"] for row in receipts) != ["attach", "create"]
+            or any(row["action"].get("record_id") != record_id for row in receipts
+                   if row["action"]["kind"] == "attach")
+            or any(not row["actor_subject_id"] or not row["actor_client_id"] for row in receipts)
+            or len({row["operation_id"] for row in receipts}) != 2):
+        raise RuntimeError("durable real-process Search identity/provenance/action evidence differs")
+    for _, provider_record_id, kind, candidate_json, provider in candidates:
+        candidate = json.loads(candidate_json)
+        if (provider != "tmdb" or kind != "movie"
+                or candidate["provider"] != "tmdb" or candidate["kind"] != "movie"
+                or candidate["provider_id"] != provider_record_id):
+            raise RuntimeError("durable Search candidate differs from its owning provider page")
+    for row in receipts:
+        provider_record_id, disposition = expected_actions[row["action"]["kind"]]
+        if (candidate_ids.get(row["candidate_receipt_id"]) != provider_record_id
+                or row["provider"] != "tmdb" or row["grain"] != "film"
+                or row["record_id"] != record_id or row["evidence_mode"] != "refetch"
+                or row["disposition"] != disposition):
+            raise RuntimeError("durable Search action is not bound to its expected candidate")
+    return {"recordId": record_id, "identifiers": identifiers, "candidateCount": len(candidates),
+            "actions": receipts, "completeProvenanceSourceIds": expected_ids}
 
 
 if __name__ == "__main__":

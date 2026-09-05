@@ -4,6 +4,8 @@
 
 mod api_clients;
 mod artwork;
+#[cfg(feature = "desktop-runtime")]
+mod artwork_protocol;
 mod endpoint;
 mod metadata;
 mod network_config;
@@ -11,6 +13,9 @@ mod nuvio_collections;
 mod providers;
 mod records;
 mod reviews;
+mod search;
+#[cfg(all(test, feature = "desktop-runtime"))]
+mod search_permission_tests;
 mod secure_storage;
 mod setup;
 
@@ -19,12 +24,11 @@ use axum::response::IntoResponse;
 #[cfg(feature = "desktop-runtime")]
 use endpoint::{EndpointConnectionInput, EndpointConnectionStatus};
 #[cfg(feature = "desktop-runtime")]
-use fasti_application::{AccessAdministrationPort, CapabilityKey};
-#[cfg(feature = "desktop-runtime")]
 use fasti_api::{
-    FASTI_ACCESS_BINDING_COOKIE, FASTI_ACCESS_CALLBACK_PATH, FASTI_ACCESS_HOST,
-    FASTI_ACCESS_ORIGIN,
+    FASTI_ACCESS_BINDING_COOKIE, FASTI_ACCESS_CALLBACK_PATH, FASTI_ACCESS_HOST, FASTI_ACCESS_ORIGIN,
 };
+#[cfg(feature = "desktop-runtime")]
+use fasti_application::{AccessAdministrationPort, CapabilityKey, ProviderOperationLease};
 #[cfg(feature = "desktop-runtime")]
 use fasti_domain::{AuthCeremonyPurpose, AuthCeremonySelection, RecordId, RequestCorrelationId};
 #[cfg(feature = "desktop-runtime")]
@@ -38,12 +42,12 @@ use providers::{
     SaveProviderCredentialInput,
 };
 #[cfg(feature = "desktop-runtime")]
+use serde::Serialize;
+#[cfg(feature = "desktop-runtime")]
 use setup::{DesktopProblem, KeyringSetupSecretStore, SetupStatus};
 use std::ffi::OsString;
 use std::io;
 use std::path::PathBuf;
-#[cfg(feature = "desktop-runtime")]
-use serde::Serialize;
 #[cfg(feature = "desktop-runtime")]
 use std::sync::{Arc, Mutex};
 #[cfg(feature = "desktop-runtime")]
@@ -51,6 +55,14 @@ use tauri::{
     webview::cookie::{time::Duration as CookieDuration, Cookie, SameSite},
     Manager,
 };
+
+#[cfg(feature = "desktop-runtime")]
+#[derive(Serialize)]
+struct ProviderCandidateResponse {
+    #[serde(flatten)]
+    candidate: ProviderCandidate,
+    grain: &'static str,
+}
 
 #[cfg(all(feature = "desktop-runtime", not(target_os = "android")))]
 struct AccessServer {
@@ -69,9 +81,12 @@ struct AccessServerInner {
 #[cfg(all(feature = "desktop-runtime", not(target_os = "android")))]
 impl AccessServer {
     fn is_running(&self) -> bool {
-        self.inner
-            .lock()
-            .is_ok_and(|inner| inner.task.as_ref().is_some_and(|task| !task.inner().is_finished()))
+        self.inner.lock().is_ok_and(|inner| {
+            inner
+                .task
+                .as_ref()
+                .is_some_and(|task| !task.inner().is_finished())
+        })
     }
 
     async fn shutdown(&self) -> io::Result<()> {
@@ -90,7 +105,9 @@ impl AccessServer {
         };
         tokio::time::timeout(ACCESS_SERVER_SHUTDOWN_TIMEOUT, task)
             .await
-            .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "Access server shutdown timed out"))?
+            .map_err(|_| {
+                io::Error::new(io::ErrorKind::TimedOut, "Access server shutdown timed out")
+            })?
             .map_err(io::Error::other)??;
         Ok(())
     }
@@ -116,7 +133,7 @@ struct DesktopState {
     artwork: artwork::ArtworkCache,
     provider_runtime: Mutex<Option<Arc<fasti_provider_runtime::ProviderRuntime>>>,
     // ponytail: one provider gate prevents credential races; split by provider if contention appears.
-    provider_operation_gate: tokio::sync::Mutex<()>,
+    provider_operation_gate: Arc<tokio::sync::Mutex<()>>,
     access_runtime: Option<Arc<fasti_api::DirectLoopbackAccessRuntime>>,
     #[cfg(not(target_os = "android"))]
     access_server: Arc<AccessServer>,
@@ -354,17 +371,21 @@ async fn test_endpoint_connection(
 
 #[cfg(feature = "desktop-runtime")]
 async fn run_blocking_provider_operation<T, F>(
-    gate: &tokio::sync::Mutex<()>,
+    gate: &Arc<tokio::sync::Mutex<()>>,
     operation: F,
 ) -> Result<T, DesktopProblem>
 where
     T: Send + 'static,
     F: FnOnce() -> Result<T, DesktopProblem> + Send + 'static,
 {
-    let _provider_guard = gate.lock().await;
-    tokio::task::spawn_blocking(operation)
-        .await
-        .map_err(|_| DesktopProblem::storage("The provider operation task did not complete."))?
+    let provider_guard = Arc::clone(gate).lock_owned().await;
+    tokio::task::spawn_blocking(move || {
+        // A cancelled caller cannot stop blocking vault work or release its gate early.
+        let _provider_guard = provider_guard;
+        operation()
+    })
+    .await
+    .map_err(|_| DesktopProblem::storage("The provider operation task did not complete."))?
 }
 
 #[cfg(feature = "desktop-runtime")]
@@ -473,7 +494,7 @@ async fn read_provider_health(
 async fn search_provider(
     state: tauri::State<'_, DesktopState>,
     input: ProviderSearchInput,
-) -> Result<Vec<ProviderCandidate>, DesktopProblem> {
+) -> Result<Vec<ProviderCandidateResponse>, DesktopProblem> {
     let _provider_guard = state.provider_operation_gate.lock().await;
     let kernel = state.kernel()?;
     let access = records::require_access(
@@ -488,6 +509,130 @@ async fn search_provider(
         access.workspace_id(),
         input,
         configuration.outbound_policy(),
+    )
+    .await?
+    .into_iter()
+    .map(|candidate| {
+        Ok(ProviderCandidateResponse {
+            grain: candidate.grain()?.as_str(),
+            candidate,
+        })
+    })
+    .collect()
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command]
+async fn search_provider_page(
+    state: tauri::State<'_, DesktopState>,
+    input: search::ProviderPageInput,
+) -> Result<fasti_contracts::SearchProviderPageResponse, DesktopProblem> {
+    let kernel = state.kernel()?;
+    let access = records::require_access(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+    )?;
+    let runtime = state.provider_runtime(&kernel)?;
+    let configuration = state.network.load()?;
+    let lease = ProviderOperationLease::new(
+        Arc::clone(&state.provider_operation_gate)
+            .lock_owned()
+            .await,
+    );
+    search::provider_page(
+        runtime,
+        kernel,
+        access,
+        configuration.outbound_policy().clone(),
+        input,
+        lease,
+    )
+    .await
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command]
+async fn read_search_candidate(
+    state: tauri::State<'_, DesktopState>,
+    input: search::CandidateDetailsInput,
+) -> Result<fasti_contracts::SearchCandidateDetailsResponse, DesktopProblem> {
+    let kernel = state.kernel()?;
+    let access = records::require_access(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+    )?;
+    let runtime = state.provider_runtime(&kernel)?;
+    let configuration = state.network.load()?;
+    let lease = ProviderOperationLease::new(
+        Arc::clone(&state.provider_operation_gate)
+            .lock_owned()
+            .await,
+    );
+    search::candidate_details(
+        runtime,
+        kernel,
+        access,
+        configuration.outbound_policy().clone(),
+        input,
+        lease,
+    )
+    .await
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command]
+async fn save_search_candidate(
+    state: tauri::State<'_, DesktopState>,
+    input: search::CandidateActionInput,
+) -> Result<fasti_contracts::SearchCandidateActionResponse, DesktopProblem> {
+    let kernel = state.kernel()?;
+    let access = records::require_access(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+    )?;
+    let runtime = state.provider_runtime(&kernel)?;
+    let configuration = state.network.load()?;
+    let lease = ProviderOperationLease::new(
+        Arc::clone(&state.provider_operation_gate)
+            .lock_owned()
+            .await,
+    );
+    search::save_candidate(
+        runtime,
+        kernel,
+        access,
+        configuration.outbound_policy().clone(),
+        input,
+        lease,
+    )
+    .await
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command]
+async fn save_provider_identifier(
+    state: tauri::State<'_, DesktopState>,
+    input: search::ProviderIdentifierActionInput,
+) -> Result<fasti_contracts::ProviderIdentifierActionResponse, DesktopProblem> {
+    let kernel = state.kernel()?;
+    let access = records::require_access(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+    )?;
+    let runtime = state.provider_runtime(&kernel)?;
+    let configuration = state.network.load()?;
+    let lease = ProviderOperationLease::new(
+        Arc::clone(&state.provider_operation_gate)
+            .lock_owned()
+            .await,
+    );
+    search::save_provider_identifier(
+        runtime,
+        kernel,
+        access,
+        configuration.outbound_policy().clone(),
+        input,
+        lease,
     )
     .await
 }
@@ -512,15 +657,15 @@ async fn track_provider_candidate(
         configuration.outbound_policy(),
     )
     .await?;
-    state
-        .artwork
-        .cache_candidate(
+    records::finish_provider_save(
+        records::create_provider_record(&kernel, access, &candidate),
+        state.artwork.cache_candidate(
             &candidate,
             configuration.outbound_policy(),
             runtime.transport(),
-        )
-        .await?;
-    records::create_provider_record(&kernel, access, candidate)
+        ),
+    )
+    .await
 }
 
 #[cfg(feature = "desktop-runtime")]
@@ -555,15 +700,15 @@ async fn apply_provider_metadata(
         configuration.outbound_policy(),
     )
     .await?;
-    state
-        .artwork
-        .cache_candidate(
+    records::finish_provider_save(
+        records::apply_provider_metadata(&kernel, access, record_id, &candidate),
+        state.artwork.cache_candidate(
             &candidate,
             configuration.outbound_policy(),
             runtime.transport(),
-        )
-        .await?;
-    records::apply_provider_metadata(&kernel, access, record_id, candidate)
+        ),
+    )
+    .await
 }
 
 #[cfg(feature = "desktop-runtime")]
@@ -572,7 +717,11 @@ async fn refresh_metadata_claims(
     state: tauri::State<'_, DesktopState>,
     input: fasti_contracts::RefreshMetadataClaimsRequest,
 ) -> Result<fasti_contracts::RefreshMetadataClaimsResponse, DesktopProblem> {
-    let _provider_guard = state.provider_operation_gate.lock().await;
+    let lease = fasti_application::ProviderOperationLease::new(
+        Arc::clone(&state.provider_operation_gate)
+            .lock_owned()
+            .await,
+    );
     let kernel = state.kernel()?;
     let access = records::require_access(
         &kernel,
@@ -580,7 +729,7 @@ async fn refresh_metadata_claims(
     )?;
     let runtime = state.provider_runtime(&kernel)?;
     let policy = state.network.load()?.outbound_policy().clone();
-    metadata::refresh(kernel, runtime, policy, access, input).await
+    metadata::refresh(kernel, runtime, policy, access, input, lease).await
 }
 
 #[cfg(feature = "desktop-runtime")]
@@ -615,12 +764,29 @@ fn configure_metadata_projection(
 #[tauri::command(async)]
 fn list_records(
     state: tauri::State<'_, DesktopState>,
+    query: Option<fasti_contracts::ListRecordsQueryParameters>,
 ) -> Result<records::RecordPage, DesktopProblem> {
     let kernel = state.kernel()?;
     records::list_records(
         &kernel,
         &KeyringSetupSecretStore::new(kernel.data_root_identity()),
         &state.artwork,
+        query,
+    )
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command(async)]
+fn search_records(
+    state: tauri::State<'_, DesktopState>,
+    input: fasti_contracts::LocalSearchRequestDto,
+) -> Result<search::LocalSearchResponse, DesktopProblem> {
+    let kernel = state.kernel()?;
+    search::local_records(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+        &state.artwork,
+        input,
     )
 }
 
@@ -844,6 +1010,7 @@ pub fn run() {
     #[cfg(not(target_os = "android"))]
     let setup_access_server_owner = Arc::clone(&access_server_owner);
     let app = tauri::Builder::default()
+        .register_asynchronous_uri_scheme_protocol("asset", artwork_protocol::handle)
         .setup(move |app| {
             secure_storage::initialize().map_err(|()| {
                 io::Error::other("Fasti could not initialize the platform credential store")
@@ -855,12 +1022,10 @@ pub fn run() {
                 SqliteKernel::open(&data_root)
                     .map_err(|_| io::Error::other("Fasti could not open its local data root"))?,
             );
-            let artwork = artwork::ArtworkCache::new(artwork_root);
+            let artwork = artwork::ArtworkCache::new(artwork_root, kernel.data_root_identity());
             artwork.prepare().map_err(|_| {
                 io::Error::other("Fasti could not prepare its private artwork cache")
             })?;
-            app.asset_protocol_scope()
-                .allow_directory(artwork.root(), false)?;
             #[cfg(not(target_os = "android"))]
             let (access_runtime, access_server) = {
                 let listener = bind_access_listener()?;
@@ -885,7 +1050,9 @@ pub fn run() {
                             let Some(asset) = resolver.get(path.to_owned()) else {
                                 return axum::http::StatusCode::NOT_FOUND.into_response();
                             };
-                            let Ok(content_type) = asset.mime_type().parse::<axum::http::HeaderValue>() else {
+                            let Ok(content_type) =
+                                asset.mime_type().parse::<axum::http::HeaderValue>()
+                            else {
                                 return axum::http::StatusCode::INTERNAL_SERVER_ERROR
                                     .into_response();
                             };
@@ -897,10 +1064,9 @@ pub fn run() {
                                 axum::body::Body::from(asset.bytes)
                             };
                             let mut response = axum::response::Response::new(body);
-                            response.headers_mut().insert(
-                                axum::http::header::CONTENT_TYPE,
-                                content_type,
-                            );
+                            response
+                                .headers_mut()
+                                .insert(axum::http::header::CONTENT_TYPE, content_type);
                             response.headers_mut().insert(
                                 axum::http::header::CONTENT_LENGTH,
                                 axum::http::HeaderValue::try_from(content_length.to_string())
@@ -911,10 +1077,9 @@ pub fn run() {
                                     return axum::http::StatusCode::INTERNAL_SERVER_ERROR
                                         .into_response();
                                 };
-                                response.headers_mut().insert(
-                                    axum::http::header::CONTENT_SECURITY_POLICY,
-                                    csp,
-                                );
+                                response
+                                    .headers_mut()
+                                    .insert(axum::http::header::CONTENT_SECURITY_POLICY, csp);
                             }
                             response
                         }
@@ -936,14 +1101,10 @@ pub fn run() {
                         shutdown: Some(shutdown),
                     }),
                 });
-                *setup_access_server_owner
-                    .lock()
-                    .map_err(|_| io::Error::other("the Access server owner lock is unavailable"))? =
-                    Some(Arc::clone(&access_server));
-                (
-                    Some(runtime),
-                    access_server,
-                )
+                *setup_access_server_owner.lock().map_err(|_| {
+                    io::Error::other("the Access server owner lock is unavailable")
+                })? = Some(Arc::clone(&access_server));
+                (Some(runtime), access_server)
             };
             #[cfg(target_os = "android")]
             let access_runtime = None;
@@ -956,14 +1117,16 @@ pub fn run() {
                 provider_runtime: Mutex::new(None),
                 // ponytail: serialize provider vault mutation and metadata claim
                 // refresh; use per-provider gates only if measured throughput needs it.
-                provider_operation_gate: tokio::sync::Mutex::new(()),
+                provider_operation_gate: Arc::new(tokio::sync::Mutex::new(())),
                 access_runtime,
                 #[cfg(not(target_os = "android"))]
                 access_server,
             });
             #[cfg(not(target_os = "android"))]
             app.get_webview_window("main")
-                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "the main WebView is missing"))?
+                .ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::NotFound, "the main WebView is missing")
+                })?
                 .navigate(
                     tauri::Url::parse(FASTI_ACCESS_ORIGIN)
                         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?,
@@ -986,12 +1149,17 @@ pub fn run() {
             test_provider_credential,
             read_provider_health,
             search_provider,
+            search_provider_page,
+            read_search_candidate,
+            save_search_candidate,
+            save_provider_identifier,
             track_provider_candidate,
             apply_provider_metadata,
             refresh_metadata_claims,
             read_metadata_projection,
             configure_metadata_projection,
             list_records,
+            search_records,
             create_record,
             attach_identifier,
             register_namespace,
@@ -1070,7 +1238,11 @@ mod tests {
         let value = serde_json::to_value(response).expect("serialize command response");
 
         assert_eq!(
-            value.as_object().expect("response object").keys().collect::<Vec<_>>(),
+            value
+                .as_object()
+                .expect("response object")
+                .keys()
+                .collect::<Vec<_>>(),
             ["authorization_url", "expires_at"]
         );
         let encoded = value.to_string();
@@ -1097,18 +1269,15 @@ mod tests {
     #[cfg(feature = "desktop-runtime")]
     #[test]
     fn packaged_capability_allows_only_the_main_exact_loopback_origin() {
-        let configuration: serde_json::Value = serde_json::from_str(include_str!(
-            "../tauri.conf.json"
-        ))
-        .expect("packaged Tauri configuration JSON");
-        let desktop: serde_json::Value = serde_json::from_str(include_str!(
-            "../capabilities/main-loopback.json"
-        ))
-        .expect("packaged capability JSON");
-        let android: serde_json::Value = serde_json::from_str(include_str!(
-            "../capabilities/main-android-local.json"
-        ))
-        .expect("Android capability JSON");
+        let configuration: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json"))
+                .expect("packaged Tauri configuration JSON");
+        let desktop: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/main-loopback.json"))
+                .expect("packaged capability JSON");
+        let android: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/main-android-local.json"))
+                .expect("Android capability JSON");
 
         assert_eq!(desktop["windows"], serde_json::json!(["main"]));
         assert_eq!(
@@ -1135,8 +1304,14 @@ mod tests {
     #[cfg(all(feature = "desktop-runtime", not(target_os = "android")))]
     #[test]
     fn embedded_spa_fallback_serves_navigation_without_masking_api_or_mutations() {
-        assert!(serves_embedded_asset(&axum::http::Method::GET, "/first-run"));
-        assert!(serves_embedded_asset(&axum::http::Method::HEAD, "/first-run"));
+        assert!(serves_embedded_asset(
+            &axum::http::Method::GET,
+            "/first-run"
+        ));
+        assert!(serves_embedded_asset(
+            &axum::http::Method::HEAD,
+            "/first-run"
+        ));
         assert!(!serves_embedded_asset(&axum::http::Method::GET, "/api"));
         assert!(!serves_embedded_asset(
             &axum::http::Method::GET,
@@ -1198,7 +1373,7 @@ mod tests {
     #[cfg(feature = "desktop-runtime")]
     #[tokio::test]
     async fn blocking_provider_operations_wait_for_the_shared_gate() {
-        let gate = tokio::sync::Mutex::new(());
+        let gate = Arc::new(tokio::sync::Mutex::new(()));
         let held = gate.lock().await;
         let started = Arc::new(AtomicBool::new(false));
         let operation_started = Arc::clone(&started);
@@ -1218,5 +1393,34 @@ mod tests {
         drop(held);
         operation.await.expect("serialized provider operation");
         assert!(started.load(Ordering::SeqCst));
+    }
+
+    #[cfg(feature = "desktop-runtime")]
+    #[tokio::test]
+    async fn cancelled_provider_caller_keeps_gate_until_blocking_work_finishes() {
+        let gate = Arc::new(tokio::sync::Mutex::new(()));
+        let operation_gate = Arc::clone(&gate);
+        let (started, entered) = tokio::sync::oneshot::channel();
+        let (finish, release) = std::sync::mpsc::channel();
+        let caller = tokio::spawn(async move {
+            run_blocking_provider_operation(&operation_gate, move || {
+                started.send(()).expect("caller is waiting");
+                release.recv().expect("release blocking work");
+                Ok(())
+            })
+            .await
+        });
+        entered.await.expect("blocking operation started");
+        caller.abort();
+        assert!(caller.await.expect_err("caller cancelled").is_cancelled());
+        let still_locked = gate.try_lock().is_err();
+        finish.send(()).expect("finish outstanding blocking work");
+        let _finished = tokio::time::timeout(Duration::from_secs(5), gate.lock())
+            .await
+            .expect("completed blocking operation releases its gate");
+        assert!(
+            still_locked,
+            "cancellation must not release the provider gate"
+        );
     }
 }

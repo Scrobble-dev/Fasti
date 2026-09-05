@@ -2,6 +2,8 @@ import {
   connectionEndpoint,
   FastiClient,
   type CredentialProvider,
+  type LocalSearchRequestDto,
+  type LocalSearchResponseDto,
 } from "@fasti/sdk";
 import type {
   AttachIdentifierInput,
@@ -12,6 +14,7 @@ import type {
   IntegrationRuntimeStatus,
   IntegrationStatusHost,
   IntegrationStatusResponse,
+  ListRecordsQueryParameters,
   NetworkConfiguration,
   MetadataProjectionConfigurationResponse,
   MetadataProjectionResponse,
@@ -330,7 +333,7 @@ export function createWebHost(
       return parseIntegrationStatusResponse(response.integrations);
     },
     async providerCredentialStatus(): Promise<ProviderCredentialStatus[]> {
-      return loadProviderRows(client);
+      return loadProviderRows(credential ? client : accessClient);
     },
     async saveProviderCredential(
       provider: string,
@@ -370,12 +373,51 @@ export function createWebHost(
         `${provider} search is not active in the browser host. Provider requests must use the governed native or server host.`,
       );
     },
+    async searchRecords(
+      request: LocalSearchRequestDto,
+    ): Promise<LocalSearchResponseDto> {
+      const response = await (credential ? client : accessClient).searchRecords(
+        request,
+      );
+      return {
+        ...response,
+        records: response.records.map((record) => ({
+          ...record,
+          poster: { ...record.poster, value: null },
+        })),
+      };
+    },
+    searchProviderPage: (provider, request) =>
+      (credential ? client : accessClient).searchProviderPage(
+        provider,
+        request,
+      ),
+    readSearchCandidate: (provider, grain, candidateReceiptId, offline) =>
+      (credential ? client : accessClient).readSearchCandidate(
+        provider,
+        grain,
+        candidateReceiptId,
+        { offline },
+      ),
+    saveSearchCandidate: (provider, grain, candidateReceiptId, request) =>
+      (credential ? client : accessClient).saveSearchCandidate(
+        provider,
+        grain,
+        candidateReceiptId,
+        request,
+      ),
+    saveProviderIdentifier: (provider, grain, request) =>
+      (credential ? client : accessClient).saveProviderIdentifier(
+        provider,
+        grain,
+        request,
+      ),
     clearSearchCache(): void {},
     getSearchCacheSize(): number {
       return 0;
     },
-    async listRecords(): Promise<RecordPage> {
-      const response = await client.listRecords();
+    async listRecords(query?: ListRecordsQueryParameters): Promise<RecordPage> {
+      const response = await client.listRecords({}, query);
       return {
         truncated: response.truncated,
         records: response.records.map((record) => ({

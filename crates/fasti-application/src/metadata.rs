@@ -5,7 +5,7 @@
 //! Fasti Record; it never becomes the Record identity.
 
 use crate::{ApplicationResult, RequestAccessContext};
-use crate::{ProviderCapabilityState, ProviderId};
+use crate::{ProviderCapabilityState, ProviderId, ProviderResponseCachePolicy};
 use fasti_domain::{
     AnimeGroupingPreference, EnrichmentPolicy, ExternalIdentifierClaim, ExternalIdentifierError,
     FieldClaim, FieldClaimStatus, FieldKey, Grain, IdentityAssertion,
@@ -23,6 +23,19 @@ use std::{collections::HashMap, future::Future, pin::Pin};
 pub const MAX_PROVIDER_METADATA_FIELDS: usize = 16;
 pub const GOOGLE_BOOKS_PROVIDER_ID: &str = "google-books";
 pub const TMDB_PROVIDER_ID: &str = "tmdb";
+
+/// Actual top-level provider response locale, independent of UI preference.
+pub fn provider_metadata_response_locale(
+    provider: &str,
+    requested: Option<&MetadataLocale>,
+) -> Option<MetadataLocale> {
+    match provider {
+        TMDB_PROVIDER_ID => Some(requested.cloned().unwrap_or_else(|| {
+            MetadataLocale::try_new("en-US").expect("fixed TMDB locale is valid")
+        })),
+        _ => None,
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ProviderIdentifierValueKind {
@@ -872,6 +885,58 @@ impl ProviderMetadataField {
     }
 }
 
+/// Convert bounded provider evidence without choosing a new observation time or
+/// freshness policy. Callers supply the actual response context, not save time.
+pub fn provider_candidate_metadata_fields(
+    candidate: &crate::SearchCandidate,
+    locale: Option<MetadataLocale>,
+    region: Option<MetadataRegion>,
+    evidence_digest: &fasti_domain::Sha256Digest,
+    fetched_at: fasti_domain::ReceivedAt,
+    expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    initial_status: FieldClaimStatus,
+) -> Result<Vec<ProviderMetadataField>, crate::SearchEvidenceError> {
+    let invalid = crate::SearchEvidenceError::InvalidCandidate;
+    let data = candidate.data();
+    let provenance = fasti_domain::FieldClaimProvenance::try_new(
+        MetadataProviderId::try_new(&data.provider).map_err(|_| invalid)?,
+        fasti_domain::NamespaceKey::try_new(candidate.identifier().namespace())
+            .map_err(|_| invalid)?,
+        candidate.identifier().value(),
+        locale,
+        region,
+        None,
+        evidence_digest.clone(),
+    )
+    .map_err(|_| invalid)?;
+    let year = data.release_year.map(|year| year.to_string());
+    [
+        (TITLE_FIELD_KEY, Some(data.title.as_str())),
+        (ORIGINAL_TITLE_FIELD_KEY, data.original_title.as_deref()),
+        (OVERVIEW_FIELD_KEY, data.overview.as_deref()),
+        (POSTER_FIELD_KEY, data.image_url.as_deref()),
+        (RELEASE_YEAR_FIELD_KEY, year.as_deref()),
+    ]
+    .into_iter()
+    .filter_map(|(key, value)| value.map(|value| (key, value)))
+    .map(|(key, value)| {
+        let claim = FieldClaim::try_new_unbound_provider(
+            fasti_domain::MetadataClaimId::new_v7(),
+            value,
+            provenance.clone(),
+            fetched_at,
+            expires_at,
+            initial_status,
+        )
+        .map_err(|_| invalid)?;
+        Ok(ProviderMetadataField::new(
+            FieldKey::try_new(key).map_err(|_| invalid)?,
+            claim,
+        ))
+    })
+    .collect()
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct CreateProviderRecordCommand {
     correlation_id: RequestCorrelationId,
@@ -879,6 +944,7 @@ pub struct CreateProviderRecordCommand {
     grain: Grain,
     identifier: ExternalIdentifierClaim,
     fields: Vec<ProviderMetadataField>,
+    response_policy: ProviderResponseCachePolicy,
 }
 
 impl CreateProviderRecordCommand {
@@ -888,6 +954,7 @@ impl CreateProviderRecordCommand {
         grain: Grain,
         identifier: ExternalIdentifierClaim,
         fields: Vec<ProviderMetadataField>,
+        response_policy: ProviderResponseCachePolicy,
     ) -> Self {
         Self {
             correlation_id,
@@ -895,6 +962,7 @@ impl CreateProviderRecordCommand {
             grain,
             identifier,
             fields,
+            response_policy,
         }
     }
 
@@ -917,6 +985,10 @@ impl CreateProviderRecordCommand {
     pub fn fields(&self) -> &[ProviderMetadataField] {
         &self.fields
     }
+
+    pub const fn response_policy(&self) -> &ProviderResponseCachePolicy {
+        &self.response_policy
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -926,6 +998,7 @@ pub struct ApplyProviderMetadataCommand {
     record_id: RecordId,
     identifier: ExternalIdentifierClaim,
     fields: Vec<ProviderMetadataField>,
+    response_policy: ProviderResponseCachePolicy,
 }
 
 impl ApplyProviderMetadataCommand {
@@ -935,6 +1008,7 @@ impl ApplyProviderMetadataCommand {
         record_id: RecordId,
         identifier: ExternalIdentifierClaim,
         fields: Vec<ProviderMetadataField>,
+        response_policy: ProviderResponseCachePolicy,
     ) -> Self {
         Self {
             correlation_id,
@@ -942,6 +1016,7 @@ impl ApplyProviderMetadataCommand {
             record_id,
             identifier,
             fields,
+            response_policy,
         }
     }
 
@@ -963,6 +1038,10 @@ impl ApplyProviderMetadataCommand {
 
     pub fn fields(&self) -> &[ProviderMetadataField] {
         &self.fields
+    }
+
+    pub const fn response_policy(&self) -> &ProviderResponseCachePolicy {
+        &self.response_policy
     }
 }
 
@@ -1215,6 +1294,7 @@ pub trait MetadataClaimRefreshService: Send + Sync {
     fn authorize_and_refresh(
         &self,
         command: RefreshMetadataClaimsCommand,
+        lease: crate::ProviderOperationLease,
     ) -> MetadataRefreshFuture<'_>;
 }
 
@@ -1329,6 +1409,7 @@ pub struct CommitMetadataRefreshCommand {
     ratings: Vec<RatingClaim>,
     cache_entries: Vec<MetadataCacheEntry>,
     attribution: MetadataAttribution,
+    response_policy: ProviderResponseCachePolicy,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1524,6 +1605,7 @@ impl CommitMetadataRefreshCommand {
         ratings: Vec<RatingClaim>,
         cache_entries: Vec<MetadataCacheEntry>,
         attribution: MetadataAttribution,
+        response_policy: ProviderResponseCachePolicy,
     ) -> Self {
         Self {
             correlation_id,
@@ -1537,6 +1619,7 @@ impl CommitMetadataRefreshCommand {
             ratings,
             cache_entries,
             attribution,
+            response_policy,
         }
     }
 
@@ -1572,6 +1655,10 @@ impl CommitMetadataRefreshCommand {
     }
     pub const fn attribution(&self) -> &MetadataAttribution {
         &self.attribution
+    }
+
+    pub const fn response_policy(&self) -> &ProviderResponseCachePolicy {
+        &self.response_policy
     }
 }
 

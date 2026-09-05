@@ -7,6 +7,9 @@ import type {
   ApplyAnimeGroupingPolicyChangeResponse,
   CompleteTrailBaseContinuationRequest,
   ConfigureMetadataProjectionRequest,
+  ListRecordsQueryParameters,
+  LocalSearchRequestDto,
+  LocalSearchResponseDto,
   MetadataProjectionConfigurationResponse,
   MetadataProjectionResponse,
   PreviewAnimeGroupingPolicyChangeRequest,
@@ -15,6 +18,13 @@ import type {
   ReadTrailBaseContinuationResponse,
   RefreshMetadataClaimsRequest,
   RefreshMetadataClaimsResponse,
+  ProviderIdentifierActionRequest,
+  ProviderIdentifierActionResponse,
+  SearchCandidateActionRequest,
+  SearchCandidateActionResponse,
+  SearchCandidateDetailsResponse,
+  SearchProviderPageRequest,
+  SearchProviderPageResponse,
   RevokeBrowserSessionsResponse,
   RotateBrowserSessionResponse,
   StartTrailBaseSignInRequest,
@@ -31,6 +41,10 @@ export type {
   CompleteTrailBaseContinuationRequest,
   ConfigureMetadataProjectionRequest,
   EnrichmentPolicyDto,
+  ListRecordsQueryParameters,
+  LocalSearchCursorDto,
+  LocalSearchRequestDto,
+  LocalSearchResponseDto,
   MetadataAttributionDto,
   MetadataCacheEntryDto,
   MetadataFieldGroupDto,
@@ -44,6 +58,16 @@ export type {
   RatingClaimDto,
   RefreshMetadataClaimsRequest,
   RefreshMetadataClaimsResponse,
+  ProviderIdentifierActionRequest,
+  ProviderIdentifierActionResponse,
+  SearchCandidateActionRequest,
+  SearchCandidateActionResponse,
+  SearchCandidateDto,
+  SearchCandidateDetailsResponse,
+  SearchCandidateReceiptDto,
+  SearchRecordActionDto,
+  SearchProviderPageRequest,
+  SearchProviderPageResponse,
   RevokeBrowserSessionsResponse,
   RotateBrowserSessionResponse,
   StartTrailBaseSignInRequest,
@@ -326,6 +350,7 @@ export interface ProviderCredentialStatus {
 export interface ProviderSearchCandidate {
   readonly provider: string;
   readonly provider_id: string;
+  readonly grain: string;
   readonly title: string;
   readonly original_title?: string;
   readonly kind: MediaKind | string;
@@ -378,6 +403,30 @@ export interface WorkbenchHost {
     provider: string,
     query: string,
   ): Promise<ProviderSearchCandidate[]>;
+  searchRecords?(
+    request: LocalSearchRequestDto,
+  ): Promise<LocalSearchResponseDto>;
+  searchProviderPage?(
+    provider: string,
+    request: SearchProviderPageRequest,
+  ): Promise<SearchProviderPageResponse>;
+  readSearchCandidate?(
+    provider: string,
+    grain: string,
+    candidateReceiptId: string,
+    offline: boolean,
+  ): Promise<SearchCandidateDetailsResponse>;
+  saveSearchCandidate?(
+    provider: string,
+    grain: string,
+    candidateReceiptId: string,
+    request: SearchCandidateActionRequest,
+  ): Promise<SearchCandidateActionResponse>;
+  saveProviderIdentifier?(
+    provider: string,
+    grain: string,
+    request: ProviderIdentifierActionRequest,
+  ): Promise<ProviderIdentifierActionResponse>;
   trackProviderCandidate?(
     selection: ProviderSelection,
   ): Promise<CreateRecordResult>;
@@ -392,7 +441,7 @@ export interface WorkbenchHost {
   getSearchCacheSize?(): number;
   listReviews?(): Promise<ReviewItem[]>;
   resolveReview?(input: ResolveReviewInput): Promise<ResolveReviewOutcome>;
-  listRecords?(): Promise<RecordPage>;
+  listRecords?(query?: ListRecordsQueryParameters): Promise<RecordPage>;
   createRecord?(grain: string): Promise<CreateRecordResult>;
   attachIdentifier?(
     input: AttachIdentifierInput,

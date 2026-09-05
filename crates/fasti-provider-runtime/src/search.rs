@@ -1,0 +1,1302 @@
+use crate::metadata::{provider_response_locale, run_blocking};
+use crate::{
+    ProviderCandidate, ProviderRuntime, ProviderRuntimeError, ProviderRuntimeErrorKind,
+    ProviderSearchInput, ProviderSearchPage, ProviderSelectionInput,
+};
+use fasti_application::{
+    ApplicationResult, CapabilityKey, ProblemCode, ProviderCapabilityState,
+    ProviderIdentifierActionCommand, ProviderIdentifierActionOutcome,
+    ProviderIdentifierActionPreparation, ProviderOperationLease, ReadSearchCandidateRequest,
+    SearchPageRequest, SearchPersistencePort, StoredSearchPage,
+};
+use std::{future::Future, sync::Arc};
+
+#[cfg(test)]
+use fasti_application::StoredSearchCandidate;
+pub use fasti_application::{
+    ProviderCandidateDetailsOutcome, ProviderSearchActionOutcome, ProviderSearchOutcome,
+};
+
+/// Governed provider-page orchestration. Hosts acquire their existing provider
+/// gate before calling; this service neither creates locks nor owns user state.
+pub struct ProviderSearchService {
+    runtime: Arc<ProviderRuntime>,
+    persistence: Arc<dyn SearchPersistencePort>,
+}
+
+impl ProviderSearchService {
+    pub fn new(runtime: Arc<ProviderRuntime>, persistence: Arc<dyn SearchPersistencePort>) -> Self {
+        Self {
+            runtime,
+            persistence,
+        }
+    }
+
+    pub async fn save_candidate(
+        &self,
+        command: fasti_application::SearchCandidateActionCommand,
+        lease: ProviderOperationLease,
+    ) -> ApplicationResult<ProviderSearchActionOutcome> {
+        let runtime = Arc::clone(&self.runtime);
+        let policy = command.request.outbound_policy.clone();
+        self.save_candidate_with(command, lease, move |selection, state| async move {
+            runtime.fetch_selection(selection, &policy, &state).await
+        })
+        .await
+    }
+
+    pub async fn save_provider_identifier(
+        &self,
+        command: ProviderIdentifierActionCommand,
+        lease: ProviderOperationLease,
+    ) -> ApplicationResult<ProviderIdentifierActionOutcome> {
+        let runtime = Arc::clone(&self.runtime);
+        let policy = command.outbound_policy.clone();
+        self.save_provider_identifier_with(command, lease, move |selection, state| async move {
+            runtime.fetch_selection(selection, &policy, &state).await
+        })
+        .await
+    }
+
+    async fn save_provider_identifier_with<F, Fut>(
+        &self,
+        mut command: ProviderIdentifierActionCommand,
+        lease: ProviderOperationLease,
+        fetch: F,
+    ) -> ApplicationResult<ProviderIdentifierActionOutcome>
+    where
+        F: FnOnce(ProviderSelectionInput, ProviderCapabilityState) -> Fut,
+        Fut: Future<Output = Result<ProviderCandidate, ProviderRuntimeError>>,
+    {
+        let capability = CapabilityKey::AttachIdentifier;
+        let id = command.correlation_id;
+        command.terms_revision = self
+            .cache_policy_revision(command.provider.as_str(), id)
+            .map_err(|_| {
+                Box::new(fasti_application::FastiProblem::from_code(
+                    ProblemCode::ValidationFailed,
+                    capability,
+                    id,
+                ))
+            })?;
+        let mapping = fasti_application::provider_identity_mapping_for_grain(
+            command.provider.as_str(),
+            command.grain,
+        )
+        .ok_or_else(|| {
+            Box::new(fasti_application::FastiProblem::from_code(
+                ProblemCode::InvalidIdentifier,
+                capability,
+                id,
+            ))
+        })?;
+        let expected_identifier = mapping
+            .identifier(command.provider_record_id.clone())
+            .map_err(|_| {
+                Box::new(fasti_application::FastiProblem::from_code(
+                    ProblemCode::InvalidIdentifier,
+                    capability,
+                    id,
+                ))
+            })?;
+        let persistence = Arc::clone(&self.persistence);
+        let request = command.clone();
+        let prepared = run_blocking(&lease, capability, id, move || {
+            persistence.prepare_provider_identifier_action(&request)
+        })
+        .await?;
+        let state = match &prepared {
+            ProviderIdentifierActionPreparation::Replay(receipt) => {
+                return Ok(ProviderIdentifierActionOutcome::Saved(receipt.clone()))
+            }
+            ProviderIdentifierActionPreparation::Refetch { provider_state, .. } => {
+                provider_state.clone()
+            }
+        };
+        let selection = ProviderSelectionInput {
+            provider: command.provider.as_str().to_owned(),
+            provider_id: command.provider_record_id.clone(),
+            kind: mapping.kind().to_owned(),
+            locale: None,
+            region: None,
+        };
+        let fetched = fetch(selection, state).await;
+        let confirmed_identifier = match fetched.and_then(|candidate| {
+            let identifier = candidate.search_evidence()?.identifier().clone();
+            if identifier != expected_identifier {
+                return Err(ProviderRuntimeError::response_invalid(
+                    "The provider detail identity does not match the selected identifier.",
+                ));
+            }
+            Ok(identifier)
+        }) {
+            Ok(identifier) => identifier,
+            Err(error) => {
+                let persistence = Arc::clone(&self.persistence);
+                let request = command.clone();
+                let current = run_blocking(&lease, capability, id, move || {
+                    persistence.prepare_provider_identifier_action(&request)
+                })
+                .await?;
+                return match (&prepared, current) {
+                    (_, ProviderIdentifierActionPreparation::Replay(receipt)) => {
+                        Ok(ProviderIdentifierActionOutcome::Saved(receipt))
+                    }
+                    (
+                        ProviderIdentifierActionPreparation::Refetch {
+                            provider_authority_fingerprint: original,
+                            ..
+                        },
+                        ProviderIdentifierActionPreparation::Refetch {
+                            provider_authority_fingerprint: current,
+                            ..
+                        },
+                    ) if original == &current => Ok(ProviderIdentifierActionOutcome::Unavailable {
+                        problem: error.problem_code(),
+                    }),
+                    _ => Err(Box::new(fasti_application::FastiProblem::forbidden(
+                        capability, id,
+                    ))),
+                };
+            }
+        };
+        let persistence = Arc::clone(&self.persistence);
+        let receipt = run_blocking(&lease, capability, id, move || {
+            persistence.commit_provider_identifier_action(
+                &command,
+                &prepared,
+                &confirmed_identifier,
+            )
+        })
+        .await?;
+        Ok(ProviderIdentifierActionOutcome::Saved(Box::new(receipt)))
+    }
+
+    async fn save_candidate_with<F, Fut>(
+        &self,
+        mut command: fasti_application::SearchCandidateActionCommand,
+        lease: ProviderOperationLease,
+        fetch: F,
+    ) -> ApplicationResult<ProviderSearchActionOutcome>
+    where
+        F: FnOnce(ProviderSelectionInput, ProviderCapabilityState) -> Fut,
+        Fut: Future<Output = Result<ProviderCandidate, ProviderRuntimeError>>,
+    {
+        use fasti_application::SearchCandidateActionPreparation as Preparation;
+        let capability = CapabilityKey::AttachIdentifier;
+        let id = command.request.correlation_id;
+        command.request.terms_revision = self
+            .cache_policy_revision(command.request.provider.as_str(), id)
+            .map_err(|_| {
+                Box::new(fasti_application::FastiProblem::from_code(
+                    ProblemCode::ValidationFailed,
+                    capability,
+                    id,
+                ))
+            })?;
+        let persistence = Arc::clone(&self.persistence);
+        let request = command.clone();
+        let prepared = run_blocking(&lease, capability, id, move || {
+            persistence.prepare_search_candidate_action(&request)
+        })
+        .await?;
+        let fetched = match &prepared {
+            Preparation::Replay(receipt) => {
+                return Ok(ProviderSearchActionOutcome::Saved(receipt.clone()))
+            }
+            Preparation::Cached(_) => None,
+            Preparation::Refetch(details) => {
+                let candidate = details.candidate.receipt.candidate();
+                let source = candidate.data();
+                let locale = fasti_application::provider_metadata_response_locale(
+                    &source.provider,
+                    details.candidate.context.locale(),
+                );
+                let selection = ProviderSelectionInput {
+                    provider: source.provider.clone(),
+                    provider_id: source.provider_id.clone(),
+                    kind: source.kind.clone(),
+                    locale: locale.as_ref().map(|value| value.as_str().to_owned()),
+                    region: None,
+                };
+                Some(fetch(selection, details.provider_state.clone()).await.and_then(|fresh| {
+                    if fresh.search_evidence()?.identifier() != candidate.identifier() {
+                        return Err(ProviderRuntimeError::response_invalid("The provider detail identity does not match the selected candidate."));
+                    }
+                    let policy = *fresh.recorded_response_policy()?;
+                    fresh.metadata_fields(locale, None).map(|fields| (fields, policy))
+                }))
+            }
+        };
+        let fields = match fetched {
+            None => None,
+            Some(Ok(fields)) => Some(fields),
+            Some(Err(error)) => {
+                let persistence = Arc::clone(&self.persistence);
+                let current = run_blocking(&lease, capability, id, move || {
+                    persistence.prepare_search_candidate_action(&command)
+                })
+                .await?;
+                match (&prepared, current) {
+                    (_, Preparation::Replay(receipt)) => {
+                        return Ok(ProviderSearchActionOutcome::Saved(receipt))
+                    }
+                    (Preparation::Refetch(original), Preparation::Refetch(current))
+                        if original.candidate == current.candidate
+                            && original.provider_authority_fingerprint
+                                == current.provider_authority_fingerprint =>
+                    {
+                        return Ok(ProviderSearchActionOutcome::Unavailable {
+                            problem: error.problem_code(),
+                        });
+                    }
+                    _ => {
+                        return Err(Box::new(fasti_application::FastiProblem::forbidden(
+                            capability, id,
+                        )))
+                    }
+                }
+            }
+        };
+        let persistence = Arc::clone(&self.persistence);
+        let receipt = run_blocking(&lease, capability, id, move || {
+            persistence.commit_search_candidate_action(
+                &command,
+                &prepared,
+                fields
+                    .as_ref()
+                    .map(|(fields, policy)| (fields.as_slice(), policy)),
+            )
+        })
+        .await?;
+        Ok(ProviderSearchActionOutcome::Saved(Box::new(receipt)))
+    }
+
+    pub async fn search_page(
+        &self,
+        mut request: SearchPageRequest,
+        offline: bool,
+        lease: ProviderOperationLease,
+    ) -> ApplicationResult<ProviderSearchOutcome> {
+        request.query = effective_query(&request.query, request.correlation_id)?;
+        let runtime = Arc::clone(&self.runtime);
+        let query = request.query.clone();
+        let policy = request.outbound_policy.clone();
+        self.search_page_with(request, offline, lease, move |state| async move {
+            runtime
+                .search_page(
+                    ProviderSearchInput {
+                        provider: query.provider().as_str().to_owned(),
+                        query: query.query().as_str().to_owned(),
+                    },
+                    query.page(),
+                    query.locale(),
+                    &policy,
+                    &state,
+                )
+                .await
+        })
+        .await
+    }
+
+    pub async fn candidate_details(
+        &self,
+        request: ReadSearchCandidateRequest,
+        offline: bool,
+        lease: ProviderOperationLease,
+    ) -> ApplicationResult<Option<ProviderCandidateDetailsOutcome>> {
+        let runtime = Arc::clone(&self.runtime);
+        let policy = request.outbound_policy.clone();
+        self.candidate_details_with(
+            request,
+            offline,
+            lease,
+            move |selection, state| async move {
+                runtime.fetch_selection(selection, &policy, &state).await
+            },
+        )
+        .await
+    }
+
+    async fn candidate_details_with<F, Fut>(
+        &self,
+        mut request: ReadSearchCandidateRequest,
+        offline: bool,
+        lease: ProviderOperationLease,
+        fetch: F,
+    ) -> ApplicationResult<Option<ProviderCandidateDetailsOutcome>>
+    where
+        F: FnOnce(ProviderSelectionInput, ProviderCapabilityState) -> Fut,
+        Fut: Future<Output = Result<ProviderCandidate, ProviderRuntimeError>>,
+    {
+        let capability = CapabilityKey::SearchMetadata;
+        let id = request.correlation_id;
+        request.terms_revision = self.cache_policy_revision(request.provider.as_str(), id)?;
+        let persistence = Arc::clone(&self.persistence);
+        let read = request.clone();
+        if offline {
+            // An authorized original snapshot needs no provider-read capability,
+            // DNS, credential or network access. Its stored lifetime is unchanged.
+            return run_blocking(&lease, capability, id, move || {
+                persistence.read_search_candidate(&read)
+            })
+            .await
+            .map(|candidate| {
+                candidate
+                    .filter(|candidate| candidate.payload_is_reusable(chrono::Utc::now()))
+                    .map(ProviderCandidateDetailsOutcome::Snapshot)
+            });
+        }
+        let Some(prepared) = run_blocking(&lease, capability, id, move || {
+            persistence.prepare_search_candidate_details(&read)
+        })
+        .await?
+        else {
+            return Ok(None);
+        };
+        let source = prepared.candidate.receipt.candidate().data();
+        let locale = provider_response_locale(
+            &source.provider,
+            prepared.candidate.context.locale(),
+            capability,
+            id,
+        )?;
+        let selection = ProviderSelectionInput {
+            provider: source.provider.clone(),
+            provider_id: source.provider_id.clone(),
+            kind: source.kind.clone(),
+            locale: locale.as_ref().map(|value| value.as_str().to_owned()),
+            // These movie/series/volume detail routes do not have a response-region
+            // contract. Do not promote old requested-region evidence into a claim.
+            region: None,
+        };
+        let fetched = fetch(selection, prepared.provider_state.clone()).await;
+        let persistence = Arc::clone(&self.persistence);
+        let Some(current) = run_blocking(&lease, capability, id, move || {
+            persistence.prepare_search_candidate_details(&request)
+        })
+        .await?
+        else {
+            return Ok(None);
+        };
+        if current.candidate != prepared.candidate
+            || current.provider_authority_fingerprint != prepared.provider_authority_fingerprint
+        {
+            return Err(Box::new(fasti_application::FastiProblem::forbidden(
+                capability, id,
+            )));
+        }
+        let snapshot = current.candidate;
+        let fetched = fetched.and_then(|details| {
+            let evidence = details.search_evidence()?;
+            if evidence.identifier() == snapshot.receipt.candidate().identifier() {
+                Ok(evidence)
+            } else {
+                Err(ProviderRuntimeError::response_invalid(
+                    "The provider detail identity does not match the selected candidate.",
+                ))
+            }
+        });
+        // This locator comes from the current authorized receipt, not a fresh
+        // receipt or an assertion that the newly fetched payload matches it.
+        let candidate_receipt_id = snapshot.receipt.id();
+        let provider = fasti_application::ProviderId::try_new(snapshot.context.provider())
+            .map_err(|_| {
+                Box::new(fasti_application::FastiProblem::from_code(
+                    ProblemCode::IntegrityFailed,
+                    capability,
+                    id,
+                ))
+            })?;
+        let grain = snapshot.receipt.candidate().identifier().grain();
+        Ok(Some(
+            match (snapshot.payload_is_reusable(chrono::Utc::now()), fetched) {
+                (true, Ok(details)) => ProviderCandidateDetailsOutcome::Refetched {
+                    snapshot,
+                    details: Box::new(details),
+                    locale,
+                },
+                (true, Err(error)) => ProviderCandidateDetailsOutcome::Unavailable {
+                    snapshot,
+                    problem: error.problem_code(),
+                },
+                (false, Ok(details)) => ProviderCandidateDetailsOutcome::RefetchedWithoutSnapshot {
+                    candidate_receipt_id,
+                    provider,
+                    grain,
+                    details: Box::new(details),
+                    locale,
+                },
+                (false, Err(error)) => {
+                    ProviderCandidateDetailsOutcome::UnavailableWithoutSnapshot {
+                        candidate_receipt_id,
+                        provider,
+                        grain,
+                        problem: error.problem_code(),
+                    }
+                }
+            },
+        ))
+    }
+
+    fn cache_policy_revision(
+        &self,
+        provider: &str,
+        id: fasti_domain::RequestCorrelationId,
+    ) -> ApplicationResult<String> {
+        self.runtime
+            .descriptor(provider)
+            .map(|descriptor| descriptor.cache_policy.to_owned())
+            .map_err(|_| {
+                Box::new(fasti_application::FastiProblem::from_code(
+                    ProblemCode::ValidationFailed,
+                    CapabilityKey::SearchMetadata,
+                    id,
+                ))
+            })
+    }
+
+    // Keep the fetch lazy: cache-only paths never resolve DNS or load credentials.
+    // The private closure also exercises sequencing without replacing governed egress.
+    async fn search_page_with<F, Fut>(
+        &self,
+        mut request: SearchPageRequest,
+        offline: bool,
+        lease: ProviderOperationLease,
+        fetch: F,
+    ) -> ApplicationResult<ProviderSearchOutcome>
+    where
+        F: FnOnce(ProviderCapabilityState) -> Fut,
+        Fut: Future<Output = Result<ProviderSearchPage, ProviderRuntimeError>>,
+    {
+        let capability = CapabilityKey::SearchMetadata;
+        let id = request.correlation_id;
+        // The legacy partition slot holds trusted Fasti cache policy, never a
+        // caller-selected revision or the provider's legal-posture label.
+        request.terms_revision =
+            self.cache_policy_revision(request.query.provider().as_str(), id)?;
+        let persistence = Arc::clone(&self.persistence);
+        let prepare_request = request.clone();
+        let prepared = run_blocking(&lease, capability, id, move || {
+            persistence.prepare_search_page(&prepare_request)
+        })
+        .await?;
+        if let Some(page) = self.cached(&request, false, &lease).await? {
+            return Ok(ProviderSearchOutcome::Page {
+                page,
+                upstream_problem: None,
+            });
+        }
+        if offline {
+            return self
+                .fallback(&request, ProblemCode::ProviderUnavailable, &lease)
+                .await;
+        }
+        let fetched = fetch(prepared.provider_state.clone()).await;
+        // Errors also expose source state. Recheck authority before returning any
+        // post-I/O outcome, then let the final commit recheck atomically again.
+        let persistence = Arc::clone(&self.persistence);
+        let check_request = request.clone();
+        let current = run_blocking(&lease, capability, id, move || {
+            persistence.prepare_search_page(&check_request)
+        })
+        .await?;
+        if current.partition != prepared.partition {
+            return Err(Box::new(fasti_application::FastiProblem::forbidden(
+                capability, id,
+            )));
+        }
+        let fetched = match fetched {
+            Ok(page) => page,
+            Err(error) => {
+                if matches!(
+                    error.kind(),
+                    ProviderRuntimeErrorKind::Network | ProviderRuntimeErrorKind::Provider
+                ) && matches!(
+                    error.problem_code(),
+                    ProblemCode::ProviderUnavailable | ProblemCode::ProviderRateLimited
+                ) {
+                    return self.fallback(&request, error.problem_code(), &lease).await;
+                }
+                // Vault, policy, credential and malformed-response failures cannot
+                // rescue an otherwise ineligible page through stale-on-error.
+                return Ok(ProviderSearchOutcome::Unavailable {
+                    problem: error.problem_code(),
+                });
+            }
+        };
+        if fetched.candidates.len() > fasti_application::MAX_SEARCH_PAGE_CANDIDATES {
+            return Ok(ProviderSearchOutcome::Unavailable {
+                problem: ProblemCode::ProviderResponseInvalid,
+            });
+        }
+        let mut candidates = Vec::with_capacity(fetched.candidates.len());
+        let context = request.query.receipt_context();
+        for candidate in &fetched.candidates {
+            let candidate = match candidate.search_evidence() {
+                Ok(candidate) => candidate,
+                Err(error) => {
+                    return Ok(ProviderSearchOutcome::Unavailable {
+                        problem: error.problem_code(),
+                    })
+                }
+            };
+            if candidate.data().provider != request.query.provider().as_str() {
+                return Ok(ProviderSearchOutcome::Unavailable {
+                    problem: ProblemCode::ProviderResponseInvalid,
+                });
+            }
+            if context.accepts(&candidate) {
+                candidates.push(candidate);
+            }
+        }
+        let persistence = Arc::clone(&self.persistence);
+        if context
+            .validate_page(&candidates, fetched.next_page)
+            .is_err()
+        {
+            return Ok(ProviderSearchOutcome::Unavailable {
+                problem: ProblemCode::ProviderResponseInvalid,
+            });
+        }
+        let Some(response_policy) = fetched.response_cache_policy().copied() else {
+            return Ok(ProviderSearchOutcome::Unavailable {
+                problem: ProblemCode::ProviderResponseInvalid,
+            });
+        };
+        if response_policy.reuse() == fasti_application::ProviderResponseReuse::NoStore {
+            run_blocking(&lease, capability, id, move || {
+                persistence.discard_cached_search_page(&request, &prepared)
+            })
+            .await?;
+            return Ok(ProviderSearchOutcome::Live {
+                candidates,
+                next_page: fetched.next_page,
+            });
+        }
+        let page = run_blocking(&lease, capability, id, move || {
+            persistence.commit_search_page(
+                &request,
+                &prepared,
+                &candidates,
+                &fetched.evidence_digest,
+                fetched.next_page,
+                &response_policy,
+            )
+        })
+        .await?;
+        Ok(ProviderSearchOutcome::Page {
+            page,
+            upstream_problem: None,
+        })
+    }
+
+    async fn cached(
+        &self,
+        request: &SearchPageRequest,
+        upstream_unavailable: bool,
+        lease: &ProviderOperationLease,
+    ) -> ApplicationResult<Option<StoredSearchPage>> {
+        let persistence = Arc::clone(&self.persistence);
+        let request = request.clone();
+        run_blocking(
+            lease,
+            CapabilityKey::SearchMetadata,
+            request.correlation_id,
+            move || persistence.read_cached_search_page(&request, upstream_unavailable),
+        )
+        .await
+    }
+
+    async fn fallback(
+        &self,
+        request: &SearchPageRequest,
+        problem: ProblemCode,
+        lease: &ProviderOperationLease,
+    ) -> ApplicationResult<ProviderSearchOutcome> {
+        Ok(match self.cached(request, true, lease).await? {
+            Some(page) => ProviderSearchOutcome::Page {
+                page,
+                upstream_problem: Some(problem),
+            },
+            None => ProviderSearchOutcome::Unavailable { problem },
+        })
+    }
+}
+
+fn effective_query(
+    query: &fasti_application::SearchProviderQuery,
+    id: fasti_domain::RequestCorrelationId,
+) -> ApplicationResult<fasti_application::SearchProviderQuery> {
+    let capability = CapabilityKey::SearchMetadata;
+    let locale =
+        provider_response_locale(query.provider().as_str(), query.locale(), capability, id)?;
+    // Current TMDB multi-search and Google Books routes have no response-region
+    // parameter. Regional enrichment remains a separate, route-specific owner.
+    fasti_application::SearchProviderQuery::try_new(
+        query.query().clone(),
+        query.provider().clone(),
+        query.page(),
+        locale,
+        None,
+        query.grains().to_vec(),
+    )
+    .map_err(|_| {
+        Box::new(fasti_application::FastiProblem::from_code(
+            ProblemCode::IntegrityFailed,
+            capability,
+            id,
+        ))
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    include!("search_response_policy_tests.rs");
+    include!("search_action_tests.rs");
+    use super::*;
+    include!("search_details_tests.rs");
+    use fasti_application::*;
+    use fasti_domain::*;
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex,
+    };
+
+    struct Persistence {
+        prepared: PreparedSearchPage,
+        fresh: Option<StoredSearchPage>,
+        stale: Option<StoredSearchPage>,
+        calls: Mutex<Vec<&'static str>>,
+        deny_commit: AtomicBool,
+        deny_prepare: AtomicBool,
+        pause_commit: Mutex<
+            Option<(
+                tokio::sync::oneshot::Sender<()>,
+                std::sync::mpsc::Receiver<()>,
+            )>,
+        >,
+    }
+
+    fn page() -> StoredSearchPage {
+        let at = chrono::Utc::now();
+        StoredSearchPage {
+            sequence: 1,
+            candidates: vec![],
+            next_page: Some(2),
+            cache_state: SearchCacheState::Fresh,
+            lifetime: SearchReceiptLifetime::try_new(
+                at,
+                at + chrono::Duration::seconds(120),
+                at + chrono::Duration::seconds(600),
+                at + chrono::Duration::seconds(86400),
+            )
+            .unwrap(),
+            response_digest: Sha256Digest::from_bytes(&[4; 32]),
+        }
+    }
+
+    fn setup(
+        fresh: Option<StoredSearchPage>,
+        stale: Option<StoredSearchPage>,
+    ) -> (ProviderSearchService, Arc<Persistence>, SearchPageRequest) {
+        setup_with_grains(fresh, stale, vec![])
+    }
+
+    fn setup_with_grains(
+        fresh: Option<StoredSearchPage>,
+        stale: Option<StoredSearchPage>,
+        grains: Vec<Grain>,
+    ) -> (ProviderSearchService, Arc<Persistence>, SearchPageRequest) {
+        let access = RequestAccessContext::new(
+            WorkspaceId::new_v7(),
+            ProfileId::new_v7(),
+            ClientId::new_v7(),
+            CredentialId::new_v7(),
+            ProfileGrantId::new_v7(),
+            1,
+        );
+        let mut request = SearchPageRequest {
+            correlation_id: RequestCorrelationId::new_v7(),
+            access: access.into(),
+            query: SearchProviderQuery::try_new(
+                SearchQuery::try_new("Fixture").unwrap(),
+                ProviderId::try_new("tmdb").unwrap(),
+                1,
+                None,
+                None,
+                grains,
+            )
+            .unwrap(),
+            outbound_policy: OutboundAccessPolicy::default(),
+            terms_revision: "fixture-terms".into(),
+        };
+        request.query = effective_query(&request.query, request.correlation_id).unwrap();
+        let prepared = PreparedSearchPage {
+            partition: SearchReceiptPartition::try_new(
+                AuthorizedApplicationAccess::new(
+                    access.workspace_id(),
+                    access.profile_id(),
+                    access.grant_id(),
+                    AuthorizedActor::Credential {
+                        presented_client_id: access.client_id(),
+                        credential_id: access.credential_id(),
+                    },
+                ),
+                request.query.receipt_context().digest(),
+                Sha256Digest::from_bytes(&[1; 32]),
+                Sha256Digest::from_bytes(&[2; 32]),
+                "fasti.public-metadata-cache.v1".into(),
+            )
+            .unwrap(),
+            provider_state: ProviderCapabilityState::try_new(
+                ProviderId::try_new("tmdb").unwrap(),
+                ProviderCapabilityId::try_new("metadata.search").unwrap(),
+                ProviderCapabilityStatus::Available,
+                1,
+                CredentialRequirement::BearerToken,
+                Some(CredentialReference::try_new("secret:fixture").unwrap()),
+                ProviderCredentialStatus::StoredUnverified,
+                ConfigurationDigest::parse("ab".repeat(32)).unwrap(),
+                ProviderCheckMetadata::never_run(),
+                ProviderCheckMetadata::never_run(),
+            )
+            .unwrap(),
+        };
+        let persistence = Arc::new(Persistence {
+            prepared,
+            fresh,
+            stale,
+            calls: Mutex::new(vec![]),
+            deny_commit: AtomicBool::new(false),
+            deny_prepare: AtomicBool::new(false),
+            pause_commit: Mutex::new(None),
+        });
+        let runtime = Arc::new(ProviderRuntime::new(Arc::new(
+            crate::PlatformCredentialVault::new("fasti-test", "search-no-vault-access"),
+        )));
+        (
+            ProviderSearchService::new(runtime, persistence.clone()),
+            persistence,
+            request,
+        )
+    }
+
+    impl SearchPersistencePort for Persistence {
+        fn authorize_search_candidate_read_request(
+            &self,
+            _: RequestCorrelationId,
+            _: &ApplicationAccessContext,
+        ) -> ApplicationResult<()> {
+            unreachable!("runtime tests enter after transport authorization")
+        }
+        fn authorize_search_candidate_action_request(
+            &self,
+            _: RequestCorrelationId,
+            _: &ApplicationAccessContext,
+        ) -> ApplicationResult<()> {
+            unreachable!("runtime tests enter after transport authorization")
+        }
+        fn authorize_search_page_request(
+            &self,
+            _: RequestCorrelationId,
+            _: &ApplicationAccessContext,
+        ) -> ApplicationResult<()> {
+            unreachable!("runtime tests enter after transport authorization")
+        }
+        fn prepare_search_candidate_action(
+            &self,
+            _: &fasti_application::SearchCandidateActionCommand,
+        ) -> ApplicationResult<fasti_application::SearchCandidateActionPreparation> {
+            panic!("page orchestration must not prepare actions")
+        }
+        fn commit_search_candidate_action(
+            &self,
+            _: &fasti_application::SearchCandidateActionCommand,
+            _: &fasti_application::SearchCandidateActionPreparation,
+            _: Option<(
+                &[fasti_application::ProviderMetadataField],
+                &fasti_application::ProviderResponseCachePolicy,
+            )>,
+        ) -> ApplicationResult<fasti_application::SearchCandidateActionReceipt> {
+            panic!("page orchestration must not commit actions")
+        }
+        fn search_local_records(
+            &self,
+            _: &LocalSearchRequest,
+        ) -> ApplicationResult<LocalSearchPage> {
+            panic!("provider pages must not own local Record search")
+        }
+
+        fn prepare_search_page(
+            &self,
+            request: &SearchPageRequest,
+        ) -> ApplicationResult<PreparedSearchPage> {
+            assert_eq!(request.terms_revision, "fasti.public-metadata-cache.v1");
+            assert_eq!(
+                request.query,
+                effective_query(&request.query, request.correlation_id).unwrap()
+            );
+            self.calls.lock().unwrap().push("prepare");
+            if self.deny_prepare.load(Ordering::SeqCst) {
+                return Err(Box::new(FastiProblem::forbidden(
+                    CapabilityKey::SearchMetadata,
+                    request.correlation_id,
+                )));
+            }
+            Ok(self.prepared.clone())
+        }
+        fn read_cached_search_page(
+            &self,
+            request: &SearchPageRequest,
+            stale: bool,
+        ) -> ApplicationResult<Option<StoredSearchPage>> {
+            assert_eq!(request.terms_revision, "fasti.public-metadata-cache.v1");
+            self.calls
+                .lock()
+                .unwrap()
+                .push(if stale { "stale" } else { "fresh" });
+            Ok(if stale {
+                self.stale.clone()
+            } else {
+                self.fresh.clone()
+            })
+        }
+        fn discard_cached_search_page(
+            &self,
+            request: &SearchPageRequest,
+            prepared: &PreparedSearchPage,
+        ) -> ApplicationResult<()> {
+            self.calls.lock().unwrap().push("discard");
+            assert_eq!(prepared, &self.prepared);
+            if self.deny_commit.load(Ordering::SeqCst) {
+                return Err(Box::new(FastiProblem::forbidden(
+                    CapabilityKey::SearchMetadata,
+                    request.correlation_id,
+                )));
+            }
+            Ok(())
+        }
+        fn commit_search_page(
+            &self,
+            request: &SearchPageRequest,
+            prepared: &PreparedSearchPage,
+            candidates: &[SearchCandidate],
+            digest: &Sha256Digest,
+            next_page: Option<u32>,
+            _: &ProviderResponseCachePolicy,
+        ) -> ApplicationResult<StoredSearchPage> {
+            assert_eq!(request.terms_revision, "fasti.public-metadata-cache.v1");
+            self.calls.lock().unwrap().push("commit");
+            let pause = self.pause_commit.lock().unwrap().take();
+            if let Some((entered, release)) = pause {
+                let _ = entered.send(());
+                let _ = release.recv();
+            }
+            if self.deny_commit.load(Ordering::SeqCst) {
+                return Err(Box::new(FastiProblem::forbidden(
+                    CapabilityKey::SearchMetadata,
+                    request.correlation_id,
+                )));
+            }
+            assert_eq!(prepared, &self.prepared);
+            let mut page = page();
+            page.next_page = next_page;
+            page.response_digest = digest.clone();
+            page.candidates = candidates
+                .iter()
+                .map(|candidate| {
+                    SearchCandidateReceipt::new(
+                        SearchCandidateReceiptId::new_v7(),
+                        prepared.partition.clone(),
+                        candidate.clone(),
+                        digest.clone(),
+                        page.lifetime.clone(),
+                    )
+                })
+                .collect();
+            Ok(page)
+        }
+        fn read_search_candidate(
+            &self,
+            _: &ReadSearchCandidateRequest,
+        ) -> ApplicationResult<Option<StoredSearchCandidate>> {
+            panic!("page orchestration must not reopen details");
+        }
+        fn prepare_search_candidate_details(
+            &self,
+            _: &ReadSearchCandidateRequest,
+        ) -> ApplicationResult<Option<PreparedSearchCandidateDetails>> {
+            panic!("page orchestration must not prepare details");
+        }
+    }
+
+    async fn lease() -> ProviderOperationLease {
+        ProviderOperationLease::new(Arc::new(tokio::sync::Mutex::new(())).lock_owned().await)
+    }
+
+    #[test]
+    fn effective_search_coordinates_match_provider_routes() {
+        let id = RequestCorrelationId::new_v7();
+        for provider in [crate::TMDB_PROVIDER, crate::GOOGLE_BOOKS_PROVIDER] {
+            let query = |locale: Option<&str>, region: Option<&str>| {
+                SearchProviderQuery::try_new(
+                    SearchQuery::try_new("Fixture").unwrap(),
+                    ProviderId::try_new(provider).unwrap(),
+                    2,
+                    locale.map(|value| MetadataLocale::try_new(value).unwrap()),
+                    region.map(|value| MetadataRegion::try_new(value).unwrap()),
+                    vec![Grain::Film],
+                )
+                .unwrap()
+            };
+            let default = effective_query(&query(None, None), id).unwrap();
+            let explicit = effective_query(&query(Some("en-US"), Some("US")), id).unwrap();
+            let french = effective_query(&query(Some("fr-FR"), Some("FR")), id).unwrap();
+            assert_eq!(default, explicit);
+            assert_eq!(
+                default.receipt_context().digest(),
+                explicit.receipt_context().digest()
+            );
+            assert_eq!(french.region(), None);
+            assert_eq!(french.page(), 2);
+            assert_eq!(french.grains(), &[Grain::Film]);
+            assert_eq!(french.query().as_str(), "Fixture");
+            assert_eq!(french.provider().as_str(), provider);
+            if provider == crate::TMDB_PROVIDER {
+                assert_eq!(default.locale().map(MetadataLocale::as_str), Some("en-us"));
+                assert_eq!(french.locale().map(MetadataLocale::as_str), Some("fr-fr"));
+                assert_ne!(default.digest(), french.digest());
+            } else {
+                assert_eq!(french, default);
+                assert_eq!(french.locale(), None);
+            }
+            assert_eq!(effective_query(&french, id).unwrap(), french);
+        }
+    }
+
+    #[tokio::test]
+    async fn public_search_uses_trusted_policy_and_coordinates_before_cache_reads() {
+        for offline in [false, true] {
+            for revision in ["", "caller-chosen", "tmdb_attribution_required"] {
+                let (service, persistence, mut request) = setup(Some(page()), None);
+                request.terms_revision = revision.into();
+                request.query = SearchProviderQuery::try_new(
+                    request.query.query().clone(),
+                    request.query.provider().clone(),
+                    1,
+                    None,
+                    Some(MetadataRegion::try_new("FR").unwrap()),
+                    vec![],
+                )
+                .unwrap();
+                let outcome = service
+                    .search_page(request, offline, lease().await)
+                    .await
+                    .unwrap();
+                assert!(
+                    matches!(outcome, ProviderSearchOutcome::Page { page, upstream_problem: None } if page.candidates.is_empty())
+                );
+                assert_eq!(*persistence.calls.lock().unwrap(), ["prepare", "fresh"]);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn unknown_provider_never_reaches_search_persistence_or_fetch() {
+        let (service, persistence, mut request) = setup(Some(page()), Some(page()));
+        request.query = SearchProviderQuery::try_new(
+            request.query.query().clone(),
+            ProviderId::try_new("unknown-provider").unwrap(),
+            1,
+            None,
+            None,
+            vec![],
+        )
+        .unwrap();
+        let error = service
+            .search_page_with(request, false, lease().await, |_| async {
+                panic!("unknown provider fetched")
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), ProblemCode::ValidationFailed);
+        assert!(persistence.calls.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn cache_and_offline_paths_never_fetch_even_for_empty_pages() {
+        for offline in [false, true] {
+            let (service, persistence, request) = setup(Some(page()), None);
+            let result = service
+                .search_page_with(request, offline, lease().await, |_| async {
+                    panic!("cache hit fetched upstream")
+                })
+                .await
+                .unwrap();
+            assert!(
+                matches!(result, ProviderSearchOutcome::Page { page, upstream_problem: None } if page.candidates.is_empty() && page.cache_state == SearchCacheState::Fresh)
+            );
+            assert_eq!(*persistence.calls.lock().unwrap(), ["prepare", "fresh"]);
+        }
+        for cached in [false, true] {
+            let mut stale = page();
+            stale.cache_state = SearchCacheState::StaleOnError;
+            let (service, persistence, request) = setup(None, cached.then_some(stale));
+            let result = service
+                .search_page_with(request, true, lease().await, |_| async {
+                    panic!("offline fetched upstream")
+                })
+                .await
+                .unwrap();
+            assert_eq!(matches!(result, ProviderSearchOutcome::Page { .. }), cached);
+            assert_eq!(
+                *persistence.calls.lock().unwrap(),
+                ["prepare", "fresh", "stale"]
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn search_commits_normalized_receipts_and_filtered_empty_continuations() {
+        for filtered in [false, true] {
+            let grains = if filtered {
+                vec![Grain::Series]
+            } else {
+                vec![]
+            };
+            let (service, persistence, request) = setup_with_grains(None, None, grains);
+            let upstream = crate::providers::search_page_fixture();
+            let digest = upstream.evidence_digest.clone();
+            let expected = persistence.prepared.provider_state.clone();
+            let result = service
+                .search_page_with(request, false, lease().await, move |state| async move {
+                    assert_eq!(state, expected);
+                    Ok(upstream)
+                })
+                .await
+                .unwrap();
+            let ProviderSearchOutcome::Page {
+                page,
+                upstream_problem: None,
+            } = result
+            else {
+                panic!("committed page")
+            };
+            assert_eq!(page.candidates.len(), usize::from(!filtered));
+            assert_eq!(page.next_page, Some(2));
+            assert_eq!(page.response_digest, digest);
+            assert_eq!(
+                *persistence.calls.lock().unwrap(),
+                ["prepare", "fresh", "prepare", "commit"]
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn only_transient_upstream_failures_allow_stale_fallback() {
+        for (error, fallback) in [
+            (ProviderRuntimeError::network("offline"), true),
+            (ProviderRuntimeError::provider("upstream outage"), true),
+            (ProviderRuntimeError::rate_limited("limit"), true),
+            (ProviderRuntimeError::credential("denied"), false),
+            (ProviderRuntimeError::configuration("policy"), false),
+            (ProviderRuntimeError::vault("locked"), false),
+            (ProviderRuntimeError::response_invalid("invalid"), false),
+        ]
+        .into_iter()
+        .chain(
+            crate::providers::registry()
+                .iter()
+                .filter(|spec| spec.runtime_available)
+                .flat_map(|spec| {
+                    [401, 403, 404, 429, 500, 501, 502, 503, 504, 505].map(|status| {
+                        (
+                            crate::providers::provider_status_error(
+                                *spec,
+                                reqwest::StatusCode::from_u16(status).unwrap(),
+                            )
+                            .unwrap(),
+                            matches!(status, 429 | 500 | 502 | 503 | 504),
+                        )
+                    })
+                }),
+        ) {
+            let mut stale = page();
+            stale.cache_state = SearchCacheState::StaleOnError;
+            let (service, persistence, request) = setup(None, Some(stale));
+            let code = error.problem_code();
+            let outcome = service
+                .search_page_with(request, false, lease().await, |_| async move { Err(error) })
+                .await
+                .unwrap();
+            match outcome {
+                ProviderSearchOutcome::Live { .. } => {
+                    panic!("failed fetch cannot return live data")
+                }
+                ProviderSearchOutcome::Page {
+                    upstream_problem, ..
+                } => {
+                    assert!(fallback);
+                    assert_eq!(upstream_problem, Some(code));
+                }
+                ProviderSearchOutcome::Unavailable { problem } => {
+                    assert!(!fallback);
+                    assert_eq!(problem, code);
+                }
+            }
+            assert_eq!(
+                persistence.calls.lock().unwrap().contains(&"stale"),
+                fallback
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn search_commit_reauthorization_is_not_rescued_by_cache() {
+        let (service, persistence, request) = setup(None, Some(page()));
+        persistence.deny_commit.store(true, Ordering::SeqCst);
+        let error = service
+            .search_page_with(request, false, lease().await, |_| async {
+                Ok(crate::providers::search_page_fixture())
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), ProblemCode::Forbidden);
+        assert_eq!(
+            *persistence.calls.lock().unwrap(),
+            ["prepare", "fresh", "prepare", "commit"]
+        );
+    }
+
+    #[tokio::test]
+    async fn search_cancellation_releases_network_but_retains_started_commit_lease() {
+        for commit in [false, true] {
+            let (service, persistence, request) = setup(None, None);
+            let gate = Arc::new(tokio::sync::Mutex::new(()));
+            let lease = ProviderOperationLease::new(Arc::clone(&gate).lock_owned().await);
+            let (entered, started) = tokio::sync::oneshot::channel();
+            let (release, finish) = std::sync::mpsc::channel();
+            let mut network_entered = Some(entered);
+            if commit {
+                *persistence.pause_commit.lock().unwrap() =
+                    Some((network_entered.take().unwrap(), finish));
+            }
+            let caller = tokio::spawn(async move {
+                service
+                    .search_page_with(request, false, lease, |_| async move {
+                        if let Some(entered) = network_entered {
+                            let _ = entered.send(());
+                            std::future::pending::<()>().await;
+                        }
+                        Ok(crate::providers::search_page_fixture())
+                    })
+                    .await
+            });
+            tokio::time::timeout(std::time::Duration::from_secs(5), started)
+                .await
+                .unwrap()
+                .unwrap();
+            caller.abort();
+            assert!(caller.await.unwrap_err().is_cancelled());
+            let held = gate.try_lock().is_err();
+            let _ = release.send(());
+            let _completed = tokio::time::timeout(std::time::Duration::from_secs(5), gate.lock())
+                .await
+                .unwrap();
+            assert_eq!(held, commit);
+            assert_eq!(
+                persistence.calls.lock().unwrap().contains(&"commit"),
+                commit
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn real_outbound_denials_are_not_stale_fallback_errors() {
+        for (host, networks, policy) in [
+            (
+                "127.0.0.1",
+                &[NetworkClass::Public][..],
+                OutboundAccessPolicy::default(),
+            ),
+            (
+                "93.184.216.34",
+                &[NetworkClass::Public][..],
+                OutboundAccessPolicy {
+                    deny_providers: vec!["tmdb".into()],
+                    ..Default::default()
+                },
+            ),
+        ] {
+            let (service, persistence, request) = setup(None, Some(page()));
+            let outcome = service
+                .search_page_with(request, false, lease().await, |_| async move {
+                    let declaration = OutboundAccessDeclaration {
+                        provider: "tmdb",
+                        capabilities: &["metadata.search"],
+                        hosts: if host == "127.0.0.1" {
+                            &["127.0.0.1"]
+                        } else {
+                            &["93.184.216.34"]
+                        },
+                        networks,
+                    };
+                    let endpoint = format!("https://{host}/").parse().unwrap();
+                    crate::GovernedTransport::default()
+                        .authorize(declaration, &policy, "metadata.search", &endpoint)
+                        .await?;
+                    panic!("denied endpoint must not be authorized")
+                })
+                .await
+                .unwrap();
+            assert_eq!(
+                outcome,
+                ProviderSearchOutcome::Unavailable {
+                    problem: ProblemCode::ProviderRouteUnavailable
+                }
+            );
+            assert_eq!(
+                *persistence.calls.lock().unwrap(),
+                ["prepare", "fresh", "prepare"]
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn search_reauthorizes_before_disclosing_failure_or_result() {
+        for success in [false, true] {
+            let (service, persistence, request) = setup(None, Some(page()));
+            let revoked = Arc::clone(&persistence);
+            let error = service
+                .search_page_with(request, false, lease().await, |_| async move {
+                    revoked.deny_prepare.store(true, Ordering::SeqCst);
+                    if success {
+                        Ok(crate::providers::search_page_fixture())
+                    } else {
+                        Err(ProviderRuntimeError::credential("denied"))
+                    }
+                })
+                .await
+                .unwrap_err();
+            assert_eq!(error.code(), ProblemCode::Forbidden);
+            assert_eq!(
+                *persistence.calls.lock().unwrap(),
+                ["prepare", "fresh", "prepare"]
+            );
+        }
+        let (service, persistence, request) = setup(None, None);
+        persistence.deny_prepare.store(true, Ordering::SeqCst);
+        assert_eq!(
+            service
+                .search_page_with(request, false, lease().await, |_| async {
+                    panic!("unauthorized fetch")
+                })
+                .await
+                .unwrap_err()
+                .code(),
+            ProblemCode::Forbidden
+        );
+        assert_eq!(*persistence.calls.lock().unwrap(), ["prepare"]);
+    }
+}

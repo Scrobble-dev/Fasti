@@ -2,6 +2,7 @@ import {
   B1_CONFORMANCE_OPERATIONS,
   LOCAL_BOOTSTRAP_OPERATIONS,
   LOCAL_RUNTIME_OPERATIONS,
+  LOCAL_SEARCH_MAX_RESPONSE_BYTES,
   FastiContractParseError,
   parseAcceptObservationRequest,
   parseAcceptObservationResponse,
@@ -24,6 +25,9 @@ import {
   parseInitializeNodeRequest,
   parseInitializeNodeResponse,
   parseListRecordsResponse,
+  parseLocalSearchRequestDto,
+  parseLocalSearchResponseDto,
+  parseListRecordsQueryParameters,
   parseListBrowserSessionsResponse,
   parseListProvidersResponse,
   parseListTrackingDispositionsResponse,
@@ -35,6 +39,14 @@ import {
   parseProblemDetailsForOperation,
   parseProviderCapabilityResponse,
   parseProviderHealthResponse,
+  parseSearchProviderPageRequest,
+  parseSearchProviderPageResponse,
+  parseSearchCandidateDetailsQueryParameters,
+  parseSearchCandidateDetailsResponse,
+  parseSearchCandidateActionRequest,
+  parseSearchCandidateActionResponse,
+  parseProviderIdentifierActionRequest,
+  parseProviderIdentifierActionResponse,
   parseRefreshMetadataClaimsRequest,
   parseRefreshMetadataClaimsResponse,
   parseResolveIdentityRouteResponse,
@@ -79,6 +91,9 @@ import {
   type InitializeNodeRequest,
   type InitializeNodeResponse,
   type ListRecordsResponse,
+  type LocalSearchRequestDto,
+  type LocalSearchResponseDto,
+  type ListRecordsQueryParameters,
   type ListBrowserSessionsResponse,
   type ListProvidersResponse,
   type ListTrackingDispositionsResponse,
@@ -92,6 +107,14 @@ import {
   type ProblemCode,
   type ProviderCapabilityResponse,
   type ProviderHealthResponse,
+  type SearchProviderPageRequest,
+  type SearchProviderPageResponse,
+  type SearchCandidateDetailsQueryParameters,
+  type SearchCandidateDetailsResponse,
+  type SearchCandidateActionRequest,
+  type SearchCandidateActionResponse,
+  type ProviderIdentifierActionRequest,
+  type ProviderIdentifierActionResponse,
   type RefreshMetadataClaimsRequest,
   type RefreshMetadataClaimsResponse,
   type ResolveIdentityRouteResponse,
@@ -283,6 +306,8 @@ const MAX_SSE_EVENT_LINES = 256;
 const MAX_SSE_CURSOR_CHARACTERS = 512;
 const RECEIPT_ID = /^rcp_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/;
 const RECORD_ID = /^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/;
+const SEARCH_CANDIDATE_RECEIPT_ID =
+  /^scr_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/;
 const BROWSER_SESSION_ID = /^ses_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/;
 const PROVIDER_PATH_ID = /^[a-z0-9][a-z0-9._-]{0,127}$/;
 const RESOLUTION_INTENTS = new Set([
@@ -585,15 +610,43 @@ export class FastiClient {
     });
   }
 
-  listRecords(options: CallOptions = {}): Promise<ListRecordsResponse> {
+  listRecords(
+    options: CallOptions = {},
+    query: ListRecordsQueryParameters = {},
+  ): Promise<ListRecordsResponse> {
     const operation = LOCAL_RUNTIME_OPERATIONS.listRecords;
+    query = parseOutgoing(
+      parseListRecordsQueryParameters,
+      query,
+      "List-records query",
+    );
+    const recordId =
+      query.record_id == null
+        ? undefined
+        : contractPathIdentifier(query.record_id, RECORD_ID, "record_id");
     return this.#jsonOperation({
       method: operation.method,
-      path: operation.path,
+      path:
+        recordId === undefined
+          ? operation.path
+          : `${operation.path}?record_id=${encodeURIComponent(recordId)}`,
       authenticated: operation.authenticated,
       problemContract: operation,
       retryMode: "safe",
-      responseParser: parseListRecordsResponse,
+      responseParser: (value) => {
+        const response = parseListRecordsResponse(value);
+        if (
+          recordId !== undefined &&
+          (response.truncated ||
+            response.records.length > 1 ||
+            response.records.some((record) => record.record_id !== recordId))
+        ) {
+          throw new FastiContractParseError(
+            "Record selector response does not match the requested Record",
+          );
+        }
+        return response;
+      },
       responseLabel: "List-records response",
       options,
     });
@@ -859,6 +912,316 @@ export class FastiClient {
         return response;
       },
       responseLabel: "Provider health response",
+      options,
+    });
+  }
+
+  searchRecords(
+    request: LocalSearchRequestDto,
+    options: CallOptions = {},
+  ): Promise<LocalSearchResponseDto> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.searchRecords;
+    const body = parseOutgoing(
+      parseLocalSearchRequestDto,
+      request,
+      "Local Search request",
+    );
+    // Bind the response to immutable input, even if the caller mutates its DTO
+    // while credentials or a retry are pending. The server owns cursor authority.
+    const afterId = body.after?.last_record_id;
+    const afterDigest = body.after?.context_digest;
+    const grains = new Set(body.grains);
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      body,
+      maxResponseBytes: LOCAL_SEARCH_MAX_RESPONSE_BYTES,
+      responseParser: (value) => {
+        const response = parseLocalSearchResponseDto(value);
+        let previous = afterId;
+        for (const record of response.records) {
+          if (
+            record.record_id.length !== 36 ||
+            RECORD_ID.exec(record.record_id)?.[0] !== record.record_id ||
+            (previous !== undefined && record.record_id <= previous) ||
+            (grains.size > 0 && !grains.has(record.grain)) ||
+            (response.next != null &&
+              record.record_id > response.next.last_record_id)
+          ) {
+            throw new FastiContractParseError(
+              "Local Search records do not match the requested page",
+            );
+          }
+          previous = record.record_id;
+        }
+        if (
+          response.next != null &&
+          ((afterId !== undefined && response.next.last_record_id <= afterId) ||
+            (afterDigest !== undefined &&
+              response.next.context_digest !== afterDigest))
+        ) {
+          throw new FastiContractParseError(
+            "Local Search cursor does not continue the requested page",
+          );
+        }
+        return response;
+      },
+      responseLabel: "Local Search response",
+      options,
+    });
+  }
+
+  searchProviderPage(
+    providerId: string,
+    request: SearchProviderPageRequest,
+    options: CallOptions = {},
+  ): Promise<SearchProviderPageResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.searchProviderPage;
+    const identifiers = providerPathIdentifiers(providerId);
+    const body = parseOutgoing(
+      parseSearchProviderPageRequest,
+      request,
+      "Provider Search request",
+    );
+    const requestedPage = body.page;
+    const offline = body.offline;
+    const requestedGrains = new Set(body.grains);
+    return this.#jsonOperation({
+      method: operation.method,
+      path: providerOperationPath(operation.path, identifiers),
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      browserMutation: true,
+      retryMode: "never",
+      body,
+      // 100 receipts, each with at most 64 KiB of admitted candidate JSON,
+      // plus bounded receipt IDs and page metadata. No global limit increase.
+      maxResponseBytes: 100 * (64 * 1024 + 1024) + 8 * 1024,
+      responseParser: (value) => {
+        const response = parseSearchProviderPageResponse(value);
+        if (
+          response.provider_id !== identifiers.providerId ||
+          (response.outcome === "live" &&
+            (offline ||
+              response.page !== requestedPage ||
+              response.candidates.some(
+                (candidate) =>
+                  candidate.provider !== identifiers.providerId ||
+                  (requestedGrains.size > 0 &&
+                    !requestedGrains.has(candidate.grain)),
+              ))) ||
+          (response.outcome === "page" &&
+            (response.page !== requestedPage ||
+              (response.cache_state === "observed" &&
+                (offline || response.upstream_problem != null)) ||
+              response.candidates.some(
+                (receipt) =>
+                  receipt.candidate.provider !== identifiers.providerId ||
+                  receipt.candidate.grain !== receipt.grain ||
+                  (requestedGrains.size > 0 &&
+                    !requestedGrains.has(receipt.grain)),
+              )))
+        ) {
+          throw new FastiContractParseError(
+            "Provider Search response does not match the requested provider and page",
+          );
+        }
+        return response;
+      },
+      responseLabel: "Provider Search response",
+      options,
+    });
+  }
+
+  readSearchCandidate(
+    providerId: string,
+    grain: string,
+    candidateReceiptId: string,
+    query: SearchCandidateDetailsQueryParameters,
+    options: CallOptions = {},
+  ): Promise<SearchCandidateDetailsResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.readSearchCandidate;
+    const locator = searchCandidatePath(
+      operation.path,
+      providerId,
+      grain,
+      candidateReceiptId,
+    );
+    const offline = parseOutgoing(
+      parseSearchCandidateDetailsQueryParameters,
+      query,
+      "Candidate details query",
+    ).offline;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: `${locator.path}?${new URLSearchParams({ offline: String(offline) })}`,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      responseParser: (value) => {
+        const response = parseSearchCandidateDetailsResponse(value);
+        if (response.outcome === "missing") return response;
+        if (
+          response.outcome === "refetched_without_snapshot" ||
+          response.outcome === "unavailable_without_snapshot"
+        ) {
+          if (
+            offline ||
+            response.candidate_receipt_id !== locator.receiptId ||
+            response.provider_id !== locator.providerId ||
+            response.grain !== locator.grain ||
+            (response.outcome === "refetched_without_snapshot" &&
+              (response.details.provider !== locator.providerId ||
+                response.details.grain !== locator.grain))
+          )
+            throw new FastiContractParseError(
+              "Candidate details response does not match the requested locator and mode",
+            );
+          return response;
+        }
+        const receipt = response.snapshot.receipt;
+        if (
+          receipt.candidate_receipt_id !== locator.receiptId ||
+          receipt.grain !== locator.grain ||
+          receipt.candidate.grain !== locator.grain ||
+          receipt.candidate.provider !== locator.providerId ||
+          (offline
+            ? response.outcome !== "snapshot"
+            : response.outcome === "snapshot") ||
+          (response.outcome === "refetched" &&
+            (response.details.provider !== receipt.candidate.provider ||
+              response.details.provider_id !== receipt.candidate.provider_id ||
+              response.details.grain !== receipt.candidate.grain ||
+              response.details.kind !== receipt.candidate.kind))
+        )
+          throw new FastiContractParseError(
+            "Candidate details response does not match the requested locator and mode",
+          );
+        return response;
+      },
+      responseLabel: "Candidate details response",
+      options,
+    });
+  }
+
+  saveSearchCandidate(
+    providerId: string,
+    grain: string,
+    candidateReceiptId: string,
+    request: SearchCandidateActionRequest,
+    options: CallOptions = {},
+  ): Promise<SearchCandidateActionResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.saveSearchCandidate;
+    const locator = searchCandidatePath(
+      operation.path,
+      providerId,
+      grain,
+      candidateReceiptId,
+    );
+    const body = parseOutgoing(
+      parseSearchCandidateActionRequest,
+      request,
+      "Candidate action request",
+    );
+    const operationId = body.operation_id;
+    const actionKind = body.action.kind;
+    const targetRecord =
+      body.action.kind === "attach" ? body.action.record_id : undefined;
+    const evidenceMode = body.evidence_mode;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: locator.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      browserMutation: true,
+      retryMode: "stable-idempotency",
+      body,
+      responseParser: (value) => {
+        const response = parseSearchCandidateActionResponse(value);
+        if (response.outcome === "unavailable") return response;
+        const receipt = response.receipt;
+        const historicalStatusValid =
+          receipt.initial_status === "fresh"
+            ? typeof receipt.expires_at === "string"
+            : receipt.initial_status === "stale" && receipt.expires_at == null;
+        if (
+          !historicalStatusValid ||
+          receipt.operation_id !== operationId ||
+          receipt.candidate_receipt_id !== locator.receiptId ||
+          receipt.provider_id !== locator.providerId ||
+          receipt.grain !== locator.grain ||
+          receipt.action.kind !== actionKind ||
+          receipt.evidence_mode !== evidenceMode ||
+          (targetRecord !== undefined
+            ? receipt.action.kind !== "attach" ||
+              receipt.action.record_id !== targetRecord ||
+              receipt.record_id !== targetRecord ||
+              !["attached", "already_attached"].includes(receipt.disposition)
+            : !["created", "reused"].includes(receipt.disposition))
+        )
+          throw new FastiContractParseError(
+            "Candidate action receipt does not match the submitted intent",
+          );
+        return response;
+      },
+      responseLabel: "Candidate action response",
+      options,
+    });
+  }
+
+  saveProviderIdentifier(
+    providerId: string,
+    grain: string,
+    request: ProviderIdentifierActionRequest,
+    options: CallOptions = {},
+  ): Promise<ProviderIdentifierActionResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.saveProviderIdentifier;
+    const locator = searchProviderGrainPath(operation.path, providerId, grain);
+    const body = parseOutgoing(
+      parseProviderIdentifierActionRequest,
+      request,
+      "Provider identifier action request",
+    );
+    const operationId = body.operation_id;
+    const providerRecordId = body.provider_record_id;
+    const actionKind = body.action.kind;
+    const targetRecord =
+      body.action.kind === "attach" ? body.action.record_id : undefined;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: locator.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      browserMutation: true,
+      retryMode: "stable-idempotency",
+      body,
+      responseParser: (value) => {
+        const response = parseProviderIdentifierActionResponse(value);
+        if (response.outcome === "unavailable") return response;
+        const receipt = response.receipt;
+        if (
+          receipt.operation_id !== operationId ||
+          receipt.provider_id !== locator.providerId ||
+          receipt.provider_record_id !== providerRecordId ||
+          receipt.grain !== locator.grain ||
+          receipt.origin !== "user_selected_provider_identifier" ||
+          receipt.action.kind !== actionKind ||
+          (targetRecord !== undefined
+            ? receipt.action.kind !== "attach" ||
+              receipt.action.record_id !== targetRecord ||
+              receipt.record_id !== targetRecord ||
+              !["attached", "already_attached"].includes(receipt.disposition)
+            : !["created", "reused"].includes(receipt.disposition))
+        )
+          throw new FastiContractParseError(
+            "Provider identifier action receipt does not match the submitted intent",
+          );
+        return response;
+      },
+      responseLabel: "Provider identifier action response",
       options,
     });
   }
@@ -2212,7 +2575,7 @@ function contractPathIdentifier(
   pattern: RegExp,
   label: string,
 ): string {
-  if (!pattern.test(value)) {
+  if (typeof value !== "string" || pattern.exec(value)?.[0] !== value) {
     throw new TypeError(`${label} does not match the generated contract`);
   }
   return value;
@@ -2276,6 +2639,55 @@ function providerOperationPath(
     );
   }
   return path;
+}
+
+function searchCandidatePath(
+  template: string,
+  providerId: string,
+  grain: string,
+  candidateReceiptId: string,
+) {
+  const identifiers = providerPathIdentifiers(providerId);
+  const safeGrain = contractPathIdentifier(
+    grain,
+    /^[a-z][a-z0-9_]{0,63}$/,
+    "grain",
+  );
+  const receiptId = contractPathIdentifier(
+    candidateReceiptId,
+    SEARCH_CANDIDATE_RECEIPT_ID,
+    "candidateReceiptId",
+  );
+  const path = providerOperationPath(template, identifiers)
+    .replace("{grain}", encodeURIComponent(safeGrain))
+    .replace("{candidate_receipt_id}", encodeURIComponent(receiptId));
+  return {
+    path,
+    providerId: identifiers.providerId,
+    grain: safeGrain,
+    receiptId,
+  };
+}
+
+function searchProviderGrainPath(
+  template: string,
+  providerId: string,
+  grain: string,
+) {
+  const identifiers = providerPathIdentifiers(providerId);
+  const safeGrain = contractPathIdentifier(
+    grain,
+    /^[a-z][a-z0-9_]{0,63}$/,
+    "grain",
+  );
+  return {
+    path: providerOperationPath(template, identifiers).replace(
+      "{grain}",
+      encodeURIComponent(safeGrain),
+    ),
+    providerId: identifiers.providerId,
+    grain: safeGrain,
+  };
 }
 
 function providerCapabilityParser(

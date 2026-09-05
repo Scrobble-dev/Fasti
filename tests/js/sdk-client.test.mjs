@@ -959,6 +959,7 @@ test("credentials are header-only on authenticated surfaces and no offline queue
           "readBrowserSession",
           "readMetadataProjection",
           "readProviderHealth",
+          "readSearchCandidate",
           "readTrailBaseContinuation",
           "receiptEvents",
           "refreshMetadataClaims",
@@ -973,6 +974,10 @@ test("credentials are header-only on authenticated surfaces and no offline queue
           "revokeOtherBrowserSessions",
           "rotateBrowserSession",
           "rotateCredential",
+          "saveProviderIdentifier",
+          "saveSearchCandidate",
+          "searchProviderPage",
+          "searchRecords",
           "selectBrowserSessionProfile",
           "selectProfile",
           "setTrackingDisposition",
@@ -1149,6 +1154,69 @@ test("client.listRecords() surfaces the truncated flag through the transport", a
   });
 });
 
+test("Record selection preserves call options and binds the response identity", async () => {
+  let attempts = 0;
+  let response = { records: [], truncated: false };
+  const client = new FastiClient({
+    baseUrl: "http://127.0.0.1:8420",
+    credential: "records-secret",
+    fetch: async (url, init) => {
+      attempts += 1;
+      assert.equal(
+        new URL(url).searchParams.get("record_id"),
+        contractIds.record,
+      );
+      assert.equal(init.method, "GET");
+      assert.equal(init.body, undefined);
+      return new Response(JSON.stringify(response), {
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+  const select = () =>
+    client.listRecords({ timeoutMs: 1000 }, { record_id: contractIds.record });
+  assert.deepEqual(await select(), response);
+  assert.throws(
+    () => client.listRecords({}, { record_id: "../invalid" }),
+    FastiProtocolError,
+  );
+  assert.throws(
+    () => client.listRecords({}, { unknown: true }),
+    FastiProtocolError,
+  );
+  assert.equal(attempts, 1);
+  response = { records: [], truncated: true };
+  await assert.rejects(select(), FastiProtocolError);
+  const record = {
+    record_id: contractIds.record,
+    grain: "film",
+    status: "active",
+    title: { tier: "empty", value: null, source: null, is_stale: false },
+    poster: { tier: "empty", value: null, source: null, is_stale: false },
+    latest_activity: null,
+  };
+  response = { records: [record], truncated: false };
+  assert.deepEqual(await select(), response);
+  response = { records: [record, record], truncated: false };
+  await assert.rejects(select(), FastiProtocolError);
+  response = {
+    records: [{ ...record, record_id: v7("rec", "a") }],
+    truncated: false,
+  };
+  await assert.rejects(select(), FastiProtocolError);
+  const omitted = new FastiClient({
+    baseUrl: "http://127.0.0.1:8420",
+    credential: "records-secret",
+    fetch: async (url) => {
+      assert.equal(new URL(url).search, "");
+      return new Response(JSON.stringify({ records: [], truncated: false }), {
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+  await omitted.listRecords({}, { record_id: null });
+});
+
 test("provider SDK keeps reads retry-safe and credential mutations single-attempt", async (context) => {
   await context.test("provider list retries a transient response", async () => {
     let attempts = 0;
@@ -1274,10 +1342,10 @@ test("connection endpoints reject unsafe origins", () => {
   }
 });
 test("generated public metadata preserves complete registry and surface dispositions", () => {
-  assert.equal(PUBLIC_CAPABILITY_REGISTRY.capabilities.length, 52);
+  assert.equal(PUBLIC_CAPABILITY_REGISTRY.capabilities.length, 53);
   assert.equal(
     Object.keys(PUBLIC_CAPABILITY_REGISTRY.surface_profiles).length,
-    17,
+    18,
   );
   const stream = PUBLIC_CAPABILITY_REGISTRY.capabilities.find(
     (capability) => capability.id === "receipt.stream",
@@ -1811,7 +1879,7 @@ test("all implemented contract routes complete against the loopback Rust fixture
       discovery.surface_profiles,
       PUBLIC_CAPABILITY_REGISTRY.surface_profiles,
     );
-    assert.equal(discovery.capabilities.length, 52);
+    assert.equal(discovery.capabilities.length, 53);
     assert.ok(
       discovery.capabilities.some(
         (capability) =>

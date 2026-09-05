@@ -40,10 +40,10 @@ const mutateJson = async (root, relativePath, mutate) => {
 
 test("checked-in generated contracts validate", async () => {
   assert.deepEqual(await validateGeneratedContracts(), {
-    capabilityCount: 52,
+    capabilityCount: 53,
     conformanceOpenApiPathCount: 9,
-    openApiPathCount: 36,
-    problemCount: 372,
+    openApiPathCount: 41,
+    problemCount: 392,
     schemaCount: 2,
   });
 });
@@ -72,6 +72,19 @@ test("OpenAPI version mutation is rejected", async () => {
         document.openapi = "3.0.3";
       }),
     (result) => assert.rejects(result, /3\.1\.0/),
+  );
+});
+
+test("local Search response byte limit mutation is rejected", async () => {
+  await withArtifacts(
+    (root) =>
+      mutateJson(root, "contracts/generated/v1/openapi.json", (document) => {
+        document.paths["/api/v1/search/records"].post[
+          "x-fasti-max-response-bytes"
+        ] = 512 * 1024;
+      }),
+    (result) =>
+      assert.rejects(result, /operation-specific response byte limit/),
   );
 });
 

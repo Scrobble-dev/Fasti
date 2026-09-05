@@ -5,10 +5,9 @@ use fasti_application::{
     RequestAccessContext,
 };
 use fasti_contracts::{
-    metadata_field_group, metadata_projection_configuration_response,
-    metadata_projection_response, metadata_refresh_mode, refresh_metadata_claims_response,
-    ConfigureMetadataProjectionRequest, LastKnownGoodPolicyDto, MetadataFieldGroupDto,
-    MetadataProjectionConfigurationResponse,
+    metadata_field_group, metadata_projection_configuration_response, metadata_projection_response,
+    metadata_refresh_mode, refresh_metadata_claims_response, ConfigureMetadataProjectionRequest,
+    LastKnownGoodPolicyDto, MetadataFieldGroupDto, MetadataProjectionConfigurationResponse,
     MetadataProjectionResponse, RefreshMetadataClaimsRequest, RefreshMetadataClaimsResponse,
 };
 use fasti_domain::{
@@ -57,12 +56,12 @@ pub(crate) async fn refresh(
     policy: fasti_application::OutboundAccessPolicy,
     access: RequestAccessContext,
     request: RefreshMetadataClaimsRequest,
+    lease: fasti_application::ProviderOperationLease,
 ) -> Result<RefreshMetadataClaimsResponse, DesktopProblem> {
     let correlation_id = RequestCorrelationId::new_v7();
-    let operation_id = request
-        .operation_id
-        .parse::<OperationId>()
-        .map_err(|_| DesktopProblem::invalid_input("operation_id is not a valid operation identifier"))?;
+    let operation_id = request.operation_id.parse::<OperationId>().map_err(|_| {
+        DesktopProblem::invalid_input("operation_id is not a valid operation identifier")
+    })?;
     let record_id = request
         .record_id
         .parse::<RecordId>()
@@ -88,17 +87,20 @@ pub(crate) async fn refresh(
     );
     let provider_id_text = provider_id.as_str().to_owned();
     let outcome = service
-        .authorize_and_refresh(RefreshMetadataClaimsCommand::new(
-            correlation_id,
-            access,
-            operation_id,
-            record_id,
-            provider_id,
-            groups,
-            locale,
-            region,
-            metadata_refresh_mode(request.mode),
-        ))
+        .authorize_and_refresh(
+            RefreshMetadataClaimsCommand::new(
+                correlation_id,
+                access,
+                operation_id,
+                record_id,
+                provider_id,
+                groups,
+                locale,
+                region,
+                metadata_refresh_mode(request.mode),
+            ),
+            lease,
+        )
         .await
         .map_err(|problem| DesktopProblem::application(&problem))?;
     Ok(refresh_metadata_claims_response(

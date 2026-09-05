@@ -32,6 +32,7 @@ pub(crate) const FULL_ADMIN_SCOPES: &[ScopeKey] = &[
     ScopeKey::ProfileStateRead,
     ScopeKey::ProfileStateWrite,
     ScopeKey::ProviderRead,
+    ScopeKey::MetadataSearch,
     ScopeKey::ProviderCredentialManage,
     ScopeKey::MetadataClaimRefresh,
     ScopeKey::MetadataProjectionRead,

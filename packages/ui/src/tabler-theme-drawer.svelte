@@ -2,13 +2,11 @@
   import type { ThemeSettings } from "./types.js";
   import { DEFAULT_THEME_SETTINGS } from "./defaults.js";
   import { dialogFocus } from "./dialog-focus.js";
-  import {
-    IconSun,
-    IconMoon,
-    IconMoonStars,
-    IconX,
-    IconRotate2,
-  } from "@tabler/icons-svelte";
+  import IconSun from "@tabler/icons-svelte/icons/sun";
+  import IconMoon from "@tabler/icons-svelte/icons/moon";
+  import IconMoonStars from "@tabler/icons-svelte/icons/moon-stars";
+  import IconX from "@tabler/icons-svelte/icons/x";
+  import IconRotate2 from "@tabler/icons-svelte/icons/rotate-2";
 
   interface Props {
     open: boolean;

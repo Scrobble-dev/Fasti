@@ -1,22 +1,20 @@
 <script lang="ts">
   import { onMount, tick, untrack } from "svelte";
-  import {
-    IconAlertCircle,
-    IconBug,
-    IconCheck,
-    IconDatabase,
-    IconExternalLink,
-    IconEye,
-    IconEyeOff,
-    IconFileDownload,
-    IconKey,
-    IconPlus,
-    IconRefresh,
-    IconTags,
-    IconTrash,
-    IconUser,
-    IconWorld,
-  } from "@tabler/icons-svelte";
+  import IconAlertCircle from "@tabler/icons-svelte/icons/alert-circle";
+  import IconBug from "@tabler/icons-svelte/icons/bug";
+  import IconCheck from "@tabler/icons-svelte/icons/check";
+  import IconDatabase from "@tabler/icons-svelte/icons/database";
+  import IconExternalLink from "@tabler/icons-svelte/icons/external-link";
+  import IconEye from "@tabler/icons-svelte/icons/eye";
+  import IconEyeOff from "@tabler/icons-svelte/icons/eye-off";
+  import IconFileDownload from "@tabler/icons-svelte/icons/file-download";
+  import IconKey from "@tabler/icons-svelte/icons/key";
+  import IconPlus from "@tabler/icons-svelte/icons/plus";
+  import IconRefresh from "@tabler/icons-svelte/icons/refresh";
+  import IconTags from "@tabler/icons-svelte/icons/tags";
+  import IconTrash from "@tabler/icons-svelte/icons/trash";
+  import IconUser from "@tabler/icons-svelte/icons/user";
+  import IconWorld from "@tabler/icons-svelte/icons/world";
   import AccountSecurityView from "./account-security-view.svelte";
   import NetworkSettings from "./network-settings.svelte";
   import { hostProblemText } from "./host-problem.js";

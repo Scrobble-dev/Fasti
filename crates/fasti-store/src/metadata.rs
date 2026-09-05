@@ -6,7 +6,11 @@
 //! ever supplied (history, never overwritten in place) and the single
 //! current override per field, then read them back for resolution.
 
-use crate::identity::{attach_identifier_tx, insert_record, matching_record_ids};
+#[cfg(test)]
+use crate::identity::MAX_RECORDS_PAGE;
+use crate::identity::{
+    attach_identifier_tx, insert_record, matching_record_ids, selected_record_ids_json,
+};
 use crate::kernel::{
     authorize_transaction, map_sql, now, parse_timestamp, timestamp, SqliteKernel,
 };
@@ -19,7 +23,8 @@ use fasti_application::{
     MetadataOverrideMutation, MetadataProjectionPort, MetadataProjectionView,
     MetadataRefreshPersistencePort, PrepareMetadataRefreshCommand, PreparedMetadataRefresh,
     ProblemCode, ProviderCapabilityState, ProviderMetadataField, ProviderMetadataPort,
-    RatingClaimView, ReadCachedMetadataRefreshCommand, ReadMetadataProjectionQuery,
+    ProviderResponseCachePolicy, ProviderResponseReuse, RatingClaimView,
+    ReadCachedMetadataRefreshCommand, ReadMetadataProjectionQuery,
     ReadMetadataRefreshReceiptCommand, RefreshMetadataClaimsOutcome, MAX_PROVIDER_METADATA_FIELDS,
 };
 use fasti_contracts::{
@@ -41,7 +46,7 @@ use fasti_domain::{
     RequestCorrelationId, ResolvedField, Sha256Digest, WorkspaceId,
 };
 use rusqlite::{params, Connection, OptionalExtension, Row, Transaction, TransactionBehavior};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 const MAX_EFFECTIVE_FIELD_CLAIMS: i64 = 256;
 const MAX_REFRESH_RECEIPT_JSON_BYTES: usize = 1024 * 1024;
@@ -684,6 +689,173 @@ fn cache_storage_key(key: &MetadataCacheKey) -> Result<String, serde_json::Error
     serde_json::to_vec(key).map(|encoded| crate::crypto::sha256_hex(&encoded))
 }
 
+enum MetadataReceiptDisclosure {
+    LiveResponse,
+    Reuse,
+}
+
+fn validate_refresh_receipt_evidence(
+    connection: &Connection,
+    workspace_id: WorkspaceId,
+    record_id: RecordId,
+    outcome: &RefreshMetadataClaimsOutcome,
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+    disclosure: MetadataReceiptDisclosure,
+) -> ApplicationResult<()> {
+    let fields = outcome.field_claims().iter().map(|view| {
+        let claim = view.claim();
+        (
+            claim.claim_id(),
+            ("field", claim.provenance(), claim.fetched_at()),
+        )
+    });
+    let ratings = outcome.rating_claims().iter().map(|view| {
+        let claim = view.claim();
+        (
+            claim.claim_id(),
+            ("rating", claim.provenance(), claim.fetched_at()),
+        )
+    });
+    let projections = outcome.projections().iter().filter_map(|projection| {
+        projection.resolved_field().provenance().map(|claim| {
+            (
+                claim.claim_id(),
+                ("field", claim.claim_provenance(), claim.fetched_at()),
+            )
+        })
+    });
+    let mut expected = HashMap::new();
+    for (id, evidence) in fields.chain(ratings).chain(projections) {
+        if expected.insert(id, evidence).is_some_and(|previous| {
+            previous.0 != evidence.0
+                || previous.1 != evidence.1
+                || timestamp(previous.2) != timestamp(evidence.2)
+        }) {
+            return Err(receipt_integrity(capability, correlation_id));
+        }
+    }
+    if outcome.cache_entries().iter().any(|view| {
+        view.entry()
+            .claim_ids()
+            .iter()
+            .any(|id| !expected.contains_key(id))
+    }) {
+        return Err(receipt_integrity(capability, correlation_id));
+    }
+    if expected.is_empty() {
+        return Ok(());
+    }
+    let ids: Vec<_> = expected.keys().map(ToString::to_string).collect();
+    let ids =
+        serde_json::to_string(&ids).map_err(|_| receipt_integrity(capability, correlation_id))?;
+    let mut statement = map_sql(
+        connection.prepare(
+            "SELECT claim_id, claim_kind, response_policy_json FROM metadata_claims
+         WHERE workspace_id=?1 AND record_id=?2
+           AND claim_id IN (SELECT value FROM json_each(?3))",
+        ),
+        capability,
+        correlation_id,
+    )?;
+    let rows = map_sql(
+        statement.query_map(
+            params![workspace_id.to_string(), record_id.to_string(), ids],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
+        ),
+        capability,
+        correlation_id,
+    )?;
+    for row in rows {
+        let (id, kind, policy) = map_sql(row, capability, correlation_id)?;
+        let id = id
+            .parse::<MetadataClaimId>()
+            .map_err(|_| receipt_integrity(capability, correlation_id))?;
+        let (expected_kind, provenance, fetched_at) = expected
+            .remove(&id)
+            .ok_or_else(|| receipt_integrity(capability, correlation_id))?;
+        if kind != expected_kind {
+            return Err(receipt_integrity(capability, correlation_id));
+        }
+        validate_loaded_response_policy(
+            policy.as_deref(),
+            provenance,
+            fetched_at,
+            capability,
+            correlation_id,
+        )?;
+    }
+    if !expected.is_empty() {
+        return Err(receipt_integrity(capability, correlation_id));
+    }
+    if matches!(disclosure, MetadataReceiptDisclosure::Reuse) {
+        let read_at = now();
+        let mut required = HashSet::new();
+        let mut fields = BTreeSet::new();
+        for view in outcome.field_claims() {
+            required.insert(view.claim().claim_id());
+            fields.insert(
+                view.claim()
+                    .field_key()
+                    .ok_or_else(|| receipt_integrity(capability, correlation_id))?
+                    .clone(),
+            );
+        }
+        for projection in outcome.projections() {
+            if let Some(provenance) = projection.resolved_field().provenance() {
+                required.insert(provenance.claim_id());
+                fields.insert(projection.field_key().clone());
+            }
+        }
+        for key in fields {
+            for claim in load_field_claims(
+                connection,
+                workspace_id,
+                record_id,
+                &key,
+                capability,
+                correlation_id,
+                read_at,
+            )? {
+                required.remove(&claim.claim_id());
+            }
+        }
+        if !outcome.rating_claims().is_empty() {
+            required.extend(
+                outcome
+                    .rating_claims()
+                    .iter()
+                    .map(|view| view.claim().claim_id()),
+            );
+            for claim in load_rating_claims(
+                connection,
+                workspace_id,
+                record_id,
+                capability,
+                correlation_id,
+                read_at,
+            )? {
+                required.remove(&claim.claim_id());
+            }
+        }
+        if !required.is_empty() {
+            return Err(Box::new(FastiProblem::from_code(
+                ProblemCode::MetadataClaimStale,
+                capability,
+                correlation_id,
+            )));
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn write_field_claim(
     connection: &Connection,
     workspace_id: WorkspaceId,
@@ -692,7 +864,9 @@ pub(crate) fn write_field_claim(
     claim: &FieldClaim,
     capability: CapabilityKey,
     correlation_id: RequestCorrelationId,
+    response_policy_json: Option<&str>,
 ) -> ApplicationResult<()> {
+    validate_stored_response_policy(response_policy_json, capability, correlation_id)?;
     if claim.record_id().is_some_and(|value| value != record_id)
         || claim.field_key().is_some_and(|value| value != field_key)
     {
@@ -711,6 +885,7 @@ pub(crate) fn write_field_claim(
         claim,
         capability,
         correlation_id,
+        response_policy_json,
     );
     match result {
         Ok(()) => map_sql(
@@ -726,6 +901,7 @@ pub(crate) fn write_field_claim(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn write_field_claim_inner(
     connection: &Connection,
     workspace_id: WorkspaceId,
@@ -734,6 +910,7 @@ fn write_field_claim_inner(
     claim: &FieldClaim,
     capability: CapabilityKey,
     correlation_id: RequestCorrelationId,
+    response_policy_json: Option<&str>,
 ) -> ApplicationResult<()> {
     let inserted = map_sql(
         connection.execute(
@@ -768,6 +945,7 @@ fn write_field_claim_inner(
             claim,
             capability,
             correlation_id,
+            response_policy_json,
         );
     }
 
@@ -776,14 +954,15 @@ fn write_field_claim_inner(
         connection.execute(
             r#"
             INSERT INTO metadata_claims(
-                claim_id, workspace_id, record_id, claim_kind, created_at
-            ) VALUES (?1, ?2, ?3, 'field', ?4)
+                claim_id, workspace_id, record_id, claim_kind, created_at, response_policy_json
+            ) VALUES (?1, ?2, ?3, 'field', ?4, ?5)
             "#,
             params![
                 claim.claim_id().to_string(),
                 workspace_id.to_string(),
                 record_id.to_string(),
-                timestamp(now())
+                timestamp(now()),
+                response_policy_json,
             ],
         ),
         capability,
@@ -826,9 +1005,23 @@ fn write_field_claim_inner(
         capability,
         correlation_id,
     )?;
+    if crate::local_search::searchable_field(field_key.as_str()) {
+        map_sql(
+            crate::local_search::index_text(
+                connection,
+                &workspace_id.to_string(),
+                "",
+                &record_id.to_string(),
+                claim.value(),
+            ),
+            capability,
+            correlation_id,
+        )?;
+    }
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn verify_identical_field_claim(
     connection: &Connection,
     workspace_id: WorkspaceId,
@@ -837,6 +1030,7 @@ fn verify_identical_field_claim(
     claim: &FieldClaim,
     capability: CapabilityKey,
     correlation_id: RequestCorrelationId,
+    response_policy_json: Option<&str>,
 ) -> ApplicationResult<()> {
     let existing = map_sql(
         connection
@@ -846,13 +1040,18 @@ fn verify_identical_field_claim(
                        provenance.provider_id, provenance.source_record_id,
                        provenance.region, provenance.source_version,
                        provenance.evidence_digest, provenance.provenance_state,
-                       provenance.initial_status
+                       provenance.initial_status, registered.response_policy_json
                 FROM metadata_field_claims claim
                 JOIN metadata_claim_provenance provenance
                   ON provenance.record_id = claim.record_id
                  AND provenance.field_key = claim.field_key
                  AND provenance.source = claim.source
                  AND provenance.fetched_at = claim.fetched_at
+                JOIN metadata_claims registered
+                  ON registered.claim_id = provenance.claim_id
+                 AND registered.workspace_id = claim.workspace_id
+                 AND registered.record_id = claim.record_id
+                 AND registered.claim_kind = 'field'
                 WHERE claim.workspace_id = ?1 AND claim.record_id = ?2
                   AND claim.field_key = ?3 AND claim.source = ?4
                   AND claim.fetched_at = ?5
@@ -876,6 +1075,7 @@ fn verify_identical_field_claim(
                         row.get::<_, Option<String>>(7)?,
                         row.get::<_, String>(8)?,
                         row.get::<_, String>(9)?,
+                        row.get::<_, Option<String>>(10)?,
                     ))
                 },
             )
@@ -901,6 +1101,7 @@ fn verify_identical_field_claim(
             "legacy_incomplete".to_owned()
         },
         claim_status(claim.initial_status()).to_owned(),
+        response_policy_json.map(ToOwned::to_owned),
     );
     if existing.as_ref() == Some(&expected) {
         Ok(())
@@ -1023,14 +1224,22 @@ pub(crate) fn write_rating_claim(
     claim: &RatingClaim,
     capability: CapabilityKey,
     correlation_id: RequestCorrelationId,
+    response_policy_json: Option<&str>,
 ) -> ApplicationResult<()> {
+    validate_stored_response_policy(response_policy_json, capability, correlation_id)?;
     map_sql(
         connection.execute_batch("SAVEPOINT metadata_rating_claim_write"),
         capability,
         correlation_id,
     )?;
-    let result =
-        write_rating_claim_inner(connection, workspace_id, claim, capability, correlation_id);
+    let result = write_rating_claim_inner(
+        connection,
+        workspace_id,
+        claim,
+        capability,
+        correlation_id,
+        response_policy_json,
+    );
     match result {
         Ok(()) => map_sql(
             connection.execute_batch("RELEASE metadata_rating_claim_write"),
@@ -1052,20 +1261,22 @@ fn write_rating_claim_inner(
     claim: &RatingClaim,
     capability: CapabilityKey,
     correlation_id: RequestCorrelationId,
+    response_policy_json: Option<&str>,
 ) -> ApplicationResult<()> {
     let inserted = map_sql(
         connection.execute(
             r#"
             INSERT INTO metadata_claims(
-                claim_id, workspace_id, record_id, claim_kind, created_at
-            ) VALUES (?1, ?2, ?3, 'rating', ?4)
+                claim_id, workspace_id, record_id, claim_kind, created_at, response_policy_json
+            ) VALUES (?1, ?2, ?3, 'rating', ?4, ?5)
             ON CONFLICT(claim_id) DO NOTHING
             "#,
             params![
                 claim.claim_id().to_string(),
                 workspace_id.to_string(),
                 claim.record_id().to_string(),
-                timestamp(now())
+                timestamp(now()),
+                response_policy_json,
             ],
         ),
         capability,
@@ -1078,6 +1289,7 @@ fn write_rating_claim_inner(
             claim,
             capability,
             correlation_id,
+            response_policy_json,
         );
     }
     let provenance = claim.provenance();
@@ -1136,6 +1348,7 @@ fn verify_identical_rating_claim(
     claim: &RatingClaim,
     capability: CapabilityKey,
     correlation_id: RequestCorrelationId,
+    response_policy_json: Option<&str>,
 ) -> ApplicationResult<()> {
     let existing = map_sql(
         connection
@@ -1146,7 +1359,7 @@ fn verify_identical_rating_claim(
                        rating.provider_id, rating.source, rating.source_record_id,
                        rating.locale, rating.region, rating.source_version,
                        rating.evidence_digest, rating.fetched_at, rating.expires_at,
-                       rating.initial_status
+                       rating.initial_status, registered.response_policy_json
                 FROM metadata_claims registered
                 JOIN metadata_rating_claims rating ON rating.claim_id = registered.claim_id
                 WHERE registered.claim_id = ?1
@@ -1170,6 +1383,7 @@ fn verify_identical_rating_claim(
                         row.get::<_, String>(11)?,
                         row.get::<_, Option<String>>(12)?,
                         row.get::<_, String>(13)?,
+                        row.get::<_, Option<String>>(14)?,
                     ))
                 },
             )
@@ -1194,6 +1408,7 @@ fn verify_identical_rating_claim(
             fetched_at,
             expires_at,
             initial_status,
+            stored_policy_json,
         )| {
             record_id == claim.record_id().to_string()
                 && value_millis == i64::from(claim.value_millis())
@@ -1217,6 +1432,7 @@ fn verify_identical_rating_claim(
                 && fetched_at == timestamp(claim.fetched_at())
                 && expires_at == claim.expires_at().map(timestamp)
                 && initial_status == claim_status(claim.initial_status())
+                && stored_policy_json.as_deref() == response_policy_json
         },
     );
     if matches_existing {
@@ -1233,6 +1449,7 @@ pub(crate) fn load_rating_claims(
     record_id: RecordId,
     capability: CapabilityKey,
     correlation_id: RequestCorrelationId,
+    read_at: chrono::DateTime<chrono::Utc>,
 ) -> ApplicationResult<Vec<RatingClaim>> {
     let mut statement = map_sql(
         connection.prepare(
@@ -1247,8 +1464,14 @@ pub(crate) fn load_rating_claims(
                        FROM metadata_claim_lifecycle_events lifecycle
                        WHERE lifecycle.claim_id = rating.claim_id
                        ORDER BY lifecycle.sequence DESC LIMIT 1
-                   ), rating.initial_status)
+                   ), rating.initial_status),
+                   registered.claim_id, registered.response_policy_json
             FROM metadata_rating_claims rating
+            LEFT JOIN metadata_claims registered
+              ON registered.claim_id = rating.claim_id
+             AND registered.workspace_id = rating.workspace_id
+             AND registered.record_id = rating.record_id
+             AND registered.claim_kind = 'rating'
             WHERE rating.workspace_id = ?1 AND rating.record_id = ?2
             ORDER BY rating.fetched_at DESC, rating.claim_id DESC
             LIMIT ?3
@@ -1280,6 +1503,8 @@ pub(crate) fn load_rating_claims(
                     row.get::<_, String>(11)?,
                     row.get::<_, Option<String>>(12)?,
                     row.get::<_, String>(13)?,
+                    row.get::<_, Option<String>>(14)?,
+                    row.get::<_, Option<String>>(15)?,
                 ))
             },
         ),
@@ -1303,7 +1528,12 @@ pub(crate) fn load_rating_claims(
             fetched_at,
             expires_at,
             status,
+            registered_claim_id,
+            response_policy_json,
         ) = map_sql(row, capability, correlation_id)?;
+        if registered_claim_id.as_deref() != Some(claim_id.as_str()) {
+            return Err(receipt_integrity(capability, correlation_id));
+        }
         let provenance = FieldClaimProvenance::try_new(
             MetadataProviderId::try_new(provider_id).map_err(|_| {
                 Box::new(FastiProblem::integrity_failed(capability, correlation_id))
@@ -1361,9 +1591,49 @@ pub(crate) fn load_rating_claims(
             })?,
         )
         .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
-        claims.push(claim);
+        let response_policy = validate_loaded_response_policy(
+            response_policy_json.as_deref(),
+            claim.provenance(),
+            claim.fetched_at(),
+            capability,
+            correlation_id,
+        )?;
+        claims.push((claim, response_policy));
     }
-    Ok(claims)
+    let evidence: Vec<_> = claims
+        .iter()
+        .map(|(claim, policy)| MetadataReadEvidence {
+            provenance: claim.provenance(),
+            fetched_at: claim.fetched_at(),
+            expires_at: claim.expires_at(),
+            policy: *policy,
+        })
+        .collect();
+    let mut allowed = reusable_metadata_evidence(&evidence, read_at);
+    let mut policies = map_sql(
+        connection.prepare(SELECT_KNOWN_RATING_POLICIES),
+        capability,
+        correlation_id,
+    )?;
+    let mut known = known_metadata_policies(
+        &mut policies,
+        params![workspace_id.to_string(), record_id.to_string()],
+        capability,
+        correlation_id,
+    )?
+    .peekable();
+    restrict_unknown_metadata(
+        &evidence,
+        &mut allowed,
+        (record_id, ""),
+        &mut known,
+        read_at,
+    )?;
+    Ok(claims
+        .into_iter()
+        .zip(allowed)
+        .filter_map(|((claim, _), allowed)| allowed.then_some(claim))
+        .collect())
 }
 
 #[allow(dead_code)]
@@ -1756,7 +2026,104 @@ fn immutable_claim_conflict(
     Box::new(FastiProblem::integrity_failed(capability, correlation_id))
 }
 
-fn write_provider_fields(
+fn validate_stored_response_policy(
+    json: Option<&str>,
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+) -> ApplicationResult<()> {
+    if let Some(json) = json {
+        let policy = ProviderResponseCachePolicy::from_canonical_json(json)
+            .ok_or_else(|| invalid_provider_metadata(capability, correlation_id))?;
+        if policy.reuse() == ProviderResponseReuse::NoStore {
+            return Err(invalid_provider_metadata(capability, correlation_id));
+        }
+    }
+    Ok(())
+}
+
+fn validate_response_observation(
+    policy: &ProviderResponseCachePolicy,
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+) -> ApplicationResult<()> {
+    if policy.reuse() == ProviderResponseReuse::NoStore || policy.received_at() > now() {
+        return Err(invalid_provider_metadata(capability, correlation_id));
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_provider_fields(
+    identifier: &fasti_domain::ExternalIdentifierClaim,
+    record_id: Option<RecordId>,
+    fields: &[ProviderMetadataField],
+    response_policy: &ProviderResponseCachePolicy,
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+) -> ApplicationResult<()> {
+    validate_response_observation(response_policy, capability, correlation_id)?;
+    if fields.is_empty() || fields.len() > MAX_PROVIDER_METADATA_FIELDS {
+        return Err(invalid_provider_metadata(capability, correlation_id));
+    }
+    let mut keys = BTreeSet::new();
+    let first = fields[0].claim();
+    for field in fields {
+        let claim = field.claim();
+        if !claim.provenance().is_complete()
+            || claim.source().as_str() != identifier.namespace()
+            || claim.provenance().source_identifier() != Some(identifier.value())
+            || claim
+                .record_id()
+                .is_some_and(|value| Some(value) != record_id)
+            || claim
+                .field_key()
+                .is_some_and(|value| value != field.field_key())
+            || timestamp(claim.fetched_at()) != timestamp(response_policy.received_at())
+            || claim.provenance() != first.provenance()
+            || claim.expires_at() != first.expires_at()
+            || claim.initial_status() != first.initial_status()
+            || !keys.insert(field.field_key().as_str())
+        {
+            return Err(invalid_provider_metadata(capability, correlation_id));
+        }
+        validate_claim_response_lifetime(
+            response_policy,
+            claim.fetched_at(),
+            claim.expires_at(),
+            claim.initial_status(),
+            capability,
+            correlation_id,
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_claim_response_lifetime(
+    policy: &ProviderResponseCachePolicy,
+    fetched_at: chrono::DateTime<chrono::Utc>,
+    expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    status: FieldClaimStatus,
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+) -> ApplicationResult<()> {
+    let (fresh, _) = policy
+        .deadlines(
+            std::time::Duration::from_secs(fasti_domain::METADATA_FRESH_SECONDS as u64),
+            std::time::Duration::from_secs(fasti_domain::METADATA_STALE_ON_ERROR_SECONDS as u64),
+        )
+        .ok_or_else(|| invalid_provider_metadata(capability, correlation_id))?;
+    let valid = match (status, expires_at) {
+        (FieldClaimStatus::Fresh, Some(expiry)) => expiry > fetched_at && expiry <= fresh,
+        (FieldClaimStatus::Stale, None) => timestamp(fresh) <= timestamp(policy.received_at()),
+        _ => false,
+    };
+    if timestamp(fetched_at) != timestamp(policy.received_at()) || !valid {
+        return Err(invalid_provider_metadata(capability, correlation_id));
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn write_provider_fields(
     transaction: &Transaction<'_>,
     workspace_id: WorkspaceId,
     record_id: RecordId,
@@ -1764,17 +2131,18 @@ fn write_provider_fields(
     fields: &[ProviderMetadataField],
     capability: CapabilityKey,
     correlation_id: RequestCorrelationId,
+    response_policy: &ProviderResponseCachePolicy,
 ) -> ApplicationResult<()> {
-    if fields.is_empty() || fields.len() > MAX_PROVIDER_METADATA_FIELDS {
-        return Err(invalid_provider_metadata(capability, correlation_id));
-    }
-    let mut keys = BTreeSet::new();
+    validate_provider_fields(
+        identifier,
+        Some(record_id),
+        fields,
+        response_policy,
+        capability,
+        correlation_id,
+    )?;
+    let policy_json = response_policy.to_canonical_json();
     for field in fields {
-        if field.claim().source().as_str() != identifier.namespace()
-            || !keys.insert(field.field_key().as_str())
-        {
-            return Err(invalid_provider_metadata(capability, correlation_id));
-        }
         write_field_claim(
             transaction,
             workspace_id,
@@ -1783,6 +2151,7 @@ fn write_provider_fields(
             field.claim(),
             capability,
             correlation_id,
+            Some(&policy_json),
         )?;
     }
     Ok(())
@@ -1805,6 +2174,14 @@ impl ProviderMetadataPort for SqliteKernel {
             correlation_id,
         )?;
         authorize_transaction(&transaction, capability, command.access(), correlation_id)?;
+        validate_provider_fields(
+            command.identifier(),
+            None,
+            command.fields(),
+            command.response_policy(),
+            capability,
+            correlation_id,
+        )?;
         let workspace_id = command.access().workspace_id();
         let existing = matching_record_ids(
             &transaction,
@@ -1840,6 +2217,7 @@ impl ProviderMetadataPort for SqliteKernel {
             command.fields(),
             capability,
             correlation_id,
+            command.response_policy(),
         )?;
         map_sql(transaction.commit(), capability, correlation_id)?;
         Ok(CreateProviderRecordOutcome::new(record_id, command.grain()))
@@ -1858,6 +2236,14 @@ impl ProviderMetadataPort for SqliteKernel {
             correlation_id,
         )?;
         authorize_transaction(&transaction, capability, command.access(), correlation_id)?;
+        validate_provider_fields(
+            command.identifier(),
+            Some(command.record_id()),
+            command.fields(),
+            command.response_policy(),
+            capability,
+            correlation_id,
+        )?;
         let workspace_id = command.access().workspace_id();
         attach_identifier_tx(
             &transaction,
@@ -1875,6 +2261,7 @@ impl ProviderMetadataPort for SqliteKernel {
             command.fields(),
             capability,
             correlation_id,
+            command.response_policy(),
         )?;
         map_sql(transaction.commit(), capability, correlation_id)?;
         Ok(())
@@ -1916,6 +2303,400 @@ pub(crate) fn write_field_override(
     Ok(())
 }
 
+fn validate_loaded_response_policy(
+    json: Option<&str>,
+    provenance: &FieldClaimProvenance,
+    fetched_at: chrono::DateTime<chrono::Utc>,
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+) -> ApplicationResult<Option<ProviderResponseCachePolicy>> {
+    if let Some(json) = json {
+        let policy = ProviderResponseCachePolicy::from_canonical_json(json)
+            .ok_or_else(|| receipt_integrity(capability, correlation_id))?;
+        if policy.reuse() == ProviderResponseReuse::NoStore
+            || !provenance.is_complete()
+            || timestamp(policy.received_at()) != timestamp(fetched_at)
+        {
+            return Err(receipt_integrity(capability, correlation_id));
+        }
+        return Ok(Some(policy));
+    }
+    // Historical NULL is unknown evidence, not a new grant of reuse permission.
+    Ok(None)
+}
+
+struct MetadataReadEvidence<'a> {
+    provenance: &'a FieldClaimProvenance,
+    fetched_at: chrono::DateTime<chrono::Utc>,
+    expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    policy: Option<ProviderResponseCachePolicy>,
+}
+
+type MetadataVariant<'a> = (&'a str, &'a str, &'a str, Option<&'a str>, Option<&'a str>);
+type PolicyBoundFieldClaim = (FieldClaim, Option<ProviderResponseCachePolicy>);
+
+fn metadata_variant(provenance: &FieldClaimProvenance) -> Option<MetadataVariant<'_>> {
+    provenance
+        .provider_id()
+        .zip(provenance.source_identifier())
+        .map(|(provider, source)| {
+            (
+                provider.as_str(),
+                provenance.source_namespace().as_str(),
+                source,
+                provenance.locale().map(MetadataLocale::as_str),
+                provenance.region().map(MetadataRegion::as_str),
+            )
+        })
+}
+
+fn metadata_observation_permits_reuse(
+    evidence: &MetadataReadEvidence<'_>,
+    read_at: chrono::DateTime<chrono::Utc>,
+) -> bool {
+    let Some(policy) = evidence.policy else {
+        return true;
+    };
+    let fresh_cap = evidence
+        .expires_at
+        .and_then(|expiry| (expiry - evidence.fetched_at).to_std().ok())
+        .unwrap_or(std::time::Duration::ZERO)
+        .min(std::time::Duration::from_secs(
+            fasti_domain::METADATA_FRESH_SECONDS as u64,
+        ));
+    let Some((fresh, stale)) = policy.deadlines(
+        fresh_cap,
+        std::time::Duration::from_secs(fasti_domain::METADATA_STALE_ON_ERROR_SECONDS as u64),
+    ) else {
+        return false;
+    };
+    if read_at < policy.received_at() {
+        return false;
+    }
+    match policy.reuse() {
+        ProviderResponseReuse::NoStore | ProviderResponseReuse::ValidateEveryReuse => false,
+        ProviderResponseReuse::ValidateWhenStale => {
+            read_at
+                < evidence
+                    .expires_at
+                    .map_or(fresh, |expiry| fresh.min(expiry))
+        }
+        ProviderResponseReuse::Reusable => read_at < stale,
+    }
+}
+
+fn reusable_metadata_evidence(
+    evidence: &[MetadataReadEvidence<'_>],
+    read_at: chrono::DateTime<chrono::Utc>,
+) -> Vec<bool> {
+    let permitted: Vec<_> = evidence
+        .iter()
+        .map(|evidence| metadata_observation_permits_reuse(evidence, read_at))
+        .collect();
+    let mut known = BTreeMap::new();
+    for (index, evidence) in evidence.iter().enumerate() {
+        if let Some(key) = metadata_variant(evidence.provenance) {
+            if evidence.policy.is_some() {
+                known
+                    .entry(key)
+                    .and_modify(|latest: &mut (chrono::DateTime<chrono::Utc>, bool)| {
+                        if evidence.fetched_at > latest.0 {
+                            *latest = (evidence.fetched_at, permitted[index]);
+                        } else if evidence.fetched_at == latest.0 {
+                            latest.1 &= permitted[index];
+                        }
+                    })
+                    .or_insert((evidence.fetched_at, permitted[index]));
+            }
+        }
+    }
+    evidence
+        .iter()
+        .enumerate()
+        .map(|(index, evidence)| {
+            if !permitted[index] {
+                return false;
+            }
+            if let Some(key) = metadata_variant(evidence.provenance) {
+                known.get(&key).is_none_or(|(latest, allowed)| {
+                    *allowed && (evidence.policy.is_none() || *latest == evidence.fetched_at)
+                })
+            } else {
+                // Incomplete historical coordinates cannot prove independence from
+                // a known restriction. Keep bytes and overrides; only filter reuse.
+                !known
+                    .iter()
+                    .any(|((_, namespace, _, locale, _), (_, allowed))| {
+                        !allowed
+                            && *namespace == evidence.provenance.source_namespace().as_str()
+                            && evidence
+                                .provenance
+                                .locale()
+                                .is_none_or(|legacy| *locale == Some(legacy.as_str()))
+                    })
+            }
+        })
+        .collect()
+}
+
+// A complete payload window already validates every policy. Probe one row beyond
+// its bound, once per scope, before ranking overflow history. Orphan provenance
+// only adds conservative overflow work; never filter this probe by policy.
+// Rank narrow keys across full history, then fetch policy evidence. Neither
+// field values nor policy JSON enter the key sort. The pinned SQLite coroutine
+// plan and monotonically ordered scope stream are checked independently.
+const SELECT_KNOWN_FIELD_POLICIES: &str = r#"
+    WITH overflow_scopes AS MATERIALIZED (
+        SELECT records.value AS record_id, fields.value AS field_key
+        FROM json_each(?2) records
+        CROSS JOIN json_each(?3) fields
+        WHERE EXISTS (
+            SELECT 1 FROM metadata_claim_provenance recent
+                INDEXED BY metadata_claim_provenance_recent_idx
+            WHERE recent.workspace_id = ?1 AND recent.record_id = records.value
+              AND recent.field_key = fields.value
+            LIMIT 1 OFFSET ?4
+        )
+    ), ranked_keys AS (
+        SELECT p.claim_id, p.record_id, p.field_key,
+               DENSE_RANK() OVER (
+                   PARTITION BY p.record_id, p.field_key, p.provider_id,
+                                p.source, p.source_record_id, lower(c.locale), upper(p.region)
+                   ORDER BY p.fetched_at DESC
+               ) AS observation_rank
+        FROM overflow_scopes scope
+        CROSS JOIN metadata_claim_provenance p
+            INDEXED BY metadata_claim_provenance_recent_idx
+          ON p.workspace_id = ?1 AND p.record_id = scope.record_id
+         AND p.field_key = scope.field_key
+        CROSS JOIN metadata_claims registered
+          ON registered.claim_id = p.claim_id AND registered.workspace_id = ?1
+         AND registered.record_id = p.record_id AND registered.claim_kind = 'field'
+        CROSS JOIN metadata_field_claims c
+          ON c.workspace_id = ?1 AND c.record_id = p.record_id
+         AND c.field_key = p.field_key AND c.source = p.source
+         AND c.fetched_at = p.fetched_at
+        WHERE registered.response_policy_json IS NOT NULL
+    )
+    SELECT k.record_id, k.field_key, p.provider_id, p.source,
+           p.source_record_id, c.locale, p.region, p.source_version,
+           p.evidence_digest, p.provenance_state, p.fetched_at,
+           c.expires_at, registered.response_policy_json
+    FROM (
+        SELECT claim_id, record_id, field_key FROM ranked_keys
+        WHERE observation_rank = 1
+        ORDER BY record_id, field_key, claim_id LIMIT -1
+    ) k
+    CROSS JOIN metadata_claim_provenance p ON p.claim_id = k.claim_id
+    CROSS JOIN metadata_claims registered ON registered.claim_id = k.claim_id
+    CROSS JOIN metadata_field_claims c
+      ON c.workspace_id = ?1 AND c.record_id = p.record_id
+     AND c.field_key = p.field_key AND c.source = p.source
+     AND c.fetched_at = p.fetched_at
+"#;
+
+const SELECT_KNOWN_RATING_POLICIES: &str = r#"
+    WITH ranked_keys AS (
+        SELECT rating.claim_id, rating.record_id,
+               DENSE_RANK() OVER (
+                   PARTITION BY rating.record_id, rating.provider_id, rating.source,
+                                rating.source_record_id, lower(rating.locale), upper(rating.region)
+                   ORDER BY rating.fetched_at DESC
+               ) AS observation_rank
+        FROM metadata_rating_claims rating INDEXED BY metadata_rating_claims_record_idx
+        CROSS JOIN metadata_claims registered
+          ON registered.claim_id = rating.claim_id AND registered.workspace_id = ?1
+         AND registered.record_id = rating.record_id AND registered.claim_kind = 'rating'
+        WHERE rating.workspace_id = ?1 AND rating.record_id = ?2
+          AND registered.response_policy_json IS NOT NULL
+    )
+    SELECT k.record_id, '', rating.provider_id, rating.source,
+           rating.source_record_id, rating.locale, rating.region, rating.source_version,
+           rating.evidence_digest, 'complete', rating.fetched_at,
+           rating.expires_at, registered.response_policy_json
+    FROM (
+        SELECT claim_id, record_id FROM ranked_keys WHERE observation_rank = 1
+        ORDER BY record_id, claim_id LIMIT -1
+    ) k
+    CROSS JOIN metadata_rating_claims rating ON rating.claim_id = k.claim_id
+    CROSS JOIN metadata_claims registered ON registered.claim_id = k.claim_id
+"#;
+
+struct KnownMetadataPolicy {
+    key: (RecordId, String),
+    provenance: FieldClaimProvenance,
+    fetched_at: chrono::DateTime<chrono::Utc>,
+    expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    policy: ProviderResponseCachePolicy,
+}
+
+impl KnownMetadataPolicy {
+    fn read(
+        row: &Row<'_>,
+        capability: CapabilityKey,
+        correlation_id: RequestCorrelationId,
+    ) -> ApplicationResult<Self> {
+        let integrity = || receipt_integrity(capability, correlation_id);
+        let record: String = map_sql(row.get(0), capability, correlation_id)?;
+        let field: String = map_sql(row.get(1), capability, correlation_id)?;
+        let provider: Option<String> = map_sql(row.get(2), capability, correlation_id)?;
+        let namespace: String = map_sql(row.get(3), capability, correlation_id)?;
+        let source: Option<String> = map_sql(row.get(4), capability, correlation_id)?;
+        let locale: Option<String> = map_sql(row.get(5), capability, correlation_id)?;
+        let region: Option<String> = map_sql(row.get(6), capability, correlation_id)?;
+        let version = map_sql(row.get(7), capability, correlation_id)?;
+        let digest: Option<String> = map_sql(row.get(8), capability, correlation_id)?;
+        let state: String = map_sql(row.get(9), capability, correlation_id)?;
+        let fetched: String = map_sql(row.get(10), capability, correlation_id)?;
+        let expires: Option<String> = map_sql(row.get(11), capability, correlation_id)?;
+        let json: String = map_sql(row.get(12), capability, correlation_id)?;
+        if state != "complete" {
+            return Err(integrity());
+        }
+        let provenance = FieldClaimProvenance::try_new(
+            MetadataProviderId::try_new(provider.ok_or_else(integrity)?)
+                .map_err(|_| integrity())?,
+            NamespaceKey::try_new(namespace).map_err(|_| integrity())?,
+            source.ok_or_else(integrity)?,
+            locale
+                .map(MetadataLocale::try_new)
+                .transpose()
+                .map_err(|_| integrity())?,
+            region
+                .map(MetadataRegion::try_new)
+                .transpose()
+                .map_err(|_| integrity())?,
+            version,
+            digest
+                .ok_or_else(integrity)?
+                .parse()
+                .map_err(|_| integrity())?,
+        )
+        .map_err(|_| integrity())?;
+        let fetched_at = parse_timestamp(&fetched, capability, correlation_id)?;
+        let policy = validate_loaded_response_policy(
+            Some(&json),
+            &provenance,
+            fetched_at,
+            capability,
+            correlation_id,
+        )?
+        .ok_or_else(integrity)?;
+        Ok(Self {
+            key: (record.parse().map_err(|_| integrity())?, field),
+            provenance,
+            fetched_at,
+            expires_at: expires
+                .map(|value| parse_timestamp(&value, capability, correlation_id))
+                .transpose()?,
+            policy,
+        })
+    }
+}
+
+fn known_metadata_policies<'s>(
+    statement: &'s mut rusqlite::Statement<'_>,
+    parameters: impl rusqlite::Params,
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+) -> ApplicationResult<impl Iterator<Item = ApplicationResult<KnownMetadataPolicy>> + 's> {
+    let rows = map_sql(
+        statement.query_map(parameters, move |row| {
+            Ok(KnownMetadataPolicy::read(row, capability, correlation_id))
+        }),
+        capability,
+        correlation_id,
+    )?;
+    let mut previous_key = None;
+    Ok(rows.map(move |row| {
+        let policy = map_sql(row, capability, correlation_id)??;
+        let order_key = (policy.key.0.uuid(), policy.key.1.clone());
+        if previous_key
+            .as_ref()
+            .is_some_and(|previous| previous > &order_key)
+        {
+            return Err(receipt_integrity(capability, correlation_id));
+        }
+        previous_key = Some(order_key);
+        Ok(policy)
+    }))
+}
+
+fn restrict_unknown_metadata(
+    evidence: &[MetadataReadEvidence<'_>],
+    allowed: &mut [bool],
+    key: (RecordId, &str),
+    known: &mut std::iter::Peekable<impl Iterator<Item = ApplicationResult<KnownMetadataPolicy>>>,
+    read_at: chrono::DateTime<chrono::Utc>,
+) -> ApplicationResult<()> {
+    // A newer known observation cannot lie outside a newest-first payload window
+    // containing an older same-variant known claim. Unknown rows can bury it.
+    if !evidence.iter().any(|evidence| evidence.policy.is_none()) {
+        return Ok(());
+    }
+    while let Some(next) = known.peek() {
+        if next
+            .as_ref()
+            .is_ok_and(|next| (next.key.0.uuid(), next.key.1.as_str()) > (key.0.uuid(), key.1))
+        {
+            break;
+        }
+        let next = known.next().expect("peeked policy row")?;
+        if (next.key.0, next.key.1.as_str()) != key {
+            continue;
+        }
+        let observation = MetadataReadEvidence {
+            provenance: &next.provenance,
+            fetched_at: next.fetched_at,
+            expires_at: next.expires_at,
+            policy: Some(next.policy),
+        };
+        if metadata_observation_permits_reuse(&observation, read_at) {
+            continue;
+        }
+        for (evidence, allowed) in evidence.iter().zip(allowed.iter_mut()) {
+            if evidence.policy.is_some() {
+                continue;
+            }
+            let overlaps = if let Some(variant) = metadata_variant(evidence.provenance) {
+                Some(variant) == metadata_variant(&next.provenance)
+            } else {
+                evidence.provenance.source_namespace() == next.provenance.source_namespace()
+                    && evidence
+                        .provenance
+                        .locale()
+                        .is_none_or(|locale| Some(locale) == next.provenance.locale())
+            };
+            *allowed &= !overlaps;
+        }
+    }
+    Ok(())
+}
+
+fn reusable_field_claims(
+    claims: &mut Vec<PolicyBoundFieldClaim>,
+    read_at: chrono::DateTime<chrono::Utc>,
+    key: (RecordId, &str),
+    known: &mut std::iter::Peekable<impl Iterator<Item = ApplicationResult<KnownMetadataPolicy>>>,
+) -> ApplicationResult<Vec<FieldClaim>> {
+    let evidence: Vec<_> = claims
+        .iter()
+        .map(|(claim, policy)| MetadataReadEvidence {
+            provenance: claim.provenance(),
+            fetched_at: claim.fetched_at(),
+            expires_at: claim.expires_at(),
+            policy: *policy,
+        })
+        .collect();
+    let mut allowed = reusable_metadata_evidence(&evidence, read_at);
+    restrict_unknown_metadata(&evidence, &mut allowed, key, known, read_at)?;
+    Ok(claims
+        .drain(..)
+        .zip(allowed)
+        .filter_map(|((claim, _), allowed)| allowed.then_some(claim))
+        .collect())
+}
+
 pub(crate) fn load_field_claims(
     connection: &Connection,
     workspace_id: WorkspaceId,
@@ -1923,6 +2704,7 @@ pub(crate) fn load_field_claims(
     field_key: &FieldKey,
     capability: CapabilityKey,
     correlation_id: RequestCorrelationId,
+    read_at: chrono::DateTime<chrono::Utc>,
 ) -> ApplicationResult<Vec<FieldClaim>> {
     let mut statement = map_sql(
         connection.prepare(
@@ -1939,13 +2721,19 @@ pub(crate) fn load_field_claims(
                        WHERE lifecycle.claim_id = provenance.claim_id
                        ORDER BY lifecycle.sequence DESC
                        LIMIT 1
-                   ), provenance.initial_status)
+                   ), provenance.initial_status),
+                   registered.claim_id, registered.response_policy_json
             FROM metadata_field_claims claim
             JOIN metadata_claim_provenance provenance
               ON provenance.record_id = claim.record_id
              AND provenance.field_key = claim.field_key
              AND provenance.source = claim.source
              AND provenance.fetched_at = claim.fetched_at
+            LEFT JOIN metadata_claims registered
+              ON registered.claim_id = provenance.claim_id
+             AND registered.workspace_id = claim.workspace_id
+             AND registered.record_id = claim.record_id
+             AND registered.claim_kind = 'field'
             WHERE claim.workspace_id = ?1
               AND claim.record_id = ?2
               AND claim.field_key = ?3
@@ -1981,7 +2769,32 @@ pub(crate) fn load_field_claims(
         }
         claims.push(claim);
     }
-    Ok(claims)
+    let mut policies = map_sql(
+        connection.prepare(SELECT_KNOWN_FIELD_POLICIES),
+        capability,
+        correlation_id,
+    )?;
+    let records = selected_record_ids_json(&[record_id], capability, correlation_id)?;
+    let fields = serde_json::to_string(&[field_key.as_str()])
+        .map_err(|_| receipt_integrity(capability, correlation_id))?;
+    let mut known = known_metadata_policies(
+        &mut policies,
+        params![
+            workspace_id.to_string(),
+            records,
+            fields,
+            MAX_EFFECTIVE_FIELD_CLAIMS
+        ],
+        capability,
+        correlation_id,
+    )?
+    .peekable();
+    reusable_field_claims(
+        &mut claims,
+        read_at,
+        (record_id, field_key.as_str()),
+        &mut known,
+    )
 }
 
 struct PersistedFieldClaimRow {
@@ -2000,6 +2813,8 @@ struct PersistedFieldClaimRow {
     fetched_at: String,
     expires_at: Option<String>,
     status: String,
+    registered_claim_id: Option<String>,
+    response_policy_json: Option<String>,
 }
 
 impl PersistedFieldClaimRow {
@@ -2020,6 +2835,8 @@ impl PersistedFieldClaimRow {
             fetched_at: row.get(12)?,
             expires_at: row.get(13)?,
             status: row.get(14)?,
+            registered_claim_id: row.get(15)?,
+            response_policy_json: row.get(16)?,
         })
     }
 
@@ -2027,8 +2844,11 @@ impl PersistedFieldClaimRow {
         self,
         capability: CapabilityKey,
         correlation_id: RequestCorrelationId,
-    ) -> ApplicationResult<((RecordId, FieldKey), FieldClaim)> {
+    ) -> ApplicationResult<((RecordId, FieldKey), PolicyBoundFieldClaim)> {
         let integrity = || Box::new(FastiProblem::integrity_failed(capability, correlation_id));
+        if self.registered_claim_id.as_deref() != Some(self.claim_id.as_str()) {
+            return Err(integrity());
+        }
         let record_id = self
             .record_id
             .parse::<RecordId>()
@@ -2086,14 +2906,20 @@ impl PersistedFieldClaimRow {
             status,
         )
         .map_err(|_: FieldClaimError| integrity())?;
-        Ok(((record_id, field_key), claim))
+        let response_policy = validate_loaded_response_policy(
+            self.response_policy_json.as_deref(),
+            claim.provenance(),
+            claim.fetched_at(),
+            capability,
+            correlation_id,
+        )?;
+        Ok(((record_id, field_key), (claim, response_policy)))
     }
 }
 
 pub(crate) struct RecordListMetadata {
     policy: MetadataProjectionPolicy,
-    claims: HashMap<(RecordId, FieldKey), Vec<FieldClaim>>,
-    overrides: HashMap<(RecordId, FieldKey), ProfileFieldOverride>,
+    resolved: HashMap<(RecordId, FieldKey), ResolvedField>,
     resolved_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -2106,26 +2932,90 @@ impl RecordListMetadata {
         correlation_id: RequestCorrelationId,
     ) -> ApplicationResult<fasti_domain::ResolvedField> {
         let key = (record_id, field_key.clone());
-        resolve_profile_field(
-            self.overrides.get(&key),
-            self.claims.get(&key).map(Vec::as_slice).unwrap_or_default(),
-            &[],
-            &self.policy,
-            self.resolved_at,
-        )
-        .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))
+        if let Some(resolved) = self.resolved.get(&key) {
+            return Ok(resolved.clone());
+        }
+        resolve_profile_field(None, &[], &[], &self.policy, self.resolved_at)
+            .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))
     }
 }
 
-pub(crate) fn load_record_list_metadata(
+// Keep selection/sorting on narrow keys. LIMIT -1 prevents flattening the ordered
+// subquery; CROSS JOIN keeps payload reads after that coroutine. The outer
+// ORDER BY is still explicit, and the bundled-SQLite plan is regression-tested.
+const SELECT_RECORD_METADATA: &str = r#"
+    WITH page_records AS (
+        SELECT record_id FROM records
+        WHERE workspace_id = ?1 AND status = 'active'
+          AND record_id IN (SELECT value FROM json_each(?2))
+    ), requested_fields AS (
+        SELECT DISTINCT column1 AS field_key FROM (VALUES (?3), (?4), (?5), (?6), (?7))
+    ), selected_keys AS (
+        SELECT provenance.record_id, provenance.field_key, provenance.source,
+               provenance.fetched_at, provenance.claim_id
+        FROM page_records page
+        CROSS JOIN requested_fields field
+        CROSS JOIN metadata_claim_provenance provenance
+        WHERE provenance.claim_id IN (
+            SELECT recent.claim_id
+            FROM metadata_claim_provenance recent
+                INDEXED BY metadata_claim_provenance_recent_idx
+            CROSS JOIN metadata_field_claims claim
+                INDEXED BY metadata_field_claims_record_field_idx
+              ON claim.workspace_id = recent.workspace_id
+             AND claim.record_id = recent.record_id
+             AND claim.field_key = recent.field_key
+             AND claim.source = recent.source
+             AND claim.fetched_at = recent.fetched_at
+            WHERE recent.workspace_id = ?1 AND recent.record_id = page.record_id
+              AND recent.field_key = field.field_key
+            ORDER BY recent.fetched_at DESC, recent.source DESC LIMIT ?8
+        )
+    )
+    SELECT selected.record_id, selected.field_key, provenance.claim_id,
+           selected.source, claim.value, claim.locale,
+           provenance.provider_id, provenance.source_record_id,
+           provenance.region, provenance.source_version,
+           provenance.evidence_digest, provenance.provenance_state,
+           selected.fetched_at, claim.expires_at,
+           COALESCE((
+               SELECT lifecycle.status
+               FROM metadata_claim_lifecycle_events lifecycle
+               WHERE lifecycle.claim_id = provenance.claim_id
+               ORDER BY lifecycle.sequence DESC LIMIT 1
+           ), provenance.initial_status),
+           registered.claim_id, registered.response_policy_json
+    FROM (
+        SELECT * FROM selected_keys
+        ORDER BY record_id, field_key, fetched_at DESC, source DESC LIMIT -1
+    ) selected
+    CROSS JOIN metadata_field_claims claim
+      ON claim.record_id = selected.record_id
+     AND claim.field_key = selected.field_key
+     AND claim.source = selected.source
+     AND claim.fetched_at = selected.fetched_at
+     AND claim.workspace_id = ?1
+    CROSS JOIN metadata_claim_provenance provenance
+      ON provenance.claim_id = selected.claim_id AND provenance.workspace_id = ?1
+    LEFT JOIN metadata_claims registered
+      ON registered.claim_id = selected.claim_id AND registered.workspace_id = ?1
+     AND registered.record_id = selected.record_id AND registered.claim_kind = 'field'
+    ORDER BY selected.record_id, selected.field_key,
+             selected.fetched_at DESC, selected.source DESC
+"#;
+
+/// Resolve only the bounded set of Records selected by the caller's query.
+/// Record-list and Search pages share the same profile metadata policy.
+pub(crate) fn load_record_metadata_batch(
     connection: &Connection,
     workspace_id: WorkspaceId,
     profile_id: ProfileId,
-    page_limit: i64,
+    record_ids: &[RecordId],
     field_keys: &[FieldKey; 5],
     capability: CapabilityKey,
     correlation_id: RequestCorrelationId,
 ) -> ApplicationResult<RecordListMetadata> {
+    let record_ids_json = selected_record_ids_json(record_ids, capability, correlation_id)?;
     let policy = load_projection_policy(
         connection,
         workspace_id,
@@ -2139,81 +3029,7 @@ pub(crate) fn load_record_list_metadata(
             WITH page_records AS (
                 SELECT record_id FROM records
                 WHERE workspace_id = ?1 AND status = 'active'
-                ORDER BY record_id
-                LIMIT ?2
-            ), ranked_claims AS (
-                SELECT claim.record_id, claim.field_key,
-                       provenance.claim_id, claim.source, claim.value, claim.locale,
-                       provenance.provider_id, provenance.source_record_id,
-                       provenance.region, provenance.source_version,
-                       provenance.evidence_digest, provenance.provenance_state,
-                       claim.fetched_at, claim.expires_at,
-                       COALESCE((
-                           SELECT lifecycle.status
-                           FROM metadata_claim_lifecycle_events lifecycle
-                           WHERE lifecycle.claim_id = provenance.claim_id
-                           ORDER BY lifecycle.sequence DESC
-                           LIMIT 1
-                       ), provenance.initial_status) AS status,
-                       ROW_NUMBER() OVER (
-                           PARTITION BY claim.record_id, claim.field_key
-                           ORDER BY claim.fetched_at DESC, claim.source DESC
-                       ) AS claim_rank
-                FROM metadata_field_claims claim
-                JOIN page_records page ON page.record_id = claim.record_id
-                JOIN metadata_claim_provenance provenance
-                  ON provenance.workspace_id = claim.workspace_id
-                 AND provenance.record_id = claim.record_id
-                 AND provenance.field_key = claim.field_key
-                 AND provenance.source = claim.source
-                 AND provenance.fetched_at = claim.fetched_at
-                WHERE claim.workspace_id = ?1
-                  AND claim.field_key IN (?3, ?4, ?5, ?6, ?7)
-            )
-            SELECT record_id, field_key, claim_id, source, value, locale,
-                   provider_id, source_record_id, region, source_version,
-                   evidence_digest, provenance_state, fetched_at, expires_at, status
-            FROM ranked_claims
-            WHERE claim_rank <= ?8
-            ORDER BY record_id, field_key, fetched_at DESC, source DESC
-            "#,
-        ),
-        capability,
-        correlation_id,
-    )?;
-    let rows = map_sql(
-        statement.query_map(
-            params![
-                workspace_id.to_string(),
-                page_limit,
-                field_keys[0].as_str(),
-                field_keys[1].as_str(),
-                field_keys[2].as_str(),
-                field_keys[3].as_str(),
-                field_keys[4].as_str(),
-                MAX_EFFECTIVE_FIELD_CLAIMS,
-            ],
-            PersistedFieldClaimRow::read,
-        ),
-        capability,
-        correlation_id,
-    )?;
-    let mut claims: HashMap<(RecordId, FieldKey), Vec<FieldClaim>> = HashMap::new();
-    for row in rows {
-        let (key, claim) =
-            map_sql(row, capability, correlation_id)?.decode(capability, correlation_id)?;
-        claims.entry(key).or_default().push(claim);
-    }
-    drop(statement);
-
-    let mut statement = map_sql(
-        connection.prepare(
-            r#"
-            WITH page_records AS (
-                SELECT record_id FROM records
-                WHERE workspace_id = ?1 AND status = 'active'
-                ORDER BY record_id
-                LIMIT ?2
+                  AND record_id IN (SELECT value FROM json_each(?2))
             )
             SELECT override.record_id, override.field_key,
                    override.value, override.created_at
@@ -2232,7 +3048,7 @@ pub(crate) fn load_record_list_metadata(
         statement.query_map(
             params![
                 workspace_id.to_string(),
-                page_limit,
+                record_ids_json,
                 profile_id.to_string(),
                 field_keys[0].as_str(),
                 field_keys[1].as_str(),
@@ -2282,11 +3098,120 @@ pub(crate) fn load_record_list_metadata(
             )));
         }
     }
+    drop(statement);
+    let resolved_at = now();
+    let mut resolved = HashMap::new();
+    let mut policy_statement = map_sql(
+        connection.prepare(SELECT_KNOWN_FIELD_POLICIES),
+        capability,
+        correlation_id,
+    )?;
+    let policy_fields =
+        serde_json::to_string(&field_keys.iter().map(FieldKey::as_str).collect::<Vec<_>>())
+            .map_err(|_| receipt_integrity(capability, correlation_id))?;
+    let mut known = known_metadata_policies(
+        &mut policy_statement,
+        params![
+            workspace_id.to_string(),
+            record_ids_json,
+            policy_fields,
+            MAX_EFFECTIVE_FIELD_CLAIMS
+        ],
+        capability,
+        correlation_id,
+    )?
+    .peekable();
+    let mut statement = map_sql(
+        connection.prepare(SELECT_RECORD_METADATA),
+        capability,
+        correlation_id,
+    )?;
+    let rows = map_sql(
+        statement.query_map(
+            params![
+                workspace_id.to_string(),
+                record_ids_json,
+                field_keys[0].as_str(),
+                field_keys[1].as_str(),
+                field_keys[2].as_str(),
+                field_keys[3].as_str(),
+                field_keys[4].as_str(),
+                MAX_EFFECTIVE_FIELD_CLAIMS,
+            ],
+            PersistedFieldClaimRow::read,
+        ),
+        capability,
+        correlation_id,
+    )?;
+    let mut checked_policy_history = false;
+    {
+        let mut resolve_group =
+            |key: (RecordId, FieldKey), claims: &mut Vec<PolicyBoundFieldClaim>| {
+                checked_policy_history |= claims.iter().any(|(_, policy)| policy.is_none());
+                let claims = reusable_field_claims(
+                    claims,
+                    resolved_at,
+                    (key.0, key.1.as_str()),
+                    &mut known,
+                )?;
+                let value = resolve_profile_field(
+                    overrides.remove(&key).as_ref(),
+                    &claims,
+                    &[],
+                    &policy,
+                    resolved_at,
+                )
+                .map_err(|_| {
+                    Box::new(FastiProblem::integrity_failed(capability, correlation_id))
+                })?;
+                if resolved.insert(key, value).is_some() {
+                    return Err(Box::new(FastiProblem::integrity_failed(
+                        capability,
+                        correlation_id,
+                    )));
+                }
+                Ok(())
+            };
+        // Retain one bounded field history, not every history in the page.
+        // Decode every selected claim even when a profile override wins.
+        let mut group_key = None;
+        let mut claims = Vec::new();
+        for row in rows {
+            let (key, claim) =
+                map_sql(row, capability, correlation_id)?.decode(capability, correlation_id)?;
+            if group_key.as_ref() != Some(&key) {
+                if let Some(previous) = group_key.replace(key) {
+                    resolve_group(previous, &mut claims)?;
+                }
+            }
+            if claims.len() >= MAX_EFFECTIVE_FIELD_CLAIMS as usize {
+                return Err(Box::new(FastiProblem::integrity_failed(
+                    capability,
+                    correlation_id,
+                )));
+            }
+            claims.push(claim);
+        }
+        if let Some(key) = group_key {
+            resolve_group(key, &mut claims)?;
+        }
+    }
+    if checked_policy_history {
+        // Validate the entire ordering contract before publishing any projection;
+        // otherwise a late out-of-order restriction could be skipped silently.
+        for policy in known {
+            policy?;
+        }
+    }
+    for (key, override_) in overrides {
+        let value = resolve_profile_field(Some(&override_), &[], &[], &policy, resolved_at)
+            .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
+        resolved.insert(key, value);
+    }
     Ok(RecordListMetadata {
         policy,
-        claims,
-        overrides,
-        resolved_at: now(),
+        resolved,
+        resolved_at,
     })
 }
 
@@ -2339,8 +3264,14 @@ pub(crate) fn write_profile_field_override(
     correlation_id: RequestCorrelationId,
 ) -> ApplicationResult<()> {
     map_sql(
-        connection.execute(
-            r#"
+        connection.execute_batch("SAVEPOINT profile_search_override"),
+        capability,
+        correlation_id,
+    )?;
+    let result = (|| {
+        map_sql(
+            connection.execute(
+                r#"
             INSERT INTO metadata_profile_field_overrides(
                 workspace_id, profile_id, record_id, field_key, value,
                 created_at, updated_at, origin
@@ -2351,19 +3282,45 @@ pub(crate) fn write_profile_field_override(
                 updated_at = excluded.updated_at,
                 origin = 'user'
             "#,
-            params![
-                workspace_id.to_string(),
-                override_.profile_id().to_string(),
-                override_.record_id().to_string(),
-                override_.field_key().as_str(),
-                override_.value(),
-                timestamp(override_.created_at())
-            ],
+                params![
+                    workspace_id.to_string(),
+                    override_.profile_id().to_string(),
+                    override_.record_id().to_string(),
+                    override_.field_key().as_str(),
+                    override_.value(),
+                    timestamp(override_.created_at())
+                ],
+            ),
+            capability,
+            correlation_id,
+        )?;
+        if crate::local_search::searchable_field(override_.field_key().as_str()) {
+            map_sql(
+                crate::local_search::reindex_overrides(
+                    connection,
+                    &workspace_id.to_string(),
+                    &override_.profile_id().to_string(),
+                    &override_.record_id().to_string(),
+                ),
+                capability,
+                correlation_id,
+            )?;
+        }
+        Ok(())
+    })();
+    match result {
+        Ok(()) => map_sql(
+            connection.execute_batch("RELEASE profile_search_override"),
+            capability,
+            correlation_id,
         ),
-        capability,
-        correlation_id,
-    )?;
-    Ok(())
+        Err(error) => {
+            let _ = connection.execute_batch(
+                "ROLLBACK TO profile_search_override; RELEASE profile_search_override",
+            );
+            Err(error)
+        }
+    }
 }
 
 pub(crate) fn load_profile_field_override(
@@ -3005,6 +3962,7 @@ fn validate_refresh_commit(
     capability: CapabilityKey,
     correlation_id: RequestCorrelationId,
 ) -> ApplicationResult<()> {
+    validate_response_observation(command.response_policy(), capability, correlation_id)?;
     if current != command.prepared()
         || command.fields().len() > MAX_PROVIDER_METADATA_FIELDS
         || command.ratings().len() > 256
@@ -3014,12 +3972,19 @@ fn validate_refresh_commit(
         return Err(immutable_claim_conflict(capability, correlation_id));
     }
     let identifier = current.identifier();
+    let response_provenance = command
+        .fields()
+        .first()
+        .map(|field| field.claim().provenance())
+        .or_else(|| command.ratings().first().map(|rating| rating.provenance()));
     let mut field_keys = BTreeSet::new();
     let mut submitted_claim_groups = Vec::new();
     for field in command.fields() {
         let claim = field.claim();
         let provenance = claim.provenance();
         if !field_keys.insert(field.field_key().as_str())
+            || Some(provenance) != response_provenance
+            || timestamp(claim.fetched_at()) != timestamp(command.response_policy().received_at())
             || claim
                 .record_id()
                 .is_some_and(|value| value != current.record_id())
@@ -3032,6 +3997,14 @@ fn validate_refresh_commit(
         {
             return Err(immutable_claim_conflict(capability, correlation_id));
         }
+        validate_claim_response_lifetime(
+            command.response_policy(),
+            claim.fetched_at(),
+            claim.expires_at(),
+            claim.initial_status(),
+            capability,
+            correlation_id,
+        )?;
         let group = metadata_field_group(field.field_key())
             .ok_or_else(|| immutable_claim_conflict(capability, correlation_id))?;
         submitted_claim_groups.push((claim.claim_id(), group));
@@ -3039,16 +4012,39 @@ fn validate_refresh_commit(
     for rating in command.ratings() {
         let provenance = rating.provenance();
         if rating.record_id() != current.record_id()
+            || Some(provenance) != response_provenance
+            || timestamp(rating.fetched_at()) != timestamp(command.response_policy().received_at())
             || provenance.provider_id() != Some(command.provider_id())
             || provenance.source_namespace().as_str() != identifier.namespace()
             || provenance.source_identifier() != Some(identifier.value())
         {
             return Err(immutable_claim_conflict(capability, correlation_id));
         }
+        validate_claim_response_lifetime(
+            command.response_policy(),
+            rating.fetched_at(),
+            rating.expires_at(),
+            rating.initial_status(),
+            capability,
+            correlation_id,
+        )?;
     }
     for entry in command.cache_entries() {
         let key = entry.key();
+        let (fresh, stale) = command
+            .response_policy()
+            .deadlines(
+                std::time::Duration::from_secs(fasti_domain::METADATA_FRESH_SECONDS as u64),
+                std::time::Duration::from_secs(
+                    fasti_domain::METADATA_STALE_ON_ERROR_SECONDS as u64,
+                ),
+            )
+            .ok_or_else(|| invalid_provider_metadata(capability, correlation_id))?;
         if key.provider_id() != command.provider_id()
+            || timestamp(entry.created_at()) != timestamp(command.response_policy().received_at())
+            || entry.fresh_until() > fresh
+            || entry.stale_while_refreshing_until() > stale
+            || entry.stale_on_error_until() > stale
             || key.record_id() != current.record_id()
             || key.grain() != current.grain()
             || key.source_namespace().as_str() != identifier.namespace()
@@ -3319,6 +4315,7 @@ impl MetadataRefreshPersistencePort for SqliteKernel {
                 &field_key,
                 capability,
                 correlation_id,
+                read_at,
             )?;
             for claim in claims
                 .iter()
@@ -3363,6 +4360,7 @@ impl MetadataRefreshPersistencePort for SqliteKernel {
             prepared.record_id(),
             capability,
             correlation_id,
+            read_at,
         )? {
             if rating_ids.contains(&claim.claim_id()) {
                 rating_views.push(RatingClaimView::new(
@@ -3372,10 +4370,10 @@ impl MetadataRefreshPersistencePort for SqliteKernel {
             }
         }
         if field_views.len() + rating_views.len() != referenced_claim_ids.len() {
-            return Err(Box::new(FastiProblem::integrity_failed(
-                capability,
-                correlation_id,
-            )));
+            // A newer restriction can invalidate an otherwise fresh cache
+            // entry without changing its immutable referenced claims.
+            map_sql(transaction.commit(), capability, correlation_id)?;
+            return Ok(None);
         }
         let attributions =
             load_record_attributions(&transaction, workspace_id, capability, correlation_id)?
@@ -3432,9 +4430,9 @@ impl MetadataRefreshPersistencePort for SqliteKernel {
             capability,
             correlation_id,
         )?;
-        map_sql(transaction.commit(), capability, correlation_id)?;
         let Some((stored_digest, response_json, profile_id, record_id, provider_id)) = stored
         else {
+            map_sql(transaction.commit(), capability, correlation_id)?;
             return Ok(None);
         };
         if stored_digest != command.semantic_digest().to_string()
@@ -3447,15 +4445,25 @@ impl MetadataRefreshPersistencePort for SqliteKernel {
                 correlation_id,
             )));
         }
-        decode_refresh_receipt_outcome(
+        let outcome = decode_refresh_receipt_outcome(
             &response_json,
             command.record_id(),
             command.provider_id(),
             command.access().profile_id(),
             capability,
             correlation_id,
-        )
-        .map(Some)
+        )?;
+        validate_refresh_receipt_evidence(
+            &transaction,
+            command.access().workspace_id(),
+            command.record_id(),
+            &outcome,
+            capability,
+            correlation_id,
+            MetadataReceiptDisclosure::Reuse,
+        )?;
+        map_sql(transaction.commit(), capability, correlation_id)?;
+        Ok(Some(outcome))
     }
 
     fn authorize_and_commit_refresh_receipt(
@@ -3523,16 +4531,35 @@ impl MetadataRefreshPersistencePort for SqliteKernel {
                     correlation_id,
                 )));
             }
-            map_sql(transaction.commit(), capability, correlation_id)?;
-            return decode_refresh_receipt_outcome(
+            let outcome = decode_refresh_receipt_outcome(
                 &stored_response,
                 command.record_id(),
                 command.provider_id(),
                 command.access().profile_id(),
                 capability,
                 correlation_id,
-            );
+            )?;
+            validate_refresh_receipt_evidence(
+                &transaction,
+                command.access().workspace_id(),
+                command.record_id(),
+                &outcome,
+                capability,
+                correlation_id,
+                MetadataReceiptDisclosure::Reuse,
+            )?;
+            map_sql(transaction.commit(), capability, correlation_id)?;
+            return Ok(outcome);
         }
+        validate_refresh_receipt_evidence(
+            &transaction,
+            command.access().workspace_id(),
+            command.record_id(),
+            &outcome,
+            capability,
+            correlation_id,
+            MetadataReceiptDisclosure::Reuse,
+        )?;
         map_sql(
             transaction.execute(
                 "INSERT INTO metadata_refresh_receipts(workspace_id, profile_id, client_id, operation_id, semantic_digest, record_id, provider_id, response_json, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
@@ -3757,15 +4784,25 @@ impl MetadataRefreshPersistencePort for SqliteKernel {
                     correlation_id,
                 )));
             }
-            map_sql(transaction.commit(), capability, correlation_id)?;
-            return decode_refresh_receipt_outcome(
+            let outcome = decode_refresh_receipt_outcome(
                 &response_json,
                 command.prepared().record_id(),
                 command.provider_id(),
                 command.access().profile_id(),
                 capability,
                 correlation_id,
-            );
+            )?;
+            validate_refresh_receipt_evidence(
+                &transaction,
+                command.access().workspace_id(),
+                command.prepared().record_id(),
+                &outcome,
+                capability,
+                correlation_id,
+                MetadataReceiptDisclosure::Reuse,
+            )?;
+            map_sql(transaction.commit(), capability, correlation_id)?;
+            return Ok(outcome);
         }
         let workspace_id = command.access().workspace_id();
         let profile_id = command.access().profile_id();
@@ -3788,6 +4825,7 @@ impl MetadataRefreshPersistencePort for SqliteKernel {
             return Err(immutable_claim_conflict(capability, correlation_id));
         }
         validate_refresh_commit(&command, &current, capability, correlation_id)?;
+        let response_policy_json = command.response_policy().to_canonical_json();
         let write_at = now();
         let policy = load_projection_policy(
             &transaction,
@@ -3807,19 +4845,40 @@ impl MetadataRefreshPersistencePort for SqliteKernel {
                 field.claim(),
                 capability,
                 correlation_id,
+                Some(&response_policy_json),
             )?;
+            let observed_claim = FieldClaim::try_new_provider(
+                field.claim().claim_id(),
+                current.record_id(),
+                field.field_key().clone(),
+                field.claim().value(),
+                field.claim().provenance().clone(),
+                ReceivedAt::from_application_clock(field.claim().fetched_at()),
+                field.claim().expires_at(),
+                field.claim().initial_status(),
+            )
+            .map_err(|_| receipt_integrity(capability, correlation_id))?;
             field_views.push(FieldClaimView::new(
-                field.claim().clone(),
+                observed_claim.clone(),
                 field.claim().status_at(write_at),
             ));
-            let claims = load_field_claims(
+            let mut claims = load_field_claims(
                 &transaction,
                 workspace_id,
                 current.record_id(),
                 field.field_key(),
                 capability,
                 correlation_id,
+                write_at,
             )?;
+            // A response just received from the governed provider may be shown
+            // once even when its policy forbids subsequent cached reuse.
+            if !claims
+                .iter()
+                .any(|claim| claim.claim_id() == observed_claim.claim_id())
+            {
+                claims.push(observed_claim);
+            }
             let override_ = load_profile_field_override(
                 &transaction,
                 workspace_id,
@@ -3859,6 +4918,7 @@ impl MetadataRefreshPersistencePort for SqliteKernel {
                 rating,
                 capability,
                 correlation_id,
+                Some(&response_policy_json),
             )?;
             rating_views.push(RatingClaimView::new(
                 rating.clone(),
@@ -3908,6 +4968,25 @@ impl MetadataRefreshPersistencePort for SqliteKernel {
             &outcome,
             capability,
             correlation_id,
+        )?;
+        // The first response and replay share the same historical snapshot.
+        // Decode before commit so no unreadable receipt can become durable.
+        let outcome = decode_refresh_receipt_outcome(
+            &response_json,
+            current.record_id(),
+            command.provider_id(),
+            profile_id,
+            capability,
+            correlation_id,
+        )?;
+        validate_refresh_receipt_evidence(
+            &transaction,
+            workspace_id,
+            current.record_id(),
+            &outcome,
+            capability,
+            correlation_id,
+            MetadataReceiptDisclosure::LiveResponse,
         )?;
         map_sql(
             transaction.execute(
@@ -4035,6 +5114,7 @@ impl MetadataProjectionPort for SqliteKernel {
                 &field_key,
                 capability,
                 correlation_id,
+                read_at,
             )?;
             let override_ = load_profile_field_override(
                 &transaction,
@@ -4072,6 +5152,7 @@ impl MetadataProjectionPort for SqliteKernel {
             query.record_id(),
             capability,
             correlation_id,
+            read_at,
         )?
         .into_iter()
         .map(|claim| RatingClaimView::new(claim.clone(), claim.status_at(read_at)))
@@ -4224,6 +5305,18 @@ impl MetadataProjectionPort for SqliteKernel {
                         capability,
                         correlation_id,
                     )?;
+                    if crate::local_search::searchable_field(field_key.as_str()) {
+                        map_sql(
+                            crate::local_search::reindex_overrides(
+                                &transaction,
+                                &workspace_id.to_string(),
+                                &profile_id.to_string(),
+                                &record_id.to_string(),
+                            ),
+                            capability,
+                            correlation_id,
+                        )?;
+                    }
                 }
             }
         }
@@ -4263,8 +5356,14 @@ impl MetadataProjectionPort for SqliteKernel {
 }
 
 #[cfg(test)]
+#[path = "metadata_batch_tests.rs"]
+mod batch_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
+    include!("metadata_response_policy_tests.rs");
+    include!("metadata_reuse_tests.rs");
     use crate::test_support::TestNode;
     use fasti_application::{
         provider_identity_mapping, ApplyProviderMetadataCommand, CommitMetadataRefreshCommand,
@@ -4280,6 +5379,7 @@ mod tests {
     use fasti_domain::{
         Grain, LastKnownGoodPolicy, MetadataCacheReadState, MetadataLocale,
         MetadataProjectionPolicy, MetadataProviderId, ProfileFieldOverride, ProfileId, ReceivedAt,
+        ORIGINAL_TITLE_FIELD_KEY, OVERVIEW_FIELD_KEY, POSTER_FIELD_KEY, RELEASE_YEAR_FIELD_KEY,
         TITLE_FIELD_KEY,
     };
 
@@ -4433,11 +5533,44 @@ mod tests {
             .expect("register namespace");
     }
 
-    fn provider_field(source: &str, key: &str, value: &str) -> ProviderMetadataField {
+    fn fixture_response_policy(at: ReceivedAt) -> ProviderResponseCachePolicy {
+        ProviderResponseCachePolicy::new(
+            ProviderResponseReuse::Reusable,
+            at.value(),
+            std::time::Duration::ZERO,
+            None,
+            None,
+        )
+    }
+
+    fn provider_field(
+        provider: &str,
+        source: &str,
+        identifier: &str,
+        key: &str,
+        value: &str,
+        fetched_at: ReceivedAt,
+    ) -> ProviderMetadataField {
         ProviderMetadataField::new(
             field_key(key),
-            FieldClaim::try_new(ns(source), value, None, received(100), None)
-                .expect("provider claim"),
+            FieldClaim::try_new_unbound_provider(
+                MetadataClaimId::new_v7(),
+                value,
+                FieldClaimProvenance::try_new(
+                    MetadataProviderId::try_new(provider).expect("provider"),
+                    ns(source),
+                    identifier,
+                    None,
+                    None,
+                    None,
+                    digest("a"),
+                )
+                .expect("complete provenance"),
+                fetched_at,
+                Some(fetched_at.value() + chrono::Duration::hours(24)),
+                FieldClaimStatus::Fresh,
+            )
+            .expect("provider claim"),
         )
     }
 
@@ -4453,10 +5586,14 @@ mod tests {
                 record_id,
                 mapping.identifier("438631").expect("TMDB identifier"),
                 vec![provider_field(
+                    TMDB_PROVIDER_ID,
                     mapping.namespace(),
+                    "438631",
                     "core.overview",
                     "Identity fixture",
+                    received(100),
                 )],
+                fixture_response_policy(received(100)),
             ))
             .expect("attach TMDB identity");
         node.kernel
@@ -4500,11 +5637,176 @@ mod tests {
     }
 
     #[test]
+    fn selected_record_metadata_is_not_limited_to_the_first_record_page() {
+        let node = TestNode::new();
+        let other_profile = node.add_profile_with_scopes(&[]).profile_id();
+        let capability = CapabilityKey::ListRecords;
+        let correlation_id = RequestCorrelationId::new_v7();
+        let mut connection = node.kernel.inner.connection.lock().expect("connection");
+        let transaction = connection.transaction().expect("fixture transaction");
+        let records: Vec<_> = (0..=MAX_RECORDS_PAGE)
+            .map(|_| {
+                insert_record(
+                    &transaction,
+                    node.access.workspace_id(),
+                    Grain::Film,
+                    capability,
+                    correlation_id,
+                )
+                .expect("record")
+            })
+            .collect();
+        let first = records[0];
+        let selected = records[MAX_RECORDS_PAGE as usize];
+        let other_workspace = WorkspaceId::new_v7();
+        transaction
+            .execute(
+                "INSERT INTO workspaces(workspace_id, created_at) VALUES (?1, ?2)",
+                params![other_workspace.to_string(), timestamp(now())],
+            )
+            .expect("other workspace");
+        let foreign = insert_record(
+            &transaction,
+            other_workspace,
+            Grain::Film,
+            capability,
+            correlation_id,
+        )
+        .expect("foreign record");
+        let keys = [
+            TITLE_FIELD_KEY,
+            POSTER_FIELD_KEY,
+            ORIGINAL_TITLE_FIELD_KEY,
+            OVERVIEW_FIELD_KEY,
+            RELEASE_YEAR_FIELD_KEY,
+        ]
+        .map(field_key);
+        for (record, title) in [(first, "Unselected title"), (selected, "Selected title")] {
+            let claim =
+                FieldClaim::try_new(ns("tmdb"), title, None, received(100), None).expect("claim");
+            write_field_claim(
+                &transaction,
+                node.access.workspace_id(),
+                record,
+                &keys[0],
+                &claim,
+                capability,
+                correlation_id,
+                None,
+            )
+            .expect("claim persisted");
+        }
+        let override_ = ProfileFieldOverride::try_new(
+            node.access.profile_id(),
+            selected,
+            keys[0].clone(),
+            "My selected title",
+            received(200),
+        )
+        .expect("override");
+        write_profile_field_override(
+            &transaction,
+            node.access.workspace_id(),
+            &override_,
+            capability,
+            correlation_id,
+        )
+        .expect("override persisted");
+        write_field_claim(
+            &transaction,
+            other_workspace,
+            foreign,
+            &keys[0],
+            &FieldClaim::try_new(
+                ns("tmdb"),
+                "Private foreign title",
+                None,
+                received(100),
+                None,
+            )
+            .expect("foreign claim"),
+            capability,
+            correlation_id,
+            None,
+        )
+        .expect("foreign claim persisted");
+
+        let metadata = load_record_metadata_batch(
+            &transaction,
+            node.access.workspace_id(),
+            node.access.profile_id(),
+            &[selected, selected, foreign],
+            &keys,
+            capability,
+            correlation_id,
+        )
+        .expect("selected metadata");
+        assert_eq!(metadata.resolved.len(), 1);
+        assert_eq!(
+            metadata
+                .resolve(selected, &keys[0], capability, correlation_id)
+                .expect("resolved selected title")
+                .value(),
+            Some("My selected title")
+        );
+        assert!(metadata
+            .resolve(first, &keys[0], capability, correlation_id)
+            .expect("unselected title absent")
+            .value()
+            .is_none());
+        assert!(metadata
+            .resolve(foreign, &keys[0], capability, correlation_id)
+            .expect("foreign title absent")
+            .value()
+            .is_none());
+        let other = load_record_metadata_batch(
+            &transaction,
+            node.access.workspace_id(),
+            other_profile,
+            &[selected],
+            &keys,
+            capability,
+            correlation_id,
+        )
+        .expect("other profile metadata");
+        assert_eq!(other.resolved.len(), 1);
+        assert_eq!(
+            other
+                .resolve(selected, &keys[0], capability, correlation_id)
+                .expect("other profile title")
+                .value(),
+            Some("Selected title")
+        );
+        let empty = load_record_metadata_batch(
+            &transaction,
+            node.access.workspace_id(),
+            node.access.profile_id(),
+            &[],
+            &keys,
+            capability,
+            correlation_id,
+        )
+        .expect("empty page");
+        assert!(empty.resolved.is_empty());
+        assert!(load_record_metadata_batch(
+            &transaction,
+            node.access.workspace_id(),
+            node.access.profile_id(),
+            &vec![selected; MAX_RECORDS_PAGE as usize + 1],
+            &keys,
+            capability,
+            correlation_id
+        )
+        .is_err());
+    }
+
+    #[test]
     fn provider_record_creation_is_atomic_and_safe_to_retry_after_an_ambiguous_response() {
         let node = TestNode::new();
         let mapping = provider_identity_mapping(GOOGLE_BOOKS_PROVIDER_ID, "book")
             .expect("Google Books mapping");
         register_mapping(&node, mapping);
+        let fetched_at = ReceivedAt::from_application_clock(now());
         let command = || {
             CreateProviderRecordCommand::new(
                 RequestCorrelationId::new_v7(),
@@ -4512,10 +5814,14 @@ mod tests {
                 mapping.grain(),
                 mapping.identifier("book-1").expect("identifier"),
                 vec![provider_field(
+                    GOOGLE_BOOKS_PROVIDER_ID,
                     mapping.namespace(),
+                    "book-1",
                     TITLE_FIELD_KEY,
                     "A real provider title",
+                    fetched_at,
                 )],
+                fixture_response_policy(fetched_at),
             )
         };
         let outcome = node
@@ -4557,7 +5863,15 @@ mod tests {
                 node.access,
                 mapping.grain(),
                 identifier,
-                vec![provider_field("tmdb", TITLE_FIELD_KEY, "Wrong source")],
+                vec![provider_field(
+                    GOOGLE_BOOKS_PROVIDER_ID,
+                    "tmdb",
+                    "book-1",
+                    TITLE_FIELD_KEY,
+                    "Wrong source",
+                    received(100),
+                )],
+                fixture_response_policy(received(100)),
             ));
         assert!(result.is_err());
         assert!(node
@@ -4587,17 +5901,34 @@ mod tests {
                 node.access,
                 record_id,
                 identifier(),
-                vec![provider_field("other", TITLE_FIELD_KEY, "Wrong source")],
+                vec![provider_field(
+                    TMDB_PROVIDER_ID,
+                    "other",
+                    "438631",
+                    TITLE_FIELD_KEY,
+                    "Wrong source",
+                    received(100),
+                )],
+                fixture_response_policy(received(100)),
             ));
         assert!(invalid.is_err());
 
+        let fetched_at = ReceivedAt::from_application_clock(now());
         node.kernel
             .apply_provider_metadata(ApplyProviderMetadataCommand::new(
                 RequestCorrelationId::new_v7(),
                 node.access,
                 record_id,
                 identifier(),
-                vec![provider_field(mapping.namespace(), TITLE_FIELD_KEY, "Dune")],
+                vec![provider_field(
+                    TMDB_PROVIDER_ID,
+                    mapping.namespace(),
+                    "438631",
+                    TITLE_FIELD_KEY,
+                    "Dune",
+                    fetched_at,
+                )],
+                fixture_response_policy(fetched_at),
             ))
             .expect("refresh provider metadata");
 
@@ -4635,6 +5966,7 @@ mod tests {
                 &claim,
                 capability,
                 correlation_id,
+                None,
             )
             .expect("write claim");
             write_field_override(
@@ -4657,6 +5989,7 @@ mod tests {
             &key,
             capability,
             correlation_id,
+            crate::kernel::now(),
         )
         .expect("load claims");
         assert_eq!(claims.len(), 1);
@@ -4709,6 +6042,7 @@ mod tests {
             &claim,
             capability,
             correlation_id,
+            None,
         )
         .expect("write claim under the owning workspace");
 
@@ -4726,6 +6060,7 @@ mod tests {
             &attack,
             capability,
             correlation_id,
+            None,
         );
         assert!(result.is_err());
 
@@ -4736,6 +6071,7 @@ mod tests {
             &key,
             capability,
             correlation_id,
+            crate::kernel::now(),
         )
         .expect("load claims");
         assert_eq!(claims.len(), 1);
@@ -4799,6 +6135,7 @@ mod tests {
             &key,
             capability,
             correlation_id,
+            crate::kernel::now(),
         )
         .expect("load claims");
         assert!(claims.is_empty());
@@ -4835,6 +6172,7 @@ mod tests {
                 &claim,
                 capability,
                 correlation_id,
+                None,
             )
             .expect("write claim");
         }
@@ -4850,6 +6188,7 @@ mod tests {
             &key,
             capability,
             correlation_id,
+            crate::kernel::now(),
         )
         .expect("load claims from another workspace's database");
         assert!(claims.is_empty());
@@ -4875,6 +6214,7 @@ mod tests {
                 &claim,
                 capability,
                 correlation_id,
+                None,
             )
             .expect("write claim");
         }
@@ -4885,6 +6225,7 @@ mod tests {
             &key,
             capability,
             correlation_id,
+            crate::kernel::now(),
         )
         .expect("load claims");
         assert_eq!(
@@ -4915,6 +6256,7 @@ mod tests {
             &first,
             capability,
             correlation_id,
+            None,
         )
         .expect("first immutable claim");
         assert!(write_field_claim(
@@ -4925,6 +6267,7 @@ mod tests {
             &conflict,
             capability,
             correlation_id,
+            None
         )
         .is_err());
 
@@ -4935,6 +6278,7 @@ mod tests {
             &key,
             capability,
             correlation_id,
+            crate::kernel::now(),
         )
         .expect("load immutable claim");
         assert_eq!(claims.len(), 1);
@@ -5123,6 +6467,7 @@ mod tests {
             &claim,
             capability,
             correlation_id,
+            None,
         )
         .expect("claim");
 
@@ -5171,6 +6516,7 @@ mod tests {
             &key,
             capability,
             correlation_id,
+            crate::kernel::now(),
         )
         .expect("effective claim");
         assert_eq!(status[0].initial_status(), FieldClaimStatus::Stale);
@@ -5200,6 +6546,7 @@ mod tests {
             &claim,
             capability,
             correlation_id,
+            None,
         )
         .expect("write rating");
         write_rating_claim(
@@ -5208,6 +6555,7 @@ mod tests {
             &claim,
             capability,
             correlation_id,
+            None,
         )
         .expect("identical rating retry");
         let loaded = load_rating_claims(
@@ -5216,6 +6564,7 @@ mod tests {
             record_id,
             capability,
             correlation_id,
+            crate::kernel::now(),
         )
         .expect("load ratings");
         assert_eq!(loaded.len(), 1);
@@ -5259,27 +6608,31 @@ mod tests {
             &claim,
             capability,
             correlation_id,
+            None,
         )
         .expect("claim");
-        let cache_key = MetadataCacheKey::try_new(
-            MetadataProviderId::try_new("tmdb").expect("provider"),
-            Some(3),
-            record_id,
-            "metadata/movie",
-            Grain::Film,
-            ns("tmdb"),
-            "movie-cache",
-            Some(MetadataLocale::try_new("en-IE").expect("locale")),
-            Some(MetadataRegion::try_new("IE").expect("region")),
-            MetadataFieldGroup::BasicInfo,
-            digest("b"),
-            digest("c"),
-            1,
-            MetadataCachePurpose::OfflineRead,
-            "terms-v1",
-            MetadataDataClassification::Internal,
-        )
-        .expect("cache key");
+        let cache_key_for = |revision| {
+            MetadataCacheKey::try_new(
+                MetadataProviderId::try_new("tmdb").expect("provider"),
+                Some(3),
+                record_id,
+                "metadata/movie",
+                Grain::Film,
+                ns("tmdb"),
+                "movie-cache",
+                Some(MetadataLocale::try_new("en-IE").expect("locale")),
+                Some(MetadataRegion::try_new("IE").expect("region")),
+                MetadataFieldGroup::BasicInfo,
+                digest("b"),
+                digest("c"),
+                1,
+                MetadataCachePurpose::OfflineRead,
+                revision,
+                MetadataDataClassification::Internal,
+            )
+            .expect("cache key")
+        };
+        let cache_key = cache_key_for("tmdb_attribution_required");
         let created = received(300);
         let created_at = created.value();
         let entry = MetadataCacheEntry::try_new(
@@ -5309,6 +6662,27 @@ mod tests {
         .expect("load cache")
         .expect("entry");
         assert_eq!(loaded, entry);
+        let current_policy_key = cache_key_for("fasti.public-metadata-cache.v1");
+        assert!(load_metadata_cache_entry(
+            &connection,
+            node.access.workspace_id(),
+            &current_policy_key,
+            capability,
+            correlation_id,
+        )
+        .expect("new policy cache lookup")
+        .is_none());
+        assert_eq!(
+            load_metadata_cache_entry(
+                &connection,
+                node.access.workspace_id(),
+                &cache_key,
+                capability,
+                correlation_id,
+            )
+            .expect("historical cache remains readable"),
+            Some(entry.clone())
+        );
         assert_eq!(
             loaded.read_state(
                 created_at + Duration::hours(3),
@@ -5517,6 +6891,7 @@ mod tests {
                 &claim,
                 CapabilityKey::ListRecords,
                 RequestCorrelationId::new_v7(),
+                None,
             )
             .expect("claim");
             for attribution in [&expected, &unrelated] {
@@ -5617,6 +6992,7 @@ mod tests {
                 &claim,
                 capability,
                 correlation_id,
+                None,
             )
             .expect("claim");
             for entry in [&matching, &unaffected] {
@@ -5756,6 +7132,7 @@ mod tests {
             &claim,
             CapabilityKey::ListRecords,
             RequestCorrelationId::new_v7(),
+            None,
         )
         .expect("claim");
         for cache in [&first, &second] {
@@ -5808,6 +7185,7 @@ mod tests {
             &claim,
             CapabilityKey::ListRecords,
             RequestCorrelationId::new_v7(),
+            None,
         )
         .expect("claim");
         let cache_key = MetadataCacheKey::try_new(
@@ -5904,6 +7282,7 @@ mod tests {
                 Vec::new(),
                 Vec::new(),
                 attribution,
+                fixture_response_policy(received(100)),
             ));
         assert!(matches!(
             result,
@@ -6003,6 +7382,7 @@ mod tests {
                 Vec::new(),
                 vec![cache],
                 attribution.clone(),
+                fixture_response_policy(fetched_at),
             )
         };
 
@@ -6187,6 +7567,7 @@ mod tests {
                 &claim,
                 CapabilityKey::RefreshMetadataClaims,
                 RequestCorrelationId::new_v7(),
+                None,
             )
             .expect("claim");
         }
@@ -6259,6 +7640,7 @@ mod tests {
                     &claim,
                     CapabilityKey::RefreshMetadataClaims,
                     RequestCorrelationId::new_v7(),
+                    None,
                 )
                 .expect("write claim");
             }
@@ -6279,6 +7661,8 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("unavailable lifecycle count");
-        assert_eq!(count, 513);
+        // The complete provider claim establishing the fixture identity is
+        // transitioned too, in addition to all 513 paginated title claims.
+        assert_eq!(count, 514);
     }
 }

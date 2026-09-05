@@ -11,29 +11,27 @@
     ProviderSelection,
     TrackingDispositionUpdate,
   } from "./types.js";
-  import {
-    IconArrowLeft,
-    IconStarFilled,
-    IconCheck,
-    IconBookmark,
-    IconCalendar,
-    IconRepeat,
-    IconExternalLink,
-    IconShieldCheck,
-    IconNotes,
-    IconListNumbers,
-    IconHistory,
-    IconAdjustments,
-    IconFolderPlus,
-    IconMessage,
-    IconDotsVertical,
-    IconX,
-    IconEdit,
-    IconClock,
-    IconDeviceTv,
-    IconPhoto,
-    IconRefresh,
-  } from "@tabler/icons-svelte";
+  import IconArrowLeft from "@tabler/icons-svelte/icons/arrow-left";
+  import IconStarFilled from "@tabler/icons-svelte/icons/star-filled";
+  import IconCheck from "@tabler/icons-svelte/icons/check";
+  import IconBookmark from "@tabler/icons-svelte/icons/bookmark";
+  import IconCalendar from "@tabler/icons-svelte/icons/calendar";
+  import IconRepeat from "@tabler/icons-svelte/icons/repeat";
+  import IconExternalLink from "@tabler/icons-svelte/icons/external-link";
+  import IconShieldCheck from "@tabler/icons-svelte/icons/shield-check";
+  import IconNotes from "@tabler/icons-svelte/icons/notes";
+  import IconListNumbers from "@tabler/icons-svelte/icons/list-numbers";
+  import IconHistory from "@tabler/icons-svelte/icons/history";
+  import IconAdjustments from "@tabler/icons-svelte/icons/adjustments";
+  import IconFolderPlus from "@tabler/icons-svelte/icons/folder-plus";
+  import IconMessage from "@tabler/icons-svelte/icons/message";
+  import IconDotsVertical from "@tabler/icons-svelte/icons/dots-vertical";
+  import IconX from "@tabler/icons-svelte/icons/x";
+  import IconEdit from "@tabler/icons-svelte/icons/edit";
+  import IconClock from "@tabler/icons-svelte/icons/clock";
+  import IconDeviceTv from "@tabler/icons-svelte/icons/device-tv";
+  import IconPhoto from "@tabler/icons-svelte/icons/photo";
+  import IconRefresh from "@tabler/icons-svelte/icons/refresh";
   import ProgressModal from "./progress-modal.svelte";
   import RatingReviewModal from "./rating-review-modal.svelte";
   import CollectionModal from "./collection-modal.svelte";
@@ -237,8 +235,12 @@
     { id: "dropped", label: "Dropped" },
   ];
 
-  const selectedTrackingDisposition = $derived<TrackingDispositionUpdate>(
-    record.trackingDisposition ?? "unset",
+  const selectedTrackingDisposition = $derived<
+    TrackingDispositionUpdate | "unknown"
+  >(
+    record.trackingDisposition === undefined
+      ? "unknown"
+      : (record.trackingDisposition ?? "unset"),
   );
   const projectionProviders = $derived(
     Array.from(
@@ -603,6 +605,10 @@
               )}
             aria-label="Profile tracking state"
           >
+            {#if record.trackingDisposition === undefined}
+              <option value="unknown" disabled>Tracking state not loaded</option
+              >
+            {/if}
             {#each trackingOptions as opt}
               <option value={opt.id}>{opt.label}</option>
             {/each}
@@ -799,7 +805,21 @@
     <!-- Right Main Tabbed Content Area (Ryot 5-Tab System) -->
     <section class="main-content-pane" aria-label="Media record sections">
       <!-- Section Tabs -->
-      <nav class="content-tabs" aria-label="Media section tabs">
+      <nav
+        class="content-tabs"
+        aria-label="Media section tabs"
+        onfocusin={(event) => {
+          if (
+            event.target instanceof HTMLElement &&
+            event.target.matches(".tab-btn")
+          ) {
+            event.target.scrollIntoView({
+              block: "nearest",
+              inline: "nearest",
+            });
+          }
+        }}
+      >
         <button
           type="button"
           class="tab-btn"
@@ -2046,6 +2066,7 @@
   }
   .tab-btn {
     display: inline-flex;
+    flex-shrink: 0;
     align-items: center;
     gap: 6px;
     padding: 12px 18px;
@@ -2059,8 +2080,8 @@
     white-space: nowrap;
   }
   .tab-btn.active {
-    color: var(--fasti-action-primary);
-    border-bottom-color: var(--fasti-action-primary);
+    color: var(--fasti-text-primary);
+    border-bottom-color: currentColor;
     background: var(--fasti-surface-paper);
   }
   .tab-pane {

@@ -83,7 +83,8 @@
               "c1",
               "m1",
               "m2",
-              "m3"
+              "m3",
+              "m4"
             ],
             "type": "string"
           },
@@ -156,6 +157,7 @@
               "metadata.claim.refresh",
               "metadata.projection.configure",
               "metadata.projection.read",
+              "metadata.search",
               "node.initialize",
               "observation.accept",
               "portability.workspace.export",
@@ -242,7 +244,8 @@
               "c1",
               "m1",
               "m2",
-              "m3"
+              "m3",
+              "m4"
             ],
             "type": "string"
           },
@@ -260,6 +263,7 @@
                 "metadata_claim_refresh",
                 "metadata_projection_configure",
                 "metadata_projection_read",
+                "metadata_search",
                 "observation_accept",
                 "profile_select",
                 "profile_state_read",
@@ -295,7 +299,8 @@
               "later_b3",
               "m1_providers",
               "m2_metadata",
-              "m3_identity_routing"
+              "m3_identity_routing",
+              "m4_search"
             ],
             "type": "string"
           },
@@ -328,8 +333,8 @@
             "items": {
               "$ref": "#/components/schemas/CapabilityDescriptorDto"
             },
-            "maxItems": 52,
-            "minItems": 52,
+            "maxItems": 53,
+            "minItems": 53,
             "type": "array",
             "uniqueItems": true
           },
@@ -367,8 +372,8 @@
               },
               "type": "object"
             },
-            "maxProperties": 17,
-            "minProperties": 17,
+            "maxProperties": 18,
+            "minProperties": 18,
             "propertyNames": {
               "enum": [
                 "b1_durable_bootstrap",
@@ -387,7 +392,8 @@
                 "later_b3",
                 "m1_providers",
                 "m2_metadata",
-                "m3_identity_routing"
+                "m3_identity_routing",
+                "m4_search"
               ],
               "type": "string"
             },
@@ -421,7 +427,8 @@
               "c1",
               "m1",
               "m2",
-              "m3"
+              "m3",
+              "m4"
             ],
             "type": "string"
           },
@@ -470,7 +477,8 @@
               "c1",
               "m1",
               "m2",
-              "m3"
+              "m3",
+              "m4"
             ],
             "type": [
               "string",
@@ -1448,7 +1456,9 @@
                             "browser_session_expired",
                             "browser_session_revoked",
                             "capability_unavailable",
+                            "capacity_exceeded",
                             "forbidden",
+                            "idempotency_conflict",
                             "identity_conflict",
                             "integrity_failed",
                             "invalid_identifier",
@@ -1557,7 +1567,8 @@
                             "forbidden",
                             "integrity_failed",
                             "session_policy_changed",
-                            "storage_unavailable"
+                            "storage_unavailable",
+                            "validation_failed"
                           ],
                           "runtime_body": "b2",
                           "scopes": [
@@ -1838,6 +1849,40 @@
                             "metadata_projection_read"
                           ],
                           "surface_profile": "m2_metadata",
+                          "uat": []
+                        },
+                        {
+                          "authorization": "scoped_or_browser_session",
+                          "bounded_context": "search.candidates",
+                          "contract_body": "m4",
+                          "examples": [],
+                          "id": "metadata.search",
+                          "lifecycle": {
+                            "contract_state": "finalized",
+                            "introduced_in": "m4",
+                            "runtime_availability": "implemented"
+                          },
+                          "problems": [
+                            "authentication_failed",
+                            "browser_session_expired",
+                            "browser_session_revoked",
+                            "capability_unavailable",
+                            "capacity_exceeded",
+                            "forbidden",
+                            "idempotency_conflict",
+                            "integrity_failed",
+                            "malformed_json",
+                            "payload_too_large",
+                            "session_policy_changed",
+                            "storage_unavailable",
+                            "unsupported_media_type",
+                            "validation_failed"
+                          ],
+                          "runtime_body": "m4",
+                          "scopes": [
+                            "metadata_search"
+                          ],
+                          "surface_profile": "m4_search",
                           "uat": []
                         },
                         {
@@ -2393,7 +2438,7 @@
                           "uat": []
                         },
                         {
-                          "authorization": "scoped",
+                          "authorization": "scoped_or_browser_session",
                           "bounded_context": "connections.providers",
                           "contract_body": "m1",
                           "examples": [
@@ -2407,8 +2452,11 @@
                           },
                           "problems": [
                             "authentication_failed",
+                            "browser_session_expired",
+                            "browser_session_revoked",
                             "forbidden",
                             "integrity_failed",
+                            "session_policy_changed",
                             "storage_unavailable"
                           ],
                           "runtime_body": "m1",
@@ -3449,6 +3497,60 @@
                             "binding_visibility": "public",
                             "state": "required"
                           }
+                        },
+                        "m4_search": {
+                          "cli": {
+                            "body": "m4",
+                            "reason": "Search CLI projection follows the frozen M4 contract.",
+                            "state": "later_body"
+                          },
+                          "domain_application": {
+                            "binding_visibility": "internal",
+                            "state": "required"
+                          },
+                          "http_openapi": {
+                            "binding": "openapi:{capability_id}",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "json_ld": {
+                            "reason": "Private query and candidate receipts are not linked data.",
+                            "state": "not_applicable"
+                          },
+                          "json_schema": {
+                            "binding": "schema:production-openapi-operation:{capability_id}",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "knowledge": {
+                            "body": "m4",
+                            "reason": "Search recovery guidance follows M4 route integration.",
+                            "state": "later_body"
+                          },
+                          "okf": {
+                            "body": "m4",
+                            "reason": "Search catalogue projection follows M4 activation.",
+                            "state": "later_body"
+                          },
+                          "package_smoke": {
+                            "body": "m4",
+                            "reason": "Search runtime package verification remains an M4 gate.",
+                            "state": "later_body"
+                          },
+                          "sdk": {
+                            "binding": "sdk:{capability_id}",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "sse_asyncapi": {
+                            "reason": "Search returns finite result pages without an event stream.",
+                            "state": "not_applicable"
+                          },
+                          "ui": {
+                            "body": "m4",
+                            "reason": "Search Workbench integration remains an M4 gate.",
+                            "state": "later_body"
+                          }
                         }
                       }
                     }
@@ -4147,7 +4249,7 @@
                       "next_actions": [
                         {
                           "id": "release_capacity",
-                          "label": "Release retained capacity before retrying"
+                          "label": "Increase or release governed capacity before retrying"
                         }
                       ],
                       "param": null,

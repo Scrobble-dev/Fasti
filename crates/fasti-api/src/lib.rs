@@ -48,6 +48,7 @@ mod problem;
 mod profile_state;
 mod providers;
 mod records;
+mod search;
 mod trailbase;
 
 /// Provider-scoped gates shared by credential mutation, provider checks, and
@@ -210,6 +211,11 @@ impl Modify for ProductionSecurityAddon {
         records::create_record,
         records::attach_identifier,
         records::list_records,
+        search::search_provider_page,
+        search::read_search_candidate,
+        search::save_search_candidate,
+        search::save_provider_identifier,
+        search::search_local_records,
         records::register_namespace,
         integrations::integration_status,
         integrations::nuvio_webhook,
@@ -227,6 +233,29 @@ impl Modify for ProductionSecurityAddon {
     ),
     components(schemas(
         HealthResponse,
+        fasti_contracts::SearchProviderPageRequest,
+        fasti_contracts::SearchProviderPageResponse,
+        fasti_contracts::SearchCandidateDetailsQueryParameters,
+        fasti_contracts::SearchCandidateDetailsResponse,
+        fasti_contracts::SearchCandidateSnapshotDto,
+        fasti_contracts::SearchCandidateActionRequest,
+        fasti_contracts::SearchCandidateActionResponse,
+        fasti_contracts::SearchCandidateActionReceiptDto,
+        fasti_contracts::ProviderIdentifierActionRequest,
+        fasti_contracts::ProviderIdentifierActionResponse,
+        fasti_contracts::ProviderIdentifierActionReceiptDto,
+        fasti_contracts::ProviderIdentifierActionOriginDto,
+        fasti_contracts::SearchRecordActionDto,
+        fasti_contracts::SearchCandidateEvidenceModeDto,
+        fasti_contracts::SearchRecordActionDispositionDto,
+        fasti_contracts::SearchEvidenceStatusDto,
+        fasti_contracts::LocalSearchRequestDto,
+        fasti_contracts::LocalSearchResponseDto,
+        fasti_contracts::LocalSearchCursorDto,
+        fasti_contracts::SearchCandidateReceiptDto,
+        fasti_contracts::SearchCandidateDto,
+        fasti_contracts::SearchReceiptLifetimeDto,
+        fasti_contracts::SearchCacheStateDto,
         fasti_contracts::StartTrailBaseSignInRequest,
         fasti_contracts::StartTrailBaseSignInResponse,
         fasti_contracts::TrailBaseContinuationChoiceDto,
@@ -344,6 +373,7 @@ impl Modify for ProductionSecurityAddon {
         fasti_contracts::RecordActivityDto,
         fasti_contracts::RecordIdentifierDto,
         fasti_contracts::RecordSummaryDto,
+        fasti_contracts::ListRecordsQueryParameters,
         fasti_contracts::RegisterNamespaceRequest,
         fasti_contracts::RegisterNamespaceResponse,
         fasti_contracts::ResolvedFieldDto,
@@ -390,17 +420,21 @@ pub fn integration_router(kernel: Arc<dyn LocalKernel>) -> Router {
 ///
 /// This is separate from [`integration_router`] so credentials and provider
 /// inventory are never exposed on the dedicated webhook listener.
+/// Only the exact direct listener supplies a browser boundary, and only the
+/// inventory read accepts it. Credential and health operations stay bearer-only.
 pub fn provider_api_router(
     kernel: Arc<dyn LocalKernel>,
     provider_state: Arc<dyn fasti_application::ProviderStatePort>,
     runtime: Arc<fasti_provider_runtime::ProviderRuntime>,
     provider_operation_locks: ProviderOperationLocks,
+    browser_boundary: Option<fasti_application::BrowserRequestBoundaryPolicy>,
 ) -> Router {
     providers::router().with_state(providers::ProviderApiState {
         kernel,
         provider_state,
         runtime,
         provider_operation_locks,
+        browser_boundary,
     })
 }
 
@@ -418,6 +452,24 @@ pub fn metadata_api_router(
         refresh_service,
         projection_port,
         provider_operation_locks,
+    })
+}
+
+/// Search shares the provider runtime and mutation gate; only the exact direct
+/// listener supplies a browser boundary. Other listeners remain bearer-only.
+pub fn search_api_router(
+    kernel: Arc<dyn LocalKernel>,
+    persistence: Arc<dyn fasti_application::SearchPersistencePort>,
+    service: Arc<fasti_provider_runtime::ProviderSearchService>,
+    locks: ProviderOperationLocks,
+    browser_boundary: Option<BrowserRequestBoundaryPolicy>,
+) -> Router {
+    search::router().with_state(search::SearchApiState {
+        kernel,
+        persistence,
+        service,
+        locks,
+        browser_boundary,
     })
 }
 
@@ -471,6 +523,7 @@ pub fn direct_loopback_api_router(
 /// One fixed-origin Access runtime shared by its router and packaged host.
 pub struct DirectLoopbackAccessRuntime {
     router: Router,
+    browser_boundary: BrowserRequestBoundaryPolicy,
     trailbase: Option<Arc<trailbase::TrailBaseOrchestrator>>,
 }
 
@@ -601,13 +654,21 @@ impl DirectLoopbackAccessRuntime {
             .map(|root| verified_trailbase_orchestrator(&kernel, root))
             .transpose()?
             .flatten();
-        let browser_runtime = Some((boundary, trailbase.as_ref().map(Arc::clone)));
+        let browser_runtime = Some((boundary.clone(), trailbase.as_ref().map(Arc::clone)));
         let router = durable_loopback_router(Arc::clone(&kernel), data_root, browser_runtime);
-        Ok(Self { router, trailbase })
+        Ok(Self {
+            router,
+            trailbase,
+            browser_boundary: boundary,
+        })
     }
 
     pub fn router(&self) -> Router {
         self.router.clone()
+    }
+
+    pub fn browser_boundary(&self) -> BrowserRequestBoundaryPolicy {
+        self.browser_boundary.clone()
     }
 
     #[cfg(test)]
@@ -622,10 +683,11 @@ impl DirectLoopbackAccessRuntime {
         let router = durable_loopback_router(
             Arc::clone(&kernel),
             data_root,
-            Some((boundary, Some(Arc::clone(&trailbase)))),
+            Some((boundary.clone(), Some(Arc::clone(&trailbase)))),
         );
         Self {
             router,
+            browser_boundary: boundary,
             trailbase: Some(trailbase),
         }
     }
@@ -831,6 +893,7 @@ pub fn with_static_fallback(router: Router, static_dir: Option<&Path>) -> Router
 
 #[cfg(test)]
 mod tests {
+    include!("search_http_tests.rs");
     use super::*;
     use axum::{
         body::{to_bytes, Body},
@@ -1100,7 +1163,7 @@ mod tests {
         ] {
             assert!(document.paths.paths.contains_key(path), "missing {path}");
         }
-        assert_eq!(document.paths.paths.len(), 36);
+        assert_eq!(document.paths.paths.len(), 41);
 
         let serialized = serde_json::to_string(&document).expect("serializable OpenAPI document");
         assert!(serialized.contains("#/components/schemas/HealthResponse"));
@@ -2586,6 +2649,60 @@ mod tests {
         assert_eq!(populated_list.records[0].record_id, created.record_id);
         assert_eq!(populated_list.records[0].identifiers.len(), 1);
         assert_eq!(populated_list.records[0].identifiers[0].value, "abc123");
+        for (record_id, expected_count) in [
+            (created.record_id.clone(), 1),
+            (fasti_domain::RecordId::new_v7().to_string(), 0),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    auth(Request::get(format!(
+                        "/api/v1/records?record_id={record_id}"
+                    )))
+                    .body(Body::empty())
+                    .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let selected: fasti_contracts::ListRecordsResponse =
+                serde_json::from_slice(&to_bytes(response.into_body(), 16 * 1024).await.unwrap())
+                    .unwrap();
+            assert!(!selected.truncated);
+            assert_eq!(selected.records.len(), expected_count);
+            if expected_count == 1 {
+                assert_eq!(selected, populated_list);
+            }
+        }
+        for query in [
+            "record_id=invalid".to_owned(),
+            "record_id=".to_owned(),
+            "unknown=value".to_owned(),
+            format!("record_id={0}&record_id={0}", created.record_id),
+        ] {
+            let path = format!("/api/v1/records?{query}");
+            let unauthorized = app
+                .clone()
+                .oneshot(
+                    Request::get(&path)
+                        .header(header::AUTHORIZATION, "Bearer invalid")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+            let invalid = app
+                .clone()
+                .oneshot(auth(Request::get(&path)).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(invalid.status(), StatusCode::UNPROCESSABLE_ENTITY);
+            let problem: fasti_contracts::ProblemDetails =
+                serde_json::from_slice(&to_bytes(invalid.into_body(), 16 * 1024).await.unwrap())
+                    .unwrap();
+            assert_eq!(problem.code, "validation_failed");
+        }
         assert_eq!(
             populated_list.records[0]
                 .overview

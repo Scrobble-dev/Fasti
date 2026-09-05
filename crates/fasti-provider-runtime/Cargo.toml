@@ -8,10 +8,15 @@ repository.workspace = true
 publish.workspace = true
 description = "Governed Fasti provider registry, transport, and concrete metadata adapters"
 
+[features]
+default = []
+tmdb-smoke-fixture = []
+
 [dependencies]
 chrono = { workspace = true }
 fasti-application = { workspace = true }
 fasti-domain = { workspace = true }
+httpdate = "=1.0.3"
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

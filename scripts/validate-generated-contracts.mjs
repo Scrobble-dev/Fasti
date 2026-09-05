@@ -182,6 +182,11 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     "/api/v1/records/identifiers",
     "/api/v1/records/{record_id}/identity-route",
     "/api/v1/records/{record_id}/metadata-projection",
+    "/api/v1/search/candidates/{provider_id}/{grain}/{candidate_receipt_id}",
+    "/api/v1/search/candidates/{provider_id}/{grain}/{candidate_receipt_id}/actions",
+    "/api/v1/search/providers/{provider_id}",
+    "/api/v1/search/providers/{provider_id}/{grain}/actions",
+    "/api/v1/search/records",
   ]);
   assert.deepEqual(Object.keys(openapi.components.securitySchemes), [
     "auth_binding_cookie",
@@ -198,6 +203,11 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     "list_records security must match hybrid authorization",
   );
   const nuvioCollections = openapi.paths["/api/v1/profile/nuvio-collections"];
+  assert.equal(
+    openapi.paths["/api/v1/search/records"].post["x-fasti-max-response-bytes"],
+    4 * 1024 * 1024,
+    "local Search must publish its operation-specific response byte limit",
+  );
   const hybridReadSecurity = [
     { credential_bearer: [] },
     { browser_session_cookie: [] },
@@ -261,7 +271,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
 
   assert.equal(registry.contract_version, "1.0.0");
   assert.equal(registry.capability_base_uri.endsWith("/v1/"), true);
-  assert.equal(registry.capabilities.length, 52);
+  assert.equal(registry.capabilities.length, 53);
   const capabilityIds = registry.capabilities.map(({ id }) => id);
   assert.equal(new Set(capabilityIds).size, capabilityIds.length);
   assert.deepEqual(capabilityIds, [...capabilityIds].sort());
@@ -269,6 +279,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     registry.capabilities.map((capability) => [capability.id, capability]),
   );
   const expectedProfile = (capability) => {
+    if (capability.id === "metadata.search") return "m4_search";
     if (capability.lifecycle.contract_state === "reserved") {
       return `later_${capability.contract_body}`;
     }
@@ -476,6 +487,12 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     "select_browser_session_profile",
   ]);
   const hybridOperations = new Set([
+    "list_providers",
+    "search_local_records",
+    "save_search_candidate",
+    "save_provider_identifier",
+    "read_search_candidate",
+    "search_provider_page",
     "submit_observation",
     "create_record",
     "attach_identifier",
@@ -492,6 +509,9 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     "apply_anime_grouping_policy_change",
   ]);
   const hybridMutations = new Set([
+    "save_search_candidate",
+    "save_provider_identifier",
+    "search_provider_page",
     "submit_observation",
     "create_record",
     "attach_identifier",

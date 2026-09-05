@@ -1,19 +1,21 @@
 <script lang="ts">
-  import { FastiAbortError, FastiProblemError } from "@fasti/sdk";
-  import { flushSync, onMount, tick } from "svelte";
   import {
-    IconChevronRight,
-    IconActivityHeartbeat,
-    IconDatabase,
-    IconLayoutSidebar,
-    IconLayoutSidebarLeftExpand,
-    IconPalette,
-    IconPlugConnected,
-    IconSettings,
-    IconShieldCheck,
-    IconLogout,
-    IconUserCircle,
-  } from "@tabler/icons-svelte";
+    FastiAbortError,
+    FastiProblemError,
+    parseListRecordsQueryParameters,
+  } from "@fasti/sdk";
+  import { flushSync, onMount, tick, untrack } from "svelte";
+  import IconChevronRight from "@tabler/icons-svelte/icons/chevron-right";
+  import IconActivityHeartbeat from "@tabler/icons-svelte/icons/activity-heartbeat";
+  import IconDatabase from "@tabler/icons-svelte/icons/database";
+  import IconLayoutSidebar from "@tabler/icons-svelte/icons/layout-sidebar";
+  import IconLayoutSidebarLeftExpand from "@tabler/icons-svelte/icons/layout-sidebar-left-expand";
+  import IconPalette from "@tabler/icons-svelte/icons/palette";
+  import IconPlugConnected from "@tabler/icons-svelte/icons/plug-connected";
+  import IconSettings from "@tabler/icons-svelte/icons/settings";
+  import IconShieldCheck from "@tabler/icons-svelte/icons/shield-check";
+  import IconLogout from "@tabler/icons-svelte/icons/logout";
+  import IconUserCircle from "@tabler/icons-svelte/icons/user-circle";
   import AccountSecurityView from "./account-security-view.svelte";
   import AuthModal from "./auth-modal.svelte";
   import GlobalSearch from "./global-search.svelte";
@@ -34,20 +36,29 @@
   import { hostProblemText } from "./host-problem.js";
   import { newOperationId } from "./operation-id.js";
   import { projectRecordSummary } from "./record-projection.js";
+  import { routeSlug, type SearchCandidateRoute } from "./route-slug.js";
   import type {
     ActiveNavSection,
     AccessProjectionResponse,
     CreateRecordResult,
     MediaRecord,
+    LocalSearchCursorDto,
+    LocalSearchResponseDto,
     MetadataFieldGroupDto,
     MetadataProjectionResponse,
     ProviderCredentialStatus,
     ProviderSearchCandidate,
     ProviderSelection,
+    SearchCandidateReceiptDto,
+    SearchCandidateDetailsResponse,
+    SearchProviderPageResponse,
+    SearchRecordActionDto,
     ResolveReviewInput,
+    RecordSummary,
     ReviewItem,
     ThemeSettings,
     TrackingDispositionUpdate,
+    TrackingDispositionState,
     WorkbenchHost,
     WorkbenchPreferences,
   } from "./types.js";
@@ -202,7 +213,11 @@
       case "calendar":
         return "/calendar";
       case "detail":
-        return selectedRecordId ? `/records/${selectedRecordId}` : "/records";
+        return detailSummary?.record_id === selectedRecordId
+          ? canonicalRecordPath(detailSummary)
+          : selectedRecordId
+            ? `/records/${selectedRecordId}`
+            : "/records";
       default:
         return "/";
     }
@@ -253,14 +268,62 @@
       settingsTab = settingsTabFromPath(path);
       return "settings";
     }
-    if (path === "/discover") return "discover";
+    if (path === "/discover") {
+      candidateRoute = undefined;
+      candidateRouteProblem = undefined;
+      return "discover";
+    }
+    if (path.startsWith("/explore/")) {
+      candidateRoute = undefined;
+      candidateRouteProblem = undefined;
+      const segments = path.split("/");
+      try {
+        if (segments.length !== 6 || !segments[5])
+          throw new Error("Invalid candidate route");
+        const providerId = decodeURIComponent(segments[2]);
+        const grain = decodeURIComponent(segments[3]);
+        const candidateReceiptId = decodeURIComponent(segments[4]);
+        const slug = decodeURIComponent(segments[5]);
+        if (
+          !/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(providerId) ||
+          !/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(grain) ||
+          !/^scr_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/.test(
+            candidateReceiptId,
+          ) ||
+          !slug
+        )
+          throw new Error("Invalid candidate route");
+        candidateRoute = { providerId, grain, candidateReceiptId, slug };
+      } catch {
+        candidateRouteProblem =
+          "This candidate link is invalid. Start a new Search.";
+      }
+      return "discover";
+    }
     if (path === "/reconciliation" || path === "/reviews")
       return "reconciliation";
     if (path === "/library") return "library";
     if (path === "/calendar") return "calendar";
-    if (path.startsWith("/records")) {
-      const id = path.slice("/records/".length);
-      if (id) selectedRecordId = id;
+    if (path === "/records" || path.startsWith("/records/")) {
+      const segments = path.split("/");
+      const id =
+        segments.length === 3
+          ? segments[2]
+          : segments.length === 5 && segments[2] && segments[4]
+            ? segments[3]
+            : undefined;
+      selectedRecordId = null;
+      detailRouteProblem = undefined;
+      if (path !== "/records") {
+        try {
+          if (!id) throw new Error("Missing Record identifier");
+          parseListRecordsQueryParameters({ record_id: id });
+          selectedRecordId = id;
+        } catch {
+          detailRouteProblem =
+            "This Record link is invalid. Choose a Record from Library.";
+        }
+      }
       return "detail";
     }
     return "home";
@@ -276,7 +339,10 @@
   let accessGeneration = 0;
   let profileAuthorityIdentity = "signed-out";
   let selectedRecordId = $state<string | null>(null);
+  let detailRouteProblem = $state<string>();
   let selectedRecordTab = $state<"overview" | "sources">("overview");
+  let candidateRoute = $state<SearchCandidateRoute>();
+  let candidateRouteProblem = $state<string>();
 
   // A prior session's localStorage predates nav items or context-menu items
   // added since (e.g. "settings", "connections") -- without this, those
@@ -483,6 +549,10 @@
 
   function select(section: Section): void {
     mobileNavigationOpen = false;
+    if (section === "discover") {
+      candidateRoute = undefined;
+      candidateRouteProblem = undefined;
+    }
     activeSection = section;
     if (section !== "first_run") accessCallbackMarker = undefined;
     if (typeof window === "undefined") return;
@@ -677,6 +747,7 @@
     tab: "overview" | "sources" = "overview",
   ): void {
     selectedRecordId = recordId;
+    detailRouteProblem = undefined;
     selectedRecordTab = tab;
     select("detail");
   }
@@ -691,6 +762,8 @@
   let discoverSelectionExplicit = $state(false);
   let discoverLoadId = 0;
   let discoverSectionActive = false;
+  const searchActionOperationIds = new Map<string, string>();
+  const SEARCH_CANDIDATE_HISTORY_KEY = "fastiSearchCandidate";
 
   async function loadDiscover(): Promise<void> {
     if (!canAccessProfileData) {
@@ -786,15 +859,142 @@
   let mediaRecords = $state<MediaRecord[]>([]);
   let recordsLoading = $state(false);
   let recordsProblem = $state<string | undefined>(undefined);
+  let recordsNotices = $state<string[]>([]);
   let recordActionProblem = $state<string | undefined>(undefined);
   let recordActionNotice = $state<string | undefined>(undefined);
   let recordsLoaded = false;
   let recordsGeneration = 0;
+  let trackingStates = $state<TrackingDispositionState[]>([]);
+  let trackingStatesComplete = $state(false);
+  let trackingRevision = 0;
+  let detailSummary = $state<RecordSummary>();
+  let detailLoading = $state(false);
+  let detailProblem = $state<string>();
+  let detailGeneration = 0;
+  let detailLifetime = $state(0);
+  let detailAuthority = "";
   let metadataProjection = $state<MetadataProjectionResponse>();
   let metadataProjectionLoading = $state(false);
   let metadataProjectionProblem = $state<string>();
   let metadataProjectionRecordId = "";
   let metadataProjectionGeneration = 0;
+
+  function canonicalRecordPath(summary: RecordSummary): string {
+    return `/records/${encodeURIComponent(summary.grain)}/${summary.record_id}/${routeSlug(summary.title.value ?? "record")}`;
+  }
+
+  function canonicalCandidatePath(receipt: SearchCandidateReceiptDto): string {
+    return `/explore/${encodeURIComponent(receipt.candidate.provider)}/${encodeURIComponent(receipt.grain)}/${receipt.candidate_receipt_id}/${routeSlug(receipt.candidate.title)}`;
+  }
+
+  function openSearchCandidate(receipt: SearchCandidateReceiptDto): void {
+    candidateRoute = {
+      providerId: receipt.candidate.provider,
+      grain: receipt.grain,
+      candidateReceiptId: receipt.candidate_receipt_id,
+      slug: routeSlug(receipt.candidate.title),
+    };
+    candidateRouteProblem = undefined;
+    activeSection = "discover";
+    const path = canonicalCandidatePath(receipt);
+    if (window.location.pathname !== path)
+      window.history.pushState(
+        { ...window.history.state, [SEARCH_CANDIDATE_HISTORY_KEY]: true },
+        "",
+        path,
+      );
+    window.requestAnimationFrame(() =>
+      document.getElementById("candidate-detail-title")?.focus(),
+    );
+  }
+
+  function closeSearchCandidate(): void {
+    if (window.history.state?.[SEARCH_CANDIDATE_HISTORY_KEY] === true) {
+      window.history.back();
+      return;
+    }
+    candidateRoute = undefined;
+    candidateRouteProblem = undefined;
+    activeSection = "discover";
+    window.history.replaceState(window.history.state ?? {}, "", "/discover");
+    window.requestAnimationFrame(() =>
+      document.getElementById("discover-title")?.focus(),
+    );
+  }
+
+  function clearDetailState(): void {
+    detailLifetime += 1;
+    detailGeneration += 1;
+    detailSummary = undefined;
+    detailLoading = false;
+    detailProblem = undefined;
+    detailAuthority = "";
+    recordActionNotice = undefined;
+    recordActionProblem = undefined;
+    metadataProjectionGeneration += 1;
+    metadataProjection = undefined;
+    metadataProjectionLoading = false;
+    metadataProjectionProblem = undefined;
+    metadataProjectionRecordId = "";
+    failedMetadataRefresh = undefined;
+  }
+
+  async function loadSelectedRecord(restoreRetryFocus = false): Promise<void> {
+    const recordId = selectedRecordId;
+    if (!recordId || activeSection !== "detail" || !canAccessProfileData)
+      return;
+    const generation = ++detailGeneration;
+    const authority = profileAuthorityIdentity;
+    const current = () =>
+      generation === detailGeneration &&
+      authority === profileAuthorityIdentity &&
+      selectedRecordId === recordId &&
+      activeSection === "detail";
+    detailLoading = true;
+    detailProblem = undefined;
+    try {
+      if (!host.listRecords)
+        throw new Error("This host does not support Record reads yet.");
+      const page = await host.listRecords({ record_id: recordId });
+      if (!current()) return;
+      if (
+        page.truncated ||
+        page.records.length > 1 ||
+        page.records.some((record) => record.record_id !== recordId)
+      ) {
+        throw new Error("The host returned an invalid Record selection.");
+      }
+      detailSummary = page.records[0];
+      detailAuthority = authority;
+      if (detailSummary) {
+        // Grain/title are presentation segments. Only the authorized stable ID
+        // selects identity; normalize stale segments without adding history.
+        const path = canonicalRecordPath(detailSummary);
+        if (window.location.pathname !== path) {
+          window.history.replaceState(window.history.state, "", path);
+        }
+      } else {
+        detailProblem =
+          "This Record is not available in the current workspace.";
+      }
+    } catch (error) {
+      if (!current()) return;
+      detailSummary = undefined;
+      detailProblem = hostProblemText(error, "Could not load this Record.");
+    } finally {
+      if (current()) {
+        detailLoading = false;
+        if (restoreRetryFocus) {
+          await tick();
+          if (current())
+            (
+              document.getElementById("retry-record-detail") ??
+              document.getElementById("main-content")
+            )?.focus();
+        }
+      }
+    }
+  }
 
   async function loadRecords(restoreRetryFocus = false): Promise<boolean> {
     if (!canAccessProfileData) {
@@ -806,18 +1006,38 @@
       return false;
     }
     const generation = ++recordsGeneration;
+    const trackingReadRevision = trackingRevision;
     const showLoading = mediaRecords.length === 0;
     if (showLoading) recordsLoading = true;
     recordsProblem = undefined;
+    recordsNotices = [];
+    let trackingProblem: string | undefined;
     try {
       const statesPromise = host.listTrackingDispositions
-        ? host.listTrackingDispositions().catch((error) => {
-            const detail = hostProblemText(error, "Fasti request failed.");
-            if (generation === recordsGeneration) {
-              recordActionNotice = `Could not load profile tracking state. Records still use their activity fallback. ${detail}`;
-            }
-            return { states: [], truncated: false };
-          })
+        ? host
+            .listTrackingDispositions()
+            .then((page) => {
+              if (
+                generation === recordsGeneration &&
+                trackingReadRevision === trackingRevision
+              ) {
+                trackingStates = [...page.states];
+                trackingStatesComplete = !page.truncated;
+              }
+              return page;
+            })
+            .catch((error) => {
+              const detail = hostProblemText(error, "Fasti request failed.");
+              trackingProblem = `Could not load profile tracking state. Records still use their activity fallback. ${detail}`;
+              if (
+                generation === recordsGeneration &&
+                trackingReadRevision === trackingRevision
+              ) {
+                trackingStates = [];
+                trackingStatesComplete = false;
+              }
+              return { states: [], truncated: false };
+            })
         : Promise.resolve({ states: [], truncated: false });
       const [recordPage, statePage] = await Promise.all([
         host.listRecords(),
@@ -825,15 +1045,20 @@
       ]);
       if (generation !== recordsGeneration) return false;
       if (recordPage.truncated) {
-        recordActionProblem =
-          "Only the first 500 records are shown. Additional records remain stored.";
+        recordsNotices.push(
+          "Only the first 500 records are shown. Additional records remain stored.",
+        );
       }
-      if (statePage.truncated) {
-        recordActionProblem =
-          "Only the first 500 profile tracking states are shown. Additional states remain stored.";
+      // A one-Record mutation does not repair a failed or partial global read.
+      if (trackingProblem) {
+        recordsNotices.push(trackingProblem);
+      } else if (statePage.truncated) {
+        recordsNotices.push(
+          "Only the first 500 profile tracking states are shown. Additional states remain stored.",
+        );
       }
       const dispositions = new Map(
-        statePage.states.map((state) => [state.record_id, state.disposition]),
+        trackingStates.map((state) => [state.record_id, state.disposition]),
       );
       mediaRecords = recordPage.records.map((summary) =>
         projectRecordSummary(summary, dispositions.get(summary.record_id)),
@@ -862,22 +1087,22 @@
     recordsLoaded = false;
     recordsLoading = false;
     recordsProblem = undefined;
+    recordsNotices = [];
+    trackingStates = [];
+    trackingStatesComplete = false;
     recordActionProblem = undefined;
     recordActionNotice = undefined;
-    metadataProjectionGeneration += 1;
-    metadataProjection = undefined;
-    metadataProjectionLoading = false;
-    metadataProjectionProblem = undefined;
-    metadataProjectionRecordId = "";
-    failedMetadataRefresh = undefined;
+    clearDetailState();
     invalidateDiscoverProviders();
+    searchActionOperationIds.clear();
     reviewsLoadId += 1;
     reviews = [];
     reviewsLoaded = false;
     reviewsLoading = false;
     reviewsProblem = undefined;
     resolvingReviewId = undefined;
-    selectedRecordId = null;
+    // The URL is navigation intent, not private profile data. Its exact Record
+    // must be read again under the new authority; never retain its projection.
   }
 
   async function setTrackingDisposition(
@@ -894,11 +1119,23 @@
       return;
     }
     const authorityIdentity = profileAuthorityIdentity;
+    const originSection = activeSection;
+    const lifetime = detailLifetime;
+    const showFeedback = () =>
+      activeSection === originSection &&
+      (originSection !== "detail" ||
+        (lifetime === detailLifetime && selectedRecordId === recordId));
     recordActionProblem = undefined;
     recordActionNotice = undefined;
     try {
       const state = await host.setTrackingDisposition(recordId, disposition);
       if (authorityIdentity !== profileAuthorityIdentity) return;
+      // A read started before this confirmed mutation must not undo its UI state.
+      trackingRevision += 1;
+      trackingStates = [
+        ...trackingStates.filter((item) => item.record_id !== recordId),
+        state,
+      ];
       mediaRecords = mediaRecords.map((record) =>
         record.id === recordId
           ? {
@@ -910,12 +1147,14 @@
             }
           : record,
       );
+      if (!showFeedback()) return;
       recordActionNotice =
         disposition === "unset"
           ? "Tracking state now follows recorded activity."
           : `Tracking state set to ${disposition.replaceAll("_", " ")}.`;
     } catch (error) {
       if (authorityIdentity !== profileAuthorityIdentity) return;
+      if (!showFeedback()) return;
       recordActionProblem = hostProblemText(
         error,
         "Could not update the profile tracking state.",
@@ -923,28 +1162,56 @@
     }
   }
 
-  async function createRecordFromDiscover(
+  async function saveProviderSearchResult(
     candidate: ProviderSearchCandidate,
+    action: SearchRecordActionDto = { kind: "create" },
   ): Promise<CreateRecordResult> {
-    if (!canAccessProfileData || !host.trackProviderCandidate) {
-      throw new Error(
-        "Sign in before creating a Record from provider metadata.",
-      );
+    if (!canAccessProfileData || !host.saveProviderIdentifier) {
+      throw new Error("Sign in before saving provider identity to a Record.");
     }
     const authorityIdentity = profileAuthorityIdentity;
-    const result = await host.trackProviderCandidate({
-      provider: candidate.provider,
-      provider_id: candidate.provider_id,
-      kind: candidate.kind,
-    });
+    const operationKey = JSON.stringify([
+      "provider",
+      candidate.provider,
+      candidate.grain,
+      candidate.provider_id,
+      action.kind,
+      action.kind === "attach" ? action.record_id : null,
+    ]);
+    const operationId =
+      searchActionOperationIds.get(operationKey) ?? newOperationId();
+    searchActionOperationIds.set(operationKey, operationId);
+    const result = await host.saveProviderIdentifier(
+      candidate.provider,
+      candidate.grain,
+      {
+        operation_id: operationId,
+        provider_record_id: candidate.provider_id,
+        action,
+      },
+    );
     if (authorityIdentity !== profileAuthorityIdentity) {
       throw new Error(
         "Account access changed before the Record was confirmed.",
       );
     }
+    if (result.outcome === "unavailable") {
+      throw new Error(
+        `The provider could not confirm this identifier (${result.problem_code}).`,
+      );
+    }
+    searchActionOperationIds.delete(operationKey);
     recordsLoaded = false;
     await loadRecords();
-    return result;
+    if (authorityIdentity !== profileAuthorityIdentity) {
+      throw new Error(
+        "Account access changed before the Record was confirmed.",
+      );
+    }
+    return {
+      record_id: result.receipt.record_id,
+      grain: result.receipt.grain,
+    };
   }
 
   async function searchProvider(
@@ -962,12 +1229,142 @@
     return results;
   }
 
-  function resetClientEndpoint(): void {
-    mediaRecords = [];
+  async function searchRecords(
+    query: string,
+    after?: LocalSearchCursorDto,
+    grains: string[] = [],
+  ): Promise<LocalSearchResponseDto> {
+    if (!canAccessProfileData || !host.searchRecords) {
+      throw new Error("Sign in before searching local Records.");
+    }
+    const authorityIdentity = profileAuthorityIdentity;
+    const results = await host.searchRecords({
+      query,
+      grains,
+      after: after ?? null,
+    });
+    if (authorityIdentity !== profileAuthorityIdentity) {
+      throw new Error("Account access changed before search completed.");
+    }
+    return results;
+  }
+
+  async function searchProviderPage(
+    provider: string,
+    query: string,
+    page: number,
+    offline: boolean,
+  ): Promise<SearchProviderPageResponse> {
+    if (!canAccessProfileData || !host.searchProviderPage) {
+      throw new Error("Sign in before searching configured providers.");
+    }
+    const authorityIdentity = profileAuthorityIdentity;
+    const results = await host.searchProviderPage(provider, {
+      query,
+      page,
+      locale: null,
+      region: null,
+      grains: [],
+      offline,
+    });
+    if (authorityIdentity !== profileAuthorityIdentity) {
+      throw new Error("Account access changed before search completed.");
+    }
+    return results;
+  }
+
+  async function saveSearchCandidate(
+    receipt: SearchCandidateReceiptDto,
+    evidenceMode: "cached" | "refetch",
+    action: SearchRecordActionDto = { kind: "create" },
+  ): Promise<CreateRecordResult> {
+    if (!canAccessProfileData || !host.saveSearchCandidate) {
+      throw new Error("Sign in before saving Search identity to a Record.");
+    }
+    const authorityIdentity = profileAuthorityIdentity;
+    const operationKey = JSON.stringify([
+      "receipt",
+      receipt.candidate.provider,
+      receipt.grain,
+      receipt.candidate_receipt_id,
+      evidenceMode,
+      action.kind,
+      action.kind === "attach" ? action.record_id : null,
+    ]);
+    const operationId =
+      searchActionOperationIds.get(operationKey) ?? newOperationId();
+    searchActionOperationIds.set(operationKey, operationId);
+    const result = await host.saveSearchCandidate(
+      receipt.candidate.provider,
+      receipt.grain,
+      receipt.candidate_receipt_id,
+      {
+        operation_id: operationId,
+        action,
+        evidence_mode: evidenceMode,
+      },
+    );
+    if (authorityIdentity !== profileAuthorityIdentity) {
+      throw new Error(
+        "Account access changed before the Record was confirmed.",
+      );
+    }
+    if (result.outcome === "unavailable") {
+      throw new Error(
+        `The provider could not confirm this candidate (${result.problem_code}).`,
+      );
+    }
+    searchActionOperationIds.delete(operationKey);
     recordsLoaded = false;
-    recordsProblem = undefined;
-    recordActionNotice = undefined;
-    recordActionProblem = undefined;
+    await loadRecords();
+    if (authorityIdentity !== profileAuthorityIdentity) {
+      throw new Error(
+        "Account access changed before the Record was confirmed.",
+      );
+    }
+    return {
+      record_id: result.receipt.record_id,
+      grain: result.receipt.grain,
+    };
+  }
+
+  async function readSearchCandidate(
+    receipt: SearchCandidateReceiptDto,
+    offline: boolean,
+  ): Promise<SearchCandidateDetailsResponse> {
+    return readSearchCandidateRoute(
+      {
+        providerId: receipt.candidate.provider,
+        grain: receipt.grain,
+        candidateReceiptId: receipt.candidate_receipt_id,
+        slug: routeSlug(receipt.candidate.title),
+      },
+      offline,
+    );
+  }
+
+  async function readSearchCandidateRoute(
+    route: SearchCandidateRoute,
+    offline: boolean,
+  ): Promise<SearchCandidateDetailsResponse> {
+    if (!canAccessProfileData || !host.readSearchCandidate) {
+      throw new Error("Sign in before reading provider details.");
+    }
+    const authorityIdentity = profileAuthorityIdentity;
+    const result = await host.readSearchCandidate(
+      route.providerId,
+      route.grain,
+      route.candidateReceiptId,
+      offline,
+    );
+    if (authorityIdentity !== profileAuthorityIdentity) {
+      throw new Error("Account access changed before details completed.");
+    }
+    return result;
+  }
+
+  function resetClientEndpoint(): void {
+    clearProfileOwnedWorkbenchState();
   }
 
   function retryRecords(): void {
@@ -983,16 +1380,26 @@
       throw new Error("Sign in before applying provider metadata.");
     }
     const authorityIdentity = profileAuthorityIdentity;
+    const lifetime = detailLifetime;
+    const current = () =>
+      authorityIdentity === profileAuthorityIdentity &&
+      lifetime === detailLifetime &&
+      selectedRecordId === recordId &&
+      activeSection === "detail";
     recordActionProblem = undefined;
     recordActionNotice = undefined;
     try {
       await host.applyProviderMetadata(recordId, selection);
-      if (authorityIdentity !== profileAuthorityIdentity) return;
-      await loadRecords();
-      if (authorityIdentity !== profileAuthorityIdentity) return;
+      if (!current()) return;
+      await Promise.all([
+        loadRecords(),
+        loadSelectedRecord(),
+        loadMetadataProjection(recordId),
+      ]);
+      if (!current()) return;
       recordActionNotice = `Metadata refreshed from ${selection.provider}.`;
     } catch (error) {
-      if (authorityIdentity !== profileAuthorityIdentity) return;
+      if (!current()) return;
       recordActionProblem = hostProblemText(
         error,
         "Could not refresh metadata for this record.",
@@ -1059,6 +1466,14 @@
       );
     }
     const authorityIdentity = profileAuthorityIdentity;
+    const lifetime = detailLifetime;
+    const projection = metadataProjection;
+    const recordId = projection.record_id;
+    const current = () =>
+      authorityIdentity === profileAuthorityIdentity &&
+      lifetime === detailLifetime &&
+      selectedRecordId === recordId &&
+      activeSection === "detail";
     const fieldGroups = metadataProjection.policy.enabled_field_groups.filter(
       (group) => refreshableMetadataFieldGroups.has(group),
     );
@@ -1068,7 +1483,7 @@
       );
     }
     const requestKey = JSON.stringify([
-      metadataProjection.record_id,
+      recordId,
       providerId,
       fieldGroups,
       metadataProjection.policy.preferred_locale,
@@ -1082,22 +1497,23 @@
     try {
       await host.refreshMetadataClaims({
         operation_id: operationId,
-        record_id: metadataProjection.record_id,
+        record_id: recordId,
         provider_id: providerId,
         field_groups: fieldGroups,
         locale: metadataProjection.policy.preferred_locale,
         region: metadataProjection.policy.region,
         mode: "revalidate",
       });
-      if (authorityIdentity !== profileAuthorityIdentity) return;
+      if (!current()) return;
       await Promise.all([
-        loadMetadataProjection(metadataProjection.record_id),
+        loadMetadataProjection(recordId),
         loadRecords(),
+        loadSelectedRecord(),
       ]);
-      if (authorityIdentity !== profileAuthorityIdentity) return;
+      if (!current()) return;
       failedMetadataRefresh = undefined;
     } catch (error) {
-      if (authorityIdentity !== profileAuthorityIdentity) return;
+      if (!current()) return;
       failedMetadataRefresh = { requestKey, operationId };
       throw error;
     }
@@ -1106,14 +1522,39 @@
   function metadataPolicyChanged(): void {
     metadataProjectionRecordId = "";
     metadataProjection = undefined;
-    if (selectedRecord?.id) void loadMetadataProjection(selectedRecord.id);
+    if (selectedRecordId && canAccessProfileData) {
+      void loadMetadataProjection(selectedRecordId);
+      void loadSelectedRecord();
+    }
   }
 
   const watchingRecords = $derived(
     mediaRecords.filter((record) => record.status === "watching"),
   );
   const selectedRecord = $derived(
-    mediaRecords.find((record) => record.id === selectedRecordId),
+    detailSummary?.record_id === selectedRecordId &&
+      detailAuthority === profileAuthorityIdentity
+      ? (() => {
+          const tracking = trackingStates.find(
+            (state) => state.record_id === selectedRecordId,
+          );
+          const known = Boolean(tracking) || trackingStatesComplete;
+          const record = projectRecordSummary(
+            detailSummary,
+            tracking?.disposition,
+          );
+          return {
+            ...record,
+            status:
+              !known && !detailSummary.latest_activity
+                ? ("unknown" as const)
+                : record.status,
+            trackingDisposition: known
+              ? (tracking?.disposition ?? null)
+              : undefined,
+          };
+        })()
+      : undefined,
   );
   const showsRecordFeedback = $derived(
     activeSection === "home" ||
@@ -1121,6 +1562,19 @@
       activeSection === "calendar" ||
       activeSection === "detail",
   );
+
+  $effect(() => {
+    // Track only route and authority. Reads/writes inside the loader must not
+    // subscribe this effect to its own loading/result state.
+    const recordId = selectedRecordId;
+    const active = activeSection === "detail" && canAccessProfileData;
+    accessProfileDataIdentity;
+    untrack(() => {
+      clearDetailState();
+      if (active && recordId) void loadSelectedRecord();
+    });
+    return () => untrack(clearDetailState);
+  });
 
   $effect(() => {
     const needsDiscoverProviders =
@@ -1180,7 +1634,12 @@
       !(activeSection === "settings" && settingsTab === "account")
     )
       void refreshAccessProjection();
-    const sync = () => (activeSection = sectionFromPath());
+    const sync = () => {
+      activeSection = sectionFromPath();
+      window.requestAnimationFrame(() =>
+        document.getElementById("main-content")?.focus(),
+      );
+    };
     const revalidateAccess = () => {
       if (host.profileDataAuthority === "browser_session" && accessProjection)
         void refreshAccessProjection();
@@ -1232,6 +1691,13 @@
 </script>
 
 {#snippet recordStatus()}
+  {#if recordsNotices.length && !recordActionNotice}
+    <div class="alert alert-info d-block" role="status">
+      {#each recordsNotices as notice}
+        <p class="m-0">{notice}</p>
+      {/each}
+    </div>
+  {/if}
   {#if recordsLoading}
     <p class="record-load-status alert alert-info" role="status">
       Loading records…
@@ -1447,11 +1913,37 @@
             bind:selectedProviderId={discoverSelectedProviderId}
             bind:selectionExplicit={discoverSelectionExplicit}
             onSearch={searchProvider}
+            onSearchLocal={canAccessProfileData && host.searchRecords
+              ? searchRecords
+              : undefined}
+            onSearchAttachTargets={canAccessProfileData && host.searchRecords
+              ? (query, grain, after) => searchRecords(query, after, [grain])
+              : undefined}
+            onSearchProviderPage={canAccessProfileData &&
+            host.searchProviderPage
+              ? searchProviderPage
+              : undefined}
+            onOpenRecord={(recordId) => openRecord(recordId)}
             onOpenSettings={openProviderSettings}
             onRetry={() => loadDiscover()}
             onCandidateAction={canAccessProfileData &&
-            host.trackProviderCandidate
-              ? createRecordFromDiscover
+            host.saveProviderIdentifier
+              ? saveProviderSearchResult
+              : undefined}
+            onCandidateReceiptAction={canAccessProfileData &&
+            host.saveSearchCandidate
+              ? saveSearchCandidate
+              : undefined}
+            onReadCandidate={canAccessProfileData && host.readSearchCandidate
+              ? readSearchCandidate
+              : undefined}
+            {candidateRoute}
+            {candidateRouteProblem}
+            onOpenCandidate={openSearchCandidate}
+            onCloseCandidateRoute={closeSearchCandidate}
+            onReadCandidateRoute={canAccessProfileData &&
+            host.readSearchCandidate
+              ? readSearchCandidateRoute
               : undefined}
           />
         {/key}
@@ -1500,48 +1992,73 @@
           onSelectRecord={openRecord}
         />
       {:else if activeSection === "detail"}
-        {@render recordStatus()}
-        {#if selectedRecord && !recordsProblem}
-          <MediaDetailView
-            record={selectedRecord}
-            {metadataProjection}
-            {metadataProjectionLoading}
-            {metadataProjectionProblem}
-            metadataRefreshUnavailableFieldGroups={metadataProjection?.policy.enabled_field_groups.filter(
-              (group) => !refreshableMetadataFieldGroups.has(group),
-            ) ?? []}
-            metadataRefreshableFieldGroupCount={metadataProjection?.policy.enabled_field_groups.filter(
-              (group) => refreshableMetadataFieldGroups.has(group),
-            ).length ?? 0}
-            availableCollections={[]}
-            initialTab={selectedRecordTab}
-            contextMenuConfigs={workbenchPreferences.contextMenuItems}
-            providerCredentials={discoverProviders}
-            providerLoading={discoverLoading}
-            providerHostProblem={discoverHostProblem}
-            onBack={() => select("library")}
-            onSearchMetadata={searchProvider}
-            onApplyMetadata={canAccessProfileData && host.applyProviderMetadata
-              ? applyProviderMetadata
-              : undefined}
-            onOpenProviderSettings={openProviderSettings}
-            onRetryProviders={() => loadDiscover()}
-            onRetryMetadataProjection={() =>
-              loadMetadataProjection(selectedRecord.id, true)}
-            onRefreshMetadataClaims={canAccessProfileData &&
-            host.refreshMetadataClaims
-              ? refreshMetadataProjectionClaims
-              : undefined}
-            onSetTrackingDisposition={canAccessProfileData
-              ? (recordId, disposition) =>
-                  void setTrackingDisposition(recordId, disposition)
-              : undefined}
-            onOpenReconciliation={() => select("reconciliation")}
-          />
+        {#if detailLoading}
+          <p class="alert alert-info" role="status">Loading Record…</p>
+        {/if}
+        {#if selectedRecord}
+          {#key detailLifetime}
+            <MediaDetailView
+              record={selectedRecord}
+              {metadataProjection}
+              {metadataProjectionLoading}
+              {metadataProjectionProblem}
+              metadataRefreshUnavailableFieldGroups={metadataProjection?.policy.enabled_field_groups.filter(
+                (group) => !refreshableMetadataFieldGroups.has(group),
+              ) ?? []}
+              metadataRefreshableFieldGroupCount={metadataProjection?.policy.enabled_field_groups.filter(
+                (group) => refreshableMetadataFieldGroups.has(group),
+              ).length ?? 0}
+              availableCollections={[]}
+              initialTab={selectedRecordTab}
+              contextMenuConfigs={workbenchPreferences.contextMenuItems}
+              providerCredentials={discoverProviders}
+              providerLoading={discoverLoading}
+              providerHostProblem={discoverHostProblem}
+              onBack={() => select("library")}
+              onSearchMetadata={searchProvider}
+              onApplyMetadata={canAccessProfileData &&
+              host.applyProviderMetadata
+                ? applyProviderMetadata
+                : undefined}
+              onOpenProviderSettings={openProviderSettings}
+              onRetryProviders={() => loadDiscover()}
+              onRetryMetadataProjection={() =>
+                loadMetadataProjection(selectedRecord.id, true)}
+              onRefreshMetadataClaims={canAccessProfileData &&
+              host.refreshMetadataClaims
+                ? refreshMetadataProjectionClaims
+                : undefined}
+              onSetTrackingDisposition={canAccessProfileData
+                ? (recordId, disposition) =>
+                    void setTrackingDisposition(recordId, disposition)
+                : undefined}
+              onOpenReconciliation={() => select("reconciliation")}
+            />
+          {/key}
         {:else}
           <div class="state-message">
             <h1>Media Detail</h1>
-            <p>No record is selected.</p>
+            {#if detailRouteProblem}
+              <p role="alert">{detailRouteProblem}</p>
+            {:else if selectedRecordId && !canAccessProfileData}
+              <p role="status">Sign in to read this Record.</p>
+              <button
+                type="button"
+                class="btn btn-primary"
+                onclick={openAccountSecurity}>Open Account and security</button
+              >
+            {:else if detailProblem}
+              <p role="alert">{detailProblem}</p>
+              <button
+                id="retry-record-detail"
+                type="button"
+                class="btn btn-primary"
+                onclick={() => void loadSelectedRecord(true)}
+                >Retry Record</button
+              >
+            {:else if !detailLoading}
+              <p>No record is selected.</p>
+            {/if}
             <button
               type="button"
               class="link-btn"
