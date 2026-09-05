@@ -3349,3 +3349,56 @@ the corrupt-profile error. Strict Store all-target clippy, Rust formatting and
 diff checks pass. Independent review of the corrected two-line Store diff is
 CLEAR; `archive.rs` and `restore_import.rs` still exactly match the published head.
 This closes the local diagnosis, not hosted acceptance of a new PR head.
+
+### 2026-09-05 — Exact publication and acceptance-audit correction
+
+PR #128 now publishes `7ebc0f640c77dfbd75a32bed0109fd3ceeb598f2`, tree
+`d4947f094e742ae9fcc3e1d9f5d4b7a720ab5e27`. Clean local receipts bind that
+commit/tree and pass all 27 contract and 11 portable checks. A transient DNS
+failure stopped the first push; a fresh successful resolver check and normal
+retry published the exact commit. Hosted coverage now passes on that head.
+No merge or shared runtime/schema release occurred.
+
+The fresh requirement-by-requirement audit supersedes the older
+**implementation-complete** statement above. M4 still needs media-domain controls,
+explicit Attach selection, a policy-safe details/canonical-Record journey for
+no-store candidates, stable provider continuation, native cancellation and a
+real-process browser Search journey. Existing mocked browser fixtures prove
+presentation, not the complete browser-to-SQLite flow. Local Search correctly
+uses a context-bound keyset; that does not prove stable provider pagination.
+The stale-on-error cached-action guard and local Record/Library labels also need
+reconciliation with the approved server-owned policy and M5 state boundary.
+These are active M4 requirements, not removed scope or later-stage substitutions.
+
+Native review verified five bounded PR corrections: stale lifecycle/archive
+prose, local-only provider-empty copy, overwritten truncation/failure notices,
+and generator diagnostics naming the wrong schema. The six remaining Codacy
+annotations are fixture-owned process/callback false positives, not authorization
+to disable scanners. The docs dependency patch covers the real Docusaurus
+`image-size/fromFile` consumer; a new timeout-bounded ICNS/JXL/HEIF regression
+passes there. The two glib alerts remain the documented unresolved Tauri/GTK
+dependency issue; first-party non-use is not proof of transitive unreachability.
+
+Parallel allocation: commander alone owns production UI, generated contracts,
+registry, host and migration integration. Agent A owns only two new browser
+notice regression files; agent B owns only the new Docusaurus parser regression;
+agent C maps real-process Search acceptance read-only. No agent may mutate shared
+production files. M5/M7/M8 preparation stays read-only until M4's exact release.
+Access retains its isolated performance test, Browser UI workflow job and two
+development pins, plus one additive CHANGELOG Unreleased entry. It owns the
+current 4173/18422 browser slot until its explicit terminal-process release.
+
+Read-only M3 follow-up confirmed that normal identity resolution loads profile
+policy instead of the authorized client's effective override. The existing
+client-aware loader and attribution identity suffice for a one-owner code fix
+with inheritance, cross-client isolation and non-Nuvio regressions; no schema or
+new identity owner is needed. M10 must consume M3 after M7, not replace it.
+
+M9 source review preserves distinct public catalog reads and authenticated
+Library/watched/progress writes. Scrob's legacy whole-Library push and content-ID
+merge are not substitutes for the pinned Nuvio compound key, item mutations,
+origin-client suppression and lane-specific pagination. Current official
+[MDBList authentication](https://api.mdblist.com/docs/authentication/) documents
+Public PKCE/S256 and bearer tokens for local apps; app registration and governed
+token lifecycle remain required. No query-key fallback or invented Cloud ratings
+or Collections RPC is authorized. ~~Codex Security~~ remains excluded permanently.
