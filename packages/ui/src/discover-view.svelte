@@ -696,7 +696,7 @@
         id="provider-choice"
         class="form-select"
         value={selectedProviderId}
-        disabled={searching || Boolean(actionKey) || Boolean(detailKey)}
+        disabled={Boolean(actionKey) || Boolean(detailKey)}
         onchange={(event) => selectProvider(event.currentTarget.value)}
       >
         <option value={ALL_PROVIDERS}>All available providers</option>
