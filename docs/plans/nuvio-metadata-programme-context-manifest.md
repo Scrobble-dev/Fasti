@@ -1748,3 +1748,46 @@ envelopes. Use a forward correction or remove only disposable Search cache rows
 through an authorized recovery path; do not downgrade the schema, rewrite durable
 action history or delete Records. No Codex Security was used. M4 remains local and
 unmerged with v16/archive v6 and shared ownership; no v17 or C2 release is granted.
+
+### 2026-09-05 — Exact provider-page verification and bounded Nuvio preparation
+
+Commit `81c2bc22f5f5b324d05603cf822bf419df8d277e`, tree
+`d98f32406328546bc4fda40ff2fa20664b232a46`, passed the canonical PR gate.
+Both machine receipts were checked against that exact clean commit and tree:
+27/27 contract checks and 11/11 portable checks, every gate passing with exit 0.
+This includes workspace tests, strict clippy, generated contract consistency and
+277 canonical SDK checks. This checkpoint update is later documentation, not part
+of that tested tree. It does not extend the receipt to untested changes or prove
+live-provider, Workbench, packaged-host or accessibility behavior.
+
+Read-only M11 preparation compared the existing Scrob pin with upstream
+`ce85114902390dbab47e42859ef1586997739a9f` (16 later commits). The
+[exact comparison](https://github.com/ellite/scrob/compare/1c4d775b70f489ca0531376b2c3de6a8c3de2a2b...ce85114902390dbab47e42859ef1586997739a9f)
+adds two bounded verification cases to the existing M11 workfront:
+
+- A queued Nuvio job cancelled before admission must not transition back to
+  running. Reuse planned admission and generation fencing; do not create a
+  second job owner.
+- Series-level watched rows without season/episode coordinates represent rollups
+  in Scrob's importer, not extra episode consumption evidence. Preserve distinct
+  summary and episode fixtures. This is observed Scrob behavior, not an
+  independently established Nuvio contract.
+
+The [adapter](https://github.com/ellite/scrob/blob/ce85114902390dbab47e42859ef1586997739a9f/backend/core/nuvio.py)
+and [README](https://github.com/ellite/scrob/blob/ce85114902390dbab47e42859ef1586997739a9f/README.md)
+are unchanged from the pin. There is no new authentication-contract disposition.
+Scrob demonstrates snapshot pulls and Library read/merge/replacement; it does not
+alone establish every delta/upsert RPC in the approved programme. Those require
+the separately pinned official Nuvio evidence. Its ratings exclusion and
+TMDB-centric matching do not narrow Fasti's approved scope. Keep the existing
+baseline pin; this comparison supplements rather than silently replaces it.
+
+Search candidates, viewed details and Create/Attach receipts are not Library,
+progress or watched intent and cannot independently enqueue remote writes or
+override response restrictions. No M11 implementation or shared-file ownership
+is released by this preparation. All three bounded review agents have released
+their test leaves; the commander retains shared integration ownership. The next
+active implementation remains candidate policy retention, payload disclosure and
+cached-action checks through existing owners, followed by the remaining metadata
+and host/Workbench paths recorded above. No second roadmap, scope reduction or
+speculative production surface was introduced. Codex Security remains prohibited.
