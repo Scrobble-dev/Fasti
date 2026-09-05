@@ -52,6 +52,7 @@
     SearchCandidateReceiptDto,
     SearchCandidateDetailsResponse,
     SearchProviderPageResponse,
+    SearchRecordActionDto,
     ResolveReviewInput,
     RecordSummary,
     ReviewItem,
@@ -1161,16 +1162,22 @@
     }
   }
 
-  async function createRecordFromDiscover(
+  async function saveProviderSearchResult(
     candidate: ProviderSearchCandidate,
+    action: SearchRecordActionDto = { kind: "create" },
   ): Promise<CreateRecordResult> {
     if (!canAccessProfileData || !host.saveProviderIdentifier) {
-      throw new Error(
-        "Sign in before creating a Record from provider metadata.",
-      );
+      throw new Error("Sign in before saving provider identity to a Record.");
     }
     const authorityIdentity = profileAuthorityIdentity;
-    const operationKey = `provider:${candidate.provider}:${candidate.grain}:${candidate.provider_id}:create`;
+    const operationKey = JSON.stringify([
+      "provider",
+      candidate.provider,
+      candidate.grain,
+      candidate.provider_id,
+      action.kind,
+      action.kind === "attach" ? action.record_id : null,
+    ]);
     const operationId =
       searchActionOperationIds.get(operationKey) ?? newOperationId();
     searchActionOperationIds.set(operationKey, operationId);
@@ -1180,7 +1187,7 @@
       {
         operation_id: operationId,
         provider_record_id: candidate.provider_id,
-        action: { kind: "create" },
+        action,
       },
     );
     if (authorityIdentity !== profileAuthorityIdentity) {
@@ -1196,6 +1203,11 @@
     searchActionOperationIds.delete(operationKey);
     recordsLoaded = false;
     await loadRecords();
+    if (authorityIdentity !== profileAuthorityIdentity) {
+      throw new Error(
+        "Account access changed before the Record was confirmed.",
+      );
+    }
     return {
       record_id: result.receipt.record_id,
       grain: result.receipt.grain,
@@ -1220,15 +1232,16 @@
   async function searchRecords(
     query: string,
     after?: LocalSearchCursorDto,
+    grains: string[] = [],
   ): Promise<LocalSearchResponseDto> {
     if (!canAccessProfileData || !host.searchRecords) {
-      throw new Error("Sign in before searching your Library.");
+      throw new Error("Sign in before searching local Records.");
     }
     const authorityIdentity = profileAuthorityIdentity;
     const results = await host.searchRecords({
       query,
-      grains: [],
-      after,
+      grains,
+      after: after ?? null,
     });
     if (authorityIdentity !== profileAuthorityIdentity) {
       throw new Error("Account access changed before search completed.");
@@ -1263,12 +1276,21 @@
   async function saveSearchCandidate(
     receipt: SearchCandidateReceiptDto,
     evidenceMode: "cached" | "refetch",
+    action: SearchRecordActionDto = { kind: "create" },
   ): Promise<CreateRecordResult> {
     if (!canAccessProfileData || !host.saveSearchCandidate) {
-      throw new Error("Sign in before creating a Record from Search.");
+      throw new Error("Sign in before saving Search identity to a Record.");
     }
     const authorityIdentity = profileAuthorityIdentity;
-    const operationKey = `${receipt.candidate_receipt_id}:create:${evidenceMode}`;
+    const operationKey = JSON.stringify([
+      "receipt",
+      receipt.candidate.provider,
+      receipt.grain,
+      receipt.candidate_receipt_id,
+      evidenceMode,
+      action.kind,
+      action.kind === "attach" ? action.record_id : null,
+    ]);
     const operationId =
       searchActionOperationIds.get(operationKey) ?? newOperationId();
     searchActionOperationIds.set(operationKey, operationId);
@@ -1278,7 +1300,7 @@
       receipt.candidate_receipt_id,
       {
         operation_id: operationId,
-        action: { kind: "create" },
+        action,
         evidence_mode: evidenceMode,
       },
     );
@@ -1295,6 +1317,11 @@
     searchActionOperationIds.delete(operationKey);
     recordsLoaded = false;
     await loadRecords();
+    if (authorityIdentity !== profileAuthorityIdentity) {
+      throw new Error(
+        "Account access changed before the Record was confirmed.",
+      );
+    }
     return {
       record_id: result.receipt.record_id,
       grain: result.receipt.grain,
@@ -1889,6 +1916,9 @@
             onSearchLocal={canAccessProfileData && host.searchRecords
               ? searchRecords
               : undefined}
+            onSearchAttachTargets={canAccessProfileData && host.searchRecords
+              ? (query, grain, after) => searchRecords(query, after, [grain])
+              : undefined}
             onSearchProviderPage={canAccessProfileData &&
             host.searchProviderPage
               ? searchProviderPage
@@ -1898,7 +1928,7 @@
             onRetry={() => loadDiscover()}
             onCandidateAction={canAccessProfileData &&
             host.saveProviderIdentifier
-              ? createRecordFromDiscover
+              ? saveProviderSearchResult
               : undefined}
             onCandidateReceiptAction={canAccessProfileData &&
             host.saveSearchCandidate

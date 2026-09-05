@@ -176,9 +176,15 @@ test("local-only Search does not claim an empty provider query", async ({
   await page.goto("/discover");
   await page.getByLabel("Metadata provider").selectOption("all");
   await page
-    .getByRole("searchbox", { name: "Search your Library and providers" })
+    .getByRole("searchbox", { name: "Search local Records and providers" })
     .fill("Local-only");
   await page.getByRole("button", { name: "Search", exact: true }).click();
+  await expect(
+    page.getByRole("region", { name: "Local Records" }),
+  ).toBeVisible();
+  await expect(page.getByRole("region", { name: "Your Library" })).toHaveCount(
+    0,
+  );
   await page.waitForFunction(
     () => window.__SEARCH_BOUNDARY_FIXTURE__?.localQueries.length === 1,
   );

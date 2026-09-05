@@ -65,6 +65,7 @@ export type {
   SearchCandidateDto,
   SearchCandidateDetailsResponse,
   SearchCandidateReceiptDto,
+  SearchRecordActionDto,
   SearchProviderPageRequest,
   SearchProviderPageResponse,
   RevokeBrowserSessionsResponse,
