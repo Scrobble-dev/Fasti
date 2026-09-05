@@ -221,6 +221,13 @@ Key routing rules:
 
 ## Review and handoff
 
+The [C2 foundation delivery gate](docs/plans/fasti-access-c2-foundation.md)
+is a pure domain/application dependency slice, not C2 runtime completion.
+It adds no PAT authentication route, administration port, migration or archive
+version. Preserve M4's shared integration ownership and reserved search scope;
+require its exact merged handoff before C2 activation work. Run the unchanged
+canonical PR gate for the shared typed-ID and secret-erasure changes.
+
 Document:
 
 - user impact;
