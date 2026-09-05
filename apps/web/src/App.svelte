@@ -3,10 +3,13 @@
     FastiClient,
     FastiProtocolError,
     connectionEndpoint,
+    type LocalSearchRequestDto,
+    type LocalSearchResponseDto,
   } from "@fasti/sdk";
   import type {
     NetworkConfiguration,
     RecordPage,
+    RecordSummary,
     WorkbenchHost,
   } from "@fasti/ui";
   import SetupPanel, {
@@ -192,6 +195,19 @@
     try {
       const { convertFileSrc, invoke } = await import("@tauri-apps/api/core");
       const accessClient = new FastiClient({ baseUrl: window.location.origin });
+      type NativeRecord = RecordSummary & {
+        readonly poster_asset_path?: string | null;
+      };
+      const projectNativeRecord = (record: NativeRecord): RecordSummary => {
+        const { poster_asset_path: path, ...summary } = record;
+        return {
+          ...summary,
+          poster: {
+            ...record.poster,
+            value: path ? convertFileSrc(path) : null,
+          },
+        };
+      };
       host = {
         networkConfigurationScope: "node",
         profileDataAuthority: "scoped",
@@ -246,6 +262,17 @@
           invoke("read_provider_health", { input: { provider } }),
         searchProvider: (provider, query) =>
           invoke("search_provider", { input: { provider, query } }),
+        searchRecords: async (input: LocalSearchRequestDto) => {
+          const page = await invoke<
+            Omit<LocalSearchResponseDto, "records"> & {
+              readonly records: ReadonlyArray<NativeRecord>;
+            }
+          >("search_records", { input });
+          return {
+            ...page,
+            records: page.records.map(projectNativeRecord),
+          };
+        },
         trackProviderCandidate: (selection) =>
           invoke("track_provider_candidate", { input: selection }),
         applyProviderMetadata: (recordId, selection) =>
@@ -265,16 +292,7 @@
           const page = await invoke<RecordPage>("list_records", { query });
           return {
             ...page,
-            records: page.records.map((record) => {
-              const { poster_asset_path: path, ...summary } = record;
-              return {
-                ...summary,
-                poster: {
-                  ...record.poster,
-                  value: path ? convertFileSrc(path) : null,
-                },
-              };
-            }),
+            records: page.records.map(projectNativeRecord),
           };
         },
         createRecord: (grain) => invoke("create_record", { grain }),

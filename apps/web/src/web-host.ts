@@ -2,6 +2,8 @@ import {
   connectionEndpoint,
   FastiClient,
   type CredentialProvider,
+  type LocalSearchRequestDto,
+  type LocalSearchResponseDto,
 } from "@fasti/sdk";
 import type {
   AttachIdentifierInput,
@@ -370,6 +372,20 @@ export function createWebHost(
       throw unavailable(
         `${provider} search is not active in the browser host. Provider requests must use the governed native or server host.`,
       );
+    },
+    async searchRecords(
+      request: LocalSearchRequestDto,
+    ): Promise<LocalSearchResponseDto> {
+      const response = await (credential ? client : accessClient).searchRecords(
+        request,
+      );
+      return {
+        ...response,
+        records: response.records.map((record) => ({
+          ...record,
+          poster: { ...record.poster, value: null },
+        })),
+      };
     },
     clearSearchCache(): void {},
     getSearchCacheSize(): number {
