@@ -28,6 +28,7 @@ const candidate = (index = 1) => ({
   candidate: {
     provider: "tmdb",
     provider_id: String(index),
+    grain: "film",
     kind: "movie",
     title: "Dune",
     original_title: null,
@@ -209,6 +210,12 @@ test("provider Search binds live results to the submitted provider and page", as
       "candidate provider",
       (value) => {
         value.candidates[0].provider = "google-books";
+      },
+    ],
+    [
+      "candidate grain",
+      (value) => {
+        value.candidates[0].grain = "series";
       },
     ],
   ]) {
@@ -575,6 +582,18 @@ test("provider Search binds page responses to the requested source and page", as
       "candidate provider",
       (value) => {
         value.candidates[0].candidate.provider = "google-books";
+      },
+    ],
+    [
+      "receipt grain",
+      (value) => {
+        value.candidates[0].grain = "series";
+      },
+    ],
+    [
+      "candidate grain",
+      (value) => {
+        value.candidates[0].candidate.grain = "series";
       },
     ],
   ]) {

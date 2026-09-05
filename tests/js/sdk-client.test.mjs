@@ -974,6 +974,7 @@ test("credentials are header-only on authenticated surfaces and no offline queue
           "revokeOtherBrowserSessions",
           "rotateBrowserSession",
           "rotateCredential",
+          "saveProviderIdentifier",
           "saveSearchCandidate",
           "searchProviderPage",
           "searchRecords",

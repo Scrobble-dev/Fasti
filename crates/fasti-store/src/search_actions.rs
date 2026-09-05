@@ -128,6 +128,45 @@ pub(crate) fn decode_receipt(
     Ok(receipt)
 }
 
+pub(crate) fn decode_provider_identifier_receipt(
+    json: &str,
+    id: RequestCorrelationId,
+) -> ApplicationResult<ProviderIdentifierActionReceipt> {
+    if json.len() > MAX_RECEIPT_BYTES {
+        return Err(problem(ProblemCode::IntegrityFailed, id));
+    }
+    let receipt: ProviderIdentifierActionReceipt =
+        serde_json::from_str(json).map_err(|_| problem(ProblemCode::IntegrityFailed, id))?;
+    if serde_json::to_string(&receipt).map_err(|_| problem(ProblemCode::IntegrityFailed, id))?
+        != json
+    {
+        return Err(problem(ProblemCode::IntegrityFailed, id));
+    }
+    let mapping = provider_identity_mapping_for_grain(&receipt.provider, receipt.grain)
+        .ok_or_else(|| problem(ProblemCode::IntegrityFailed, id))?;
+    mapping
+        .identifier(receipt.provider_record_id.clone())
+        .map_err(|_| problem(ProblemCode::IntegrityFailed, id))?;
+    let action_valid = match (receipt.action, receipt.disposition) {
+        (
+            SearchRecordAction::Create,
+            SearchRecordActionDisposition::Created | SearchRecordActionDisposition::Reused,
+        ) => true,
+        (
+            SearchRecordAction::Attach(target),
+            SearchRecordActionDisposition::Attached
+            | SearchRecordActionDisposition::AlreadyAttached,
+        ) => target == receipt.record_id,
+        _ => false,
+    };
+    if !action_valid
+        || receipt.origin != ProviderIdentifierActionOrigin::UserSelectedProviderIdentifier
+    {
+        return Err(problem(ProblemCode::IntegrityFailed, id));
+    }
+    Ok(receipt)
+}
+
 fn replay(
     tx: &Transaction<'_>,
     access: AuthorizedApplicationAccess,
@@ -221,6 +260,210 @@ pub(crate) fn prepare(
     let result = prepare_tx(&tx, command)?;
     map_sql(tx.commit(), CAPABILITY, id)?;
     Ok(result)
+}
+
+fn replay_provider_identifier(
+    tx: &Transaction<'_>,
+    access: AuthorizedApplicationAccess,
+    command: &ProviderIdentifierActionCommand,
+) -> ApplicationResult<Option<ProviderIdentifierActionReceipt>> {
+    let id = command.correlation_id;
+    let row = map_sql(
+        tx.query_row(
+            "SELECT profile_id, actor_client_id, actor_subject_id, semantic_digest, record_id, receipt_json FROM search_action_receipts WHERE workspace_id = ?1 AND operation_id = ?2",
+            params![access.workspace_id().to_string(), command.operation_id.to_string()],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<String>>(2)?, row.get::<_, String>(3)?, row.get::<_, String>(4)?, row.get::<_, String>(5)?)),
+        )
+        .optional(),
+        CAPABILITY,
+        id,
+    )?;
+    let Some((profile, client, actor_subject, digest, record, json)) = row else {
+        return Ok(None);
+    };
+    if profile != access.profile_id().to_string()
+        || client != access.attribution_client_id().to_string()
+        || actor_subject != subject(access).map(|value| value.to_string())
+        || digest != command.semantic_digest().as_str()
+    {
+        return Err(problem(ProblemCode::IdempotencyConflict, id));
+    }
+    let receipt = decode_provider_identifier_receipt(&json, id)?;
+    if receipt.workspace_id != access.workspace_id()
+        || receipt.profile_id != access.profile_id()
+        || receipt.actor_client_id != access.attribution_client_id()
+        || receipt.actor_subject_id != subject(access)
+        || receipt.operation_id != command.operation_id
+        || receipt.record_id.to_string() != record
+        || receipt.semantic_digest() != command.semantic_digest()
+    {
+        return Err(problem(ProblemCode::IntegrityFailed, id));
+    }
+    Ok(Some(receipt))
+}
+
+fn prepare_provider_identifier_tx(
+    tx: &Transaction<'_>,
+    command: &ProviderIdentifierActionCommand,
+) -> ApplicationResult<ProviderIdentifierActionPreparation> {
+    let id = command.correlation_id;
+    let access = authorize_application_transaction(tx, CAPABILITY, &command.access, id)?;
+    if let Some(receipt) = replay_provider_identifier(tx, access, command)? {
+        return Ok(ProviderIdentifierActionPreparation::Replay(Box::new(
+            receipt,
+        )));
+    }
+    authorize_application_transaction(tx, CapabilityKey::SearchMetadata, &command.access, id)
+        .map_err(|error| search_problem(&error, id))?;
+    let mapping = provider_identity_mapping_for_grain(command.provider.as_str(), command.grain)
+        .ok_or_else(|| problem(ProblemCode::InvalidIdentifier, id))?;
+    mapping
+        .identifier(command.provider_record_id.clone())
+        .map_err(|_| problem(ProblemCode::InvalidIdentifier, id))?;
+    let (provider_state, provider_authority_fingerprint) = provider_snapshot(
+        tx,
+        access.workspace_id(),
+        command.provider.as_str(),
+        "metadata.read",
+        &command.outbound_policy,
+        id,
+    )
+    .map_err(|error| search_problem(&error, id))?;
+    Ok(ProviderIdentifierActionPreparation::Refetch {
+        provider_state,
+        provider_authority_fingerprint,
+    })
+}
+
+pub(crate) fn prepare_provider_identifier(
+    kernel: &SqliteKernel,
+    command: &ProviderIdentifierActionCommand,
+) -> ApplicationResult<ProviderIdentifierActionPreparation> {
+    let id = command.correlation_id;
+    let mut connection = kernel.lock_connection(CAPABILITY, id)?;
+    let tx = map_sql(
+        connection.transaction_with_behavior(TransactionBehavior::Immediate),
+        CAPABILITY,
+        id,
+    )?;
+    let result = prepare_provider_identifier_tx(&tx, command)?;
+    map_sql(tx.commit(), CAPABILITY, id)?;
+    Ok(result)
+}
+
+pub(crate) fn commit_provider_identifier(
+    kernel: &SqliteKernel,
+    command: &ProviderIdentifierActionCommand,
+    prepared: &ProviderIdentifierActionPreparation,
+    confirmed_identifier: &fasti_domain::ExternalIdentifierClaim,
+) -> ApplicationResult<ProviderIdentifierActionReceipt> {
+    let id = command.correlation_id;
+    let mut connection = kernel.lock_connection(CAPABILITY, id)?;
+    let tx = map_sql(
+        connection.transaction_with_behavior(TransactionBehavior::Immediate),
+        CAPABILITY,
+        id,
+    )?;
+    let current = prepare_provider_identifier_tx(&tx, command)?;
+    if let ProviderIdentifierActionPreparation::Replay(receipt) = current {
+        map_sql(tx.commit(), CAPABILITY, id)?;
+        return Ok(*receipt);
+    }
+    let authority_matches = matches!(
+        (&current, prepared),
+        (
+            ProviderIdentifierActionPreparation::Refetch {
+                provider_authority_fingerprint: current,
+                ..
+            },
+            ProviderIdentifierActionPreparation::Refetch {
+                provider_authority_fingerprint: prepared,
+                ..
+            }
+        ) if current == prepared
+    );
+    if !authority_matches {
+        return Err(problem(ProblemCode::Forbidden, id));
+    }
+    let mapping = provider_identity_mapping_for_grain(command.provider.as_str(), command.grain)
+        .ok_or_else(|| problem(ProblemCode::InvalidIdentifier, id))?;
+    let identifier = mapping
+        .identifier(command.provider_record_id.clone())
+        .map_err(|_| problem(ProblemCode::InvalidIdentifier, id))?;
+    if &identifier != confirmed_identifier {
+        return Err(problem(ProblemCode::ValidationFailed, id));
+    }
+    let access = authorize_application_transaction(&tx, CAPABILITY, &command.access, id)?;
+    register_namespace_tx(
+        &tx,
+        access.workspace_id(),
+        &mapping
+            .namespace_definition()
+            .map_err(|_| problem(ProblemCode::InvalidIdentifier, id))?,
+        CAPABILITY,
+        id,
+    )?;
+    let (record_id, mut disposition) = match command.action {
+        SearchRecordAction::Create => {
+            let existing = matching_record_ids(
+                &tx,
+                access.workspace_id(),
+                std::slice::from_ref(&identifier),
+                CAPABILITY,
+                id,
+            )?;
+            if let Some(record_id) = existing.first() {
+                (*record_id, SearchRecordActionDisposition::Reused)
+            } else {
+                (
+                    insert_record(&tx, access.workspace_id(), command.grain, CAPABILITY, id)?,
+                    SearchRecordActionDisposition::Created,
+                )
+            }
+        }
+        SearchRecordAction::Attach(record) => (record, SearchRecordActionDisposition::Attached),
+    };
+    let attached = attach_identifier_tx(
+        &tx,
+        access.workspace_id(),
+        record_id,
+        &identifier,
+        CAPABILITY,
+        id,
+    )?;
+    if matches!(command.action, SearchRecordAction::Attach(_)) && !attached.created() {
+        disposition = SearchRecordActionDisposition::AlreadyAttached;
+    }
+    let receipt = ProviderIdentifierActionReceipt {
+        workspace_id: access.workspace_id(),
+        profile_id: access.profile_id(),
+        actor_client_id: access.attribution_client_id(),
+        actor_subject_id: subject(access),
+        operation_id: command.operation_id,
+        provider: command.provider.as_str().to_owned(),
+        provider_record_id: command.provider_record_id.clone(),
+        grain: command.grain,
+        action: command.action,
+        origin: ProviderIdentifierActionOrigin::UserSelectedProviderIdentifier,
+        record_id,
+        disposition,
+        committed_at: now(),
+    };
+    let json =
+        serde_json::to_string(&receipt).map_err(|_| problem(ProblemCode::IntegrityFailed, id))?;
+    let receipt = decode_provider_identifier_receipt(&json, id)?;
+    map_sql(
+        tx.execute(
+            "INSERT INTO search_action_receipts(workspace_id,operation_id,profile_id,actor_client_id,actor_subject_id,record_id,semantic_digest,receipt_json) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+            params![receipt.workspace_id.to_string(), receipt.operation_id.to_string(), receipt.profile_id.to_string(),
+                receipt.actor_client_id.to_string(), receipt.actor_subject_id.map(|value| value.to_string()),
+                receipt.record_id.to_string(), command.semantic_digest().as_str(), json],
+        ),
+        CAPABILITY,
+        id,
+    )?;
+    map_sql(tx.commit(), CAPABILITY, id)?;
+    Ok(receipt)
 }
 
 pub(crate) fn commit(

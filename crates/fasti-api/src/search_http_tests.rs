@@ -396,6 +396,14 @@ mod search_http_tests {
         })
     }
 
+    fn provider_identifier_action_body(operation: &str) -> serde_json::Value {
+        serde_json::json!({
+            "operation_id": operation,
+            "provider_record_id": "42",
+            "action": {"kind": "create"}
+        })
+    }
+
     fn action_counts(f: &Fixture) -> Vec<i64> {
         let connection = rusqlite::Connection::open(f.kernel.database_path()).unwrap();
         [
@@ -644,6 +652,24 @@ mod search_http_tests {
         refetch["evidence_mode"] = "refetch".into();
         let (status, problem) =
             response(&f.app, request(&f, true, &path, refetch.to_string())).await;
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{problem}");
+        assert_eq!(problem["code"], "capability_unavailable");
+        assert_eq!(action_counts(&f), before);
+        assert_eq!(f.vault.0.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn search_http_provider_identifier_action_enforces_browser_boundary_and_writes_nothing_when_details_are_unavailable(
+    ) {
+        let f = fixture().await;
+        let path = "/api/v1/search/providers/tmdb/film/actions";
+        let body = provider_identifier_action_body(&OperationId::new_v7().to_string());
+        let before = action_counts(&f);
+        let mut missing_csrf = request(&f, true, path, body.to_string());
+        missing_csrf.headers_mut().remove(local::CSRF_HEADER);
+        let (status, problem) = response(&f.app, missing_csrf).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{problem}");
+        let (status, problem) = response(&f.app, request(&f, false, path, body.to_string())).await;
         assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{problem}");
         assert_eq!(problem["code"], "capability_unavailable");
         assert_eq!(action_counts(&f), before);

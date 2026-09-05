@@ -2767,6 +2767,132 @@
         ],
         "type": "object"
       },
+      "ProviderIdentifierActionOriginDto": {
+        "enum": [
+          "user_selected_provider_identifier"
+        ],
+        "type": "string"
+      },
+      "ProviderIdentifierActionReceiptDto": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/SearchRecordActionDto"
+          },
+          "committed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "disposition": {
+            "$ref": "#/components/schemas/SearchRecordActionDispositionDto"
+          },
+          "grain": {
+            "type": "string"
+          },
+          "operation_id": {
+            "maxLength": 35,
+            "minLength": 35,
+            "pattern": "^op_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/ProviderIdentifierActionOriginDto"
+          },
+          "provider_id": {
+            "type": "string"
+          },
+          "provider_record_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "record_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation_id",
+          "provider_id",
+          "provider_record_id",
+          "grain",
+          "action",
+          "origin",
+          "record_id",
+          "disposition",
+          "committed_at"
+        ],
+        "type": "object"
+      },
+      "ProviderIdentifierActionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/SearchRecordActionDto"
+          },
+          "operation_id": {
+            "maxLength": 35,
+            "minLength": 35,
+            "pattern": "^op_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          },
+          "provider_record_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation_id",
+          "provider_record_id",
+          "action"
+        ],
+        "type": "object"
+      },
+      "ProviderIdentifierActionResponse": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "outcome": {
+                "enum": [
+                  "saved"
+                ],
+                "type": "string"
+              },
+              "receipt": {
+                "$ref": "#/components/schemas/ProviderIdentifierActionReceiptDto"
+              }
+            },
+            "required": [
+              "receipt",
+              "outcome"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "outcome": {
+                "enum": [
+                  "unavailable"
+                ],
+                "type": "string"
+              },
+              "problem_code": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "problem_code",
+              "outcome"
+            ],
+            "type": "object"
+          }
+        ]
+      },
       "ProviderKindDto": {
         "enum": [
           "metadata",
@@ -3649,6 +3775,9 @@
             "maxItems": 10,
             "type": "array"
           },
+          "grain": {
+            "type": "string"
+          },
           "image_url": {
             "maxLength": 2048,
             "type": [
@@ -3699,6 +3828,7 @@
         "required": [
           "provider",
           "provider_id",
+          "grain",
           "kind",
           "title",
           "authors"
@@ -11358,6 +11488,240 @@
         ],
         "x-fasti-required-scopes": [
           "metadata_search"
+        ],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/v1/search/providers/{provider_id}/{grain}/actions": {
+      "post": {
+        "operationId": "save_provider_identifier",
+        "parameters": [
+          {
+            "description": "Registered provider identity",
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Canonical candidate grain",
+            "in": "path",
+            "name": "grain",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderIdentifierActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderIdentifierActionResponse"
+                }
+              }
+            },
+            "description": "Atomic identifier-only Record action or explicit provider failure; saved receipt is historical, including on replay"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Malformed JSON"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Authentication is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Current identity-write authority, new-save Search authority or browser boundary denied"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Target Record is not accessible"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Operation intent, identity or session state conflicts"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Request exceeds the Search body limit"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Content-Type is not application/json"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "identity.identifier.attach.validation_failed": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "identity.identifier.attach",
+                      "code": "validation_failed",
+                      "correlation_id": "req_018f0e0e7f7b70008000000000000022",
+                      "detail": "request representation does not satisfy the governed contract",
+                      "next_actions": [
+                        {
+                          "id": "correct_request",
+                          "label": "Correct the request representation and retry"
+                        }
+                      ],
+                      "param": null,
+                      "retryability": "retry_after_correction",
+                      "safe_state": "no_mutation",
+                      "status": 422,
+                      "title": "Validation failed",
+                      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed",
+                      "violations": [
+                        {
+                          "actual": null,
+                          "code": "invalid_representation",
+                          "expected": "the documented request schema",
+                          "pointer": "/",
+                          "reason": "request JSON does not match the governed schema"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Invalid provider identifier or action intent"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Receipt state failed integrity checks"
+          },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Provider capability is unavailable"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "credential_bearer": []
+          },
+          {
+            "browser_session_cookie": [],
+            "csrf_cookie": [],
+            "csrf_header": []
+          }
+        ],
+        "tags": [
+          "search"
+        ],
+        "x-fasti-authorization": "scoped_or_browser_session",
+        "x-fasti-capability-id": "identity.identifier.attach",
+        "x-fasti-conditional-required-scopes": {
+          "new_operation": [
+            "metadata_search"
+          ]
+        },
+        "x-fasti-example-ids": [
+          "identity.identifier.attach.validation_failed"
+        ],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "browser_session_expired",
+          "browser_session_revoked",
+          "capability_unavailable",
+          "forbidden",
+          "idempotency_conflict",
+          "identity_conflict",
+          "integrity_failed",
+          "invalid_identifier",
+          "malformed_json",
+          "payload_too_large",
+          "record_not_found",
+          "session_policy_changed",
+          "storage_unavailable",
+          "unsupported_media_type",
+          "validation_failed"
+        ],
+        "x-fasti-required-scopes": [
+          "identity_write"
         ],
         "x-fasti-runtime-availability": "implemented"
       }

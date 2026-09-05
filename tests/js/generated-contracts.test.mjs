@@ -42,7 +42,7 @@ test("checked-in generated contracts validate", async () => {
   assert.deepEqual(await validateGeneratedContracts(), {
     capabilityCount: 53,
     conformanceOpenApiPathCount: 9,
-    openApiPathCount: 40,
+    openApiPathCount: 41,
     problemCount: 388,
     schemaCount: 2,
   });

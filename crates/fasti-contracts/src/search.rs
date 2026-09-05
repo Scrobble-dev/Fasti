@@ -1,9 +1,9 @@
 //! Provider Search representations. Receipt authority remains server-side.
 
 use fasti_application::{
-    ProviderCandidateDetailsOutcome, ProviderSearchActionOutcome, ProviderSearchOutcome,
-    SearchCacheState, SearchCandidate, SearchCandidateReceipt, SearchProviderQuery,
-    SearchReceiptLifetime, StoredSearchCandidate,
+    ProviderCandidateDetailsOutcome, ProviderIdentifierActionOutcome, ProviderSearchActionOutcome,
+    ProviderSearchOutcome, SearchCacheState, SearchCandidate, SearchCandidateReceipt,
+    SearchProviderQuery, SearchReceiptLifetime, StoredSearchCandidate,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -209,6 +209,7 @@ pub struct SearchCandidateReceiptDto {
 pub struct SearchCandidateDto {
     pub provider: String,
     pub provider_id: String,
+    pub grain: String,
     pub kind: String,
     #[schemars(length(min = 1, max = 512))]
     #[schema(min_length = 1, max_length = 512)]
@@ -246,6 +247,7 @@ impl From<&SearchCandidate> for SearchCandidateDto {
         Self {
             provider: data.provider.clone(),
             provider_id: data.provider_id.clone(),
+            grain: value.identifier().grain().as_str().to_owned(),
             kind: data.kind.clone(),
             title: data.title.clone(),
             original_title: data.original_title.clone(),
@@ -296,7 +298,7 @@ pub enum SearchCandidateDetailsResponse {
         snapshot: SearchCandidateSnapshotDto,
     },
     Refetched {
-        snapshot: SearchCandidateSnapshotDto,
+        snapshot: Box<SearchCandidateSnapshotDto>,
         details: SearchCandidateDto,
         locale: Option<String>,
     },
@@ -355,7 +357,7 @@ impl From<Option<ProviderCandidateDetailsOutcome>> for SearchCandidateDetailsRes
                 details,
                 locale,
             }) => Self::Refetched {
-                snapshot: (&snapshot).into(),
+                snapshot: Box::new((&snapshot).into()),
                 details: details.as_ref().into(),
                 locale: locale.map(|value| value.as_str().to_owned()),
             },
@@ -582,6 +584,115 @@ impl TryFrom<ProviderSearchActionOutcome> for SearchCandidateActionResponse {
                 problem_code: problem.as_str().to_owned(),
             },
         })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderIdentifierActionRequest {
+    #[schemars(
+        length(equal = 35),
+        regex(pattern = r"^op_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$")
+    )]
+    #[schema(
+        min_length = 35,
+        max_length = 35,
+        pattern = r"^op_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+    )]
+    pub operation_id: String,
+    #[schemars(length(min = 1, max = 256))]
+    #[schema(min_length = 1, max_length = 256)]
+    pub provider_record_id: String,
+    pub action: SearchRecordActionDto,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderIdentifierActionOriginDto {
+    UserSelectedProviderIdentifier,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderIdentifierActionReceiptDto {
+    #[schemars(
+        length(equal = 35),
+        regex(pattern = r"^op_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$")
+    )]
+    #[schema(
+        min_length = 35,
+        max_length = 35,
+        pattern = r"^op_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+    )]
+    pub operation_id: String,
+    pub provider_id: String,
+    #[schemars(length(min = 1, max = 256))]
+    #[schema(min_length = 1, max_length = 256)]
+    pub provider_record_id: String,
+    pub grain: String,
+    pub action: SearchRecordActionDto,
+    pub origin: ProviderIdentifierActionOriginDto,
+    #[schemars(
+        length(equal = 36),
+        regex(pattern = r"^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$")
+    )]
+    #[schema(
+        min_length = 36,
+        max_length = 36,
+        pattern = r"^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+    )]
+    pub record_id: String,
+    pub disposition: SearchRecordActionDispositionDto,
+    #[schemars(extend("format" = "date-time"))]
+    #[schema(format = "date-time")]
+    pub committed_at: String,
+}
+
+impl From<&fasti_application::ProviderIdentifierActionReceipt>
+    for ProviderIdentifierActionReceiptDto
+{
+    fn from(value: &fasti_application::ProviderIdentifierActionReceipt) -> Self {
+        use fasti_application::SearchRecordActionDisposition as Disposition;
+        Self {
+            operation_id: value.operation_id.to_string(),
+            provider_id: value.provider.clone(),
+            provider_record_id: value.provider_record_id.clone(),
+            grain: value.grain.as_str().to_owned(),
+            action: value.action.into(),
+            origin: ProviderIdentifierActionOriginDto::UserSelectedProviderIdentifier,
+            record_id: value.record_id.to_string(),
+            disposition: match value.disposition {
+                Disposition::Created => SearchRecordActionDispositionDto::Created,
+                Disposition::Reused => SearchRecordActionDispositionDto::Reused,
+                Disposition::Attached => SearchRecordActionDispositionDto::Attached,
+                Disposition::AlreadyAttached => SearchRecordActionDispositionDto::AlreadyAttached,
+            },
+            committed_at: value.committed_at.to_rfc3339(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(tag = "outcome", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ProviderIdentifierActionResponse {
+    Saved {
+        receipt: ProviderIdentifierActionReceiptDto,
+    },
+    Unavailable {
+        problem_code: String,
+    },
+}
+
+impl From<ProviderIdentifierActionOutcome> for ProviderIdentifierActionResponse {
+    fn from(value: ProviderIdentifierActionOutcome) -> Self {
+        match value {
+            ProviderIdentifierActionOutcome::Saved(receipt) => Self::Saved {
+                receipt: receipt.as_ref().into(),
+            },
+            ProviderIdentifierActionOutcome::Unavailable { problem } => Self::Unavailable {
+                problem_code: problem.as_str().to_owned(),
+            },
+        }
     }
 }
 

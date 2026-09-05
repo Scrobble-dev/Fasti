@@ -45,6 +45,8 @@ import {
   parseSearchCandidateDetailsResponse,
   parseSearchCandidateActionRequest,
   parseSearchCandidateActionResponse,
+  parseProviderIdentifierActionRequest,
+  parseProviderIdentifierActionResponse,
   parseRefreshMetadataClaimsRequest,
   parseRefreshMetadataClaimsResponse,
   parseResolveIdentityRouteResponse,
@@ -111,6 +113,8 @@ import {
   type SearchCandidateDetailsResponse,
   type SearchCandidateActionRequest,
   type SearchCandidateActionResponse,
+  type ProviderIdentifierActionRequest,
+  type ProviderIdentifierActionResponse,
   type RefreshMetadataClaimsRequest,
   type RefreshMetadataClaimsResponse,
   type ResolveIdentityRouteResponse,
@@ -984,6 +988,7 @@ export class FastiClient {
     );
     const requestedPage = body.page;
     const offline = body.offline;
+    const requestedGrains = new Set(body.grains);
     return this.#jsonOperation({
       method: operation.method,
       path: providerOperationPath(operation.path, identifiers),
@@ -1003,7 +1008,10 @@ export class FastiClient {
             (offline ||
               response.page !== requestedPage ||
               response.candidates.some(
-                (candidate) => candidate.provider !== identifiers.providerId,
+                (candidate) =>
+                  candidate.provider !== identifiers.providerId ||
+                  (requestedGrains.size > 0 &&
+                    !requestedGrains.has(candidate.grain)),
               ))) ||
           (response.outcome === "page" &&
             (response.page !== requestedPage ||
@@ -1011,7 +1019,10 @@ export class FastiClient {
                 (offline || response.upstream_problem != null)) ||
               response.candidates.some(
                 (receipt) =>
-                  receipt.candidate.provider !== identifiers.providerId,
+                  receipt.candidate.provider !== identifiers.providerId ||
+                  receipt.candidate.grain !== receipt.grain ||
+                  (requestedGrains.size > 0 &&
+                    !requestedGrains.has(receipt.grain)),
               )))
         ) {
           throw new FastiContractParseError(
@@ -1063,7 +1074,8 @@ export class FastiClient {
             response.provider_id !== locator.providerId ||
             response.grain !== locator.grain ||
             (response.outcome === "refetched_without_snapshot" &&
-              response.details.provider !== locator.providerId)
+              (response.details.provider !== locator.providerId ||
+                response.details.grain !== locator.grain))
           )
             throw new FastiContractParseError(
               "Candidate details response does not match the requested locator and mode",
@@ -1074,6 +1086,7 @@ export class FastiClient {
         if (
           receipt.candidate_receipt_id !== locator.receiptId ||
           receipt.grain !== locator.grain ||
+          receipt.candidate.grain !== locator.grain ||
           receipt.candidate.provider !== locator.providerId ||
           (offline
             ? response.outcome !== "snapshot"
@@ -1081,6 +1094,7 @@ export class FastiClient {
           (response.outcome === "refetched" &&
             (response.details.provider !== receipt.candidate.provider ||
               response.details.provider_id !== receipt.candidate.provider_id ||
+              response.details.grain !== receipt.candidate.grain ||
               response.details.kind !== receipt.candidate.kind))
         )
           throw new FastiContractParseError(
@@ -1154,6 +1168,60 @@ export class FastiClient {
         return response;
       },
       responseLabel: "Candidate action response",
+      options,
+    });
+  }
+
+  saveProviderIdentifier(
+    providerId: string,
+    grain: string,
+    request: ProviderIdentifierActionRequest,
+    options: CallOptions = {},
+  ): Promise<ProviderIdentifierActionResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.saveProviderIdentifier;
+    const locator = searchProviderGrainPath(operation.path, providerId, grain);
+    const body = parseOutgoing(
+      parseProviderIdentifierActionRequest,
+      request,
+      "Provider identifier action request",
+    );
+    const operationId = body.operation_id;
+    const providerRecordId = body.provider_record_id;
+    const actionKind = body.action.kind;
+    const targetRecord =
+      body.action.kind === "attach" ? body.action.record_id : undefined;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: locator.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      browserMutation: true,
+      retryMode: "stable-idempotency",
+      body,
+      responseParser: (value) => {
+        const response = parseProviderIdentifierActionResponse(value);
+        if (response.outcome === "unavailable") return response;
+        const receipt = response.receipt;
+        if (
+          receipt.operation_id !== operationId ||
+          receipt.provider_id !== locator.providerId ||
+          receipt.provider_record_id !== providerRecordId ||
+          receipt.grain !== locator.grain ||
+          receipt.origin !== "user_selected_provider_identifier" ||
+          receipt.action.kind !== actionKind ||
+          (targetRecord !== undefined
+            ? receipt.action.kind !== "attach" ||
+              receipt.action.record_id !== targetRecord ||
+              receipt.record_id !== targetRecord ||
+              !["attached", "already_attached"].includes(receipt.disposition)
+            : !["created", "reused"].includes(receipt.disposition))
+        )
+          throw new FastiContractParseError(
+            "Provider identifier action receipt does not match the submitted intent",
+          );
+        return response;
+      },
+      responseLabel: "Provider identifier action response",
       options,
     });
   }
@@ -2598,6 +2666,27 @@ function searchCandidatePath(
     providerId: identifiers.providerId,
     grain: safeGrain,
     receiptId,
+  };
+}
+
+function searchProviderGrainPath(
+  template: string,
+  providerId: string,
+  grain: string,
+) {
+  const identifiers = providerPathIdentifiers(providerId);
+  const safeGrain = contractPathIdentifier(
+    grain,
+    /^[a-z][a-z0-9_]{0,63}$/,
+    "grain",
+  );
+  return {
+    path: providerOperationPath(template, identifiers).replace(
+      "{grain}",
+      encodeURIComponent(safeGrain),
+    ),
+    providerId: identifiers.providerId,
+    grain: safeGrain,
   };
 }
 

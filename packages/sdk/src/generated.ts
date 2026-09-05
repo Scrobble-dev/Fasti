@@ -2833,6 +2833,132 @@ const PRODUCTION_SCHEMAS = {
     ],
     "type": "object"
   },
+  "ProviderIdentifierActionOriginDto": {
+    "enum": [
+      "user_selected_provider_identifier"
+    ],
+    "type": "string"
+  },
+  "ProviderIdentifierActionReceiptDto": {
+    "additionalProperties": false,
+    "properties": {
+      "action": {
+        "$ref": "#/components/schemas/SearchRecordActionDto"
+      },
+      "committed_at": {
+        "format": "date-time",
+        "type": "string"
+      },
+      "disposition": {
+        "$ref": "#/components/schemas/SearchRecordActionDispositionDto"
+      },
+      "grain": {
+        "type": "string"
+      },
+      "operation_id": {
+        "maxLength": 35,
+        "minLength": 35,
+        "pattern": "^op_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      },
+      "origin": {
+        "$ref": "#/components/schemas/ProviderIdentifierActionOriginDto"
+      },
+      "provider_id": {
+        "type": "string"
+      },
+      "provider_record_id": {
+        "maxLength": 256,
+        "minLength": 1,
+        "type": "string"
+      },
+      "record_id": {
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "operation_id",
+      "provider_id",
+      "provider_record_id",
+      "grain",
+      "action",
+      "origin",
+      "record_id",
+      "disposition",
+      "committed_at"
+    ],
+    "type": "object"
+  },
+  "ProviderIdentifierActionRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "action": {
+        "$ref": "#/components/schemas/SearchRecordActionDto"
+      },
+      "operation_id": {
+        "maxLength": 35,
+        "minLength": 35,
+        "pattern": "^op_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      },
+      "provider_record_id": {
+        "maxLength": 256,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "operation_id",
+      "provider_record_id",
+      "action"
+    ],
+    "type": "object"
+  },
+  "ProviderIdentifierActionResponse": {
+    "oneOf": [
+      {
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "enum": [
+              "saved"
+            ],
+            "type": "string"
+          },
+          "receipt": {
+            "$ref": "#/components/schemas/ProviderIdentifierActionReceiptDto"
+          }
+        },
+        "required": [
+          "receipt",
+          "outcome"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "enum": [
+              "unavailable"
+            ],
+            "type": "string"
+          },
+          "problem_code": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "problem_code",
+          "outcome"
+        ],
+        "type": "object"
+      }
+    ]
+  },
   "ProviderKindDto": {
     "enum": [
       "metadata",
@@ -3715,6 +3841,9 @@ const PRODUCTION_SCHEMAS = {
         "maxItems": 10,
         "type": "array"
       },
+      "grain": {
+        "type": "string"
+      },
       "image_url": {
         "maxLength": 2048,
         "type": [
@@ -3765,6 +3894,7 @@ const PRODUCTION_SCHEMAS = {
     "required": [
       "provider",
       "provider_id",
+      "grain",
       "kind",
       "title",
       "authors"
@@ -4645,6 +4775,9 @@ export type SearchCandidateEvidenceModeDto = "cached" | "refetch";
 export type SearchRecordActionDispositionDto = "already_attached" | "attached" | "created" | "reused";
 
 // prettier-ignore
+export type ProviderIdentifierActionOriginDto = "user_selected_provider_identifier";
+
+// prettier-ignore
 export type SearchEvidenceStatusDto = "fresh" | "stale";
 
 // prettier-ignore
@@ -4913,6 +5046,27 @@ export interface SearchCandidateActionReceiptDto {
   readonly record_id: string;
 }
 
+export interface ProviderIdentifierActionRequest {
+  readonly action: SearchRecordActionDto;
+  readonly operation_id: string;
+  readonly provider_record_id: string;
+}
+
+// prettier-ignore
+export type ProviderIdentifierActionResponse = { readonly outcome: "saved"; readonly receipt: ProviderIdentifierActionReceiptDto } | { readonly outcome: "unavailable"; readonly problem_code: string };
+
+export interface ProviderIdentifierActionReceiptDto {
+  readonly action: SearchRecordActionDto;
+  readonly committed_at: string;
+  readonly disposition: SearchRecordActionDispositionDto;
+  readonly grain: string;
+  readonly operation_id: string;
+  readonly origin: ProviderIdentifierActionOriginDto;
+  readonly provider_id: string;
+  readonly provider_record_id: string;
+  readonly record_id: string;
+}
+
 export interface SearchCandidateReceiptDto {
   readonly candidate: SearchCandidateDto;
   readonly candidate_receipt_id: string;
@@ -4921,6 +5075,7 @@ export interface SearchCandidateReceiptDto {
 
 export interface SearchCandidateDto {
   readonly authors: ReadonlyArray<string>;
+  readonly grain: string;
   readonly image_url?: null | string;
   readonly kind: string;
   readonly original_title?: null | string;
@@ -5334,6 +5489,7 @@ export interface AccessProjectionResponse {
 export const LOCAL_RUNTIME_OPERATIONS = {
   searchRecords: { operationId: "search_local_records", method: "POST", path: "/api/v1/search/records", capabilityId: "metadata.search", authorization: "scoped_or_browser_session", requiredScopes: ["metadata_search"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: "LocalSearchRequestDto", responseSchema: "LocalSearchResponseDto" },
   saveSearchCandidate: { operationId: "save_search_candidate", method: "POST", path: "/api/v1/search/candidates/{provider_id}/{grain}/{candidate_receipt_id}/actions", capabilityId: "identity.identifier.attach", authorization: "scoped_or_browser_session", requiredScopes: ["identity_write"], conditionalRequiredScopes: {"new_operation":["metadata_search"]}, problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","idempotency_conflict","identity_conflict","integrity_failed","invalid_identifier","malformed_json","payload_too_large","record_not_found","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["identity.identifier.attach.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: "SearchCandidateActionRequest", responseSchema: "SearchCandidateActionResponse" },
+  saveProviderIdentifier: { operationId: "save_provider_identifier", method: "POST", path: "/api/v1/search/providers/{provider_id}/{grain}/actions", capabilityId: "identity.identifier.attach", authorization: "scoped_or_browser_session", requiredScopes: ["identity_write"], conditionalRequiredScopes: {"new_operation":["metadata_search"]}, problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","idempotency_conflict","identity_conflict","integrity_failed","invalid_identifier","malformed_json","payload_too_large","record_not_found","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["identity.identifier.attach.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: "ProviderIdentifierActionRequest", responseSchema: "ProviderIdentifierActionResponse" },
   readSearchCandidate: { operationId: "read_search_candidate", method: "GET", path: "/api/v1/search/candidates/{provider_id}/{grain}/{candidate_receipt_id}", capabilityId: "metadata.search", authorization: "scoped_or_browser_session", requiredScopes: ["metadata_search"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "SearchCandidateDetailsResponse" },
   searchProviderPage: { operationId: "search_provider_page", method: "POST", path: "/api/v1/search/providers/{provider_id}", capabilityId: "metadata.search", authorization: "scoped_or_browser_session", requiredScopes: ["metadata_search"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "SearchProviderPageRequest", responseSchema: "SearchProviderPageResponse" },
   submitObservation: { operationId: "submit_observation", method: "POST", path: "/api/v1/observations", capabilityId: "observation.accept", authorization: "scoped_or_browser_session", requiredScopes: ["observation_accept"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","invalid_observation","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["observation.accept.capacity_exceeded","observation.accept.receipt","observation.accept.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: "SubmitObservationRequest", responseSchema: "SubmitObservationResponse" },
@@ -5513,6 +5669,16 @@ export function parseSearchCandidateActionRequest(value: unknown): SearchCandida
 // prettier-ignore
 export function parseSearchCandidateActionResponse(value: unknown): SearchCandidateActionResponse {
   return parseProductionDto("SearchCandidateActionResponse", value);
+}
+
+// prettier-ignore
+export function parseProviderIdentifierActionRequest(value: unknown): ProviderIdentifierActionRequest {
+  return parseProductionDto("ProviderIdentifierActionRequest", value);
+}
+
+// prettier-ignore
+export function parseProviderIdentifierActionResponse(value: unknown): ProviderIdentifierActionResponse {
+  return parseProductionDto("ProviderIdentifierActionResponse", value);
 }
 
 // prettier-ignore

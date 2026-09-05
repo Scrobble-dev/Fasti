@@ -16,6 +16,7 @@ test("local and receipt-backed provider Search survive a partial source failure"
     const candidate = {
       provider: "tmdb",
       provider_id: "693134",
+      grain: "film",
       kind: "movie",
       title: "Dune: Part Two",
       original_title: "Dune: Part Two",
@@ -246,6 +247,7 @@ test("local and receipt-backed provider Search survive a partial source failure"
                         ...candidate,
                         provider: "tvdb",
                         provider_id: "movies/341029",
+                        kind: "series",
                       },
                     },
                     {

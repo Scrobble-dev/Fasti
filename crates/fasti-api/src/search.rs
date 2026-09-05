@@ -391,6 +391,89 @@ pub(crate) async fn save_search_candidate(
 
 #[utoipa::path(
     post,
+    path = "/api/v1/search/providers/{provider_id}/{grain}/actions",
+    operation_id = "save_provider_identifier",
+    tag = "search",
+    params(
+        ("provider_id" = String, Path, description = "Registered provider identity"),
+        ("grain" = String, Path, description = "Canonical candidate grain")
+    ),
+    security(("credential_bearer" = []), ("browser_session_cookie" = [], "csrf_cookie" = [], "csrf_header" = [])),
+    request_body(content = fasti_contracts::ProviderIdentifierActionRequest, content_type = "application/json"),
+    responses(
+        (status = 200, description = "Atomic identifier-only Record action or explicit provider failure; saved receipt is historical, including on replay", body = fasti_contracts::ProviderIdentifierActionResponse),
+        (status = 400, description = "Malformed JSON", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 401, description = "Authentication is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "Current identity-write authority, new-save Search authority or browser boundary denied", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "Target Record is not accessible", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "Operation intent, identity or session state conflicts", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 413, description = "Request exceeds the Search body limit", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 415, description = "Content-Type is not application/json", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "Invalid provider identifier or action intent", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 500, description = "Receipt state failed integrity checks", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 501, description = "Provider capability is unavailable", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 503, description = "Storage is unavailable", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub(crate) async fn save_provider_identifier(
+    State(state): State<SearchApiState>,
+    SearchActionAccess { id, access }: SearchActionAccess,
+    locator: Result<Path<(String, String)>, PathRejection>,
+    body: Result<Json<fasti_contracts::ProviderIdentifierActionRequest>, JsonRejection>,
+) -> Result<Response, HttpProblem> {
+    let capability = CapabilityKey::AttachIdentifier;
+    let invalid = |pointer| invalid_for(capability, id, pointer);
+    let (provider, grain) = locator.map_err(|_| invalid("/provider_id"))?.0;
+    let body = body
+        .map_err(|error| json_rejection(capability, id, error))?
+        .0;
+    let action = match body.action {
+        fasti_contracts::SearchRecordActionDto::Create {} => {
+            fasti_application::SearchRecordAction::Create
+        }
+        fasti_contracts::SearchRecordActionDto::Attach { record_id } => {
+            fasti_application::SearchRecordAction::Attach(
+                record_id
+                    .parse()
+                    .map_err(|_| invalid("/action/record_id"))?,
+            )
+        }
+    };
+    let command = fasti_application::ProviderIdentifierActionCommand {
+        correlation_id: id,
+        access,
+        outbound_policy: OutboundAccessPolicy::default(),
+        terms_revision: String::new(),
+        operation_id: body
+            .operation_id
+            .parse()
+            .map_err(|_| invalid("/operation_id"))?,
+        provider: ProviderId::try_new(provider.clone()).map_err(|_| invalid("/provider_id"))?,
+        provider_record_id: body.provider_record_id,
+        grain: grain.parse().map_err(|_| invalid("/grain"))?,
+        action,
+    };
+    let gate = state
+        .locks
+        .get(&provider)
+        .ok_or_else(|| invalid("/provider_id"))?;
+    let lease = ProviderOperationLease::new(gate.lock_owned().await);
+    let response = fasti_contracts::ProviderIdentifierActionResponse::from(
+        state
+            .service
+            .save_provider_identifier(command, lease)
+            .await
+            .map_err(application_problem)?,
+    );
+    Ok((
+        [(header::CACHE_CONTROL, "private, no-store")],
+        Json(response),
+    )
+        .into_response())
+}
+
+#[utoipa::path(
+    post,
     path = "/api/v1/search/records",
     operation_id = "search_local_records",
     tag = "search",
@@ -492,6 +575,10 @@ pub(crate) fn router() -> Router<SearchApiState> {
             post(save_search_candidate),
         )
         .route(
+            "/api/v1/search/providers/{provider_id}/{grain}/actions",
+            post(save_provider_identifier),
+        )
+        .route(
             "/api/v1/search/candidates/{provider_id}/{grain}/{candidate_receipt_id}",
             get(read_search_candidate),
         )
@@ -535,7 +622,7 @@ mod tests {
                 serde_json::json!({
                     "outcome": "refetched_without_snapshot", "candidate_receipt_id": candidate_receipt_id,
                     "provider_id": "tmdb", "grain": "film", "locale": "fr-fr",
-                    "details": {"provider": "tmdb", "provider_id": "42", "kind": "movie",
+                    "details": {"provider": "tmdb", "provider_id": "42", "grain": "film", "kind": "movie",
                         "title": "New observation only", "original_title": null, "release_year": 2026,
                         "authors": [], "image_url": null, "overview": "New overview only"},
                 }),

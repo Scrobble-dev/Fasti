@@ -343,7 +343,7 @@ test("Discover selects available providers and preserves an explicit choice", as
     let googleConfigured = false;
     let tmdbConfigured = true;
     const completedSearches = new Set<string>();
-    const trackedCandidates = new Set<string>();
+    const actionOperationIds = new Map<string, string>();
     const providerStatus = () => [
       {
         provider: "google-books",
@@ -452,6 +452,7 @@ test("Discover selects available providers and preserves an explicit choice", as
                   {
                     provider: "google-books",
                     provider_id: "dune-volume",
+                    grain: "work",
                     title: "Dune",
                     original_title: null,
                     release_year: null,
@@ -472,6 +473,7 @@ test("Discover selects available providers and preserves an explicit choice", as
                 {
                   provider: "tmdb",
                   provider_id: "1396",
+                  grain: "series",
                   title: "Breaking Bad",
                   original_title: null,
                   release_year: null,
@@ -483,6 +485,7 @@ test("Discover selects available providers and preserves an explicit choice", as
                 {
                   provider: "tmdb",
                   provider_id: "1396",
+                  grain: "film",
                   title: "Breaking Bad: The Movie",
                   original_title: null,
                   release_year: null,
@@ -495,33 +498,55 @@ test("Discover selects available providers and preserves an explicit choice", as
               next_page: null,
             };
           }
-          case "track_provider_candidate": {
+          case "save_provider_identifier": {
             const input = (
               arguments_ as {
                 input?: {
-                  provider?: string;
                   provider_id?: string;
-                  kind?: string;
+                  grain?: string;
+                  request?: {
+                    operation_id?: string;
+                    provider_record_id?: string;
+                    action?: { kind?: string };
+                  };
                 };
               }
             )?.input;
-            const candidateKey = `${input?.provider}:${input?.kind}:${input?.provider_id}`;
+            const candidateKey = `${input?.provider_id}:${input?.grain}:${input?.request?.provider_record_id}`;
             if (
-              !["tmdb:show:1396", "tmdb:movie:1396"].includes(candidateKey) ||
-              trackedCandidates.has(candidateKey)
+              !["tmdb:series:1396", "tmdb:film:1396"].includes(candidateKey)
             ) {
               throw new Error(`Unexpected Record creation: ${candidateKey}`);
             }
-            trackedCandidates.add(candidateKey);
-            if (input?.kind === "movie") {
+            if (input?.request?.action?.kind !== "create") {
+              throw new Error("Unexpected Record action");
+            }
+            const operationId = input?.request?.operation_id;
+            if (!operationId) throw new Error("Missing operation ID");
+            const prior = actionOperationIds.get(candidateKey);
+            if (prior !== undefined && prior !== operationId) {
+              throw new Error("Retry changed the operation ID");
+            }
+            actionOperationIds.set(candidateKey, operationId);
+            if (input?.grain === "film") {
               throw {
                 detail: "TMDB could not return the selected movie.",
                 next_action: "Try the search again.",
               };
             }
             return {
-              record_id: "rec_01991f588e0070008000000000000010",
-              grain: "show",
+              outcome: "saved",
+              receipt: {
+                operation_id: operationId,
+                provider_id: "tmdb",
+                provider_record_id: "1396",
+                grain: "series",
+                action: { kind: "create" },
+                origin: "user_selected_provider_identifier",
+                record_id: "rec_01991f588e0070008000000000000010",
+                disposition: "created",
+                committed_at: "2026-09-05T12:00:00Z",
+              },
             };
           }
           case "list_records":
@@ -621,6 +646,10 @@ test("Discover selects available providers and preserves an explicit choice", as
   await expect(
     movieResult.getByRole("button", { name: "Record ready" }),
   ).toHaveCount(0);
+  await movieResult.getByRole("button", { name: "Create Record" }).click();
+  await expect(movieResult.getByRole("alert")).toHaveText(
+    "TMDB could not return the selected movie. Try the search again.",
+  );
 
   await provider.selectOption("google-books");
   await expect(

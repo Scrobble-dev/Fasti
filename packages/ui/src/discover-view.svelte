@@ -403,7 +403,7 @@
         .toLowerCase()
         .replace(/[^\p{L}\p{N}]+/gu, " ")
         .trim();
-      const grain = result.receipt?.grain ?? result.candidate.kind;
+      const grain = result.candidate.grain;
       const key =
         title && result.candidate.release_year
           ? `${grain}\u001f${result.candidate.release_year}\u001f${title}`

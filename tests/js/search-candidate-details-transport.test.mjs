@@ -16,6 +16,7 @@ const otherReceiptId = "scr_01991f588e0070008000000000000002";
 const candidate = () => ({
   provider: "tmdb",
   provider_id: "438631",
+  grain: "film",
   kind: "movie",
   title: "Dune",
   original_title: null,
@@ -224,10 +225,15 @@ test("snapshot-free candidate details bind both outcomes to the requested locato
       });
     }
   }
-  const response = refetchedWithoutSnapshot();
-  response.details.provider = "google-books";
-  const client = clientWith(async () => json(response));
-  await assert.rejects(read(client, { offline: false }), FastiProtocolError);
+  for (const [field, value] of [
+    ["provider", "google-books"],
+    ["grain", "series"],
+  ]) {
+    const response = refetchedWithoutSnapshot();
+    response.details[field] = value;
+    const client = clientWith(async () => json(response));
+    await assert.rejects(read(client, { offline: false }), FastiProtocolError);
+  }
 });
 
 test("snapshot-free candidate detail outcomes reject offline requests despite caller mutation", async (context) => {
@@ -397,6 +403,12 @@ test("candidate details bind every returned snapshot to the exact requested loca
       },
     ],
     [
+      "candidate grain",
+      (value) => {
+        value.snapshot.receipt.candidate.grain = "series";
+      },
+    ],
+    [
       "provider",
       (value) => {
         value.snapshot.receipt.candidate.provider = "google-books";
@@ -419,6 +431,7 @@ test("candidate details bind every returned snapshot to the exact requested loca
 test("refetched candidate details must preserve the original provider coordinate", async (context) => {
   for (const [field, value] of [
     ["provider", "google-books"],
+    ["grain", "series"],
     ["kind", "tv"],
     ["provider_id", "438632"],
   ]) {

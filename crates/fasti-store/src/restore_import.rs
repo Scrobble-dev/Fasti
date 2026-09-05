@@ -50,9 +50,7 @@ use fasti_domain::{
     RecordId, RecordStatus, RequestCorrelationId, RestoreAttemptId, RestoreStatus, ReviewItemId,
     ReviewStatus, Sha256Digest, TrackingDisposition, WorkspaceId,
 };
-use rusqlite::{
-    params, Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior,
-};
+use rusqlite::{params, Connection, OpenFlags, Transaction, TransactionBehavior};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
@@ -664,7 +662,11 @@ fn import_verified_pass_two(
     )?;
     repair_legacy_provider_coordinates_v1(&transaction).map_err(RestoreImportError::Sqlite)?;
     migrate_imported_legacy_metadata_v12(&transaction).map_err(RestoreImportError::Sqlite)?;
-    crate::local_search::rebuild(&transaction).map_err(RestoreImportError::Sqlite)?;
+    if !crate::local_search::rebuild_cancellable(&transaction, || !cancellation.is_cancelled())
+        .map_err(RestoreImportError::Sqlite)?
+    {
+        return Err(RestoreImportError::Canceled);
+    }
     verify_imported_database(&transaction, preflight.manifest(), correlation_id)?;
     crash_test_point("import", "verified");
     transaction.commit().map_err(RestoreImportError::Sqlite)?;
@@ -1355,6 +1357,17 @@ fn verify_import_domain_invariants(
                 GROUP BY review.review_item_id
                 HAVING COUNT(candidate.record_id) < 2
                     OR COUNT(DISTINCT candidate_record.grain) <> 1
+
+                UNION ALL
+
+                SELECT action.operation_id
+                FROM search_action_receipts action
+                JOIN records action_record
+                  ON action_record.record_id = action.record_id
+                WHERE action.workspace_id = ?1 AND (
+                    action_record.workspace_id <> action.workspace_id
+                    OR json_extract(action.receipt_json, '$.grain') IS NOT action_record.grain
+                )
             ) invalid
             "#,
             [workspace_id.to_string()],
@@ -2520,31 +2533,38 @@ fn import_row(
         WorkspaceExportEntity::SearchActionReceipts => {
             let row: SearchActionReceiptRow = decode_row(line, path)?;
             require_workspace(row.workspace_id, workspace_id)?;
-            let receipt = crate::search_actions::decode_receipt(
-                &row.receipt_json,
-                RequestCorrelationId::new_v7(),
-            )
-            .map_err(|_| RestoreImportError::DomainInvariant)?;
-            if receipt.workspace_id != row.workspace_id
-                || receipt.operation_id != row.operation_id
-                || receipt.profile_id != row.profile_id
-                || receipt.actor_client_id != row.actor_client_id
-                || receipt.actor_subject_id != row.actor_subject_id
-                || receipt.record_id != row.record_id
-                || receipt.semantic_digest() != row.semantic_digest
-            {
-                return Err(RestoreImportError::DomainInvariant);
-            }
-            let grain: String = transaction
-                .query_row(
-                    "SELECT grain FROM records WHERE workspace_id = ?1 AND record_id = ?2",
-                    params![workspace_id.to_string(), row.record_id.to_string()],
-                    |record| record.get(0),
-                )
-                .optional()
-                .map_err(RestoreImportError::Sqlite)?
-                .ok_or(RestoreImportError::DomainInvariant)?;
-            if grain != receipt.grain.as_str() {
+            let correlation_id = RequestCorrelationId::new_v7();
+            let receipt_matches =
+                crate::search_actions::decode_receipt(&row.receipt_json, correlation_id)
+                    .map(|receipt| {
+                        receipt.workspace_id == row.workspace_id
+                            && receipt.operation_id == row.operation_id
+                            && receipt.profile_id == row.profile_id
+                            && receipt.actor_client_id == row.actor_client_id
+                            && receipt.actor_subject_id == row.actor_subject_id
+                            && receipt.record_id == row.record_id
+                            && receipt.semantic_digest() == row.semantic_digest
+                    })
+                    .or_else(|_| {
+                        if format_version != fasti_application::WORKSPACE_ARCHIVE_FORMAT_VERSION {
+                            return Ok(false);
+                        }
+                        crate::search_actions::decode_provider_identifier_receipt(
+                            &row.receipt_json,
+                            correlation_id,
+                        )
+                        .map(|receipt| {
+                            receipt.workspace_id == row.workspace_id
+                                && receipt.operation_id == row.operation_id
+                                && receipt.profile_id == row.profile_id
+                                && receipt.actor_client_id == row.actor_client_id
+                                && receipt.actor_subject_id == row.actor_subject_id
+                                && receipt.record_id == row.record_id
+                                && receipt.semantic_digest() == row.semantic_digest
+                        })
+                    })
+                    .unwrap_or(false);
+            if !receipt_matches {
                 return Err(RestoreImportError::DomainInvariant);
             }
             insert_row(transaction, entity, transaction.execute(
