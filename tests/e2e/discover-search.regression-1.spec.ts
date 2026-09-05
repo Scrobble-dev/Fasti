@@ -1,3 +1,4 @@
+import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 import { mockAuthenticatedAccess } from "./test-helpers";
 
@@ -290,6 +291,7 @@ test("local and receipt-backed provider Search survive a partial source failure"
   await expect
     .poll(() => page.evaluate(() => window.__SEARCH_PAGE_INPUTS__?.length))
     .toBe(3);
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 
   await providerResult.getByRole("link", { name: "View details" }).click();
   await expect(page).toHaveURL(
@@ -299,6 +301,7 @@ test("local and receipt-backed provider Search survive a partial source failure"
     page.getByRole("heading", { name: "Dune: Part Two", level: 1 }),
   ).toBeVisible();
   await expect(page.getByText("Expanded provider details.")).toBeVisible();
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 
   await page.getByRole("button", { name: "Back to Search" }).click();
   await expect(page).toHaveURL("/discover");
