@@ -377,7 +377,10 @@ impl ProviderSearchPage {
         self.response_cache_policy.as_ref()
     }
 
-    fn with_response_cache_policy(mut self, policy: ProviderResponseCachePolicy) -> Self {
+    pub(crate) fn with_response_cache_policy(
+        mut self,
+        policy: ProviderResponseCachePolicy,
+    ) -> Self {
         self.response_cache_policy = Some(policy);
         for candidate in &mut self.candidates {
             candidate.response_cache_policy = Some(policy);
@@ -1302,6 +1305,7 @@ fn parse_tmdb_candidates(
 pub(crate) fn search_page_fixture() -> ProviderSearchPage {
     parse_tmdb_candidates(br#"{"page":1,"total_pages":2,"results":[{"id":42,"media_type":"movie","title":"Fixture film","adult":false}]}"#, 1)
         .expect("valid parser fixture")
+        .with_response_cache_policy(crate::cache_policy::observe(&reqwest::header::HeaderMap::new(), chrono::Utc::now(), std::time::Duration::ZERO))
 }
 
 fn tmdb_candidate(

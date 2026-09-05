@@ -81,6 +81,14 @@ pub struct SearchProviderPageRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(tag = "outcome", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SearchProviderPageResponse {
+    Live {
+        provider_id: String,
+        page: u32,
+        #[schemars(length(max = 100))]
+        #[schema(max_items = 100)]
+        candidates: Vec<SearchCandidateDto>,
+        next_page: Option<u32>,
+    },
     Page {
         provider_id: String,
         page: u32,
@@ -101,6 +109,7 @@ pub enum SearchProviderPageResponse {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SearchCacheStateDto {
+    Observed,
     Fresh,
     StaleOnError,
 }
@@ -108,6 +117,7 @@ pub enum SearchCacheStateDto {
 impl From<SearchCacheState> for SearchCacheStateDto {
     fn from(value: SearchCacheState) -> Self {
         match value {
+            SearchCacheState::Observed => Self::Observed,
             SearchCacheState::Fresh => Self::Fresh,
             SearchCacheState::StaleOnError => Self::StaleOnError,
         }

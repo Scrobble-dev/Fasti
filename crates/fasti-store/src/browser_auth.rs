@@ -1506,7 +1506,8 @@ mod tests {
                         &prepared,
                         &[],
                         &fasti_domain::Sha256Digest::from_bytes(&[7; 32]),
-                        None
+                        None,
+                        &crate::search::tests::response_policy(),
                     )
                     .unwrap_err()
                     .code(),
@@ -1595,6 +1596,7 @@ mod tests {
                 &[crate::search::tests::candidate("42")],
                 &fasti_domain::Sha256Digest::from_bytes(&[7; 32]),
                 None,
+                &crate::search::tests::response_policy(),
             )
             .unwrap();
         (fixture, session, saved)

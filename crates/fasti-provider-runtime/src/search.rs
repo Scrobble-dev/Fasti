@@ -14,6 +14,10 @@ use std::{future::Future, sync::Arc};
 /// or remote results; authorization and persistence failures remain typed errors.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderSearchOutcome {
+    Live {
+        candidates: Vec<fasti_application::SearchCandidate>,
+        next_page: Option<u32>,
+    },
     Page {
         page: StoredSearchPage,
         upstream_problem: Option<ProblemCode>,
@@ -387,6 +391,11 @@ impl ProviderSearchService {
                 });
             }
         };
+        if fetched.candidates.len() > fasti_application::MAX_SEARCH_PAGE_CANDIDATES {
+            return Ok(ProviderSearchOutcome::Unavailable {
+                problem: ProblemCode::ProviderResponseInvalid,
+            });
+        }
         let mut candidates = Vec::with_capacity(fetched.candidates.len());
         let context = request.query.receipt_context();
         for candidate in &fetched.candidates {
@@ -408,6 +417,29 @@ impl ProviderSearchService {
             }
         }
         let persistence = Arc::clone(&self.persistence);
+        if context
+            .validate_page(&candidates, fetched.next_page)
+            .is_err()
+        {
+            return Ok(ProviderSearchOutcome::Unavailable {
+                problem: ProblemCode::ProviderResponseInvalid,
+            });
+        }
+        let Some(response_policy) = fetched.response_cache_policy().copied() else {
+            return Ok(ProviderSearchOutcome::Unavailable {
+                problem: ProblemCode::ProviderResponseInvalid,
+            });
+        };
+        if response_policy.reuse() == fasti_application::ProviderResponseReuse::NoStore {
+            run_blocking(&lease, capability, id, move || {
+                persistence.discard_cached_search_page(&request, &prepared)
+            })
+            .await?;
+            return Ok(ProviderSearchOutcome::Live {
+                candidates,
+                next_page: fetched.next_page,
+            });
+        }
         let page = run_blocking(&lease, capability, id, move || {
             persistence.commit_search_page(
                 &request,
@@ -415,6 +447,7 @@ impl ProviderSearchService {
                 &candidates,
                 &fetched.evidence_digest,
                 fetched.next_page,
+                &response_policy,
             )
         })
         .await?;
@@ -485,6 +518,7 @@ fn effective_query(
 
 #[cfg(test)]
 mod tests {
+    include!("search_response_policy_tests.rs");
     include!("search_action_tests.rs");
     use super::*;
     include!("search_details_tests.rs");
@@ -691,6 +725,21 @@ mod tests {
                 self.fresh.clone()
             })
         }
+        fn discard_cached_search_page(
+            &self,
+            request: &SearchPageRequest,
+            prepared: &PreparedSearchPage,
+        ) -> ApplicationResult<()> {
+            self.calls.lock().unwrap().push("discard");
+            assert_eq!(prepared, &self.prepared);
+            if self.deny_commit.load(Ordering::SeqCst) {
+                return Err(Box::new(FastiProblem::forbidden(
+                    CapabilityKey::SearchMetadata,
+                    request.correlation_id,
+                )));
+            }
+            Ok(())
+        }
         fn commit_search_page(
             &self,
             request: &SearchPageRequest,
@@ -698,6 +747,7 @@ mod tests {
             candidates: &[SearchCandidate],
             digest: &Sha256Digest,
             next_page: Option<u32>,
+            _: &ProviderResponseCachePolicy,
         ) -> ApplicationResult<StoredSearchPage> {
             assert_eq!(request.terms_revision, "fasti.public-metadata-cache.v1");
             self.calls.lock().unwrap().push("commit");
@@ -944,6 +994,9 @@ mod tests {
                 .await
                 .unwrap();
             match outcome {
+                ProviderSearchOutcome::Live { .. } => {
+                    panic!("failed fetch cannot return live data")
+                }
                 ProviderSearchOutcome::Page {
                     upstream_problem, ..
                 } => {

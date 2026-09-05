@@ -983,6 +983,7 @@ export class FastiClient {
       "Provider Search request",
     );
     const requestedPage = body.page;
+    const offline = body.offline;
     return this.#jsonOperation({
       method: operation.method,
       path: providerOperationPath(operation.path, identifiers),
@@ -998,8 +999,16 @@ export class FastiClient {
         const response = parseSearchProviderPageResponse(value);
         if (
           response.provider_id !== identifiers.providerId ||
+          (response.outcome === "live" &&
+            (offline ||
+              response.page !== requestedPage ||
+              response.candidates.some(
+                (candidate) => candidate.provider !== identifiers.providerId,
+              ))) ||
           (response.outcome === "page" &&
             (response.page !== requestedPage ||
+              (response.cache_state === "observed" &&
+                (offline || response.upstream_problem != null)) ||
               response.candidates.some(
                 (receipt) =>
                   receipt.candidate.provider !== identifiers.providerId,

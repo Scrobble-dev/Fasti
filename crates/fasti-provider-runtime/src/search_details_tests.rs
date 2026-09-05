@@ -98,6 +98,7 @@ mod candidate_details_tests {
             panic!("candidate details must not prepare a new Search page")
         }
 
+        fn discard_cached_search_page(&self, _: &SearchPageRequest, _: &PreparedSearchPage) -> ApplicationResult<()> { panic!("details must not discard Search pages") }
         fn commit_search_page(
             &self,
             _: &SearchPageRequest,
@@ -105,6 +106,7 @@ mod candidate_details_tests {
             _: &[SearchCandidate],
             _: &Sha256Digest,
             _: Option<u32>,
+            _: &fasti_application::ProviderResponseCachePolicy,
         ) -> ApplicationResult<StoredSearchPage> {
             panic!("candidate details must never replace the immutable Search page")
         }

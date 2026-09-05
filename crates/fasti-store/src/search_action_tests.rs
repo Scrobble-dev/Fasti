@@ -408,6 +408,66 @@ mod candidate_action_tests {
     }
 
     #[test]
+    fn completed_action_replays_after_scoped_discard_without_changing_durable_history() {
+        let (node, request, command, _) = fixture();
+        let action_prepared = node
+            .kernel
+            .prepare_search_candidate_action(&command)
+            .unwrap();
+        let original = node
+            .kernel
+            .commit_search_candidate_action(&command, &action_prepared, None)
+            .unwrap();
+        let page_prepared = node.kernel.prepare_search_page(&request).unwrap();
+        let durable = rows(&node, MUTATION_TABLES);
+        let unrelated = rows(&node, UNRELATED_TABLES);
+        assert_eq!(durable[0].len(), 1, "populated Record");
+        assert_eq!(durable[2].len(), 1, "populated identifier");
+        assert_eq!(durable[3].len(), 3, "populated field claims");
+        assert_eq!(durable[4].len(), 3, "populated metadata claims");
+        assert_eq!(durable[5].len(), 3, "populated provenance");
+        assert_eq!(durable[7].len(), 1, "populated durable action receipt");
+        assert_eq!(
+            rows(&node, &["search_pages", "search_candidate_receipts"])
+                .iter()
+                .map(Vec::len)
+                .collect::<Vec<_>>(),
+            [1, 1]
+        );
+
+        node.kernel
+            .discard_cached_search_page(&request, &page_prepared)
+            .unwrap();
+        assert!(rows(&node, &["search_pages", "search_candidate_receipts"])
+            .iter()
+            .all(Vec::is_empty));
+        assert_eq!(rows(&node, MUTATION_TABLES), durable);
+        assert_eq!(rows(&node, UNRELATED_TABLES), unrelated);
+
+        // Replay needs current IdentityWrite, not permission to reacquire the
+        // deleted Search evidence. It returns the exact immutable old outcome.
+        remove_scope(&node, "metadata_search");
+        assert_eq!(
+            node.kernel
+                .prepare_search_candidate_action(&command)
+                .unwrap(),
+            SearchCandidateActionPreparation::Replay(Box::new(original.clone()))
+        );
+        assert_eq!(
+            node.kernel
+                .commit_search_candidate_action(&command, &action_prepared, None)
+                .unwrap(),
+            original
+        );
+        assert_eq!(act(&node, &command).unwrap(), original);
+        assert_eq!(rows(&node, MUTATION_TABLES), durable);
+        assert_eq!(rows(&node, UNRELATED_TABLES), unrelated);
+        assert!(rows(&node, &["search_pages", "search_candidate_receipts"])
+            .iter()
+            .all(Vec::is_empty));
+    }
+
+    #[test]
     fn action_operation_reuse_with_changed_intent_or_profile_conflicts_without_mutation() {
         let (node, _, command, _) = fixture();
         let original = act(&node, &command).unwrap();

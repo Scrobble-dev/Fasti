@@ -51,12 +51,13 @@ mod search_action_archive_tests {
         let prepared = node.kernel.prepare_search_page(&request).unwrap();
         let page = node
             .kernel
-            .commit_search_page(
+.commit_search_page(
                 &request,
                 &prepared,
                 &[crate::search::tests::candidate("42")],
                 &Sha256Digest::from_bytes(&[7; 32]),
                 None,
+                &crate::search::tests::response_policy(),
             )
             .unwrap();
         let command = SearchCandidateActionCommand {
