@@ -3234,3 +3234,118 @@ change. Archive v7 remains unchanged and v18/archive v8 remain unallocated.
 There was no push, PR, merge or shared-file release in this checkpoint.
 ~~Codex Security~~ remains permanently excluded; native exact-diff review found
 and closed the recovery-copy mismatch.
+
+### 2026-09-05 — M4 publication, hosted-review corrections, parallel preparation
+
+PR #128 targets `dev` at `d150a510e9ae8d7bdc8ebdcf9b06749ea388b205`,
+tree `62c2b91f0e22339b35328e34f253007cd698a933`. The clean local canonical
+gate passed 27 contract and 11 portable checks before publication. Current
+hosted Rust, JavaScript, browser UI, contracts, documentation, CodeQL and
+dependency-advisory jobs pass. Coverage completed its Rust tests but failed
+while merging one corrupt LLVM raw profile; root-cause investigation and a
+local instrumented reproduction are active. The long-running canonical,
+container and hardware jobs and CodeRabbit review are not yet landing proof.
+No merge, migration allocation or shared-surface release has occurred.
+
+Codacy's 13 annotations are confined to native artwork and browser test tooling.
+Independent native review confirmed three Python `assert` checks could disappear
+under optimization. They now use unconditional failures. Normal and optimized
+self-tests pass, and a deliberately broken image predicate is rejected under
+`python3 -O`. Browser query-rejection data now uses the existing W3C request's
+separate `args` array instead of joining data into JavaScript source. Its old
+SQL-injection annotation referred to JavaScript, not a database query.
+The local seeder and namespace launches use validated executable paths and
+tokenized arguments without a shell; narrow Bandit comments record that boundary.
+The browser resolver annotation is a test-owned Promise callback indexed by the
+fixed `recordA` fixture, not a function selected by user or provider input.
+No scanner-wide exclusion or runtime change was added.
+
+The revised native harness passed exact poster decode, reload, query rejection
+and restored decode in `target/native-artwork/run-3ere_1xz/receipt.json`, with
+zero external routes before and after. This is dirty-source harness-regression
+evidence using the previously qualified release Desktop hash
+`79fd85f171dd5e00de4847c373d67bc82e9c6b7a0e9f46a2e4cb56bbde8a610c`
+and a newly rebuilt test seeder. It is not a new exact-head Desktop build claim.
+
+Parallel allocation remains compact: commander writes M4 corrections; agent A
+independently triages hosted findings and the coverage failure; agent B refreshed
+M5's exact tracking-disposition selector map and advances read-only M6 preparation;
+agent C refreshes M8's source-backed field coverage. M5's first internal leaf
+reuses `ListTrackingDispositionsQuery`, Store's profile-state owner and the
+existing workspace/profile/Record primary key; the default 500-row page remains
+unchanged, while exact selection returns at most one row. Authority, profile
+isolation, missing/beyond-page Records and indexed 10,000-row plans are its gates.
+No migration or transport is needed for that first leaf, and it cannot stand
+in for the full Library or Collection-membership scope.
+
+Access has a narrow parallel allocation for its isolated
+`tests/e2e/access-performance.spec.ts`, the Browser UI job in
+`.github/workflows/ci.yml`, and `package.json`/`pnpm-lock.yaml` solely for its
+proposed development-only Lighthouse 13.4.1 and puppeteer-core 25.8.0 integration.
+It must verify source compatibility and literal brand performance metrics, reuse
+the installed Chromium/server, preserve M4 dependency changes and return an exact
+commit/tree before reconciliation. M4 stays read-only on those allocated files
+and that workflow job. This is not a schema, archive, registry, SDK, host or
+Workbench release. ~~Codex Security~~ remains permanently outside requirements.
+
+Read-only M6 preparation confirms its first local smart rail must consume M5's
+final profile-scoped, filtered, sorted, keyset-paged Library request/page types.
+Reuse `RecordSummary`; do not re-query Store identity/profile/Search owners or
+invent a parallel Library. The approved `DiscoverRailDefinition` remains a
+conceptual contract until the exact rail/filter/page/fallback behavior freezes.
+Local rails require no provider or credential I/O. Collection rails depend on
+M7 membership; TMDB Discover needs its own catalog admission, not Search receipts.
+Its later gates include isolated source status, cursor-context rejection,
+preserved focus/items on retry, 320px reflow and local p95 under 250 ms at
+10,000 Records. No production files are allocated by this preparation.
+
+M8's first proven isolated opportunity after M4 is production-company enrichment
+from the existing movie/TV details response. The approved domain enum, settings,
+generated request types, generic claims and archive readers already represent
+the group; current runtime validation, candidate parsing, canonical field mapping
+and Workbench refresh support do not. Reuse those owners, not a new request,
+capability, migration or archive. Freeze bounded positive-ID/name company
+references, deduplication and the existing 4 KiB value ceiling before coding.
+[TMDB movie details](https://developer.themoviedb.org/reference/movie-details)
+and [TV details](https://developer.themoviedb.org/reference/tv-series-details)
+document `language`, not `region`; current per-field region stamping needs an
+explicit per-group disposition before this activation. Pinned Nuvio Desktop's
+`TmdbMetadataService.kt` independently maps `productionCompanies` from details.
+Find/alias routing, English fallback, networks and episodes remain full M8 work,
+not removed scope. The first leaf does not imply those capabilities are complete.
+Its tests must cover malformed/duplicate/oversized references, disabled-group
+preflight, offline/cache reuse, outages, override preservation and safe typed UI.
+
+M7 preparation found no native Collection/membership owner. Keep the existing
+profile-scoped Nuvio JSON envelope, process-local catalog projection and UI's
+single-name placeholder separate. A native profile-owned Collection with ordered
+many-to-many Record membership is a prerequisite for M5's Collection filter and
+M6's Collection rail; it must not be inferred from raw Nuvio JSON. Typed identity,
+order/replay/version/deletion semantics and migration/archive disposition require
+explicit post-M4 freeze and one shared writer. Existing Nuvio normalization drops
+unsupported sources and keeps the final duplicate ID, while the approved import
+requires lossless preservation, duplicate rejection and preview; current envelope
+and approved pack bounds also differ. Preserve existing stored documents until
+that reconciliation is explicit. No native table, ID or API was allocated here.
+
+### 2026-09-05 — Coverage failure reproduced and corrected
+
+Fresh local instrumentation reproduced the hosted failure after all tests passed.
+The corrupt raw profile was exactly 1,024 bytes. The initial SIGKILL-worker
+hypothesis was disproved by a second complete run and those speculative changes
+were fully reverted. The actual writer is the normal-exit capture failure worker
+in `restore_capture_tests.rs`: its deliberate `ulimit -f 1` also truncates LLVM's
+regular-file profile during exit. Only that Linux test child now receives
+`LLVM_PROFILE_FILE=/dev/null`. Its real EFBIG assertion, 1 KiB file limit, cleanup
+checks and every SIGKILL matrix remain unchanged. No runtime or CI workflow change
+is needed. LLVM's [profile lifecycle](https://clang.llvm.org/docs/SourceBasedCodeCoverage.html)
+documents exit-time writes and the PID/binary-signature naming used in diagnosis.
+
+The corrected whole-workspace `cargo llvm-cov --workspace --locked --lcov
+--output-path target/m4-review-coverage.info` completed successfully with the
+physical temporary path. Store passed 467 tests plus 3 integration tests with
+6 explicit ignores; xtask passed 104 tests. The final report was produced without
+the corrupt-profile error. Strict Store all-target clippy, Rust formatting and
+diff checks pass. Independent review of the corrected two-line Store diff is
+CLEAR; `archive.rs` and `restore_import.rs` still exactly match the published head.
+This closes the local diagnosis, not hosted acceptance of a new PR head.
