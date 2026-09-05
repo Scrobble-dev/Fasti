@@ -1999,3 +1999,48 @@ packaged-host accessibility. Rollback is forward correction; retain claims and
 policy-aware archive readers rather than downgrade v17 or erase user data.
 There is no push, PR, merge or shared-file release. M4 still owns v17/archive v7;
 Access v18 remains conditional on an exact merged commit/tree and explicit handoff.
+
+### 2026-09-05 — Private restore capture closes between-pass substitution
+
+The commander reused the existing descriptor-relative Linux `O_TMPFILE` owner
+for one bounded input capture. Verification and import now consume a private,
+non-Clone file/preflight carrier. The caller's source is rewound but never read
+again after capture. No named capture, recovery artifact, importer, dependency,
+migration, archive format or public API was added. This protects against caller
+source mutation; it does not claim protection from arbitrary same-privilege host
+tampering. Malformed/no-store claim policy still fails before named staging and
+SQLite creation. The compressed input itself is temporarily captured first.
+
+Checked scratch admission includes compressed capture, database allowance,
+declared blobs and cleanup reserve. Remaining free-space admission does not
+charge already-written capture twice. Copy reads/writes remain at most 256 KiB;
+an exact-limit archive requires a one-byte EOF probe. Private file destruction
+removes capture on errors and process death. Native review found and fixed
+cancellation precedence during both initial and final caller-source rewinds.
+
+Pre-commit checks: nine focused capture/capacity tests passed; their isolated
+write-failure helper runs through its parent test and is otherwise ignored. The
+real kernel file-size limit produces an anonymous-file write error, with rewind
+and no named residue. Tests also cover correctly rehashed source replacement,
+external file overwrite/truncation, short reads, premature EOF, malformed read
+counts, limit+1, arithmetic overflow and exact scratch admission. The existing
+SIGKILL/retry matrix passes with capture-created/capture-written points. Before
+the final rewind regression additions, the full store run passed 426 unit tests
+(5 expected helpers ignored) and 3 integration tests. Formatting and diff checks
+pass. These are working-tree checks, not an exact-head canonical receipt.
+
+The bounded workfront remains in the existing programme: commander integrates
+and verifies this slice; the native reviewer prepares selected-field policy
+eligibility; the constructor reviewer maps whole-response policy threading; the
+store reviewer audits database allocation enforcement. All agents' production
+access remains read-only; only the two assigned capture test leaves were edited.
+No Codex Security was used. Whole-response metadata admission/readers, real Save,
+refresh, Workbench, provider/host evidence and delivery remain active scope.
+
+Next resource hardening uses SQLite's existing connection-local page limit
+before migration to enforce the main-database allowance. Current admission does
+not enforce peak aggregate journal/temp-file usage; a database page cap alone
+will not establish that stronger claim. Keep rollback journaling and integrity
+checks intact. Rollback remains forward correction; preserve v17/v7 and all
+earlier formats. No push, PR, merge, migration allocation or shared-file release
+has occurred.
