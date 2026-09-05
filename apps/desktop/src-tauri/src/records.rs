@@ -8,8 +8,8 @@ use fasti_application::{
     RequestAccessContext, SetTrackingDispositionCommand,
 };
 use fasti_contracts::{
-    ListTrackingDispositionsResponse, TrackingDispositionDto, TrackingDispositionStateDto,
-    TrackingDispositionUpdateDto,
+    ListRecordsQueryParameters, ListTrackingDispositionsResponse, TrackingDispositionDto,
+    TrackingDispositionStateDto, TrackingDispositionUpdateDto,
 };
 use fasti_domain::{
     ExternalIdentifierClaim, Grain, InterpretationState, NamespaceDefinition,
@@ -88,11 +88,19 @@ pub(crate) fn list_records(
     kernel: &SqliteKernel,
     store: &impl SetupSecretStore,
     artwork: &ArtworkCache,
+    query: Option<ListRecordsQueryParameters>,
 ) -> Result<RecordPage, DesktopProblem> {
     let access = require_access(kernel, store)?;
     let correlation_id = fasti_domain::RequestCorrelationId::new_v7();
+    let selector = query
+        .and_then(|query| query.record_id)
+        .map(|id| {
+            id.parse::<RecordId>()
+                .map_err(|_| fasti_application::InvalidRecordSelector)
+        })
+        .transpose();
     let summaries = kernel
-        .list_records(ListRecordsQuery::new(correlation_id, access))
+        .list_records(ListRecordsQuery::new(correlation_id, access).with_record_selector(selector))
         .map_err(|problem| DesktopProblem::application(&problem))?;
     let truncated = summaries.truncated();
     let records = summaries
@@ -392,7 +400,7 @@ mod tests {
         let artwork = ArtworkCache::new(root.path().join("artwork"));
 
         assert!(matches!(
-            list_records(&kernel, &store, &artwork),
+            list_records(&kernel, &store, &artwork, None),
             Err(problem) if problem.code() == "not_authenticated"
         ));
     }
@@ -404,9 +412,78 @@ mod tests {
         let artwork = ArtworkCache::new(root.path().join("artwork"));
         complete_setup(&kernel, &store).expect("complete setup");
 
-        let records = list_records(&kernel, &store, &artwork).expect("list records");
+        let records = list_records(&kernel, &store, &artwork, None).expect("list records");
         assert!(records.records.is_empty());
         assert!(!records.truncated);
+    }
+
+    #[test]
+    fn list_records_exact_selector_preserves_default_and_missing_pages() {
+        let (root, kernel) = new_kernel();
+        let store = MemoryStore::default();
+        let artwork = ArtworkCache::new(root.path().join("artwork"));
+        complete_setup(&kernel, &store).expect("complete setup");
+        let first = create_record(&kernel, &store, Grain::Film).expect("first record");
+        let selected = create_record(&kernel, &store, Grain::Work).expect("selected record");
+
+        for query in [None, Some(ListRecordsQueryParameters::default())] {
+            let page = list_records(&kernel, &store, &artwork, query).expect("default list");
+            assert_eq!(page.records.len(), 2);
+            assert!(!page.truncated);
+            assert!(page
+                .records
+                .iter()
+                .any(|record| record.record_id == first.record_id));
+        }
+
+        let page = list_records(
+            &kernel,
+            &store,
+            &artwork,
+            Some(ListRecordsQueryParameters {
+                record_id: Some(selected.record_id.clone()),
+            }),
+        )
+        .expect("exact selection");
+        assert_eq!(page.records.len(), 1);
+        assert_eq!(page.records[0].record_id, selected.record_id);
+        assert_eq!(page.records[0].grain, Grain::Work);
+        assert!(!page.truncated);
+
+        let page = list_records(
+            &kernel,
+            &store,
+            &artwork,
+            Some(ListRecordsQueryParameters {
+                record_id: Some(RecordId::new_v7().to_string()),
+            }),
+        )
+        .expect("unknown selection");
+        assert!(page.records.is_empty());
+        assert!(!page.truncated);
+    }
+
+    #[test]
+    fn list_records_invalid_selector_reaches_existing_authorization_owner() {
+        let (root, kernel) = new_kernel();
+        let store = MemoryStore::default();
+        let artwork = ArtworkCache::new(root.path().join("artwork"));
+        let query = ListRecordsQueryParameters {
+            record_id: Some("not-a-record-id".to_owned()),
+        };
+        assert_eq!(
+            list_records(&kernel, &store, &artwork, Some(query.clone()))
+                .expect_err("setup must precede selector validation")
+                .code(),
+            "not_authenticated",
+        );
+        complete_setup(&kernel, &store).expect("complete setup");
+        assert_eq!(
+            list_records(&kernel, &store, &artwork, Some(query))
+                .expect_err("authorized malformed selector")
+                .code(),
+            "validation_failed",
+        );
     }
 
     #[test]
@@ -430,7 +507,7 @@ mod tests {
         let created = create_record(&kernel, &store, Grain::Film).expect("create record");
         assert_eq!(created.grain, Grain::Film);
 
-        let records = list_records(&kernel, &store, &artwork).expect("list records");
+        let records = list_records(&kernel, &store, &artwork, None).expect("list records");
         assert_eq!(records.records.len(), 1);
         assert_eq!(records.records[0].record_id, created.record_id);
         assert!(!records.truncated);

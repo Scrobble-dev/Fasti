@@ -7,6 +7,7 @@ import type {
   ApplyAnimeGroupingPolicyChangeResponse,
   CompleteTrailBaseContinuationRequest,
   ConfigureMetadataProjectionRequest,
+  ListRecordsQueryParameters,
   MetadataProjectionConfigurationResponse,
   MetadataProjectionResponse,
   PreviewAnimeGroupingPolicyChangeRequest,
@@ -31,6 +32,7 @@ export type {
   CompleteTrailBaseContinuationRequest,
   ConfigureMetadataProjectionRequest,
   EnrichmentPolicyDto,
+  ListRecordsQueryParameters,
   MetadataAttributionDto,
   MetadataCacheEntryDto,
   MetadataFieldGroupDto,
@@ -392,7 +394,7 @@ export interface WorkbenchHost {
   getSearchCacheSize?(): number;
   listReviews?(): Promise<ReviewItem[]>;
   resolveReview?(input: ResolveReviewInput): Promise<ResolveReviewOutcome>;
-  listRecords?(): Promise<RecordPage>;
+  listRecords?(query?: ListRecordsQueryParameters): Promise<RecordPage>;
   createRecord?(grain: string): Promise<CreateRecordResult>;
   attachIdentifier?(
     input: AttachIdentifierInput,

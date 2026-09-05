@@ -625,12 +625,14 @@ fn configure_metadata_projection(
 #[tauri::command(async)]
 fn list_records(
     state: tauri::State<'_, DesktopState>,
+    query: Option<fasti_contracts::ListRecordsQueryParameters>,
 ) -> Result<records::RecordPage, DesktopProblem> {
     let kernel = state.kernel()?;
     records::list_records(
         &kernel,
         &KeyringSetupSecretStore::new(kernel.data_root_identity()),
         &state.artwork,
+        query,
     )
 }
 

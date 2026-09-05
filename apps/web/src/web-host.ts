@@ -12,6 +12,7 @@ import type {
   IntegrationRuntimeStatus,
   IntegrationStatusHost,
   IntegrationStatusResponse,
+  ListRecordsQueryParameters,
   NetworkConfiguration,
   MetadataProjectionConfigurationResponse,
   MetadataProjectionResponse,
@@ -374,8 +375,8 @@ export function createWebHost(
     getSearchCacheSize(): number {
       return 0;
     },
-    async listRecords(): Promise<RecordPage> {
-      const response = await client.listRecords();
+    async listRecords(query?: ListRecordsQueryParameters): Promise<RecordPage> {
+      const response = await client.listRecords({}, query);
       return {
         truncated: response.truncated,
         records: response.records.map((record) => ({

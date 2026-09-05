@@ -261,8 +261,8 @@
           }),
         listReviews: () => invoke("list_reviews"),
         resolveReview: (input) => invoke("resolve_review", { input }),
-        listRecords: async () => {
-          const page = await invoke<RecordPage>("list_records");
+        listRecords: async (query) => {
+          const page = await invoke<RecordPage>("list_records", { query });
           return {
             ...page,
             records: page.records.map((record) => {
