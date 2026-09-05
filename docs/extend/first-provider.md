@@ -35,6 +35,26 @@ Resolve every destination address and authorize every resolved address. Use a
 pinned, proxy-free, redirect-free client before credential access. Reject private
 or changed destinations according to the provider network policy.
 
+### Response policy observation
+
+The shared JSON response boundary records cache policy and the time headers
+arrive, before the bounded body is read. Search pages retain that observation
+even when empty or filtered; detail candidates retain it too. Raw headers and
+the internal policy are not part of public candidate JSON.
+
+HTTP syntax stays in the adapter. The application policy computes absolute
+purpose-capped deadlines without renewing the observation time. It distinguishes
+`no-store`, validation before every reuse, validation once stale, and permitted
+reuse. It accounts for `Date`, `Age`, `Expires`, `max-age` and `stale-if-error`.
+Unproven `Vary` matches require validation. Malformed policy cannot grant a more
+permissive fallback. The parser reuses the existing locked HTTP-date dependency.
+
+This is observation support, not completed cache enforcement. Search persistence,
+offline candidate reads, Record actions and metadata refresh still need the
+policy-aware admission/reuse integration. A `no-store` response must use a real
+live-only result; zero TTL is not permission to write its payload to SQLite or
+the WAL. Do not claim end-to-end response-policy support from parser tests.
+
 ## Provider Search transport
 
 `POST /api/v1/search/providers/{provider_id}` acquires a bounded result page.

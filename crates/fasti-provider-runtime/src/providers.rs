@@ -6,8 +6,9 @@ use fasti_application::{
     CredentialRequirement, CredentialSecret, CredentialVaultError, CredentialVaultPort,
     CredentialVaultSource, NetworkClass, OutboundAccessDeclaration, OutboundAccessPolicy,
     ProviderCapabilityState, ProviderCapabilityStatus, ProviderCheckKind, ProviderCredentialStatus,
-    ProviderIdentityMapping, ProviderMetadataField, SearchCandidate, SearchCandidateData,
-    StoredCredential, GOOGLE_BOOKS_PROVIDER_ID, MAX_PROVIDER_CREDENTIAL_BYTES, TMDB_PROVIDER_ID,
+    ProviderIdentityMapping, ProviderMetadataField, ProviderResponseCachePolicy, SearchCandidate,
+    SearchCandidateData, StoredCredential, GOOGLE_BOOKS_PROVIDER_ID, MAX_PROVIDER_CREDENTIAL_BYTES,
+    TMDB_PROVIDER_ID,
 };
 use fasti_domain::{
     ExternalIdentifierClaim, FieldClaimStatus, Grain, MetadataLocale, NamespaceDefinition,
@@ -368,6 +369,21 @@ pub struct ProviderSearchPage {
     pub candidates: Vec<ProviderCandidate>,
     pub next_page: Option<u32>,
     pub evidence_digest: Sha256Digest,
+    response_cache_policy: Option<ProviderResponseCachePolicy>,
+}
+
+impl ProviderSearchPage {
+    pub const fn response_cache_policy(&self) -> Option<&ProviderResponseCachePolicy> {
+        self.response_cache_policy.as_ref()
+    }
+
+    fn with_response_cache_policy(mut self, policy: ProviderResponseCachePolicy) -> Self {
+        self.response_cache_policy = Some(policy);
+        for candidate in &mut self.candidates {
+            candidate.response_cache_policy = Some(policy);
+        }
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -393,9 +409,20 @@ pub struct ProviderCandidate {
     pub overview: Option<String>,
     #[serde(skip)]
     evidence_digest: Sha256Digest,
+    #[serde(skip)]
+    response_cache_policy: Option<ProviderResponseCachePolicy>,
 }
 
 impl ProviderCandidate {
+    pub const fn response_cache_policy(&self) -> Option<&ProviderResponseCachePolicy> {
+        self.response_cache_policy.as_ref()
+    }
+
+    fn with_response_cache_policy(mut self, policy: ProviderResponseCachePolicy) -> Self {
+        self.response_cache_policy = Some(policy);
+        self
+    }
+
     /// Admit only normalized public fields to the durable Search receipt.
     pub fn search_evidence(&self) -> Result<SearchCandidate, ProviderRuntimeError> {
         SearchCandidate::try_new(SearchCandidateData {
@@ -657,16 +684,17 @@ impl ProviderRuntime {
             .authorized_credential(access, spec, SEARCH_CAPABILITY, endpoint, policy, state)
             .await?;
         let credential = self.load_bound_credential(&client, spec, state)?;
-        let body = send_json(
+        let response = send_json(
             credential_request(&input.provider, &client, url, &credential)?,
             spec,
         )
         .await?;
         match input.provider.as_str() {
-            GOOGLE_BOOKS_PROVIDER => parse_google_candidates(&body, page),
-            TMDB_PROVIDER => parse_tmdb_candidates(&body, page),
+            GOOGLE_BOOKS_PROVIDER => parse_google_candidates(&response.body, page),
+            TMDB_PROVIDER => parse_tmdb_candidates(&response.body, page),
             _ => Err(unsupported_provider()),
         }
+        .map(|page| page.with_response_cache_policy(response.cache_policy))
     }
 
     pub async fn fetch_selection(
@@ -752,8 +780,8 @@ impl ProviderRuntime {
         };
         let credential = self.load_bound_credential(&client, spec, state)?;
         let request = credential_request(provider, &client, url, &credential)?;
-        let body = send_json(request, spec).await?;
-        serde_json::from_slice::<serde_json::Value>(&body)
+        let response = send_json(request, spec).await?;
+        serde_json::from_slice::<serde_json::Value>(&response.body)
             .map(|_| ())
             .map_err(|_| {
                 ProviderRuntimeError::response_invalid("The provider check returned invalid JSON.")
@@ -783,21 +811,22 @@ impl ProviderRuntime {
             .map_err(|_| ProviderRuntimeError::provider("The Google Books endpoint is invalid."))?
             .push(provider_id);
         url.query_pairs_mut().append_pair("projection", "full");
-        let body = send_json(
+        let response = send_json(
             credential_request(GOOGLE_BOOKS_PROVIDER, &client, url, &credential)?,
             GOOGLE_BOOKS_SPEC,
         )
         .await?;
-        let volume: GoogleVolume = serde_json::from_slice(&body).map_err(|_| {
+        let volume: GoogleVolume = serde_json::from_slice(&response.body).map_err(|_| {
             ProviderRuntimeError::response_invalid("Google Books returned invalid JSON.")
         })?;
-        let candidate =
-            google_candidate(volume, provider_evidence_digest(&body)).ok_or_else(|| {
+        let candidate = google_candidate(volume, provider_evidence_digest(&response.body))
+            .ok_or_else(|| {
                 ProviderRuntimeError::response_invalid(
                     "Google Books returned incomplete or unsafe metadata.",
                 )
             })?;
         verify_selected_candidate(candidate, provider_id, "book")
+            .map(|candidate| candidate.with_response_cache_policy(response.cache_policy))
     }
 
     async fn fetch_tmdb(
@@ -821,20 +850,21 @@ impl ProviderRuntime {
             )
             .await?;
         let credential = self.load_bound_credential(&client, TMDB_SPEC, state)?;
-        let body = send_json(
+        let response = send_json(
             credential_request(TMDB_PROVIDER, &client, url, &credential)?,
             TMDB_SPEC,
         )
         .await?;
-        let item: TmdbItem = serde_json::from_slice(&body)
+        let item: TmdbItem = serde_json::from_slice(&response.body)
             .map_err(|_| ProviderRuntimeError::response_invalid("TMDB returned invalid JSON."))?;
-        let candidate = tmdb_candidate(item, Some(kind), provider_evidence_digest(&body))
+        let candidate = tmdb_candidate(item, Some(kind), provider_evidence_digest(&response.body))
             .ok_or_else(|| {
                 ProviderRuntimeError::response_invalid(
                     "TMDB returned incomplete or unsafe metadata.",
                 )
             })?;
         verify_selected_candidate(candidate, provider_id, kind)
+            .map(|candidate| candidate.with_response_cache_policy(response.cache_policy))
     }
 
     async fn authorized_credential(
@@ -916,13 +946,21 @@ fn verify_selected_candidate(
     Ok(candidate)
 }
 
+struct ProviderJsonResponse {
+    body: Vec<u8>,
+    cache_policy: ProviderResponseCachePolicy,
+}
+
 async fn send_json(
     request: reqwest::RequestBuilder,
     spec: ProviderSpec,
-) -> Result<Vec<u8>, ProviderRuntimeError> {
+) -> Result<ProviderJsonResponse, ProviderRuntimeError> {
+    let started = std::time::Instant::now();
     let response = request.send().await.map_err(|_| {
         ProviderRuntimeError::provider(format!("{} could not be reached.", spec.label))
     })?;
+    let received_at = chrono::Utc::now();
+    let policy = crate::cache_policy::observe(response.headers(), received_at, started.elapsed());
     if let Some(error) = provider_status_error(spec, response.status()) {
         return Err(error);
     }
@@ -937,9 +975,13 @@ async fn send_json(
             spec.label
         )));
     }
-    bounded_body(response, RESPONSE_LIMIT)
+    let body = bounded_body(response, RESPONSE_LIMIT)
         .await
-        .map_err(ProviderRuntimeError::response_invalid)
+        .map_err(ProviderRuntimeError::response_invalid)?;
+    Ok(ProviderJsonResponse {
+        body,
+        cache_policy: policy,
+    })
 }
 
 pub(crate) fn provider_status_error(
@@ -1184,6 +1226,7 @@ fn parse_google_candidates(
         candidates,
         next_page,
         evidence_digest,
+        response_cache_policy: None,
     })
 }
 
@@ -1222,6 +1265,7 @@ fn google_candidate(
             .description
             .filter(|value| valid_candidate_text(value, 4096)),
         evidence_digest,
+        response_cache_policy: None,
     })
 }
 
@@ -1250,6 +1294,7 @@ fn parse_tmdb_candidates(
         candidates,
         next_page,
         evidence_digest,
+        response_cache_policy: None,
     })
 }
 
@@ -1316,6 +1361,7 @@ fn tmdb_candidate(
         image_url,
         overview,
         evidence_digest,
+        response_cache_policy: None,
     })
 }
 
@@ -1352,6 +1398,7 @@ fn normalize_google_image(value: String) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    include!("provider_cache_transport_tests.rs");
     use fasti_application::{
         ConfigurationDigest, ProblemCode, ProviderCapabilityId, ProviderCheckMetadata, ProviderId,
     };
