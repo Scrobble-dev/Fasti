@@ -4,9 +4,9 @@
 //! credential storage. SQLite stores only the opaque credential reference and
 //! safe state. A `CredentialVaultPort` implementation stores secret material.
 
-use crate::ProblemCode;
+use crate::{ApplicationAccessContext, ApplicationResult, ProblemCode};
 use chrono::{DateTime, Utc};
-use fasti_domain::WorkspaceId;
+use fasti_domain::{RequestCorrelationId, WorkspaceId};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use zeroize::Zeroize;
@@ -674,9 +674,16 @@ impl fmt::Display for ProviderStatePortError {
 
 impl std::error::Error for ProviderStatePortError {}
 
-/// Internal persistence boundary. Public application services authorize before
-/// calling it; the store adapter remains transport- and network-free.
+/// Provider state boundary. The public inventory read resolves current authority
+/// atomically; raw state operations require an already-authorized caller.
+/// The store adapter remains transport- and network-free.
 pub trait ProviderStatePort: Send + Sync {
+    fn authorize_and_list_provider_capability_states(
+        &self,
+        correlation_id: RequestCorrelationId,
+        access: &ApplicationAccessContext,
+    ) -> ApplicationResult<Vec<ProviderCapabilityState>>;
+
     fn get_provider_capability_state(
         &self,
         workspace_id: WorkspaceId,

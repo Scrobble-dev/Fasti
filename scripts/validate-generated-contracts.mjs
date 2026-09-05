@@ -487,6 +487,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     "select_browser_session_profile",
   ]);
   const hybridOperations = new Set([
+    "list_providers",
     "search_local_records",
     "save_search_candidate",
     "save_provider_identifier",

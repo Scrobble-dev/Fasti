@@ -301,7 +301,16 @@ Provider management and Search now have governed HTTP routes and generated SDK
 methods as well as trusted-host IPC adapters. Search routes cover local Records,
 provider pages, retained candidate details and explicit retained/no-store Record
 actions under `/api/v1/search`. Provider management routes live under
-`/api/v1/providers`. The capability registry, generated OpenAPI and SDK own those
+`/api/v1/providers`. Its inventory GET also accepts an active browser session on
+the exact direct listener. The selected profile grant must have `provider_read`;
+sign-in alone does not grant inventory access. Authority and workspace state are
+read in one Store transaction. Inventory responses are `private, no-store` and
+contain status, not secrets or credential references. Browser inventory marks
+credential write/test controls unavailable because configure, remove, test and
+health routes still require scoped bearer credentials. Browser inventory uses
+the browser origin, never a separately saved service URL.
+
+The capability registry, generated OpenAPI and SDK own those
 public contracts; their authentication, listener and browser CSRF boundaries
 still apply. The legacy metadata picker and its artwork path above retain their
 local IPC contract. This document does not activate additional listeners,

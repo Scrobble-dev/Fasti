@@ -2510,6 +2510,7 @@ fn validate_production_operation_security(
     let expected = match operation_id {
         "initialize_node" => vec!["bootstrap_bearer"],
         "list_records"
+        | "list_providers"
         | "read_search_candidate"
         | "search_local_records"
         | "list_tracking_dispositions"
@@ -2519,8 +2520,7 @@ fn validate_production_operation_security(
         | "preview_anime_grouping_policy_change" => {
             vec!["credential_bearer", "browser_session_cookie"]
         }
-        "list_providers"
-        | "configure_provider_credential"
+        "configure_provider_credential"
         | "remove_provider_credential"
         | "test_provider_credential"
         | "read_provider_health"

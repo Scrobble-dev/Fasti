@@ -1,20 +1,25 @@
-use crate::local::{authenticate_request, request_authentication};
+use crate::local::{
+    application_request_authentication, authenticate_application_request, authenticate_request,
+    request_authentication,
+};
 use crate::problem::{application_problem, json_rejection, HttpProblem};
 use crate::ProviderOperationLocks;
 use axum::{
     extract::{rejection::JsonRejection, DefaultBodyLimit, Path, State},
-    http::HeaderMap,
+    http::{header, HeaderMap},
+    response::{IntoResponse, Response},
     routing::get,
     Json, Router,
 };
 use chrono::Utc;
 use fasti_application::{
-    credential_status_after_failed_check, credential_status_after_successful_check, CapabilityKey,
-    ConfigurationDigest, CredentialReference, CredentialRequirement, CredentialSecret,
-    CredentialVaultSource, FastiProblem, OutboundAccessPolicy, ProblemCode, ProviderCapabilityId,
-    ProviderCapabilityState, ProviderCapabilityStatus, ProviderCheckKind, ProviderCheckMetadata,
-    ProviderCheckStatus, ProviderCredentialStatus, ProviderId, ProviderStatePort,
-    ProviderStatePortError, RequestAccessContext, Violation, MAX_PROVIDER_CREDENTIAL_BYTES,
+    credential_status_after_failed_check, credential_status_after_successful_check,
+    ApplicationAccessContext, BrowserRequestBoundaryPolicy, CapabilityKey, ConfigurationDigest,
+    CredentialReference, CredentialRequirement, CredentialSecret, CredentialVaultSource,
+    FastiProblem, OutboundAccessPolicy, ProblemCode, ProviderCapabilityId, ProviderCapabilityState,
+    ProviderCapabilityStatus, ProviderCheckKind, ProviderCheckMetadata, ProviderCheckStatus,
+    ProviderCredentialStatus, ProviderId, ProviderStatePort, ProviderStatePortError,
+    RequestAccessContext, Violation, MAX_PROVIDER_CREDENTIAL_BYTES,
 };
 use fasti_contracts::{
     ConfigureProviderCredentialRequest, CredentialRequirementDto, ListProvidersResponse,
@@ -37,6 +42,7 @@ pub(crate) struct ProviderApiState {
     pub(crate) provider_state: Arc<dyn ProviderStatePort>,
     pub(crate) runtime: Arc<ProviderRuntime>,
     pub(crate) provider_operation_locks: ProviderOperationLocks,
+    pub(crate) browser_boundary: Option<BrowserRequestBoundaryPolicy>,
 }
 
 impl ProviderApiState {
@@ -541,10 +547,10 @@ fn descriptor_dto(
     path = "/api/v1/providers",
     operation_id = "list_providers",
     tag = "providers",
-    security(("credential_bearer" = [])),
+    security(("credential_bearer" = []), ("browser_session_cookie" = [])),
     responses(
         (status = 200, description = "Provider inventory scoped to the authenticated workspace", body = ListProvidersResponse),
-        (status = 401, description = "Credential is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 401, description = "Credential or browser session is missing, inactive, or outside its listener boundary", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "Authenticated principal lacks provider-read scope", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 500, description = "Provider state failed an integrity check", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 503, description = "Provider state storage is unavailable", body = ProblemDetails, content_type = "application/problem+json")
@@ -553,12 +559,34 @@ fn descriptor_dto(
 pub(crate) async fn list_providers(
     State(state): State<ProviderApiState>,
     headers: HeaderMap,
-) -> HttpResult<ListProvidersResponse> {
+) -> Result<Response, HttpProblem> {
     let correlation_id = RequestCorrelationId::new_v7();
     let capability = CapabilityKey::ListProviders;
-    let access = authorize(&state, &headers, capability, correlation_id).await?;
-    let mut persisted =
-        list_states(&state, access.workspace_id(), capability, correlation_id).await?;
+    let authentication = application_request_authentication(
+        &headers,
+        state.browser_boundary.as_ref(),
+        false,
+        capability,
+        correlation_id,
+    )?;
+    let kernel = Arc::clone(&state.kernel);
+    let port = Arc::clone(&state.provider_state);
+    let (mut persisted, browser) = tokio::task::spawn_blocking(move || {
+        let access = authenticate_application_request(
+            kernel.as_ref(),
+            authentication,
+            capability,
+            correlation_id,
+        )?;
+        let states = port.authorize_and_list_provider_capability_states(correlation_id, &access)?;
+        Ok::<_, Box<FastiProblem>>((
+            states,
+            matches!(access, ApplicationAccessContext::BrowserSession(_)),
+        ))
+    })
+    .await
+    .map_err(|_| storage_problem(capability, correlation_id))?
+    .map_err(application_problem)?;
     for provider in state
         .runtime
         .descriptors()
@@ -587,14 +615,30 @@ pub(crate) async fn list_providers(
             )
         })
         .collect();
-    Ok(Json(ListProvidersResponse {
+    let mut response = ListProvidersResponse {
         providers: state
             .runtime
             .descriptors()
             .iter()
             .map(|provider| descriptor_dto(&state.runtime, provider, &indexed))
             .collect(),
-    }))
+    };
+    if browser {
+        // Inventory access does not activate bearer-only credential or health operations.
+        for capability in response
+            .providers
+            .iter_mut()
+            .flat_map(|provider| &mut provider.capabilities)
+        {
+            capability.writable = false;
+            capability.testable = false;
+        }
+    }
+    Ok((
+        [(header::CACHE_CONTROL, "private, no-store")],
+        Json(response),
+    )
+        .into_response())
 }
 
 #[utoipa::path(
@@ -1202,6 +1246,7 @@ mod tests {
         body::{to_bytes, Body},
         http::{header, Request, StatusCode},
     };
+    use fasti_application::ApplicationResult;
     use fasti_application::{
         AccessAdministrationPort, CredentialVaultError, CredentialVaultPort,
         EnrollFirstClientCommand, InitializeNodeCommand, ProviderStateWriteOutcome, SecretMaterial,
@@ -1329,6 +1374,15 @@ mod tests {
     }
 
     impl ProviderStatePort for PausedState {
+        fn authorize_and_list_provider_capability_states(
+            &self,
+            correlation_id: RequestCorrelationId,
+            access: &ApplicationAccessContext,
+        ) -> ApplicationResult<Vec<ProviderCapabilityState>> {
+            self.kernel
+                .authorize_and_list_provider_capability_states(correlation_id, access)
+        }
+
         fn get_provider_capability_state(
             &self,
             workspace_id: WorkspaceId,
@@ -1409,6 +1463,18 @@ mod tests {
     }
 
     impl ProviderStatePort for CountingState {
+        fn authorize_and_list_provider_capability_states(
+            &self,
+            correlation_id: RequestCorrelationId,
+            _access: &ApplicationAccessContext,
+        ) -> ApplicationResult<Vec<ProviderCapabilityState>> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Err(Box::new(FastiProblem::forbidden(
+                CapabilityKey::ListProviders,
+                correlation_id,
+            )))
+        }
+
         fn get_provider_capability_state(
             &self,
             _workspace_id: WorkspaceId,
@@ -1469,6 +1535,7 @@ mod tests {
             CredentialVaultSource::None,
         ))));
         let app = router().with_state(ProviderApiState {
+            browser_boundary: None,
             kernel,
             provider_state: state.clone(),
             provider_operation_locks: ProviderOperationLocks::new(&runtime),
@@ -1499,6 +1566,7 @@ mod tests {
             .expect("Google Books operation lock");
         assert!(!Arc::ptr_eq(&tmdb_lock, &google_books_lock));
         let app = router().with_state(ProviderApiState {
+            browser_boundary: None,
             kernel: kernel.clone(),
             provider_state: kernel,
             runtime,
@@ -1571,6 +1639,7 @@ mod tests {
         let locks = ProviderOperationLocks::new(&runtime);
         let gate = locks.get("tmdb").expect("TMDB gate");
         let app = router().with_state(ProviderApiState {
+            browser_boundary: None,
             kernel: kernel.clone(),
             provider_state: kernel.clone(),
             runtime,
@@ -1614,6 +1683,7 @@ mod tests {
                 pause: Mutex::new(None),
             });
             let app = router().with_state(ProviderApiState {
+                browser_boundary: None,
                 kernel: kernel.clone(),
                 provider_state: state.clone(),
                 runtime,
@@ -1714,6 +1784,7 @@ mod tests {
                 pause: Mutex::new(Some((ProviderCapabilityStatus::Degraded, pause))),
             });
             let app = router().with_state(ProviderApiState {
+                browser_boundary: None,
                 kernel: kernel.clone(),
                 provider_state: state,
                 runtime,
@@ -1791,6 +1862,7 @@ mod tests {
         let writable_vault = Arc::new(MemoryVault::new(CredentialVaultSource::None));
         let writable_runtime = Arc::new(ProviderRuntime::new(writable_vault.clone()));
         let writable = router().with_state(ProviderApiState {
+            browser_boundary: None,
             kernel: kernel.clone(),
             provider_state: kernel.clone(),
             provider_operation_locks: ProviderOperationLocks::new(&writable_runtime),
@@ -1861,6 +1933,7 @@ mod tests {
             CredentialVaultSource::Environment,
         ))));
         let readonly = router().with_state(ProviderApiState {
+            browser_boundary: None,
             kernel: kernel.clone(),
             provider_state: kernel.clone(),
             provider_operation_locks: ProviderOperationLocks::new(&readonly_runtime),
@@ -1902,6 +1975,7 @@ mod tests {
             CredentialVaultSource::None,
         ))));
         let invalid = router().with_state(ProviderApiState {
+            browser_boundary: None,
             kernel: kernel.clone(),
             provider_state: kernel.clone(),
             provider_operation_locks: ProviderOperationLocks::new(&invalid_runtime),

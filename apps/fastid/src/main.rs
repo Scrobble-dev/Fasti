@@ -241,6 +241,7 @@ fn metadata_and_provider_router(
         kernel.clone(),
         providers.clone(),
         provider_operation_locks.clone(),
+        browser_boundary.clone(),
     )
     .merge(metadata_api_router(
         kernel.clone(),
