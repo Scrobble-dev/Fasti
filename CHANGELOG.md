@@ -51,8 +51,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Preserved the contributor-only [C3 KDF runner](qualification/access-c3-kdf/README.md), with bounded pipe handling, owned-child cleanup and strict cold-sample validation. Its isolated CI checks and recorded local measurement do not enable runtime cryptography or recovery.
-- Kept Account and security confirmations visible during retries, protected pending first-run actions, and corrected mobile notice and choice layout. A dedicated browser CI check guards the delayed-confirmation layout and fixture interaction-latency limits; see the [Access verification guide](docs/plans/fasti-access-parallel-regressions.md).
 - Released data-root locks when their final kernel owner drops, even while a child temporarily retains an inherited descriptor. Failed identity initialization also releases its acquired lock without hiding the original error.
+- Kept Account and security confirmations visible during retries, protected pending first-run actions, and corrected mobile notice and choice layout. A dedicated browser CI check guards the delayed-confirmation layout and fixture interaction-latency limits; see the [Access verification guide](docs/plans/fasti-access-parallel-regressions.md).
 - Prevented consumed enrollment proofs from panicking when the kernel returns `bootstrap_closed`.
 - Prevented ambiguous or cross-workspace credential grants from panicking when authentication fails closed.
 - Recovered the capability policy source after a malformed formatting-only write; the recovery changed no behavior.
