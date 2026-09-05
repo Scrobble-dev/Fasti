@@ -1,6 +1,6 @@
 # Fasti Access C2 implementation gate
 
-Status: `C2_1_DOMAIN_IN_PROGRESS_SHARED_INTEGRATION_WAITING_FOR_METADATA`
+Status: `FOUNDATION_MERGED_C2_RUNTIME_INTEGRATION_OPEN`
 
 Delivery sequencing amendment (2026-09-05): the completed pure source may
 land through the separate [foundation delivery gate](fasti-access-c2-foundation.md).
@@ -20,12 +20,45 @@ Verified implementation base (2026-09-04): merged M3 `dev`
 `df09101028a988a92f4546313c5eed6dd20d238a`, tree
 `5552947a30b82497c7fa279a6932fe7877ed612b`; schema v15, archive v5.
 
-Migration allocation: metadata retains v16. C2 must use the next released
+Migration allocation (current coordination, 2026-09-05): M4 retains migration
+v17 and archive v7. Neither is released to C2. C2 must use the next released
 migration after metadata's verified handoff. References to v16 below are the
 original reviewed migration proposal, not a current allocation. Reconcile all
 migration examples and historical archive fingerprints before C2 storage work.
 
 Owner: Commander / Mothership
+
+## Current completion boundary — 2026-09-05
+
+The pure domain/application foundation merged in [PR #125](https://github.com/Scrobble-dev/Fasti/pull/125)
+at `62e10d2e9bd738ed5da425c008eb839f89cdbea5`. Its tree exactly matches the
+reviewed head `90374622ec5bad52beabf9405835bba51b56dda5`:
+`d6fcea1563b673f83cb4cabe1ef50d1c6dc5c087`. The foundation modules and C2
+integration-test files remain unchanged through observed merged dev
+`3d775bf7af2dd52fffafeaba24ceea22da1cfcc1`. This is source/merge readback,
+not a fresh test execution or proof of complete C2 runtime support.
+
+Independent completion audit found no additional foundation implementation
+gap. PAT actors, C2 capability classification, transactional inventory,
+PAT/consent persistence, caller cutover, contracts and the A+C UI remain
+explicit C2.1–C2.7 work. The foundation merge does not satisfy those gates.
+Do not rerun foundation implementation or infer a new migration allocation.
+Before shared edits, obtain M4's exact merged commit/tree, migration allocation,
+archive disposition and ownership release. Prepare source-backed transaction
+and contract checks independently; do not invent a temporary authority model.
+
+This checkpoint supersedes earlier current-state and pending-delivery wording
+below. Historical test results, migration proposals and failed gates remain
+preserved. C3 qualification does not complete C2; packaged Tauri authentication
+remains deferred. No shared production file changes in this reconciliation.
+
+Historical foundation checkpoint (2026-09-05): implementation commit `5eb3def0` passes 319
+all-feature domain/application tests and strict all-target Clippy. Independent
+reconciliation confirms that sections 5.4 and 9 cover all 22 merged-M3 scopes
+and its four new capabilities. M4's reserved `metadata_search` stays denied.
+No usable C2 inventory store can be added against v15 alone: client ownership
+and issuance fields, the real capability/port, and persistence must land
+together after the shared-file handoff. No temporary authority model is added.
 
 ## 1. Result
 
