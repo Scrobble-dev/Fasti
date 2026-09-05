@@ -549,6 +549,15 @@ pub(crate) fn stage_preflighted_workspace_archive_pass_two(
         write_restore_phase(&staged.attempt, RestoreStatus::Verified)?;
         Ok(())
     })();
+    let imported = imported.map_err(|failure| match failure {
+        RestoreImportError::Sqlite(ref source)
+        | RestoreImportError::RowInvariant { ref source, .. }
+            if source.sqlite_error_code() == Some(rusqlite::ErrorCode::DiskFull) =>
+        {
+            RestoreImportError::CapacityExceeded
+        }
+        failure => failure,
+    });
     let imported = if cancellation.is_cancelled() {
         Err(RestoreImportError::Canceled)
     } else {
@@ -572,6 +581,29 @@ pub(crate) fn stage_preflighted_workspace_archive_pass_two(
     }
 }
 
+/// Bound the main database through migration and import, not only after close.
+/// SQLite journals and temporary files are separate from this page allowance.
+fn enforce_restore_database_limit(
+    connection: &Connection,
+    max_bytes: u64,
+) -> Result<(), RestoreImportError> {
+    let page_size = connection
+        .pragma_query_value(None, "page_size", |row| row.get::<_, u32>(0))
+        .map_err(RestoreImportError::Sqlite)?;
+    let pages = max_bytes
+        .checked_div(u64::from(page_size))
+        .filter(|pages| *pages > 0)
+        .and_then(|pages| i64::try_from(pages).ok())
+        .ok_or(RestoreImportError::CapacityExceeded)?;
+    let effective = connection
+        .pragma_update_and_check(None, "max_page_count", pages, |row| row.get::<_, i64>(0))
+        .map_err(RestoreImportError::Sqlite)?;
+    if effective <= 0 || effective > pages {
+        return Err(RestoreImportError::CapacityExceeded);
+    }
+    Ok(())
+}
+
 fn import_verified_pass_two(
     source: &mut dyn ReadSeek,
     staged: &StagedWorkspaceImport,
@@ -590,6 +622,7 @@ fn import_verified_pass_two(
     )
     .map_err(RestoreImportError::Sqlite)?;
     verify_database_identity(&staged.attempt, &database_file)?;
+    enforce_restore_database_limit(&connection, limits.max_snapshot_bytes.get())?;
     connection
         .pragma_update(None, "foreign_keys", "ON")
         .map_err(RestoreImportError::Sqlite)?;

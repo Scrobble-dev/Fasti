@@ -42,8 +42,10 @@ locked data root. Both verification and import consume that private file, never
 rereading the caller's source. Its bounded preflight rejects malformed/no-store
 policy and crossed v6/v7 claim shapes before named staging or SQLite creation.
 The same strict decoder and digest checks run again during import. Capture
-bytes count toward scratch admission; this accounting is not a hard peak bound
-on SQLite journals or temporary files.
+bytes count toward scratch admission. Restore enforces the main-database byte
+allowance with a checked SQLite page limit before migration, retaining the final
+file-size check. This is not a hard peak bound on SQLite journals or temporary
+files.
 
 The [archive-v1 schema](portability/v1/workspace-manifest.schema.json) and
 [example](portability/v1/workspace-manifest.example.json) keep the original 16
