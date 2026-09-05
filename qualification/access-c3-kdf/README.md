@@ -77,17 +77,18 @@ cryptographic agreement evidence. The original defects were identified in
 source inside `supervise()`, after enforcement and the native oracle.
 New passing helper regressions alone do not prove a before-fix failing run.
 
-The suite contains 13 focused tests: strict sample fields and RSS, complete
+The suite contains 14 focused tests: strict sample fields and RSS, complete
 cold output, record and UTF-8 bounds, exact oracle framing, parse/pipe failure
 cleanup, successful/nonzero child exits, missing cold records, immediate
-deadline rejection, held-open EOF timeout, and preserved nonblocking flags.
+deadline rejection, held-open EOF timeout, preserved nonblocking flags, and
+write progress/deadline boundaries using standard-library destinations.
 The EOF timeout uses a real owned child that keeps stdout open; it does not
 infer timeout behavior from an already-expired timestamp alone.
 
-The existing Access C3 qualification workflow runs these 13 tests in debug
+The existing Access C3 qualification workflow runs these 14 tests in debug
 and release, checks formatting and strict Clippy, and audits the exact lock
 without suppression. This binary has no doctest target. The summary guard
-requires exactly one successful 13-test summary per profile and rejects failed,
+requires exactly one successful 14-test summary per profile and rejects failed,
 ignored, filtered, missing or extra summaries. It does not run a measurement.
 
 ## Separate governed measurement

@@ -272,3 +272,16 @@ Independent delta-plan review is clear: the one-summary binary case must reject
 extra summaries, existing matrix counts and isolation remain unchanged, and
 normal local integration is preparation only. The Commander may now perform
 the narrowly named integration and checks above.
+
+## Final delivery test delta — 2026-09-05
+
+Independent coverage review found no demonstrated runner defect but identified
+missing direct write-boundary checks. Add one standard-library-only test for
+successful output, a short fixed-slice write followed by WriteZero, and an
+expired deadline that must leave its destination unchanged. No runner or
+dependency change is needed. Update current workflow and discovery counts to
+14; preserve every historical 13-test receipt and the measured 82a9e21a source.
+Rerun debug/release, strict Clippy, formatting, authored workflow and its
+synthetic guards, then canonical delivery checks and independent review.
+This test-only addition does not require another native measurement. Retry
+branches are not all fault-injected; do not claim instrumented coverage.

@@ -125,6 +125,25 @@ fn parse_error_kills_and_reaps_the_owned_child() {
 }
 
 #[test]
+fn writes_preserve_bytes_and_reject_zero_progress_or_expired_deadline() {
+    let mut output = Vec::new();
+    write(&mut output, b"abc", Instant::now()).unwrap();
+    assert_eq!(output, b"abc");
+
+    let mut short = [0; 2];
+    let error = write(&mut &mut short[..], b"abc", Instant::now()).unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<io::Error>().unwrap().kind(),
+        io::ErrorKind::WriteZero
+    );
+    assert_eq!(short, *b"ab");
+
+    let error = write(&mut output, b"d", Instant::now() - DEADLINE).unwrap_err();
+    assert_eq!(error.to_string(), "five-second watchdog expired");
+    assert_eq!(output, b"abc");
+}
+
+#[test]
 fn pipe_error_kills_and_reaps_the_owned_child() {
     let mut pid = 0;
     let result = (|| -> Result<()> {

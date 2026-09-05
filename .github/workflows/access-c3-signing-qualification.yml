@@ -48,7 +48,7 @@ jobs:
             doctests: 2
           - package: access-c3-kdf
             label: KDF runner
-            unit_tests: 13
+            unit_tests: 14
             doctests: 0
     permissions:
       contents: read
