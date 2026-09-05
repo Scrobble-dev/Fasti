@@ -14,6 +14,8 @@ mod providers;
 mod records;
 mod reviews;
 mod search;
+#[cfg(all(test, feature = "desktop-runtime"))]
+mod search_permission_tests;
 mod secure_storage;
 mod setup;
 
