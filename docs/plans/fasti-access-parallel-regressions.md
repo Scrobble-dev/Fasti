@@ -156,3 +156,64 @@ layout-shift or complete accessibility proof.
 This documentation follow-up does not change those verified UI or test bytes.
 Remaining applicable reviews, final-head gates, the shipping-convention
 disposition, hosted CI, PR, merge and integrated-tree proof remain pending.
+
+## Mobile layout correction gate, 2026-09-05
+
+M4 extended the exclusive component allocation to the existing mobile
+breakpoint rules for `.access-heading > div` and `.task-copy`. M4 remains
+read-only on this component. All other shared files, v17 and archive v7 remain
+M4-owned. The separate delayed-notice layout shift is not in this release.
+
+The existing `flex: 1 1 18rem` becomes a vertical allocation when the parent
+changes to a column. Source and restored DOM experiments attribute the gaps
+to that retained basis, not the disabled header. Desktop geometry is unchanged
+by the experimental basis reset. These rules are identical in the current base.
+
+1. Add an isolated browser regression using the existing authenticated Access
+   helper. Leave existing tests and shared helpers unchanged during QA.
+2. Prove failure before editing production CSS. Cover all five task-copy
+   wrappers and the first-run heading, not only the original header symptom.
+3. Set `flex-basis: auto` for both selectors inside the existing mobile query.
+   Preserve Tabler markup, all controls, desktop sizing, focus and trust rules.
+4. Verify content-relative vertical spacing at 320/375px and the unchanged
+   desktop row/basis at 768/1440px, Light/Dark and enlarged text spacing. Reuse
+   existing C1 and pending-confirmation cases for interaction evidence.
+5. Obtain independent diff/test review, commit the coherent correction, and
+   rerun applicable exact-head gates. Return commit, tree, component hash and
+   viewport evidence before handback. This does not waive any delivery gate.
+
+No API, SDK, schema, archive, credential or dependency change is needed. Native
+CSS corrects the existing Tabler composition; no custom component is added.
+Rollback reverts only this mobile rule and its regression, retaining the
+pending-header fix. That would restore the mobile gap and is not a UI repair.
+The notice-shift finding and packaged Tauri follow-up remain separately open.
+
+### Mobile correction verification
+
+Before the CSS edit, the new Light 320px test failed on the expected `auto`
+basis versus actual `288px`. The failure screenshot and trace remain in
+`.gstack/qa-reports/layout-red-f60c3da0-results`; its JSON SHA-256 is
+`ad85561587e6d04714af0454fff58e98f3668a240d84a5d4c7581255f364043a`.
+
+After the five-line mobile rule, the combined existing C1, pending/resume and
+new layout suites passed **41/41**, with zero failed, skipped or flaky cases
+and no runner errors. Ten new cases cover Light/Dark at 320/375/768/1440px
+plus 320px enlarged text. They reuse `mockAuthenticatedAccess`, check all five
+task-copy wrappers and the first-run heading, and verify zero Access mutations.
+The geometry check permits normal inline leading; it does not prove absence
+of vertical clipping or whole-product accessibility conformance.
+
+Command: `PLAYWRIGHT_JSON_OUTPUT_NAME=.gstack/qa-reports/layout-fixed-f60c3da0.json pnpm test:ui tests/e2e/access-layout-regressions.spec.ts tests/e2e/access-c1.spec.ts tests/e2e/access-parallel-regressions.spec.ts --output=.gstack/qa-reports/layout-fixed-f60c3da0-results --reporter=list,json`.
+The actual invocation used the absolute JSON path. JSON SHA-256:
+`ac1d0e4d35d82a0b465197d43a073de2305a7d4422f10e8e581b3435f3556e4e`.
+The 141.299556-second run measures the test invocation, not product performance.
+Both harness listeners closed. This is pre-commit working-source evidence.
+
+All 20 new screenshots were inspected. Enlarged-text full-page captures retain
+the current SPA scroll offset and fixed toolbar; they are not focus-occlusion
+or manual assistive-technology proof. Existing raw screenshots remain intact.
+Independent native source and test reviews found no concrete introduced issue.
+Ponytail review found no unnecessary dependency, abstraction or duplicate fixture;
+the fix uses native CSS at the shared cause. `pnpm lint:ui`, focused Prettier and
+`git diff --check` passed. Canonical and review receipts for the earlier head
+do not qualify the new head; exact-head delivery verification remains required.

@@ -1437,6 +1437,11 @@
       flex-direction: column;
     }
 
+    .access-heading > div,
+    .task-copy {
+      flex-basis: auto;
+    }
+
     .task-row .btn,
     .access-heading .btn {
       width: 100%;
