@@ -1,14 +1,37 @@
 # Access A+C parallel regressions
 
 Status: bounded header, mobile layout and notice fixes implemented and
-independently reviewed. Latest combined browser run passes 52/52. Earlier
-41/41, 6/6 and canonical results retain their original source identities.
-Exact clean implementation canonical gates pass at `20c0b030` (27 contract,
-11 portable). Persistent performance CI and remaining delivery gates are pending.
-Unshipped.
-Base: `62e10d2e9bd738ed5da425c008eb839f89cdbea5`.
+independently reviewed. Clean source `63f955c4` passed 142 ordinary browser
+cases, two Lighthouse cases, 27 contract and 11 portable gates. Its evidence
+retains that source identity. Remaining coverage assertions, screen-reader
+evidence and hosted delivery are in progress. Unshipped.
+Current base: `4bd84a562e60b04c278173529164f06cc41c7753` (merged C3
+qualification only). Clean rebase checkpoint: `211d3ee161285ef5cc6432e0f6e0cdc474718668`.
 
 ## Ownership and purpose
+
+### Final coverage closure, 2026-09-05
+
+Independent audit found six unasserted UI path groups, not demonstrated defects.
+The bounded source inventory is 18/24 (75%), not instrumented coverage. Close
+them before publication, reusing this slice's existing test helpers and fixtures:
+
+1. Extend held confirmation to hold its follow-up projection read and assert
+   that the same header and exit controls remain disabled until settlement.
+2. Exercise generic confirmation failure, held evidence dismissal and held
+   sign-in restart. Assert recovery, busy-state release and explicit notice reset.
+3. Complete setup, leave A and return. Assert that its consumed completion
+   notice does not replay on remount.
+4. Run focused tests, obtain an independent delta review, then verify the final
+   committed source and publish. Preserve the existing 142-case and Lighthouse
+   reports. Do not change production behavior just to satisfy a fixture.
+
+M4 released one additive Unreleased changelog entry for the bounded fixes and
+performance gate; existing entries and version conventions remain unchanged.
+It also released only the AGENTS browser-QA paragraph for the command split,
+Chrome prerequisite and link to this guide. All other shared ownership remains.
+The Orca check uses an isolated desktop session and owned browser only. Its
+generated speech output is not human-listening or full-conformance evidence.
 
 ### Resumed notice and delivery authority, 2026-09-05
 
@@ -447,4 +470,48 @@ commit verification and exact hosted results remain delivery postconditions.
 
 Manual assistive-technology and full WCAG/EN conformance remain unclaimed.
 Packaged Tauri authentication remains deferred. No PR or merge of this browser
-slice has occurred; the C3 qualification PR can deliver independently.
+slice has occurred; C3 qualification PR 127 merged independently at `4bd84a56`.
+
+### Final source and assistive-technology evidence
+
+Clean `63f955c4` passed 142 ordinary browser cases and two official Lighthouse
+timespans. At 320/1440px, CLS was 0/0 and INP was 37.861/35.383 ms. The ordinary
+and Lighthouse JSON SHA-256 values are respectively
+`f49b5c2868fb107c3fbe9d0a60586ea38f8b36af5abaf438a6251f0c244e4139` and
+`e04e668e0e8d460de3900f84196b828e76b62801a6c28ae029c186833e435326`.
+Fresh evidence-ledger canonical and ordinary runs also passed before rebase.
+Rebase onto merged C3 qualification changed no component or sentinel bytes.
+
+The six-gap coverage extension first passed eight of nine cases. The remaining
+case waited for a nonexistent `Home` navigation link. The captured page exposes
+`Overview`; correcting that selector changes no product behavior. The first
+failure remains in `.gstack/qa-reports/access-coverage-closure-first`.
+The corrected remount case passed with no retry (1/1); its JSON and artifacts
+are retained as `access-coverage-closure-corrected`. Together with the first
+run's eight passing cases, all six identified gaps now have passing focused
+checks. This closes the bounded 24/24 source-path inventory, not instrumented
+or whole-application coverage. Final combined clean-commit execution remains
+required before delivery.
+
+An isolated Orca 50.2 / AT-SPI 2.60.4 / Chrome 152.0.7977.82 run completed six
+stages with zero page/probe errors and one intercepted continuation POST.
+The empty notice region acquired its confirmation announcement; the disabled
+header was announced as a greyed button. Successful POST followed by projection
+failure retained confirmation through a held read-only Retry, without a second
+confirmation utterance. Recovery and return to A announced their focused headings.
+DOM and AT-SPI agreed on disabled and focused states. During held Retry, focus
+was temporarily on the document after its button was removed; only settled
+heading focus is claimed.
+
+The run used private DBus/XDG/Xvfb and a fresh browser profile on port 4273.
+No user settings, shared browser listeners or backend state changed. Speech
+synthesis was intentionally disconnected: this is actual Orca-generated speech
+text, not audible human testing or complete WCAG/EN conformance. Source was
+`211d3ee1` with documented plan/test edits; component SHA-256
+`89e8fac7e1f404dd4e42d2959dd26d588c708fe2a4e678a6e1c9688ab4473737`
+is unchanged from `63f955c4`. Evidence is in
+`.gstack/qa-reports/orca-access-result.md` and `orca-r3/`; result/debug log hashes:
+`af6fbf9f27c9680082c0585298f3064e8a9cc1005ed766eb8aabd9b750910ef1`,
+`b7cc1ab497b4c435ece5ec670a3ef3ca3990986dbcd026c44d5054b47e839ced`.
+Owned processes and the short temporary runtime directory were cleaned up;
+all raw evidence, including setup failures, remains retained.

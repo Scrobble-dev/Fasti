@@ -128,6 +128,11 @@ test("all setup exit controls remain disabled while confirmation is pending", as
   const pending = new Promise<void>((resolve) => {
     release = resolve;
   });
+  let releaseRead!: () => void;
+  const pendingRead = new Promise<void>((resolve) => {
+    releaseRead = resolve;
+  });
+  let confirmationRead = false;
   await page.route("**/api/access/v1/**", async (route) => {
     const request = route.request();
     if (request.method() !== "GET")
@@ -138,6 +143,10 @@ test("all setup exit controls remain disabled while confirmation is pending", as
       posts.push(request.postDataJSON());
       await pending;
       return route.fulfill({ status: 204 });
+    }
+    if (posts.length && request.method() === "GET") {
+      confirmationRead = true;
+      await pendingRead;
     }
     return json(route, current);
   });
@@ -167,8 +176,23 @@ test("all setup exit controls remain disabled while confirmation is pending", as
     await expect.soft(page).toHaveURL(/\/first-run$/);
     await expect.soft(page.getByTestId("first-run-guided-setup")).toBeVisible();
     expect(mutations).toEqual(["POST /api/access/v1/trailbase/continuation"]);
+    release();
+    await expect.poll(() => confirmationRead).toBe(true);
+    await expect(page.locator("#access-notice")).toHaveText(
+      "Account access confirmed. Review the remaining security tasks.",
+    );
+    for (const name of [
+      "Confirming…",
+      "Save and leave",
+      "Cancel sign-in",
+      "Manage existing access",
+    ]) {
+      await expect(page.getByRole("button", { name })).toBeDisabled();
+    }
+    await expect(page).toHaveURL(/\/first-run$/);
   } finally {
     release();
+    releaseRead();
   }
   await expect(
     page.getByText(
@@ -185,6 +209,154 @@ test("all setup exit controls remain disabled while confirmation is pending", as
       choice_ordinal: 0,
     },
   ]);
+  expect(mutations).toEqual(["POST /api/access/v1/trailbase/continuation"]);
+  await expect(
+    page.getByRole("button", { name: "Manage existing access" }),
+  ).toBeEnabled();
+});
+
+test("failed confirmation can dismiss evidence and restart without a stale notice", async ({
+  page,
+}) => {
+  const current = await projection(page);
+  const mutations: string[] = [];
+  let releaseDismiss!: () => void;
+  let releaseStart!: () => void;
+  const dismissal = new Promise<void>((resolve) => {
+    releaseDismiss = resolve;
+  });
+  const start = new Promise<void>((resolve) => {
+    releaseStart = resolve;
+  });
+  await page.route("**/api/access/v1/**", async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (request.method() === "GET")
+      return json(
+        route,
+        path.endsWith("/continuation") ? continuation() : current,
+      );
+    mutations.push(`${request.method()} ${path}`);
+    if (path.endsWith("/continuation") && request.method() === "DELETE") {
+      await dismissal;
+      return route.fulfill({ status: 204 });
+    }
+    if (path.endsWith("/sign-in") && request.method() === "POST") {
+      expect(request.postDataJSON()).toEqual({ remembered: false });
+      await start;
+    } else if (!(
+      path.endsWith("/continuation") && request.method() === "POST"
+    )) {
+      return route.fulfill({ status: 405 });
+    }
+    return json(
+      route,
+      problem("storage_unavailable", "browser.session.create"),
+      503,
+    );
+  });
+  const header = page.getByRole("button", { name: "Manage existing access" });
+  const notice = page.locator("#access-notice");
+  try {
+    await page.goto("/first-run?auth=continue");
+    await page.getByRole("radio", { name: /Workspace 1, profile 1/ }).check();
+    await page.getByRole("button", { name: "Confirm access" }).click();
+    await expect(page.getByRole("alert")).toBeFocused();
+    await expect(
+      page.getByRole("heading", { name: "Storage unavailable" }),
+    ).toBeVisible();
+    await expect(header).toBeEnabled();
+    await expect(
+      page.getByRole("button", { name: "Retry", exact: true }),
+    ).toBeEnabled();
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.getByRole("button", { name: "Dismiss saved evidence" }).click();
+    await expect.poll(() => mutations.length).toBe(2);
+    await expect(header).toBeDisabled();
+    await expect(
+      page.getByRole("button", { name: "Dismiss saved evidence" }),
+    ).toBeDisabled();
+    releaseDismiss();
+    await expect(notice).toHaveText(
+      "The saved sign-in evidence was dismissed.",
+    );
+    await expect(notice).toBeFocused();
+    await expect(header).toBeEnabled();
+    await page
+      .getByRole("button", { name: "Sign in to an existing account" })
+      .click();
+    await expect.poll(() => mutations.length).toBe(3);
+    await expect(header).toBeDisabled();
+    await expect(
+      page.getByRole("button", { name: "Starting…" }),
+    ).toBeDisabled();
+    await expect(notice).toHaveCount(0);
+    await expect(page.locator(".access-notice-region")).toBeEmpty();
+    await expect(page.locator(".access-notice-region")).not.toHaveAttribute(
+      "role",
+    );
+  } finally {
+    releaseDismiss();
+    releaseStart();
+  }
+  await expect(page.getByRole("alert")).toBeFocused();
+  await expect(
+    page.getByRole("heading", { name: "Storage unavailable" }),
+  ).toBeVisible();
+  await expect(header).toBeEnabled();
+  await expect(
+    page.getByRole("button", { name: "Retry", exact: true }),
+  ).toBeEnabled();
+  await expect(notice).toHaveCount(0);
+  await expect(page).toHaveURL(/\/first-run$/);
+  expect(mutations).toEqual([
+    "POST /api/access/v1/trailbase/continuation",
+    "DELETE /api/access/v1/trailbase/continuation",
+    "POST /api/access/v1/trailbase/sign-in",
+  ]);
+});
+
+test("consumed setup completion notice does not replay when A remounts", async ({
+  page,
+}) => {
+  const base = await projection(page);
+  const complete = parseAccessProjectionResponse({
+    ...base,
+    first_run_steps: base.first_run_steps.map((step) => ({
+      ...step,
+      state: "verified",
+    })),
+  });
+  const mutations: string[] = [];
+  await page.route("**/api/access/v1/**", (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (request.method() !== "GET") {
+      mutations.push(`${request.method()} ${path}`);
+      return route.fulfill({
+        status:
+          request.method() === "POST" && path.endsWith("/continuation")
+            ? 204
+            : 405,
+      });
+    }
+    return json(
+      route,
+      path.endsWith("/continuation") ? continuation() : complete,
+    );
+  });
+  await page.goto("/first-run?auth=continue");
+  await page.getByRole("radio", { name: /Workspace 1, profile 1/ }).check();
+  await page.getByRole("button", { name: "Confirm access" }).click();
+  await expect(page).toHaveURL(/\/settings\/account$/);
+  await expect(page.getByText("Account setup is complete.")).toBeFocused();
+  const navigation = page.locator("#fasti-main-navigation");
+  await navigation.getByRole("link", { name: "Overview", exact: true }).click();
+  await expect(page.getByTestId("account-security-task-map")).toHaveCount(0);
+  await navigation.getByRole("link", { name: "Settings", exact: true }).click();
+  await expect(page.getByTestId("account-security-task-map")).toBeVisible();
+  await expect(page.locator("#access-notice")).toHaveCount(0);
+  await expect(page.locator(".access-notice-region")).toBeEmpty();
   expect(mutations).toEqual(["POST /api/access/v1/trailbase/continuation"]);
 });
 
