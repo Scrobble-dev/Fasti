@@ -1042,14 +1042,18 @@
         statesPromise,
       ]);
       if (generation !== recordsGeneration) return false;
-      if (recordPage.truncated) {
-        recordsNotice =
-          "Only the first 500 records are shown. Additional records remain stored.";
-      }
-      if (statePage.truncated) {
-        recordsNotice =
-          "Only the first 500 profile tracking states are shown. Additional states remain stored.";
-      }
+      recordsNotice =
+        [
+          recordsNotice,
+          recordPage.truncated
+            ? "Only the first 500 records are shown. Additional records remain stored."
+            : undefined,
+          statePage.truncated
+            ? "Only the first 500 profile tracking states are shown. Additional states remain stored."
+            : undefined,
+        ]
+          .filter(Boolean)
+          .join(" ") || undefined;
       const dispositions = new Map(
         trackingStates.map((state) => [state.record_id, state.disposition]),
       );
