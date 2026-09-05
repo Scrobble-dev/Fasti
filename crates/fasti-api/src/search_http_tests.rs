@@ -299,6 +299,13 @@ mod search_http_tests {
     }
 
     fn seed(f: &Fixture, browser: bool) -> String {
+        seed_policy(f, browser, &fasti_application::ProviderResponseCachePolicy::new(
+            fasti_application::ProviderResponseReuse::Reusable,
+            chrono::Utc::now(), std::time::Duration::ZERO, None, None,
+        ))
+    }
+
+    fn seed_policy(f: &Fixture, browser: bool, policy: &fasti_application::ProviderResponseCachePolicy) -> String {
         let request = SearchPageRequest {
             correlation_id: RequestCorrelationId::new_v7(),
             access: if browser {
@@ -343,7 +350,7 @@ mod search_http_tests {
                 &[candidate],
                 &Sha256Digest::from_bytes(&[7; 32]),
                 None,
-                &fasti_application::ProviderResponseCachePolicy::new(fasti_application::ProviderResponseReuse::Reusable, chrono::Utc::now(), std::time::Duration::ZERO, None, None),
+                policy,
             )
             .unwrap()
             .candidates[0]
@@ -830,6 +837,37 @@ mod search_http_tests {
         assert_eq!(candidate_source_rows(&f), sources);
         assert_eq!(counts(&f), before);
         assert_eq!(f.vault.0.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn search_http_restricted_candidate_payload_is_not_disclosed_or_saved_offline() {
+        use fasti_application::{ProviderResponseCachePolicy, ProviderResponseReuse};
+        for browser in [false, true] {
+            for reuse in [ProviderResponseReuse::ValidateEveryReuse, ProviderResponseReuse::ValidateWhenStale] {
+                let f = fixture().await;
+                let policy = ProviderResponseCachePolicy::new(
+                    reuse,
+                    chrono::Utc::now() - chrono::Duration::seconds(5),
+                    std::time::Duration::ZERO,
+                    Some(std::time::Duration::from_secs(1)),
+                    None,
+                );
+                let receipt = seed_policy(&f, browser, &policy);
+                let sources = candidate_source_rows(&f);
+                let before = action_counts(&f);
+                let (status, missing) = response(&f.app, candidate_get(&f, browser, &candidate_path(&receipt))).await;
+                assert_eq!(status, StatusCode::OK);
+                assert_eq!(missing, serde_json::json!({"outcome": "missing"}));
+                let body = action_body(&OperationId::new_v7().to_string(), None);
+                let (status, denied) = response(&f.app, request(&f, browser, &action_path(&receipt), body.to_string())).await;
+                assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{denied}");
+                assert_eq!(denied["code"], "validation_failed");
+                assert!(!denied.to_string().contains("Dune"));
+                assert_eq!(candidate_source_rows(&f), sources);
+                assert_eq!(action_counts(&f), before);
+                assert_eq!(f.vault.0.load(Ordering::SeqCst), 0);
+            }
+        }
     }
 
     #[tokio::test]

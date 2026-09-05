@@ -347,9 +347,25 @@ pub struct ReadSearchCandidateRequest {
 pub struct StoredSearchCandidate {
     pub receipt: SearchCandidateReceipt,
     pub context: SearchPageContext,
+    /// Validated response observation, never projected as public headers.
+    pub response_policy: crate::ProviderResponseCachePolicy,
 }
 
 impl StoredSearchCandidate {
+    /// Explicit retained evidence is separate from the short page-cache window.
+    /// Retaining coordinates for an online fetch does not authorize this payload.
+    pub fn payload_is_reusable(&self, at: DateTime<Utc>) -> bool {
+        use crate::ProviderResponseReuse;
+        let lifetime = self.receipt.lifetime();
+        lifetime.receipt_is_current(at)
+            && at >= self.response_policy.received_at()
+            && match self.response_policy.reuse() {
+                ProviderResponseReuse::NoStore | ProviderResponseReuse::ValidateEveryReuse => false,
+                ProviderResponseReuse::ValidateWhenStale => at < lifetime.fresh_until(),
+                ProviderResponseReuse::Reusable => true,
+            }
+    }
+
     /// Project original cached evidence only. This does not authorize a save or
     /// extend receipt readability; the action transaction must recheck both.
     pub fn metadata_fields(
@@ -605,6 +621,8 @@ pub trait SearchPersistencePort: Send + Sync {
         request: &SearchPageRequest,
         upstream_unavailable: bool,
     ) -> ApplicationResult<Option<StoredSearchPage>>;
+    /// Return only currently reusable payload. Online preparation may instead
+    /// retain an authorized locator whose old payload is not reusable.
     fn read_search_candidate(
         &self,
         request: &ReadSearchCandidateRequest,

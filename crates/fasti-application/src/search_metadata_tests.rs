@@ -38,6 +38,13 @@ mod search_metadata_tests {
         )
         .unwrap();
         StoredSearchCandidate {
+            response_policy: crate::ProviderResponseCachePolicy::new(
+                crate::ProviderResponseReuse::Reusable,
+                life.created_at(),
+                std::time::Duration::ZERO,
+                None,
+                None,
+            ),
             receipt: SearchCandidateReceipt::new(
                 SearchCandidateReceiptId::new_v7(),
                 partition,
@@ -54,6 +61,43 @@ mod search_metadata_tests {
         data.original_title = Some("Original title".into());
         data.authors = vec!["Author evidence has no allocated metadata field".into()];
         data
+    }
+
+    #[test]
+    fn retained_payload_permission_is_separate_from_page_and_metadata_freshness() {
+        use crate::{ProviderResponseCachePolicy, ProviderResponseReuse};
+        let mut stored = snapshot(all_fields(), lifetime());
+        let life = stored.receipt.lifetime().clone();
+        for reuse in [
+            ProviderResponseReuse::NoStore,
+            ProviderResponseReuse::ValidateEveryReuse,
+            ProviderResponseReuse::ValidateWhenStale,
+            ProviderResponseReuse::Reusable,
+        ] {
+            stored.response_policy = ProviderResponseCachePolicy::new(
+                reuse, life.created_at(), std::time::Duration::ZERO, None, None,
+            );
+            assert!(!stored.payload_is_reusable(life.created_at() - Duration::nanoseconds(1)));
+            assert!(!stored.payload_is_reusable(life.expires_at()));
+            for at in [life.created_at(), life.fresh_until() - Duration::nanoseconds(1), life.fresh_until(), life.stale_until(), life.expires_at() - Duration::nanoseconds(1)] {
+                let expected = match reuse {
+                    ProviderResponseReuse::NoStore | ProviderResponseReuse::ValidateEveryReuse => false,
+                    ProviderResponseReuse::ValidateWhenStale => at < life.fresh_until(),
+                    ProviderResponseReuse::Reusable => true,
+                };
+                assert_eq!(stored.payload_is_reusable(at), expected, "{reuse:?} at {at}");
+            }
+        }
+        // The original nanosecond observation cannot be rounded down into
+        // permission to read before the response was actually observed.
+        stored.response_policy = ProviderResponseCachePolicy::new(
+            ProviderResponseReuse::Reusable,
+            life.created_at() + Duration::nanoseconds(100),
+            std::time::Duration::ZERO,
+            None,
+            None,
+        );
+        assert!(!stored.payload_is_reusable(life.created_at()));
     }
 
     fn semantics(fields: &[ProviderMetadataField]) -> Vec<(String, serde_json::Value)> {

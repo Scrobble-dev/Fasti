@@ -1053,6 +1053,23 @@ export class FastiClient {
       responseParser: (value) => {
         const response = parseSearchCandidateDetailsResponse(value);
         if (response.outcome === "missing") return response;
+        if (
+          response.outcome === "refetched_without_snapshot" ||
+          response.outcome === "unavailable_without_snapshot"
+        ) {
+          if (
+            offline ||
+            response.candidate_receipt_id !== locator.receiptId ||
+            response.provider_id !== locator.providerId ||
+            response.grain !== locator.grain ||
+            (response.outcome === "refetched_without_snapshot" &&
+              response.details.provider !== locator.providerId)
+          )
+            throw new FastiContractParseError(
+              "Candidate details response does not match the requested locator and mode",
+            );
+          return response;
+        }
         const receipt = response.snapshot.receipt;
         if (
           receipt.candidate_receipt_id !== locator.receiptId ||

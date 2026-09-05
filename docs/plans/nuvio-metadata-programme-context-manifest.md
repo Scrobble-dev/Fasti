@@ -1791,3 +1791,85 @@ active implementation remains candidate policy retention, payload disclosure and
 cached-action checks through existing owners, followed by the remaining metadata
 and host/Workbench paths recorded above. No second roadmap, scope reduction or
 speculative production surface was introduced. Codex Security remains prohibited.
+
+### 2026-09-05 — Retained candidate policy and snapshot-free details
+
+The preceding turn made progress: it verified the exact clean `81c2bc22` code
+tree and committed its checkpoint as `7a6c79bce1147c7568b18965bce628ae88601c5a`.
+This new implementation remains a separate, unmerged M4 increment and requires
+its own clean exact-head canonical receipt after commit.
+
+- **Existing owner:** `StoredSearchCandidate` retains the validated normalized
+  response policy instead of dropping it after page decoding. Its one
+  `payload_is_reusable(at)` rule separates original observation, exclusive
+  freshness and 24-hour retention. No-store/no-cache never permit retained
+  payload reuse; must-revalidate requires remaining freshness. Permitted explicit
+  historical evidence is not reduced to the 600-second page fallback window.
+- **Read versus locator:** public offline reads apply that rule, while internal
+  authorized preparation can retain coordinates for a real online fetch. The
+  runtime checks the same rule before disclosure, including after I/O. It still
+  reauthorizes and verifies the exact fetched identifier against the receipt.
+  Successful refetch does not validate or renew the old snapshot.
+- **Truthful results:** two strict outcomes, `refetched_without_snapshot` and
+  `unavailable_without_snapshot`, carry the validated receipt/provider/grain
+  locator without old payload, lifetime or digest. The former contains only new
+  normalized details and effective locale; the latter only a source problem.
+  Existing four shapes remain unchanged. The runtime returns its already-checked
+  `SearchCandidate`, and the API uses the existing DTO mapper rather than parsing
+  the provider object again. SDK binding uses captured locator/mode and rejects
+  both new outcomes offline. Old strict clients reject unfamiliar outcomes.
+- **Atomic Save:** cached preparation checks eligibility, and commit repeats
+  that preparation in its existing transaction before writing. Completed replay
+  still checks current IdentityWrite before returning durable history and does
+  not require Search permission, live cache policy or an ephemeral receipt.
+  `metadata_fields()` remains a pure historical projection, not save authority.
+  Its stale/zero-freshness representation cannot bypass action admission.
+- **Focused evidence:** eight application projection/permission checks, five
+  new actual-store policy tests, the full store library (408 passed, five
+  explicitly ignored), all 95 provider-runtime tests, 42 candidate-details SDK
+  checks and 24 Search-related API checks passed. The API checks include both
+  browser and credential actors through real restricted offline read/Save
+  routes, plus exact JSON/header assertions through the production projection
+  for both snapshot-free outcomes. A short actual-deadline test keeps SQLite
+  evidence unchanged while proving pending commit denial and completed replay
+  after expiry. Strict all-target clippy passed before the final projection
+  extraction; the canonical gate must cover that final code too.
+- **Native review:** independent current-slice store/time/replay and
+  runtime/contract/SDK reviews found no remaining concrete defect. The review
+  checklist prompted direct API-projection proof; it is now present. This is
+  not a completed whole-branch pre-landing review: M4 still has the required
+  metadata, live-action, host/Workbench and delivery work below. GitHub confirms
+  no PR exists for this branch. No Codex Security or packaged authentication
+  investigation ran.
+
+The commander remains the sole shared production writer. Agents edited only
+the allocated store-policy, runtime-details and SDK-details test leaves and have
+released them. Read-only next-slice preparation identified the existing
+`metadata_claims` registry as a possible immutable per-claim policy carrier; it
+is not yet a migration decision or implemented schema. Ephemeral cache rows
+cannot own that restriction because restore intentionally omits them. Admission
+must precede the first payload INSERT, not merely roll it back later. Both
+single-record projection and batched Record summaries need identical filtering;
+excluding a restricted newest claim must not resurrect older same-source data
+or erase user overrides. Pure claim freshness cannot encode no-cache permission.
+
+Before that next write, resolve schema/archive disposition explicitly: changing
+`migrate_v16` alone does not upgrade an already-version-16 local database.
+Preserve published migrations and archive v1-v5 canonical bytes. A nullable new
+archive field must not silently add `null` when reserializing old exact rows.
+Preserve legacy claims and overrides while recording what unknown response policy
+can authorize; absence cannot be called upstream permission. No new migration
+number, table, provenance meaning, API or archive format was allocated by the
+read-only preparation. No-store explicit Save and coordinate-origin live actions
+still require truthful intent/history semantics, never fabricated receipt
+provenance or an implicit exception to the recorded no-payload-persistence rule.
+
+Refetched Save, M2 refresh, selected-field reuse and Desktop track/apply/artwork
+ordering remain required active work. Existing Desktop side effects occur before
+metadata conversion, so a conversion-only guard is insufficient. Workbench,
+successful governed live-provider proof and the remaining full programme are
+unchanged in scope. This headless slice does not prove rendered accessibility or
+packaged-host behavior. It adds no dependency, schema or archive change. Rollback
+must retain restriction-aware readers/actions; prefer forward correction and do
+not erase user Records or durable action history. M4 retains v16/archive v6 and
+shared integration ownership; no v17 or C2 activation release is granted.

@@ -1988,7 +1988,7 @@ fn enrich_production_openapi(
     }
     for (name, count) in [
         ("SearchProviderPageResponse", 3),
-        ("SearchCandidateDetailsResponse", 4),
+        ("SearchCandidateDetailsResponse", 6),
         ("SearchCandidateActionResponse", 2),
         ("SearchRecordActionDto", 2),
     ] {

@@ -224,6 +224,13 @@ mod candidate_action_tests {
         .unwrap();
         let page = page();
         let snapshot = StoredSearchCandidate {
+            response_policy: fasti_application::ProviderResponseCachePolicy::new(
+                fasti_application::ProviderResponseReuse::Reusable,
+                page.lifetime.created_at(),
+                std::time::Duration::ZERO,
+                None,
+                None,
+            ),
             receipt: SearchCandidateReceipt::new(
                 SearchCandidateReceiptId::new_v7(),
                 partition,

@@ -3628,6 +3628,80 @@ const PRODUCTION_SCHEMAS = {
           "outcome"
         ],
         "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "candidate_receipt_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^scr_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          },
+          "details": {
+            "$ref": "#/components/schemas/SearchCandidateDto"
+          },
+          "grain": {
+            "type": "string"
+          },
+          "locale": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "outcome": {
+            "enum": [
+              "refetched_without_snapshot"
+            ],
+            "type": "string"
+          },
+          "provider_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "candidate_receipt_id",
+          "provider_id",
+          "grain",
+          "details",
+          "outcome"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "candidate_receipt_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^scr_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          },
+          "grain": {
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "unavailable_without_snapshot"
+            ],
+            "type": "string"
+          },
+          "problem_code": {
+            "type": "string"
+          },
+          "provider_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "candidate_receipt_id",
+          "provider_id",
+          "grain",
+          "problem_code",
+          "outcome"
+        ],
+        "type": "object"
       }
     ]
   },
@@ -4807,7 +4881,7 @@ export interface SearchCandidateDetailsQueryParameters {
 }
 
 // prettier-ignore
-export type SearchCandidateDetailsResponse = { readonly details: SearchCandidateDto; readonly locale?: null | string; readonly outcome: "refetched"; readonly snapshot: SearchCandidateSnapshotDto } | { readonly outcome: "missing" } | { readonly outcome: "snapshot"; readonly snapshot: SearchCandidateSnapshotDto } | { readonly outcome: "unavailable"; readonly problem_code: string; readonly snapshot: SearchCandidateSnapshotDto };
+export type SearchCandidateDetailsResponse = { readonly candidate_receipt_id: string; readonly details: SearchCandidateDto; readonly grain: string; readonly locale?: null | string; readonly outcome: "refetched_without_snapshot"; readonly provider_id: string } | { readonly candidate_receipt_id: string; readonly grain: string; readonly outcome: "unavailable_without_snapshot"; readonly problem_code: string; readonly provider_id: string } | { readonly details: SearchCandidateDto; readonly locale?: null | string; readonly outcome: "refetched"; readonly snapshot: SearchCandidateSnapshotDto } | { readonly outcome: "missing" } | { readonly outcome: "snapshot"; readonly snapshot: SearchCandidateSnapshotDto } | { readonly outcome: "unavailable"; readonly problem_code: string; readonly snapshot: SearchCandidateSnapshotDto };
 
 export interface SearchCandidateSnapshotDto {
   readonly lifetime: SearchReceiptLifetimeDto;

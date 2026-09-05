@@ -182,6 +182,7 @@ mod candidate_metadata_tests {
         let shift = Duration::nanoseconds(100);
         let conflict = StoredSearchCandidate {
             context: snapshot.context.clone(),
+            response_policy: snapshot.response_policy,
             receipt: SearchCandidateReceipt::new(
                 SearchCandidateReceiptId::new_v7(),
                 snapshot.receipt.partition().clone(),

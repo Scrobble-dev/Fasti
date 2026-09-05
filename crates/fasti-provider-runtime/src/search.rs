@@ -34,11 +34,24 @@ pub enum ProviderCandidateDetailsOutcome {
     Snapshot(StoredSearchCandidate),
     Refetched {
         snapshot: StoredSearchCandidate,
-        details: Box<ProviderCandidate>,
+        details: Box<fasti_application::SearchCandidate>,
         locale: Option<fasti_domain::MetadataLocale>,
     },
     Unavailable {
         snapshot: StoredSearchCandidate,
+        problem: ProblemCode,
+    },
+    RefetchedWithoutSnapshot {
+        candidate_receipt_id: fasti_domain::SearchCandidateReceiptId,
+        provider: fasti_application::ProviderId,
+        grain: fasti_domain::Grain,
+        details: Box<fasti_application::SearchCandidate>,
+        locale: Option<fasti_domain::MetadataLocale>,
+    },
+    UnavailableWithoutSnapshot {
+        candidate_receipt_id: fasti_domain::SearchCandidateReceiptId,
+        provider: fasti_application::ProviderId,
+        grain: fasti_domain::Grain,
         problem: ProblemCode,
     },
 }
@@ -239,7 +252,11 @@ impl ProviderSearchService {
                 persistence.read_search_candidate(&read)
             })
             .await
-            .map(|candidate| candidate.map(ProviderCandidateDetailsOutcome::Snapshot));
+            .map(|candidate| {
+                candidate
+                    .filter(|candidate| candidate.payload_is_reusable(chrono::Utc::now()))
+                    .map(ProviderCandidateDetailsOutcome::Snapshot)
+            });
         }
         let Some(prepared) = run_blocking(&lease, capability, id, move || {
             persistence.prepare_search_candidate_details(&read)
@@ -281,28 +298,56 @@ impl ProviderSearchService {
             )));
         }
         let snapshot = current.candidate;
-        Ok(Some(match fetched {
-            Ok(details) => {
-                if !details.search_evidence().is_ok_and(|candidate| {
-                    candidate.identifier() == snapshot.receipt.candidate().identifier()
-                }) {
-                    ProviderCandidateDetailsOutcome::Unavailable {
-                        snapshot,
-                        problem: ProblemCode::ProviderResponseInvalid,
-                    }
-                } else {
-                    ProviderCandidateDetailsOutcome::Refetched {
-                        snapshot,
-                        details: Box::new(details),
-                        locale,
+        let fetched = fetched.and_then(|details| {
+            let evidence = details.search_evidence()?;
+            if evidence.identifier() == snapshot.receipt.candidate().identifier() {
+                Ok(evidence)
+            } else {
+                Err(ProviderRuntimeError::response_invalid(
+                    "The provider detail identity does not match the selected candidate.",
+                ))
+            }
+        });
+        // This locator comes from the current authorized receipt, not a fresh
+        // receipt or an assertion that the newly fetched payload matches it.
+        let candidate_receipt_id = snapshot.receipt.id();
+        let provider = fasti_application::ProviderId::try_new(snapshot.context.provider())
+            .map_err(|_| {
+                Box::new(fasti_application::FastiProblem::from_code(
+                    ProblemCode::IntegrityFailed,
+                    capability,
+                    id,
+                ))
+            })?;
+        let grain = snapshot.receipt.candidate().identifier().grain();
+        Ok(Some(
+            match (snapshot.payload_is_reusable(chrono::Utc::now()), fetched) {
+                (true, Ok(details)) => ProviderCandidateDetailsOutcome::Refetched {
+                    snapshot,
+                    details: Box::new(details),
+                    locale,
+                },
+                (true, Err(error)) => ProviderCandidateDetailsOutcome::Unavailable {
+                    snapshot,
+                    problem: error.problem_code(),
+                },
+                (false, Ok(details)) => ProviderCandidateDetailsOutcome::RefetchedWithoutSnapshot {
+                    candidate_receipt_id,
+                    provider,
+                    grain,
+                    details: Box::new(details),
+                    locale,
+                },
+                (false, Err(error)) => {
+                    ProviderCandidateDetailsOutcome::UnavailableWithoutSnapshot {
+                        candidate_receipt_id,
+                        provider,
+                        grain,
+                        problem: error.problem_code(),
                     }
                 }
-            }
-            Err(error) => ProviderCandidateDetailsOutcome::Unavailable {
-                snapshot,
-                problem: error.problem_code(),
             },
-        }))
+        ))
     }
 
     fn cache_policy_revision(

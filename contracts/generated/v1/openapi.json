@@ -3562,6 +3562,80 @@
               "outcome"
             ],
             "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "candidate_receipt_id": {
+                "maxLength": 36,
+                "minLength": 36,
+                "pattern": "^scr_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+                "type": "string"
+              },
+              "details": {
+                "$ref": "#/components/schemas/SearchCandidateDto"
+              },
+              "grain": {
+                "type": "string"
+              },
+              "locale": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "outcome": {
+                "enum": [
+                  "refetched_without_snapshot"
+                ],
+                "type": "string"
+              },
+              "provider_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "candidate_receipt_id",
+              "provider_id",
+              "grain",
+              "details",
+              "outcome"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "candidate_receipt_id": {
+                "maxLength": 36,
+                "minLength": 36,
+                "pattern": "^scr_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+                "type": "string"
+              },
+              "grain": {
+                "type": "string"
+              },
+              "outcome": {
+                "enum": [
+                  "unavailable_without_snapshot"
+                ],
+                "type": "string"
+              },
+              "problem_code": {
+                "type": "string"
+              },
+              "provider_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "candidate_receipt_id",
+              "provider_id",
+              "grain",
+              "problem_code",
+              "outcome"
+            ],
+            "type": "object"
           }
         ]
       },
@@ -10712,7 +10786,7 @@
                 }
               }
             },
-            "description": "Original snapshot, refetched details, source failure with snapshot, or non-enumerating missing outcome"
+            "description": "Reusable original snapshot, refetched details or source failure with an authorized locator and optional permitted snapshot, or non-enumerating missing outcome"
           },
           "400": {
             "content": {

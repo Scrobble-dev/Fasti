@@ -1,5 +1,6 @@
 mod candidate_details_tests {
     use super::*;
+    use fasti_application::{ProviderResponseCachePolicy, ProviderResponseReuse};
     use std::sync::atomic::AtomicU8;
 
     const CURRENT: u8 = 0;
@@ -69,19 +70,39 @@ mod candidate_details_tests {
     }
 
     impl SearchPersistencePort for DetailsPersistence {
-        fn authorize_search_candidate_read_request(&self, _: RequestCorrelationId, _: &ApplicationAccessContext) -> ApplicationResult<()> {
+        fn authorize_search_candidate_read_request(
+            &self,
+            _: RequestCorrelationId,
+            _: &ApplicationAccessContext,
+        ) -> ApplicationResult<()> {
             unreachable!("runtime tests enter after transport authorization")
         }
-        fn authorize_search_candidate_action_request(&self, _: RequestCorrelationId, _: &ApplicationAccessContext) -> ApplicationResult<()> {
+        fn authorize_search_candidate_action_request(
+            &self,
+            _: RequestCorrelationId,
+            _: &ApplicationAccessContext,
+        ) -> ApplicationResult<()> {
             unreachable!("runtime tests enter after transport authorization")
         }
-        fn authorize_search_page_request(&self, _: RequestCorrelationId, _: &ApplicationAccessContext) -> ApplicationResult<()> {
+        fn authorize_search_page_request(
+            &self,
+            _: RequestCorrelationId,
+            _: &ApplicationAccessContext,
+        ) -> ApplicationResult<()> {
             unreachable!("details tests do not acquire pages through HTTP")
         }
-        fn prepare_search_candidate_action(&self, _: &fasti_application::SearchCandidateActionCommand) -> ApplicationResult<fasti_application::SearchCandidateActionPreparation> {
+        fn prepare_search_candidate_action(
+            &self,
+            _: &fasti_application::SearchCandidateActionCommand,
+        ) -> ApplicationResult<fasti_application::SearchCandidateActionPreparation> {
             panic!("detail reads must not prepare actions")
         }
-        fn commit_search_candidate_action(&self, _: &fasti_application::SearchCandidateActionCommand, _: &fasti_application::SearchCandidateActionPreparation, _: Option<&[fasti_application::ProviderMetadataField]>) -> ApplicationResult<fasti_application::SearchCandidateActionReceipt> {
+        fn commit_search_candidate_action(
+            &self,
+            _: &fasti_application::SearchCandidateActionCommand,
+            _: &fasti_application::SearchCandidateActionPreparation,
+            _: Option<&[fasti_application::ProviderMetadataField]>,
+        ) -> ApplicationResult<fasti_application::SearchCandidateActionReceipt> {
             panic!("detail reads must not commit actions")
         }
         fn search_local_records(
@@ -98,7 +119,13 @@ mod candidate_details_tests {
             panic!("candidate details must not prepare a new Search page")
         }
 
-        fn discard_cached_search_page(&self, _: &SearchPageRequest, _: &PreparedSearchPage) -> ApplicationResult<()> { panic!("details must not discard Search pages") }
+        fn discard_cached_search_page(
+            &self,
+            _: &SearchPageRequest,
+            _: &PreparedSearchPage,
+        ) -> ApplicationResult<()> {
+            panic!("details must not discard Search pages")
+        }
         fn commit_search_page(
             &self,
             _: &SearchPageRequest,
@@ -149,6 +176,16 @@ mod candidate_details_tests {
         Arc<DetailsPersistence>,
         ReadSearchCandidateRequest,
     ) {
+        fixture_with_policy(ProviderResponseReuse::Reusable)
+    }
+
+    fn fixture_with_policy(
+        reuse: ProviderResponseReuse,
+    ) -> (
+        ProviderSearchService,
+        Arc<DetailsPersistence>,
+        ReadSearchCandidateRequest,
+    ) {
         let (service, _, page_request) = setup(None, None);
         let ApplicationAccessContext::Credential(access) = &page_request.access else {
             panic!("existing fixture uses a credential")
@@ -182,12 +219,33 @@ mod candidate_details_tests {
         )
         .unwrap();
         let page = page();
+        let response_policy = ProviderResponseCachePolicy::new(
+            reuse,
+            page.lifetime.created_at(),
+            std::time::Duration::ZERO,
+            (reuse == ProviderResponseReuse::ValidateWhenStale)
+                .then_some(std::time::Duration::ZERO),
+            None,
+        );
+        let (fresh, stale) = response_policy
+            .deadlines(
+                std::time::Duration::from_secs(120),
+                std::time::Duration::from_secs(600),
+            )
+            .unwrap();
+        let lifetime = SearchReceiptLifetime::try_new(
+            page.lifetime.created_at(),
+            fresh,
+            stale,
+            page.lifetime.expires_at(),
+        )
+        .unwrap();
         let receipt = SearchCandidateReceipt::new(
             SearchCandidateReceiptId::new_v7(),
             partition,
             candidate().search_evidence().unwrap(),
             page.response_digest,
-            page.lifetime,
+            lifetime,
         );
         let request = ReadSearchCandidateRequest {
             correlation_id: page_request.correlation_id,
@@ -200,7 +258,11 @@ mod candidate_details_tests {
         };
         let persistence = Arc::new(DetailsPersistence {
             prepared: PreparedSearchCandidateDetails {
-                candidate: StoredSearchCandidate { receipt, context },
+                candidate: StoredSearchCandidate {
+                    receipt,
+                    context,
+                    response_policy,
+                },
                 provider_state: ProviderCapabilityState::try_new(
                     ProviderId::try_new("tmdb").unwrap(),
                     ProviderCapabilityId::try_new("metadata.read").unwrap(),
@@ -229,6 +291,150 @@ mod candidate_details_tests {
 
     fn candidate() -> ProviderCandidate {
         crate::providers::search_page_fixture().candidates.remove(0)
+    }
+
+    #[tokio::test]
+    async fn restricted_snapshot_is_not_disclosed_offline_or_fetched() {
+        for reuse in [
+            ProviderResponseReuse::ValidateEveryReuse,
+            ProviderResponseReuse::ValidateWhenStale,
+        ] {
+            let (service, persistence, request) = fixture_with_policy(reuse);
+            let result = service
+                .candidate_details_with(request, true, lease().await, |_, _| async {
+                    panic!("offline restricted evidence must not trigger a fetch")
+                })
+                .await
+                .unwrap();
+            assert_eq!(result, None);
+            assert_eq!(*persistence.calls.lock().unwrap(), ["snapshot"]);
+        }
+    }
+
+    #[tokio::test]
+    async fn restricted_snapshot_coordinates_allow_refetch_without_old_payload() {
+        for reuse in [
+            ProviderResponseReuse::ValidateEveryReuse,
+            ProviderResponseReuse::ValidateWhenStale,
+        ] {
+            let (service, persistence, request) = fixture_with_policy(reuse);
+            let receipt_id = request.candidate_receipt_id;
+            let mut details = candidate();
+            details.title = "New authorized observation".into();
+            let expected = details.clone();
+            let result = service
+                .candidate_details_with(request, false, lease().await, |selection, _| async move {
+                    assert_eq!(
+                        selection,
+                        ProviderSelectionInput {
+                            provider: "tmdb".into(),
+                            provider_id: "42".into(),
+                            kind: "movie".into(),
+                            locale: Some("fr-fr".into()),
+                            region: None,
+                        }
+                    );
+                    Ok(details)
+                })
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                result,
+                ProviderCandidateDetailsOutcome::RefetchedWithoutSnapshot {
+                    candidate_receipt_id: receipt_id,
+                    provider: ProviderId::try_new("tmdb").unwrap(),
+                    grain: Grain::Film,
+                    details: Box::new(expected.search_evidence().unwrap()),
+                    locale: Some(MetadataLocale::try_new("fr-FR").unwrap()),
+                }
+            );
+            assert_eq!(
+                *persistence.calls.lock().unwrap(),
+                ["prepare-details", "prepare-details"]
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn restricted_snapshot_is_not_a_fallback_for_outage_or_wrong_identity() {
+        for reuse in [
+            ProviderResponseReuse::ValidateEveryReuse,
+            ProviderResponseReuse::ValidateWhenStale,
+        ] {
+            for mismatch in [false, true] {
+                let (service, persistence, request) = fixture_with_policy(reuse);
+                let receipt_id = request.candidate_receipt_id;
+                let result = service
+                    .candidate_details_with(request, false, lease().await, |_, _| async move {
+                        if mismatch {
+                            let mut wrong = candidate();
+                            wrong.provider_id = "43".into();
+                            Ok(wrong)
+                        } else {
+                            Err(ProviderRuntimeError::provider("fixture provider outage"))
+                        }
+                    })
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(
+                    result,
+                    ProviderCandidateDetailsOutcome::UnavailableWithoutSnapshot {
+                        candidate_receipt_id: receipt_id,
+                        provider: ProviderId::try_new("tmdb").unwrap(),
+                        grain: Grain::Film,
+                        problem: if mismatch {
+                            ProblemCode::ProviderResponseInvalid
+                        } else {
+                            ProblemCode::ProviderUnavailable
+                        },
+                    }
+                );
+                assert_eq!(
+                    *persistence.calls.lock().unwrap(),
+                    ["prepare-details", "prepare-details"]
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn restricted_snapshot_refetch_still_rechecks_revocation_and_authority() {
+        for reuse in [
+            ProviderResponseReuse::ValidateEveryReuse,
+            ProviderResponseReuse::ValidateWhenStale,
+        ] {
+            for disposition in [DENIED, EXPIRED, CHANGED_AUTHORITY, CHANGED_SNAPSHOT] {
+                for success in [false, true] {
+                    let (service, persistence, request) = fixture_with_policy(reuse);
+                    let during_fetch = Arc::clone(&persistence);
+                    let result = service
+                        .candidate_details_with(request, false, lease().await, |_, _| async move {
+                            during_fetch
+                                .disposition
+                                .store(disposition, Ordering::SeqCst);
+                            if success {
+                                Ok(candidate())
+                            } else {
+                                Err(ProviderRuntimeError::provider(
+                                    "must not escape reauthorization",
+                                ))
+                            }
+                        })
+                        .await;
+                    if disposition == EXPIRED {
+                        assert_eq!(result.unwrap(), None);
+                    } else {
+                        assert_eq!(result.unwrap_err().code(), ProblemCode::Forbidden);
+                    }
+                    assert_eq!(
+                        *persistence.calls.lock().unwrap(),
+                        ["prepare-details", "prepare-details"]
+                    );
+                }
+            }
+        }
     }
 
     #[tokio::test]
@@ -312,7 +518,7 @@ mod candidate_details_tests {
             result,
             ProviderCandidateDetailsOutcome::Refetched {
                 snapshot: original.clone(),
-                details: Box::new(expected),
+                details: Box::new(expected.search_evidence().unwrap()),
                 locale: Some(MetadataLocale::try_new("fr-FR").unwrap()),
             }
         );
