@@ -76,8 +76,13 @@ review before code changes.
 ## Runnable checks before measurements
 
 The retained binary has no unit suite. `cargo test` does not run its supervised
-qualification. New focused tests must demonstrate both identified defects
-before the fix, then pass after it; preserve the failing output.
+qualification. The original defects are source-confirmed, not reproduced RED:
+the retained supervisor reaches kernel enforcement and the native oracle before
+either path, with no injectable child seam. Do not present a missing-helper
+compile error or a rewritten synthetic baseline as reproduction. New focused
+tests must exercise the repaired real child/pipe/parser operations and pass;
+preserve all actual failures. Independent review accepted this source-backed
+baseline plus executable regression evidence only for the scoped runner repair.
 
 - Valid sample parse; missing/extra fields, invalid/overflowing numbers,
   multiple records and over-limit RSS rejected.
@@ -130,7 +135,8 @@ Fasti/TrailBase192MiB, cross-platform, leak-free or production guarantee follows
 ## Delivery gates
 
 1. Written plan and independent review, then named package writer release.
-2. Reproduced runner negatives, minimal fix, debug/release checks and intake.
+2. Source-confirmed baseline defects, executable repaired-runner negatives,
+   minimal fix, debug/release checks and intake; no baseline RED claim.
 3. Independent exact-source review and separate properly governed native run.
 4. Shared workflow/docs integration after explicit release; canonical PR gate,
    exact-head hosted checks/reviews, PR to dev and exact merged-tree readback.
@@ -154,3 +160,9 @@ actual resource-slot release. Test, measurement and delivery gates remain open.
 
 NO UNRESOLVED DECISIONS within this isolated package repair scope. This does
 not approve the production crypto profile, recovery policy or measurement result.
+
+Independent implementation review confirms guard, preserved descriptor flags,
+bounded records/exact EOF and unchanged timing/crypto boundaries. It requested
+a live WouldBlock-to-expiry regression in addition to already-expired checks;
+that focused test remains required before the code gate passes. README and
+all execution/intake/native measurement gates remain open at this checkpoint.
