@@ -26,7 +26,7 @@ use fasti_api::{
     FASTI_ACCESS_BINDING_COOKIE, FASTI_ACCESS_CALLBACK_PATH, FASTI_ACCESS_HOST, FASTI_ACCESS_ORIGIN,
 };
 #[cfg(feature = "desktop-runtime")]
-use fasti_application::{AccessAdministrationPort, CapabilityKey};
+use fasti_application::{AccessAdministrationPort, CapabilityKey, ProviderOperationLease};
 #[cfg(feature = "desktop-runtime")]
 use fasti_domain::{AuthCeremonyPurpose, AuthCeremonySelection, RecordId, RequestCorrelationId};
 #[cfg(feature = "desktop-runtime")]
@@ -499,6 +499,93 @@ async fn search_provider(
         access.workspace_id(),
         input,
         configuration.outbound_policy(),
+    )
+    .await
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command]
+async fn search_provider_page(
+    state: tauri::State<'_, DesktopState>,
+    input: search::ProviderPageInput,
+) -> Result<fasti_contracts::SearchProviderPageResponse, DesktopProblem> {
+    let kernel = state.kernel()?;
+    let access = records::require_access(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+    )?;
+    let runtime = state.provider_runtime(&kernel)?;
+    let configuration = state.network.load()?;
+    let lease = ProviderOperationLease::new(
+        Arc::clone(&state.provider_operation_gate)
+            .lock_owned()
+            .await,
+    );
+    search::provider_page(
+        runtime,
+        kernel,
+        access,
+        configuration.outbound_policy().clone(),
+        input,
+        lease,
+    )
+    .await
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command]
+async fn read_search_candidate(
+    state: tauri::State<'_, DesktopState>,
+    input: search::CandidateDetailsInput,
+) -> Result<fasti_contracts::SearchCandidateDetailsResponse, DesktopProblem> {
+    let kernel = state.kernel()?;
+    let access = records::require_access(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+    )?;
+    let runtime = state.provider_runtime(&kernel)?;
+    let configuration = state.network.load()?;
+    let lease = ProviderOperationLease::new(
+        Arc::clone(&state.provider_operation_gate)
+            .lock_owned()
+            .await,
+    );
+    search::candidate_details(
+        runtime,
+        kernel,
+        access,
+        configuration.outbound_policy().clone(),
+        input,
+        lease,
+    )
+    .await
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command]
+async fn save_search_candidate(
+    state: tauri::State<'_, DesktopState>,
+    input: search::CandidateActionInput,
+) -> Result<fasti_contracts::SearchCandidateActionResponse, DesktopProblem> {
+    let kernel = state.kernel()?;
+    let access = records::require_access(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+    )?;
+    let runtime = state.provider_runtime(&kernel)?;
+    let configuration = state.network.load()?;
+    let lease = ProviderOperationLease::new(
+        Arc::clone(&state.provider_operation_gate)
+            .lock_owned()
+            .await,
+    );
+    search::save_candidate(
+        runtime,
+        kernel,
+        access,
+        configuration.outbound_policy().clone(),
+        input,
+        lease,
     )
     .await
 }
@@ -1015,6 +1102,9 @@ pub fn run() {
             test_provider_credential,
             read_provider_health,
             search_provider,
+            search_provider_page,
+            read_search_candidate,
+            save_search_candidate,
             track_provider_candidate,
             apply_provider_metadata,
             refresh_metadata_claims,
