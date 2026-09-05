@@ -977,6 +977,66 @@ fn metadata_known_policy_companion_only_reads_overflowing_scopes() {
 }
 
 #[test]
+fn metadata_overflow_policy_preserves_duplicate_record_and_field_semantics() {
+    let node = TestNode::new();
+    let record = records(&node, 1)[0];
+    let fields = fields();
+    for field in &fields[..2] {
+        known_policy_history(&node, record, field, 0..257);
+    }
+    let duplicate_fields = [
+        fields[0].clone(),
+        fields[1].clone(),
+        fields[0].clone(),
+        fields[1].clone(),
+        fields[0].clone(),
+    ];
+    let connection = node.kernel.inner.connection.lock().unwrap();
+    let id = RequestCorrelationId::new_v7();
+    let batch = load_record_metadata_batch(
+        &connection,
+        node.access.workspace_id(),
+        node.access.profile_id(),
+        &[record, record, record],
+        &duplicate_fields,
+        CAP,
+        id,
+    )
+    .unwrap();
+    let policy = load_projection_policy(
+        &connection,
+        node.access.workspace_id(),
+        node.access.profile_id(),
+        CAP,
+        id,
+    )
+    .unwrap();
+    for field in &fields[..2] {
+        let claims = load_field_claims(
+            &connection,
+            node.access.workspace_id(),
+            record,
+            field,
+            CAP,
+            id,
+            batch.resolved_at,
+        )
+        .unwrap();
+        assert!(
+            claims.is_empty(),
+            "the restriction below 256 NULL rows must still apply"
+        );
+        let expected =
+            resolve_profile_field(None, &claims, &[], &policy, batch.resolved_at).unwrap();
+        assert_eq!(
+            batch.resolve(record, field, CAP, id).unwrap(),
+            expected,
+            "duplicate scopes must preserve single-reader suppression"
+        );
+    }
+}
+
+#[test]
 fn metadata_known_policy_companion_indexes_full_history_and_sorts_only_keys() {
     let node = TestNode::new();
     let record = records(&node, 1)[0];
@@ -1202,8 +1262,25 @@ fn metadata_batch_dense_release_memory_and_latency() {
             );
         }
         let fields = fields();
+        // Distinguish query CPU from scheduler/disk stalls in dense stress runs.
+        let counters = || {
+            let scheduler = std::fs::read_to_string("/proc/thread-self/schedstat").unwrap();
+            let mut fields = scheduler.split_whitespace();
+            let cpu: u64 = fields.next().unwrap().parse().unwrap();
+            let wait: u64 = fields.next().unwrap().parse().unwrap();
+            let io = std::fs::read_to_string("/proc/self/io").unwrap();
+            let read: u64 = io
+                .lines()
+                .find_map(|line| line.strip_prefix("read_bytes:"))
+                .unwrap()
+                .trim()
+                .parse()
+                .unwrap();
+            (cpu, wait, read)
+        };
         let mut elapsed = Vec::new();
-        for _ in 0..5 {
+        for sample in 0..5 {
+            let before = counters();
             let started = std::time::Instant::now();
             let id = RequestCorrelationId::new_v7();
             let batch = load_record_metadata_batch(
@@ -1229,7 +1306,11 @@ fn metadata_batch_dense_release_memory_and_latency() {
                     );
                 }
             }
-            elapsed.push(started.elapsed());
+            let duration = started.elapsed();
+            let after = counters();
+            eprintln!("metadata_batch sample={sample} elapsed={duration:?} thread_cpu_ns={} scheduler_wait_ns={} physical_read_bytes={}",
+                after.0 - before.0, after.1 - before.1, after.2 - before.2);
+            elapsed.push(duration);
         }
         let (rss_after, hwm_after) = resident_memory_bytes();
         elapsed.sort();
