@@ -4,8 +4,10 @@ use crate::{
     ProviderSearchInput, ProviderSearchPage, ProviderSelectionInput,
 };
 use fasti_application::{
-    ApplicationResult, CapabilityKey, ProblemCode, ProviderCapabilityState, ProviderOperationLease,
-    ReadSearchCandidateRequest, SearchPageRequest, SearchPersistencePort, StoredSearchPage,
+    ApplicationResult, CapabilityKey, ProblemCode, ProviderCapabilityState,
+    ProviderIdentifierActionCommand, ProviderIdentifierActionOutcome,
+    ProviderIdentifierActionPreparation, ProviderOperationLease, ReadSearchCandidateRequest,
+    SearchPageRequest, SearchPersistencePort, StoredSearchPage,
 };
 use std::{future::Future, sync::Arc};
 
@@ -41,6 +43,133 @@ impl ProviderSearchService {
             runtime.fetch_selection(selection, &policy, &state).await
         })
         .await
+    }
+
+    pub async fn save_provider_identifier(
+        &self,
+        command: ProviderIdentifierActionCommand,
+        lease: ProviderOperationLease,
+    ) -> ApplicationResult<ProviderIdentifierActionOutcome> {
+        let runtime = Arc::clone(&self.runtime);
+        let policy = command.outbound_policy.clone();
+        self.save_provider_identifier_with(command, lease, move |selection, state| async move {
+            runtime.fetch_selection(selection, &policy, &state).await
+        })
+        .await
+    }
+
+    async fn save_provider_identifier_with<F, Fut>(
+        &self,
+        mut command: ProviderIdentifierActionCommand,
+        lease: ProviderOperationLease,
+        fetch: F,
+    ) -> ApplicationResult<ProviderIdentifierActionOutcome>
+    where
+        F: FnOnce(ProviderSelectionInput, ProviderCapabilityState) -> Fut,
+        Fut: Future<Output = Result<ProviderCandidate, ProviderRuntimeError>>,
+    {
+        let capability = CapabilityKey::AttachIdentifier;
+        let id = command.correlation_id;
+        command.terms_revision = self
+            .cache_policy_revision(command.provider.as_str(), id)
+            .map_err(|_| {
+                Box::new(fasti_application::FastiProblem::from_code(
+                    ProblemCode::ValidationFailed,
+                    capability,
+                    id,
+                ))
+            })?;
+        let mapping = fasti_application::provider_identity_mapping_for_grain(
+            command.provider.as_str(),
+            command.grain,
+        )
+        .ok_or_else(|| {
+            Box::new(fasti_application::FastiProblem::from_code(
+                ProblemCode::InvalidIdentifier,
+                capability,
+                id,
+            ))
+        })?;
+        let expected_identifier = mapping
+            .identifier(command.provider_record_id.clone())
+            .map_err(|_| {
+                Box::new(fasti_application::FastiProblem::from_code(
+                    ProblemCode::InvalidIdentifier,
+                    capability,
+                    id,
+                ))
+            })?;
+        let persistence = Arc::clone(&self.persistence);
+        let request = command.clone();
+        let prepared = run_blocking(&lease, capability, id, move || {
+            persistence.prepare_provider_identifier_action(&request)
+        })
+        .await?;
+        let state = match &prepared {
+            ProviderIdentifierActionPreparation::Replay(receipt) => {
+                return Ok(ProviderIdentifierActionOutcome::Saved(receipt.clone()))
+            }
+            ProviderIdentifierActionPreparation::Refetch { provider_state, .. } => {
+                provider_state.clone()
+            }
+        };
+        let selection = ProviderSelectionInput {
+            provider: command.provider.as_str().to_owned(),
+            provider_id: command.provider_record_id.clone(),
+            kind: mapping.kind().to_owned(),
+            locale: None,
+            region: None,
+        };
+        let fetched = fetch(selection, state).await;
+        let confirmed_identifier = match fetched.and_then(|candidate| {
+            let identifier = candidate.search_evidence()?.identifier().clone();
+            if identifier != expected_identifier {
+                return Err(ProviderRuntimeError::response_invalid(
+                    "The provider detail identity does not match the selected identifier.",
+                ));
+            }
+            Ok(identifier)
+        }) {
+            Ok(identifier) => identifier,
+            Err(error) => {
+                let persistence = Arc::clone(&self.persistence);
+                let request = command.clone();
+                let current = run_blocking(&lease, capability, id, move || {
+                    persistence.prepare_provider_identifier_action(&request)
+                })
+                .await?;
+                return match (&prepared, current) {
+                    (_, ProviderIdentifierActionPreparation::Replay(receipt)) => {
+                        Ok(ProviderIdentifierActionOutcome::Saved(receipt))
+                    }
+                    (
+                        ProviderIdentifierActionPreparation::Refetch {
+                            provider_authority_fingerprint: original,
+                            ..
+                        },
+                        ProviderIdentifierActionPreparation::Refetch {
+                            provider_authority_fingerprint: current,
+                            ..
+                        },
+                    ) if original == &current => Ok(ProviderIdentifierActionOutcome::Unavailable {
+                        problem: error.problem_code(),
+                    }),
+                    _ => Err(Box::new(fasti_application::FastiProblem::forbidden(
+                        capability, id,
+                    ))),
+                };
+            }
+        };
+        let persistence = Arc::clone(&self.persistence);
+        let receipt = run_blocking(&lease, capability, id, move || {
+            persistence.commit_provider_identifier_action(
+                &command,
+                &prepared,
+                &confirmed_identifier,
+            )
+        })
+        .await?;
+        Ok(ProviderIdentifierActionOutcome::Saved(Box::new(receipt)))
     }
 
     async fn save_candidate_with<F, Fut>(

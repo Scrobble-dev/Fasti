@@ -214,6 +214,7 @@ impl Modify for ProductionSecurityAddon {
         search::search_provider_page,
         search::read_search_candidate,
         search::save_search_candidate,
+        search::save_provider_identifier,
         search::search_local_records,
         records::register_namespace,
         integrations::integration_status,
@@ -240,6 +241,10 @@ impl Modify for ProductionSecurityAddon {
         fasti_contracts::SearchCandidateActionRequest,
         fasti_contracts::SearchCandidateActionResponse,
         fasti_contracts::SearchCandidateActionReceiptDto,
+        fasti_contracts::ProviderIdentifierActionRequest,
+        fasti_contracts::ProviderIdentifierActionResponse,
+        fasti_contracts::ProviderIdentifierActionReceiptDto,
+        fasti_contracts::ProviderIdentifierActionOriginDto,
         fasti_contracts::SearchRecordActionDto,
         fasti_contracts::SearchCandidateEvidenceModeDto,
         fasti_contracts::SearchRecordActionDispositionDto,
@@ -1154,7 +1159,7 @@ mod tests {
         ] {
             assert!(document.paths.paths.contains_key(path), "missing {path}");
         }
-        assert_eq!(document.paths.paths.len(), 40);
+        assert_eq!(document.paths.paths.len(), 41);
 
         let serialized = serde_json::to_string(&document).expect("serializable OpenAPI document");
         assert!(serialized.contains("#/components/schemas/HealthResponse"));

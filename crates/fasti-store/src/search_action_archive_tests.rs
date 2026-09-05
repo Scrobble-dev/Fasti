@@ -1,16 +1,18 @@
 mod search_action_archive_tests {
     use super::*;
     use fasti_application::{
-        OutboundAccessPolicy, ProviderId, ProviderStatePort, ReadSearchCandidateRequest,
+        OutboundAccessPolicy, ProviderId, ProviderIdentifierActionCommand,
+        ProviderIdentifierActionReceipt, ProviderStatePort, ReadSearchCandidateRequest,
         SearchCandidateActionCommand, SearchCandidateActionReceipt, SearchCandidateEvidenceMode,
         SearchPageRequest, SearchPersistencePort, SearchProviderQuery, SearchRecordAction,
     };
-    use fasti_domain::SearchQuery;
+    use fasti_domain::{ExternalIdentifierClaim, SearchQuery};
 
     struct Fixture {
         archive: Vec<u8>,
         credential: SearchCandidateActionReceipt,
         historical_browser: SearchCandidateActionReceipt,
+        provider_identifier: ProviderIdentifierActionReceipt,
     }
 
     fn fixture() -> Fixture {
@@ -51,7 +53,7 @@ mod search_action_archive_tests {
         let prepared = node.kernel.prepare_search_page(&request).unwrap();
         let page = node
             .kernel
-.commit_search_page(
+            .commit_search_page(
                 &request,
                 &prepared,
                 &[crate::search::tests::candidate("42")],
@@ -83,6 +85,37 @@ mod search_action_archive_tests {
             .commit_search_candidate_action(&command, &prepared, None)
             .unwrap();
         assert_eq!(credential.actor_subject_id, None);
+        node.kernel
+            .put_provider_capability_state(
+                node.access.workspace_id(),
+                crate::search::tests::state_for("metadata.read", 1),
+            )
+            .unwrap();
+
+        let provider_command = ProviderIdentifierActionCommand {
+            correlation_id: RequestCorrelationId::new_v7(),
+            access: node.access.into(),
+            outbound_policy: OutboundAccessPolicy::default(),
+            terms_revision: "tmdb-v1".into(),
+            operation_id: OperationId::new_v7(),
+            provider: ProviderId::try_new("tmdb").unwrap(),
+            provider_record_id: "84".into(),
+            grain: Grain::Film,
+            action: SearchRecordAction::Create,
+        };
+        let provider_prepared = node
+            .kernel
+            .prepare_provider_identifier_action(&provider_command)
+            .unwrap();
+        let provider_identifier = node
+            .kernel
+            .commit_provider_identifier_action(
+                &provider_command,
+                &provider_prepared,
+                &ExternalIdentifierClaim::try_new("tmdb.movie", Grain::Film, "84").unwrap(),
+            )
+            .unwrap();
+        assert_eq!(provider_identifier.actor_subject_id, None);
 
         // This is an explicit historical portable audit row, not a sign-in
         // fixture. The old human subject no longer exists on this node.
@@ -140,6 +173,7 @@ mod search_action_archive_tests {
             archive: state.bytes.clone(),
             credential,
             historical_browser,
+            provider_identifier,
         }
     }
 
@@ -149,7 +183,7 @@ mod search_action_archive_tests {
                 .query_row("SELECT COUNT(*) FROM search_action_receipts", [], |row| row
                     .get::<_, i64>(0))
                 .unwrap(),
-            2
+            3
         );
         for expected in [&fixture.credential, &fixture.historical_browser] {
             let (subject, json): (Option<String>, String) = database.query_row(
@@ -163,6 +197,22 @@ mod search_action_archive_tests {
                 *expected
             );
         }
+        let (subject, json): (Option<String>, String) = database
+            .query_row(
+                "SELECT actor_subject_id, receipt_json FROM search_action_receipts WHERE operation_id = ?1",
+                [fixture.provider_identifier.operation_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(subject, None);
+        assert_eq!(
+            crate::search_actions::decode_provider_identifier_receipt(
+                &json,
+                RequestCorrelationId::new_v7(),
+            )
+            .unwrap(),
+            fixture.provider_identifier
+        );
         assert_eq!(
             database
                 .query_row(NODE_LOCAL_STATE_COUNT_SQL, [], |row| row.get::<_, i64>(0))
@@ -185,6 +235,57 @@ mod search_action_archive_tests {
         }
     }
 
+    fn as_frozen_v6(archive: &[u8]) -> Vec<u8> {
+        let legacy = rewrite_stream(archive, WorkspaceExportEntity::MetadataClaims, |bytes| {
+            let mut rewritten = Vec::new();
+            for line in bytes
+                .split(|byte| *byte == b'\n')
+                .filter(|line| !line.is_empty())
+            {
+                let mut row: serde_json::Value = serde_json::from_slice(line).unwrap();
+                row.as_object_mut().unwrap().remove("response_policy_json");
+                rewritten.extend(serde_json::to_vec(&row).unwrap());
+                rewritten.push(b'\n');
+            }
+            *bytes = rewritten;
+        });
+        let mut entries = archive_entries(&legacy);
+        let manifest_bytes = entries.pop().unwrap().1;
+        let verified =
+            VerifiedInboundWorkspaceManifest::try_from_canonical_json(&manifest_bytes, limits())
+                .unwrap();
+        let manifest = verified.manifest();
+        let rebuilt = WorkspaceManifest::try_new_for_format(
+            WORKSPACE_ARCHIVE_V6_FORMAT_VERSION,
+            manifest.workspace_id(),
+            manifest.workspace_revision(),
+            manifest.contract_version().to_owned(),
+            16,
+            Sha256Digest::parse(
+                "sha256:d7ae3b1ab15c0223245d1a9008833049e58e9ec882a6e1ba70a2a080fa3fd7a6",
+            )
+            .unwrap(),
+            manifest.streams().to_vec(),
+            manifest.blobs().to_vec(),
+        )
+        .unwrap();
+        let projection =
+            CanonicalWorkspaceManifestProjection::try_from_application(rebuilt).unwrap();
+        entries.push((
+            "manifest.json".to_owned(),
+            projection.canonical_json_bytes().to_vec(),
+        ));
+        let archive_limits =
+            ArchiveLimits::new(64 * 1024 * 1024, 128, 16 * 1024 * 1024, 64 * 1024 * 1024).unwrap();
+        let mut writer = ArchiveWriter::new(Vec::new(), archive_limits).unwrap();
+        for (path, bytes) in entries {
+            writer
+                .append(&path, bytes.len() as u64, Cursor::new(bytes))
+                .unwrap();
+        }
+        writer.finish().unwrap()
+    }
+
     #[test]
     fn archive_v7_search_actions_roundtrip_and_reexport_without_local_authority_or_candidates() {
         let fixture = fixture();
@@ -199,7 +300,7 @@ mod search_action_archive_tests {
             verified.manifest().streams().last().unwrap().entity(),
             WorkspaceExportEntity::SearchActionReceipts
         );
-        assert_eq!(verified.manifest().streams().last().unwrap().row_count(), 2);
+        assert_eq!(verified.manifest().streams().last().unwrap().row_count(), 3);
         assert!(verified.manifest().blobs().is_empty());
         let restore_root = tempfile::tempdir().unwrap();
         let lock = LockedDataRoot::acquire(restore_root.path()).unwrap();
@@ -288,7 +389,47 @@ mod search_action_archive_tests {
     }
 
     #[test]
-    fn archive_v6_search_actions_do_not_rebind_old_actor_receipts_to_recovery_identity() {
+    fn archive_v6_rejects_provider_identifier_action_receipts() {
+        let fixture = fixture();
+        let candidate_only = rewrite_stream(
+            &fixture.archive,
+            WorkspaceExportEntity::SearchActionReceipts,
+            |bytes| {
+                let operation_id = fixture.provider_identifier.operation_id.to_string();
+                *bytes = bytes
+                    .split(|byte| *byte == b'\n')
+                    .filter(|line| !line.is_empty())
+                    .filter(|line| {
+                        serde_json::from_slice::<serde_json::Value>(line).unwrap()["operation_id"]
+                            != operation_id
+                    })
+                    .flat_map(|line| line.iter().copied().chain(std::iter::once(b'\n')))
+                    .collect();
+            },
+        );
+        let root = tempfile::tempdir().unwrap();
+        let lock = LockedDataRoot::acquire(root.path()).unwrap();
+        let attempt = RestoreAttemptId::new_v7();
+        let staged = stage_workspace_archive_pass_two(
+            &lock,
+            &mut Cursor::new(as_frozen_v6(&candidate_only)),
+            attempt,
+            RequestCorrelationId::new_v7(),
+            limits(),
+            &CancellationSignal::new(),
+        )
+        .unwrap();
+        staged.cleanup().unwrap();
+        assert_attempt_removed(root.path(), attempt);
+
+        reject(
+            as_frozen_v6(&fixture.archive),
+            "provider identifier action receipt in frozen v6",
+        );
+    }
+
+    #[test]
+    fn archive_v7_search_actions_do_not_rebind_old_actor_receipts_to_recovery_identity() {
         let fixture = fixture();
         let root = tempfile::tempdir().unwrap();
         let adapter = crate::StoppedNodePortabilityAdapter::new(root.path());
@@ -446,7 +587,7 @@ mod search_action_archive_tests {
     }
 
     #[test]
-    fn archive_v6_search_actions_reject_typed_canonical_column_and_duplicate_corruption() {
+    fn archive_v7_search_actions_reject_typed_canonical_column_and_duplicate_corruption() {
         let fixture = fixture();
         for case in [
             "subject_type",
@@ -554,7 +695,7 @@ mod search_action_archive_tests {
     }
 
     #[test]
-    fn archive_v6_search_actions_require_portable_profile_client_and_record_relations() {
+    fn archive_v7_search_actions_require_portable_profile_client_and_record_relations() {
         let fixture = fixture();
         for case in ["profile", "client", "record", "record_grain"] {
             let hostile = rewrite_stream(

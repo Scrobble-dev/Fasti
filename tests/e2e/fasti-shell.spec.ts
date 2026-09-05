@@ -524,6 +524,7 @@ test("record metadata can refresh or switch through a configured provider", asyn
                 {
                   provider: "tmdb",
                   provider_id: "693134",
+                  grain: "film",
                   title: "Dune: Part Two",
                   original_title: "Dune: Part Two",
                   kind: "movie",

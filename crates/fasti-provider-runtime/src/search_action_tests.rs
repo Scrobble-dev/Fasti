@@ -72,6 +72,27 @@ mod candidate_action_tests {
                 }
             })
         }
+
+        fn identifier_receipt(
+            &self,
+            command: &ProviderIdentifierActionCommand,
+        ) -> ProviderIdentifierActionReceipt {
+            ProviderIdentifierActionReceipt {
+                workspace_id: self.receipt.workspace_id,
+                profile_id: self.receipt.profile_id,
+                actor_client_id: self.receipt.actor_client_id,
+                actor_subject_id: self.receipt.actor_subject_id,
+                operation_id: command.operation_id,
+                provider: command.provider.as_str().to_owned(),
+                provider_record_id: command.provider_record_id.clone(),
+                grain: command.grain,
+                action: command.action,
+                origin: ProviderIdentifierActionOrigin::UserSelectedProviderIdentifier,
+                record_id: self.receipt.record_id,
+                disposition: self.receipt.disposition,
+                committed_at: self.receipt.committed_at,
+            }
+        }
     }
 
     impl SearchPersistencePort for ActionPersistence {
@@ -150,6 +171,61 @@ mod candidate_action_tests {
                 receipt.initial_status = field.claim().initial_status();
             }
             Ok(receipt)
+        }
+
+        fn prepare_provider_identifier_action(
+            &self,
+            command: &ProviderIdentifierActionCommand,
+        ) -> ApplicationResult<ProviderIdentifierActionPreparation> {
+            self.calls.lock().unwrap().push("prepare-identifier");
+            assert_eq!(command.terms_revision, "fasti.public-metadata-cache.v1");
+            match self.disposition.load(Ordering::SeqCst) {
+                DENIED => Err(Box::new(FastiProblem::forbidden(
+                    CapabilityKey::AttachIdentifier,
+                    command.correlation_id,
+                ))),
+                REPLAY => Ok(ProviderIdentifierActionPreparation::Replay(Box::new(
+                    self.identifier_receipt(command),
+                ))),
+                CHANGED_AUTHORITY => Ok(ProviderIdentifierActionPreparation::Refetch {
+                    provider_state: self.details.provider_state.clone(),
+                    provider_authority_fingerprint: Sha256Digest::from_bytes(&[8; 32]),
+                }),
+                CURRENT | CHANGED_SNAPSHOT => Ok(ProviderIdentifierActionPreparation::Refetch {
+                    provider_state: self.details.provider_state.clone(),
+                    provider_authority_fingerprint: self
+                        .details
+                        .provider_authority_fingerprint
+                        .clone(),
+                }),
+                other => panic!("unexpected fixture disposition {other}"),
+            }
+        }
+
+        fn commit_provider_identifier_action(
+            &self,
+            command: &ProviderIdentifierActionCommand,
+            prepared: &ProviderIdentifierActionPreparation,
+            confirmed_identifier: &fasti_domain::ExternalIdentifierClaim,
+        ) -> ApplicationResult<ProviderIdentifierActionReceipt> {
+            self.calls.lock().unwrap().push("commit-identifier");
+            let current = self.prepare_provider_identifier_action(command)?;
+            if let ProviderIdentifierActionPreparation::Replay(receipt) = current {
+                return Ok(*receipt);
+            }
+            if &current != prepared {
+                return Err(Box::new(FastiProblem::forbidden(
+                    CapabilityKey::AttachIdentifier,
+                    command.correlation_id,
+                )));
+            }
+            let expected =
+                provider_identity_mapping_for_grain(command.provider.as_str(), command.grain)
+                    .unwrap()
+                    .identifier(command.provider_record_id.clone())
+                    .unwrap();
+            assert_eq!(confirmed_identifier, &expected);
+            Ok(self.identifier_receipt(command))
         }
 
         fn search_local_records(
@@ -332,6 +408,22 @@ mod candidate_action_tests {
         )
     }
 
+    fn identifier_command(
+        command: SearchCandidateActionCommand,
+    ) -> ProviderIdentifierActionCommand {
+        ProviderIdentifierActionCommand {
+            correlation_id: command.request.correlation_id,
+            access: command.request.access,
+            outbound_policy: command.request.outbound_policy,
+            terms_revision: "untrusted-caller-revision".into(),
+            operation_id: OperationId::new_v7(),
+            provider: ProviderId::try_new("tmdb").unwrap(),
+            provider_record_id: "42".into(),
+            grain: Grain::Film,
+            action: SearchRecordAction::Create,
+        }
+    }
+
     #[tokio::test]
     async fn public_cached_save_and_completed_replay_never_fetch_and_use_trusted_policy() {
         for (mode, replay) in [
@@ -365,6 +457,66 @@ mod candidate_action_tests {
                 assert!(persistence.fields.lock().unwrap().is_none());
             }
         }
+    }
+
+    #[tokio::test]
+    async fn completed_provider_identifier_action_replays_without_provider_fetch() {
+        let (service, persistence, candidate_command) =
+            fixture(SearchCandidateEvidenceMode::Cached);
+        persistence.disposition.store(REPLAY, Ordering::SeqCst);
+        let command = identifier_command(candidate_command);
+        let expected = persistence.identifier_receipt(&command);
+        assert_eq!(
+            service
+                .save_provider_identifier(command, lease().await)
+                .await
+                .unwrap(),
+            ProviderIdentifierActionOutcome::Saved(Box::new(expected))
+        );
+        assert_eq!(*persistence.calls.lock().unwrap(), ["prepare-identifier"]);
+        assert!(persistence.fields.lock().unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn provider_identifier_refetch_mismatch_is_unavailable_without_commit() {
+        let (service, persistence, candidate_command) =
+            fixture(SearchCandidateEvidenceMode::Cached);
+        let command = identifier_command(candidate_command);
+        let expected_state = persistence.details.provider_state.clone();
+        let outcome = service
+            .save_provider_identifier_with(
+                command,
+                lease().await,
+                move |selection, state| async move {
+                    assert_eq!(
+                        selection,
+                        ProviderSelectionInput {
+                            provider: "tmdb".into(),
+                            provider_id: "42".into(),
+                            kind: "movie".into(),
+                            locale: None,
+                            region: None,
+                        }
+                    );
+                    assert_eq!(state, expected_state);
+                    let mut mismatched = candidate();
+                    mismatched.provider_id = "43".into();
+                    Ok(mismatched)
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            outcome,
+            ProviderIdentifierActionOutcome::Unavailable {
+                problem: ProblemCode::ProviderResponseInvalid
+            }
+        );
+        assert_eq!(
+            *persistence.calls.lock().unwrap(),
+            ["prepare-identifier", "prepare-identifier"]
+        );
+        assert!(persistence.fields.lock().unwrap().is_none());
     }
 
     #[tokio::test]

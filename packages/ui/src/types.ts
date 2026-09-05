@@ -18,6 +18,8 @@ import type {
   ReadTrailBaseContinuationResponse,
   RefreshMetadataClaimsRequest,
   RefreshMetadataClaimsResponse,
+  ProviderIdentifierActionRequest,
+  ProviderIdentifierActionResponse,
   SearchCandidateActionRequest,
   SearchCandidateActionResponse,
   SearchCandidateDetailsResponse,
@@ -56,6 +58,8 @@ export type {
   RatingClaimDto,
   RefreshMetadataClaimsRequest,
   RefreshMetadataClaimsResponse,
+  ProviderIdentifierActionRequest,
+  ProviderIdentifierActionResponse,
   SearchCandidateActionRequest,
   SearchCandidateActionResponse,
   SearchCandidateDto,
@@ -345,6 +349,7 @@ export interface ProviderCredentialStatus {
 export interface ProviderSearchCandidate {
   readonly provider: string;
   readonly provider_id: string;
+  readonly grain: string;
   readonly title: string;
   readonly original_title?: string;
   readonly kind: MediaKind | string;
@@ -416,6 +421,11 @@ export interface WorkbenchHost {
     candidateReceiptId: string,
     request: SearchCandidateActionRequest,
   ): Promise<SearchCandidateActionResponse>;
+  saveProviderIdentifier?(
+    provider: string,
+    grain: string,
+    request: ProviderIdentifierActionRequest,
+  ): Promise<ProviderIdentifierActionResponse>;
   trackProviderCandidate?(
     selection: ProviderSelection,
   ): Promise<CreateRecordResult>;

@@ -335,6 +335,27 @@ fn local_search_rebuild_matches_sources_and_failed_rebuild_rolls_back() {
 }
 
 #[test]
+fn canceled_local_search_rebuild_rolls_back() {
+    let node = node();
+    let record = seed(&node, 2, "Retained title")[0];
+    let before = ids(&node, node.access, "Retained");
+    let mut polls = 0;
+    {
+        let mut connection = node.kernel.inner.connection.lock().unwrap();
+        let transaction = connection.transaction().unwrap();
+        assert!(!rebuild_cancellable(&transaction, || {
+            polls += 1;
+            polls < 3
+        })
+        .unwrap());
+        transaction.rollback().unwrap();
+    }
+    assert!(polls >= 3);
+    assert_eq!(ids(&node, node.access, "Retained"), before);
+    assert!(before.contains(&record));
+}
+
+#[test]
 fn local_search_candidate_plan_uses_posting_keyset_without_full_scan() {
     let node = node();
     seed(&node, 100, "Common title");
@@ -437,11 +458,15 @@ fn local_search_10000_records_release_latency() {
     {
         for observed_policy in [false, true] {
             let node = node();
-            let records = seed(&node, 10_000, "Common title 東京 %_");
+            let mut records = seed(&node, 10_000, "Common title 東京 %_");
+            records.sort_by_key(ToString::to_string);
+            let mut connection = node.kernel.inner.connection.lock().unwrap();
+            let transaction = connection.transaction().unwrap();
+            let observed = ReceivedAt::from_application_clock(
+                crate::kernel::now() - chrono::Duration::hours(1),
+            );
+            let key = FieldKey::try_new(TITLE_FIELD_KEY).unwrap();
             if observed_policy {
-                let mut connection = node.kernel.inner.connection.lock().unwrap();
-                let transaction = connection.transaction().unwrap();
-                let observed = ReceivedAt::from_application_clock(crate::kernel::now());
                 let policy = fasti_application::ProviderResponseCachePolicy::new(
                     fasti_application::ProviderResponseReuse::Reusable,
                     observed.value(),
@@ -450,7 +475,6 @@ fn local_search_10000_records_release_latency() {
                     None,
                 )
                 .to_canonical_json();
-                let key = FieldKey::try_new(TITLE_FIELD_KEY).unwrap();
                 for (index, record) in records.iter().enumerate() {
                     let claim = FieldClaim::try_new_provider(
                         fasti_domain::MetadataClaimId::new_v7(),
@@ -484,8 +508,60 @@ fn local_search_10000_records_release_latency() {
                     )
                     .unwrap();
                 }
-                transaction.commit().unwrap();
             }
+            let history_key = FieldKey::try_new(fasti_domain::OVERVIEW_FIELD_KEY).unwrap();
+            for (record_index, depth) in [255, 256, 257, 4096].into_iter().enumerate() {
+                let record = records[record_index];
+                for index in 0..depth {
+                    let received = ReceivedAt::from_application_clock(
+                        observed.value() + chrono::Duration::microseconds(i64::from(index) + 1),
+                    );
+                    let claim = FieldClaim::try_new_provider(
+                        fasti_domain::MetadataClaimId::new_v7(),
+                        record,
+                        history_key.clone(),
+                        "Deep metadata history",
+                        fasti_domain::FieldClaimProvenance::try_new(
+                            fasti_domain::MetadataProviderId::try_new("tmdb").unwrap(),
+                            NamespaceKey::try_new("tmdb.movie").unwrap(),
+                            (10_001 + record_index).to_string(),
+                            None,
+                            None,
+                            None,
+                            fasti_domain::Sha256Digest::from_bytes(&[index as u8; 32]),
+                        )
+                        .unwrap(),
+                        received,
+                        Some(observed.value() + chrono::Duration::hours(24)),
+                        fasti_domain::FieldClaimStatus::Fresh,
+                    )
+                    .unwrap();
+                    write_field_claim(
+                        &transaction,
+                        node.access.workspace_id(),
+                        record,
+                        &history_key,
+                        &claim,
+                        CAPABILITY,
+                        RequestCorrelationId::new_v7(),
+                        None,
+                    )
+                    .unwrap();
+                }
+            }
+            transaction.commit().unwrap();
+            drop(connection);
+            let extensive_history = node
+                .kernel
+                .search_local_records(&request(node.access, "Common"))
+                .unwrap()
+                .records
+                .into_iter()
+                .map(|record| record.record_id())
+                .collect::<Vec<_>>();
+            assert!(records[..4]
+                .iter()
+                .all(|record| extensive_history.contains(record)));
             let mut samples = Vec::new();
             for iteration in 0..105 {
                 let query = request(

@@ -185,6 +185,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     "/api/v1/search/candidates/{provider_id}/{grain}/{candidate_receipt_id}",
     "/api/v1/search/candidates/{provider_id}/{grain}/{candidate_receipt_id}/actions",
     "/api/v1/search/providers/{provider_id}",
+    "/api/v1/search/providers/{provider_id}/{grain}/actions",
     "/api/v1/search/records",
   ]);
   assert.deepEqual(Object.keys(openapi.components.securitySchemes), [
@@ -488,6 +489,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
   const hybridOperations = new Set([
     "search_local_records",
     "save_search_candidate",
+    "save_provider_identifier",
     "read_search_candidate",
     "search_provider_page",
     "submit_observation",
@@ -507,6 +509,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
   ]);
   const hybridMutations = new Set([
     "save_search_candidate",
+    "save_provider_identifier",
     "search_provider_page",
     "submit_observation",
     "create_record",

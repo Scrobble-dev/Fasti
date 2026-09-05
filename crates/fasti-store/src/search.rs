@@ -279,6 +279,25 @@ impl SearchPersistencePort for SqliteKernel {
     ) -> ApplicationResult<fasti_application::SearchCandidateActionReceipt> {
         crate::search_actions::commit(self, command, prepared, refetched_fields)
     }
+    fn prepare_provider_identifier_action(
+        &self,
+        command: &fasti_application::ProviderIdentifierActionCommand,
+    ) -> ApplicationResult<fasti_application::ProviderIdentifierActionPreparation> {
+        crate::search_actions::prepare_provider_identifier(self, command)
+    }
+    fn commit_provider_identifier_action(
+        &self,
+        command: &fasti_application::ProviderIdentifierActionCommand,
+        prepared: &fasti_application::ProviderIdentifierActionPreparation,
+        confirmed_identifier: &fasti_domain::ExternalIdentifierClaim,
+    ) -> ApplicationResult<fasti_application::ProviderIdentifierActionReceipt> {
+        crate::search_actions::commit_provider_identifier(
+            self,
+            command,
+            prepared,
+            confirmed_identifier,
+        )
+    }
     fn search_local_records(
         &self,
         request: &fasti_application::LocalSearchRequest,

@@ -197,7 +197,7 @@ const PRODUCTION_BOOTSTRAP_OPERATIONS: [ConformanceOperation; 2] = [
 /// surface. Kept separate from `PRODUCTION_BOOTSTRAP_OPERATIONS` because that
 /// array also drives the bootstrap-only SDK slice in
 /// `render_production_bootstrap_contract`, which must not grow to include them.
-const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 44] = [
+const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 45] = [
     ConformanceOperation {
         alias: "searchRecords",
         operation_id: "search_local_records",
@@ -218,6 +218,17 @@ const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 44] = [
         authenticated: true,
         request: Some("SearchCandidateActionRequest"),
         response: Some("SearchCandidateActionResponse"),
+        retry: "stable_body_operation_id",
+    },
+    ConformanceOperation {
+        alias: "saveProviderIdentifier",
+        operation_id: "save_provider_identifier",
+        method: "post",
+        path: "/api/v1/search/providers/{provider_id}/{grain}/actions",
+        capability_id: "identity.identifier.attach",
+        authenticated: true,
+        request: Some("ProviderIdentifierActionRequest"),
+        response: Some("ProviderIdentifierActionResponse"),
         retry: "stable_body_operation_id",
     },
     ConformanceOperation {
@@ -2029,6 +2040,7 @@ fn enrich_production_openapi(
         ("SearchProviderPageResponse", 3),
         ("SearchCandidateDetailsResponse", 6),
         ("SearchCandidateActionResponse", 2),
+        ("ProviderIdentifierActionResponse", 2),
         ("SearchRecordActionDto", 2),
     ] {
         let search_outcomes = openapi
@@ -2082,7 +2094,10 @@ fn enrich_production_openapi(
             "x-fasti-required-scopes".to_owned(),
             Value::Array(array_at(capability, "/scopes")?.clone()),
         );
-        if expected.operation_id == "save_search_candidate" {
+        if matches!(
+            expected.operation_id,
+            "save_search_candidate" | "save_provider_identifier"
+        ) {
             let search_capability = capabilities
                 .iter()
                 .find(|candidate| string_at(candidate, "/id").ok() == Some("metadata.search"))
@@ -2460,6 +2475,7 @@ fn validate_production_operation_security(
         "submit_observation"
         | "search_provider_page"
         | "save_search_candidate"
+        | "save_provider_identifier"
         | "create_record"
         | "attach_identifier"
         | "register_namespace"
@@ -3686,6 +3702,7 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         "SearchCacheStateDto",
         "SearchCandidateEvidenceModeDto",
         "SearchRecordActionDispositionDto",
+        "ProviderIdentifierActionOriginDto",
         "SearchEvidenceStatusDto",
         "SearchRecordActionDto",
     ] {
@@ -3742,6 +3759,9 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         "SearchCandidateActionRequest",
         "SearchCandidateActionResponse",
         "SearchCandidateActionReceiptDto",
+        "ProviderIdentifierActionRequest",
+        "ProviderIdentifierActionResponse",
+        "ProviderIdentifierActionReceiptDto",
         "SearchCandidateReceiptDto",
         "SearchCandidateDto",
         "SearchReceiptLifetimeDto",
@@ -3998,6 +4018,14 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         (
             "parseSearchCandidateActionResponse",
             "SearchCandidateActionResponse",
+        ),
+        (
+            "parseProviderIdentifierActionRequest",
+            "ProviderIdentifierActionRequest",
+        ),
+        (
+            "parseProviderIdentifierActionResponse",
+            "ProviderIdentifierActionResponse",
         ),
         (
             "parseRefreshMetadataClaimsRequest",
@@ -5802,31 +5830,37 @@ mod tests {
                 .expect("webhook problems")
                 .contains(&Value::String(problem.to_owned())));
         }
-        assert_eq!(
-            array_at(
-                &openapi,
-                "/paths/~1api~1v1~1search~1candidates~1{provider_id}~1{grain}~1{candidate_receipt_id}~1actions/post/x-fasti-required-scopes"
-            )
-            .expect("candidate action scopes"),
-            &[serde_json::json!("identity_write")]
-        );
-        assert_eq!(
-            array_at(
-                &openapi,
-                "/paths/~1api~1v1~1search~1candidates~1{provider_id}~1{grain}~1{candidate_receipt_id}~1actions/post/x-fasti-conditional-required-scopes/new_operation"
-            )
-            .expect("new candidate action scopes"),
-            &[serde_json::json!("metadata_search")]
-        );
+        for path in [
+            "/paths/~1api~1v1~1search~1candidates~1{provider_id}~1{grain}~1{candidate_receipt_id}~1actions/post",
+            "/paths/~1api~1v1~1search~1providers~1{provider_id}~1{grain}~1actions/post",
+        ] {
+            assert_eq!(
+                array_at(&openapi, &format!("{path}/x-fasti-required-scopes"))
+                    .expect("Search action scopes"),
+                &[serde_json::json!("identity_write")]
+            );
+            assert_eq!(
+                array_at(
+                    &openapi,
+                    &format!("{path}/x-fasti-conditional-required-scopes/new_operation")
+                )
+                .expect("new Search action scopes"),
+                &[serde_json::json!("metadata_search")]
+            );
+        }
         let sdk = std::str::from_utf8(
             artifacts
                 .get(Path::new(SDK_GENERATED_PATH))
                 .expect("production SDK generated"),
         )
         .expect("production SDK is UTF-8");
-        assert!(sdk.contains(
-            "requiredScopes: [\"identity_write\"], conditionalRequiredScopes: {\"new_operation\":[\"metadata_search\"]}"
-        ));
+        assert_eq!(
+            sdk.matches(
+                "requiredScopes: [\"identity_write\"], conditionalRequiredScopes: {\"new_operation\":[\"metadata_search\"]}"
+            )
+            .count(),
+            2
+        );
 
         let conformance: Value = serde_json::from_slice(
             artifacts

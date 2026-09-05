@@ -406,6 +406,12 @@ export function createWebHost(
         candidateReceiptId,
         request,
       ),
+    saveProviderIdentifier: (provider, grain, request) =>
+      (credential ? client : accessClient).saveProviderIdentifier(
+        provider,
+        grain,
+        request,
+      ),
     clearSearchCache(): void {},
     getSearchCacheSize(): number {
       return 0;

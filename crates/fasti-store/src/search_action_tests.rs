@@ -3,10 +3,11 @@ mod candidate_action_tests {
     include!("search_candidate_policy_tests.rs");
     use super::*;
     use fasti_application::{
-        CreateRecordCommand, IdentityPort, ProfileRecordStatePort, ScopeKey,
-        SearchCandidateActionCommand, SearchCandidateActionPreparation,
-        SearchCandidateActionReceipt, SearchCandidateEvidenceMode, SearchRecordAction,
-        SearchRecordActionDisposition, SetTrackingDispositionCommand,
+        CreateRecordCommand, IdentityPort, ProfileRecordStatePort, ProviderIdentifierActionCommand,
+        ProviderIdentifierActionPreparation, ScopeKey, SearchCandidateActionCommand,
+        SearchCandidateActionPreparation, SearchCandidateActionReceipt,
+        SearchCandidateEvidenceMode, SearchRecordAction, SearchRecordActionDisposition,
+        SetTrackingDispositionCommand,
     };
     use fasti_domain::{Grain, OperationId, RecordId, TrackingDisposition};
 
@@ -108,6 +109,49 @@ mod candidate_action_tests {
                 params![node.access.grant_id().to_string(), scope],
             )
             .unwrap();
+    }
+
+    fn provider_identifier_fixture() -> (
+        TestNode,
+        ProviderIdentifierActionCommand,
+        fasti_domain::ExternalIdentifierClaim,
+    ) {
+        let (node, request) = setup();
+        node.kernel
+            .put_provider_capability_state(
+                node.access.workspace_id(),
+                state_for("metadata.read", 1),
+            )
+            .unwrap();
+        let command = ProviderIdentifierActionCommand {
+            correlation_id: request.correlation_id,
+            access: request.access,
+            outbound_policy: request.outbound_policy,
+            terms_revision: "tmdb-v1".into(),
+            operation_id: OperationId::new_v7(),
+            provider: ProviderId::try_new("tmdb").unwrap(),
+            provider_record_id: "42".into(),
+            grain: Grain::Film,
+            action: SearchRecordAction::Create,
+        };
+        let identifier = fasti_application::provider_identity_mapping_for_grain(
+            command.provider.as_str(),
+            command.grain,
+        )
+        .unwrap()
+        .identifier(command.provider_record_id.clone())
+        .unwrap();
+        (node, command, identifier)
+    }
+
+    fn act_provider_identifier(
+        node: &TestNode,
+        command: &ProviderIdentifierActionCommand,
+        identifier: &fasti_domain::ExternalIdentifierClaim,
+    ) -> ApplicationResult<fasti_application::ProviderIdentifierActionReceipt> {
+        let prepared = node.kernel.prepare_provider_identifier_action(command)?;
+        node.kernel
+            .commit_provider_identifier_action(command, &prepared, identifier)
     }
 
     #[test]
@@ -598,5 +642,196 @@ mod candidate_action_tests {
             assert_eq!(rows(&node, MUTATION_TABLES), before);
             assert_eq!(rows(&node, UNRELATED_TABLES), unrelated);
         }
+    }
+
+    #[test]
+    fn provider_identifier_action_saves_once_replays_and_rejects_changed_intent() {
+        let (node, command, identifier) = provider_identifier_fixture();
+        let prepared = node
+            .kernel
+            .prepare_provider_identifier_action(&command)
+            .unwrap();
+        assert!(matches!(
+            prepared,
+            ProviderIdentifierActionPreparation::Refetch { .. }
+        ));
+        let saved = node
+            .kernel
+            .commit_provider_identifier_action(&command, &prepared, &identifier)
+            .unwrap();
+        assert_eq!(saved.disposition, SearchRecordActionDisposition::Created);
+        assert_eq!(
+            node.kernel
+                .prepare_provider_identifier_action(&command)
+                .unwrap(),
+            ProviderIdentifierActionPreparation::Replay(Box::new(saved.clone()))
+        );
+        let before = rows(&node, MUTATION_TABLES);
+        assert_eq!(
+            act_provider_identifier(&node, &command, &identifier).unwrap(),
+            saved
+        );
+        assert_eq!(rows(&node, MUTATION_TABLES), before);
+
+        let mut changed = command.clone();
+        changed.provider_record_id = "43".into();
+        let changed_identifier = fasti_application::provider_identity_mapping_for_grain(
+            changed.provider.as_str(),
+            changed.grain,
+        )
+        .unwrap()
+        .identifier(changed.provider_record_id.clone())
+        .unwrap();
+        assert_eq!(
+            act_provider_identifier(&node, &changed, &changed_identifier)
+                .unwrap_err()
+                .code(),
+            ProblemCode::IdempotencyConflict
+        );
+        assert_eq!(rows(&node, MUTATION_TABLES), before);
+    }
+
+    #[test]
+    fn provider_identifier_action_retains_only_identity_and_durable_intent() {
+        let (node, command, identifier) = provider_identifier_fixture();
+        let saved = act_provider_identifier(&node, &command, &identifier).unwrap();
+        let connection = node.kernel.inner.connection.lock().unwrap();
+        for (table, expected) in [
+            ("records", 1_i64),
+            ("namespace_definitions", 1),
+            ("external_identifiers", 1),
+            ("search_action_receipts", 1),
+            ("search_pages", 0),
+            ("search_candidate_receipts", 0),
+            ("metadata_field_claims", 0),
+            ("metadata_claims", 0),
+            ("metadata_claim_provenance", 0),
+            ("metadata_projections", 0),
+            ("metadata_attributions", 0),
+            ("metadata_cache_entries", 0),
+            ("metadata_cache_claims", 0),
+            ("local_search_grams", 0),
+        ] {
+            assert_eq!(
+                connection
+                    .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                        row.get::<_, i64>(0)
+                    })
+                    .unwrap(),
+                expected,
+                "unexpected retained rows in {table}"
+            );
+        }
+        let identifier_row: (String, String, String) = connection
+            .query_row(
+                "SELECT record_id, namespace, value FROM external_identifiers",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            identifier_row,
+            (
+                saved.record_id.to_string(),
+                "tmdb.movie".into(),
+                "42".into()
+            )
+        );
+    }
+
+    #[test]
+    fn provider_identifier_action_is_atomic_and_rechecks_authority_only() {
+        let (node, mut command, identifier) = provider_identifier_fixture();
+        let prepared = node
+            .kernel
+            .prepare_provider_identifier_action(&command)
+            .unwrap();
+        let base = state_for("metadata.read", 2);
+        let observed = ProviderCapabilityState::try_new(
+            base.provider_id().clone(),
+            base.capability_id().clone(),
+            ProviderCapabilityStatus::Degraded,
+            base.capability_version(),
+            base.credential_requirement(),
+            base.credential_reference().cloned(),
+            base.credential_status(),
+            base.configuration_digest().clone(),
+            ProviderCheckMetadata::try_new(
+                fasti_application::ProviderCheckStatus::Unavailable,
+                Some(now()),
+                Some(ProblemCode::ProviderUnavailable),
+            )
+            .unwrap(),
+            base.credential_test().clone(),
+        )
+        .unwrap();
+        node.kernel
+            .put_provider_capability_state(node.access.workspace_id(), observed)
+            .unwrap();
+        node.kernel
+            .commit_provider_identifier_action(&command, &prepared, &identifier)
+            .unwrap();
+
+        command.operation_id = OperationId::new_v7();
+        command.provider_record_id = "43".into();
+        let identifier = fasti_application::provider_identity_mapping_for_grain(
+            command.provider.as_str(),
+            command.grain,
+        )
+        .unwrap()
+        .identifier(command.provider_record_id.clone())
+        .unwrap();
+        let prepared = node
+            .kernel
+            .prepare_provider_identifier_action(&command)
+            .unwrap();
+        node.kernel
+            .put_provider_capability_state(
+                node.access.workspace_id(),
+                ProviderCapabilityState::try_new(
+                    ProviderId::try_new("tmdb").unwrap(),
+                    ProviderCapabilityId::try_new("metadata.read").unwrap(),
+                    ProviderCapabilityStatus::Available,
+                    3,
+                    CredentialRequirement::BearerToken,
+                    Some(CredentialReference::try_new("secret:tmdb-test").unwrap()),
+                    ProviderCredentialStatus::StoredUnverified,
+                    ConfigurationDigest::parse("b".repeat(64)).unwrap(),
+                    ProviderCheckMetadata::never_run(),
+                    ProviderCheckMetadata::never_run(),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let before = rows(&node, MUTATION_TABLES);
+        assert_eq!(
+            node.kernel
+                .commit_provider_identifier_action(&command, &prepared, &identifier)
+                .unwrap_err()
+                .code(),
+            ProblemCode::Forbidden
+        );
+        assert_eq!(rows(&node, MUTATION_TABLES), before);
+
+        command.operation_id = OperationId::new_v7();
+        let prepared = node
+            .kernel
+            .prepare_provider_identifier_action(&command)
+            .unwrap();
+        let before = rows(&node, MUTATION_TABLES);
+        node.kernel
+            .inner
+            .connection
+            .lock()
+            .unwrap()
+            .execute_batch(
+                "CREATE TRIGGER reject_provider_identifier_receipt BEFORE INSERT ON search_action_receipts BEGIN SELECT RAISE(ABORT, 'fixture receipt failure'); END;",
+            )
+            .unwrap();
+        assert!(node
+            .kernel
+            .commit_provider_identifier_action(&command, &prepared, &identifier)
+            .is_err());
+        assert_eq!(rows(&node, MUTATION_TABLES), before);
     }
 }

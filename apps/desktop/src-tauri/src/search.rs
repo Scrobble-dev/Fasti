@@ -6,13 +6,14 @@ use crate::{
 use fasti_application::{
     CapabilityKey, FastiProblem, LocalSearchRequest, OutboundAccessPolicy, ProviderId,
     ProviderOperationLease, ReadSearchCandidateRequest, RequestAccessContext,
-    SearchCandidateActionCommand, SearchPageRequest, SearchPersistencePort, SearchProviderQuery,
-    SearchRecordAction,
+    ProviderIdentifierActionCommand, SearchCandidateActionCommand, SearchPageRequest,
+    SearchPersistencePort, SearchProviderQuery, SearchRecordAction,
 };
 use fasti_contracts::{
     LocalSearchCursorDto, LocalSearchRequestDto, RecordSummaryDto,
-    SearchCandidateActionRequest, SearchCandidateActionResponse, SearchCandidateDetailsResponse,
-    SearchProviderPageRequest, SearchProviderPageResponse, SearchRecordActionDto,
+    ProviderIdentifierActionRequest, ProviderIdentifierActionResponse, SearchCandidateActionRequest,
+    SearchCandidateActionResponse, SearchCandidateDetailsResponse, SearchProviderPageRequest,
+    SearchProviderPageResponse, SearchRecordActionDto,
 };
 use fasti_domain::{Grain, MetadataLocale, MetadataRegion, RequestCorrelationId, SearchQuery};
 use fasti_provider_runtime::{ProviderRuntime, ProviderSearchService};
@@ -56,6 +57,14 @@ pub(crate) struct CandidateActionInput {
     grain: String,
     candidate_receipt_id: String,
     request: SearchCandidateActionRequest,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ProviderIdentifierActionInput {
+    provider_id: String,
+    grain: String,
+    request: ProviderIdentifierActionRequest,
 }
 
 fn provider_query(
@@ -218,6 +227,48 @@ pub(crate) async fn save_candidate(
             correlation_id,
         ))
     })
+}
+
+pub(crate) async fn save_provider_identifier(
+    runtime: Arc<ProviderRuntime>,
+    kernel: Arc<SqliteKernel>,
+    access: RequestAccessContext,
+    policy: OutboundAccessPolicy,
+    input: ProviderIdentifierActionInput,
+    lease: ProviderOperationLease,
+) -> Result<ProviderIdentifierActionResponse, DesktopProblem> {
+    let action = match input.request.action {
+        SearchRecordActionDto::Create {} => SearchRecordAction::Create,
+        SearchRecordActionDto::Attach { record_id } => SearchRecordAction::Attach(
+            record_id
+                .parse()
+                .map_err(|_| DesktopProblem::invalid_input("The target Record is invalid."))?,
+        ),
+    };
+    let command = ProviderIdentifierActionCommand {
+        correlation_id: RequestCorrelationId::new_v7(),
+        access: access.into(),
+        outbound_policy: policy,
+        terms_revision: String::new(),
+        operation_id: input
+            .request
+            .operation_id
+            .parse()
+            .map_err(|_| DesktopProblem::invalid_input("The Search operation is invalid."))?,
+        provider: ProviderId::try_new(input.provider_id)
+            .map_err(|_| DesktopProblem::invalid_input("The Search provider is invalid."))?,
+        provider_record_id: input.request.provider_record_id,
+        grain: input
+            .grain
+            .parse()
+            .map_err(|_| DesktopProblem::invalid_input("The Search grain is invalid."))?,
+        action,
+    };
+    ProviderSearchService::new(runtime, kernel)
+        .save_provider_identifier(command, lease)
+        .await
+        .map(ProviderIdentifierActionResponse::from)
+        .map_err(|problem| DesktopProblem::application(&problem))
 }
 
 pub(crate) fn local_records(

@@ -69,9 +69,21 @@ pub(crate) fn reindex_overrides(
     Ok(())
 }
 
-/// Migration/restore callers supply their transaction. No source row or archive
-/// stream is changed; a failed rebuild rolls back with its enclosing operation.
 pub(crate) fn rebuild(connection: &Connection) -> rusqlite::Result<()> {
+    let completed = rebuild_cancellable(connection, || true)?;
+    debug_assert!(completed);
+    Ok(())
+}
+
+/// Restore supplies its transaction. No source row or archive stream is
+/// changed; cancellation rolls back with the enclosing operation.
+pub(crate) fn rebuild_cancellable(
+    connection: &Connection,
+    mut continue_rebuild: impl FnMut() -> bool,
+) -> rusqlite::Result<bool> {
+    if !continue_rebuild() {
+        return Ok(false);
+    }
     connection.execute("DELETE FROM local_search_grams", [])?;
     for sql in [
         "SELECT workspace_id, '', record_id, value FROM metadata_field_claims WHERE field_key IN ('core.title', 'core.original_title') ORDER BY record_id, field_key, source, fetched_at",
@@ -80,11 +92,14 @@ pub(crate) fn rebuild(connection: &Connection) -> rusqlite::Result<()> {
         let mut statement = connection.prepare(sql)?;
         let rows = statement.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?)))?;
         for row in rows {
+            if !continue_rebuild() {
+                return Ok(false);
+            }
             let (workspace, profile, record, value) = row?;
             index_text(connection, &workspace, &profile, &record, &value)?;
         }
     }
-    Ok(())
+    Ok(true)
 }
 
 const SELECT_CANDIDATES: &str = "

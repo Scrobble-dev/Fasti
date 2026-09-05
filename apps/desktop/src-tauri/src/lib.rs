@@ -54,6 +54,14 @@ use tauri::{
     Manager,
 };
 
+#[cfg(feature = "desktop-runtime")]
+#[derive(Serialize)]
+struct ProviderCandidateResponse {
+    #[serde(flatten)]
+    candidate: ProviderCandidate,
+    grain: &'static str,
+}
+
 #[cfg(all(feature = "desktop-runtime", not(target_os = "android")))]
 struct AccessServer {
     inner: Mutex<AccessServerInner>,
@@ -484,7 +492,7 @@ async fn read_provider_health(
 async fn search_provider(
     state: tauri::State<'_, DesktopState>,
     input: ProviderSearchInput,
-) -> Result<Vec<ProviderCandidate>, DesktopProblem> {
+) -> Result<Vec<ProviderCandidateResponse>, DesktopProblem> {
     let _provider_guard = state.provider_operation_gate.lock().await;
     let kernel = state.kernel()?;
     let access = records::require_access(
@@ -500,7 +508,15 @@ async fn search_provider(
         input,
         configuration.outbound_policy(),
     )
-    .await
+    .await?
+    .into_iter()
+    .map(|candidate| {
+        Ok(ProviderCandidateResponse {
+            grain: candidate.grain()?.as_str(),
+            candidate,
+        })
+    })
+    .collect()
 }
 
 #[cfg(feature = "desktop-runtime")]
@@ -580,6 +596,35 @@ async fn save_search_candidate(
             .await,
     );
     search::save_candidate(
+        runtime,
+        kernel,
+        access,
+        configuration.outbound_policy().clone(),
+        input,
+        lease,
+    )
+    .await
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command]
+async fn save_provider_identifier(
+    state: tauri::State<'_, DesktopState>,
+    input: search::ProviderIdentifierActionInput,
+) -> Result<fasti_contracts::ProviderIdentifierActionResponse, DesktopProblem> {
+    let kernel = state.kernel()?;
+    let access = records::require_access(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+    )?;
+    let runtime = state.provider_runtime(&kernel)?;
+    let configuration = state.network.load()?;
+    let lease = ProviderOperationLease::new(
+        Arc::clone(&state.provider_operation_gate)
+            .lock_owned()
+            .await,
+    );
+    search::save_provider_identifier(
         runtime,
         kernel,
         access,
@@ -1105,6 +1150,7 @@ pub fn run() {
             search_provider_page,
             read_search_candidate,
             save_search_candidate,
+            save_provider_identifier,
             track_provider_candidate,
             apply_provider_metadata,
             refresh_metadata_claims,

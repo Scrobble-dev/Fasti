@@ -2,8 +2,8 @@
 
 use crate::{
     provider_identity_mapping, ApplicationAccessContext, ApplicationResult, AuthorizedActor,
-    AuthorizedApplicationAccess, OutboundAccessPolicy, ProblemCode, ProviderCapabilityState,
-    ProviderId,
+    AuthorizedApplicationAccess, CapabilityKey, FastiProblem, OutboundAccessPolicy, ProblemCode,
+    ProviderCapabilityState, ProviderId,
 };
 use chrono::{DateTime, Duration, Utc};
 use fasti_domain::{
@@ -70,6 +70,12 @@ pub enum ProviderCandidateDetailsOutcome {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderSearchActionOutcome {
     Saved(Box<SearchCandidateActionReceipt>),
+    Unavailable { problem: ProblemCode },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProviderIdentifierActionOutcome {
+    Saved(Box<ProviderIdentifierActionReceipt>),
     Unavailable { problem: ProblemCode },
 }
 
@@ -566,6 +572,78 @@ impl SearchCandidateActionReceipt {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct ProviderIdentifierActionCommand {
+    pub correlation_id: RequestCorrelationId,
+    pub access: ApplicationAccessContext,
+    pub outbound_policy: OutboundAccessPolicy,
+    pub terms_revision: String,
+    pub operation_id: fasti_domain::OperationId,
+    pub provider: ProviderId,
+    pub provider_record_id: String,
+    pub grain: Grain,
+    pub action: SearchRecordAction,
+}
+
+impl ProviderIdentifierActionCommand {
+    pub fn semantic_digest(&self) -> Sha256Digest {
+        search_digest(&(
+            "fasti.search.provider-identifier-action.v1",
+            self.provider.as_str(),
+            &self.provider_record_id,
+            self.grain,
+            self.action,
+        ))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProviderIdentifierActionPreparation {
+    Replay(Box<ProviderIdentifierActionReceipt>),
+    Refetch {
+        provider_state: ProviderCapabilityState,
+        provider_authority_fingerprint: Sha256Digest,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderIdentifierActionOrigin {
+    UserSelectedProviderIdentifier,
+}
+
+/// Durable user intent for a provider identifier. No provider response body,
+/// candidate snapshot, metadata provenance, or freshness is retained.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderIdentifierActionReceipt {
+    pub workspace_id: WorkspaceId,
+    pub profile_id: ProfileId,
+    pub actor_client_id: ClientId,
+    pub actor_subject_id: Option<AuthSubjectId>,
+    pub operation_id: fasti_domain::OperationId,
+    pub provider: String,
+    pub provider_record_id: String,
+    pub grain: Grain,
+    pub action: SearchRecordAction,
+    pub origin: ProviderIdentifierActionOrigin,
+    pub record_id: RecordId,
+    pub disposition: SearchRecordActionDisposition,
+    pub committed_at: DateTime<Utc>,
+}
+
+impl ProviderIdentifierActionReceipt {
+    pub fn semantic_digest(&self) -> Sha256Digest {
+        search_digest(&(
+            "fasti.search.provider-identifier-action.v1",
+            &self.provider,
+            &self.provider_record_id,
+            self.grain,
+            self.action,
+        ))
+    }
+}
+
 fn deserialize_action_status<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<fasti_domain::FieldClaimStatus, D::Error> {
@@ -697,6 +775,28 @@ pub trait SearchPersistencePort: Send + Sync {
             &crate::ProviderResponseCachePolicy,
         )>,
     ) -> ApplicationResult<SearchCandidateActionReceipt>;
+    fn prepare_provider_identifier_action(
+        &self,
+        command: &ProviderIdentifierActionCommand,
+    ) -> ApplicationResult<ProviderIdentifierActionPreparation> {
+        Err(Box::new(FastiProblem::from_code(
+            ProblemCode::CapabilityUnavailable,
+            CapabilityKey::AttachIdentifier,
+            command.correlation_id,
+        )))
+    }
+    fn commit_provider_identifier_action(
+        &self,
+        command: &ProviderIdentifierActionCommand,
+        _prepared: &ProviderIdentifierActionPreparation,
+        _confirmed_identifier: &ExternalIdentifierClaim,
+    ) -> ApplicationResult<ProviderIdentifierActionReceipt> {
+        Err(Box::new(FastiProblem::from_code(
+            ProblemCode::CapabilityUnavailable,
+            CapabilityKey::AttachIdentifier,
+            command.correlation_id,
+        )))
+    }
 }
 
 /// The allowlist persisted from provider search. No raw body or request headers.

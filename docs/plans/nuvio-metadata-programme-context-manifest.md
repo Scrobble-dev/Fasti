@@ -3130,3 +3130,66 @@ allocation or shared-file release occurred.
 ~~Codex Security~~ remains permanently outside this programme; its plugin, skills,
 scans and findings are not permitted gates or blockers. Ordinary review, QA,
 dependency advisories and product safeguards remain active.
+
+### 2026-09-05 — M4 exact-diff hardening and landing-capacity checkpoint
+
+The hardening unit starts from local parent
+`7ce1e28de652062b2277fdbaccf9aafe8fc3727f` on exact `origin/dev`
+`62e10d2e9bd738ed5da425c008eb839f89cdbea5`. It preserves the committed M4
+Search core and closes review findings without allocating another migration,
+archive version, provider, dependency or UI framework.
+
+Live provider results governed by `no-store` now use one identifier-only action
+instead of the durable-candidate action. The server re-fetches the exact selected
+provider coordinate, rechecks current authority, attaches or creates the Record
+and writes only the immutable user-intent receipt in the same transaction. It
+does not retain the provider response, candidate page, metadata claims, artwork,
+freshness or policy payload. Replay remains idempotent and makes no provider call.
+Archive v7 accepts this new receipt shape; frozen archive v6 rejects it while its
+published candidate-action shape still restores.
+
+The provider candidate contract now carries the canonical grain independently of
+provider display kind. SDK checks bind receipt, route and candidate grains. The
+Discover duplicate hint groups by canonical grain, and its regression deliberately
+uses different display kinds for one same-grain duplicate. The legacy Desktop
+search command projects the same required grain, so the retained fallback surface
+does not return a false host contract.
+
+Local Search restore rebuilding is cancellable and transactional. A release-only
+review caught the rebuild call inside `debug_assert!`; the call now executes in
+every build and only the completion assertion is debug-only. The optimized v16
+backfill regression passes. Record-action validation now uses one set-based grain
+check instead of per-Record lookups. The 10,000-Record fixture keeps the title
+policy cohort but puts 255/256/257/4096-row histories on `core.overview`, which is
+resolved by Record summaries without performing thousands of redundant gram
+writes. The first corrected run also found a fixture-only self-deadlock because
+the test retained the Store connection guard while re-entering Search; the test
+now drops that guard before the query. The final optimized 10,000-Record run
+passes the 250 ms policy: without observed policy p50 was 11.628607 ms, p95 was
+11.897566 ms and max was 12.581445 ms; with observed policy p50 was 13.014045 ms,
+p95 was 15.014603 ms and max was 16.510191 ms.
+
+Current exact-source checks pass: full Rust package tests, 353 JavaScript tests
+with 351 passes and 2 explicit skips, strict all-target Rust lint, generated
+contract validation, Desktop default-feature compilation, type checks, the
+26-test shell browser suite and the focused canonical-grain duplicate browser
+regression. The existing main-bundle warning remains visible at about 787.58 kB
+minified and 157.70 kB gzip; no warning threshold was suppressed.
+
+Independent review leaves one landing decision open. `search_action_receipts`
+limits each JSON body to 16 KiB but has no aggregate row/byte admission or governed
+retirement path. The cache quota, restore limit and later M11 synchronization
+quota do not own this durable replay table. Adding an arbitrary cap would
+eventually strand valid actions because rows are immutable and no authorized
+release flow exists. A correct lifecycle must freeze quota scope, row and byte
+ceilings, compaction or retention, replay after retirement, release authority,
+archive/restore behavior and concurrent admission. That likely needs the next
+shared migration and therefore cannot be invented before explicit v18 ownership
+is released. The prior local implementation-complete statement is not landing
+approval while this capacity decision remains open.
+
+No push, PR, merge, v18 allocation or shared-file release occurred. The commander
+remains the sole shared-surface writer. ~~Codex Security~~ is crossed out in both
+controlling programme documents and is not a requirement, gate, fallback or
+blocker going forward. Native review, QA, negative tests and product safeguards
+remain active.

@@ -5,6 +5,8 @@
     connectionEndpoint,
     type LocalSearchRequestDto,
     type LocalSearchResponseDto,
+    type ProviderIdentifierActionRequest,
+    type ProviderIdentifierActionResponse,
     type SearchCandidateActionRequest,
     type SearchCandidateActionResponse,
     type SearchCandidateDetailsResponse,
@@ -312,6 +314,14 @@
               candidate_receipt_id: candidateReceiptId,
               request,
             },
+          }),
+        saveProviderIdentifier: (
+          providerId: string,
+          grain: string,
+          request: ProviderIdentifierActionRequest,
+        ) =>
+          invoke<ProviderIdentifierActionResponse>("save_provider_identifier", {
+            input: { provider_id: providerId, grain, request },
           }),
         trackProviderCandidate: (selection) =>
           invoke("track_provider_candidate", { input: selection }),

@@ -1158,25 +1158,42 @@
   async function createRecordFromDiscover(
     candidate: ProviderSearchCandidate,
   ): Promise<CreateRecordResult> {
-    if (!canAccessProfileData || !host.trackProviderCandidate) {
+    if (!canAccessProfileData || !host.saveProviderIdentifier) {
       throw new Error(
         "Sign in before creating a Record from provider metadata.",
       );
     }
     const authorityIdentity = profileAuthorityIdentity;
-    const result = await host.trackProviderCandidate({
-      provider: candidate.provider,
-      provider_id: candidate.provider_id,
-      kind: candidate.kind,
-    });
+    const operationKey = `provider:${candidate.provider}:${candidate.grain}:${candidate.provider_id}:create`;
+    const operationId =
+      searchActionOperationIds.get(operationKey) ?? newOperationId();
+    searchActionOperationIds.set(operationKey, operationId);
+    const result = await host.saveProviderIdentifier(
+      candidate.provider,
+      candidate.grain,
+      {
+        operation_id: operationId,
+        provider_record_id: candidate.provider_id,
+        action: { kind: "create" },
+      },
+    );
     if (authorityIdentity !== profileAuthorityIdentity) {
       throw new Error(
         "Account access changed before the Record was confirmed.",
       );
     }
+    if (result.outcome === "unavailable") {
+      throw new Error(
+        `The provider could not confirm this identifier (${result.problem_code}).`,
+      );
+    }
+    searchActionOperationIds.delete(operationKey);
     recordsLoaded = false;
     await loadRecords();
-    return result;
+    return {
+      record_id: result.receipt.record_id,
+      grain: result.receipt.grain,
+    };
   }
 
   async function searchProvider(
@@ -1870,7 +1887,7 @@
             onOpenSettings={openProviderSettings}
             onRetry={() => loadDiscover()}
             onCandidateAction={canAccessProfileData &&
-            host.trackProviderCandidate
+            host.saveProviderIdentifier
               ? createRecordFromDiscover
               : undefined}
             onCandidateReceiptAction={canAccessProfileData &&
