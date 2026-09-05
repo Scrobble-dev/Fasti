@@ -992,8 +992,13 @@ routes remain separate.
 PAT bearer authentication is accepted only by data/integration operations whose
 authored capability explicitly allows a PAT actor. Every browser administration
 route under `/api/access/` rejects PAT and client bearer credentials before
-handler execution and still requires the C1 cookie, CSRF, Host, Origin, session,
-membership, and recent-authentication boundary.
+handler execution. Read-only inventory uses the existing C1 validated browser
+read boundary and rechecks the cookie session, current membership and resource
+ownership inside the transaction. Mutations additionally use the C1 mutation
+boundary, including CSRF and Origin checks, and require recent authentication
+for sensitive operations. Inventory reads do not require the mutation/recent-auth
+envelope; this preserves the read-only delivery disposition in section 2 and
+the existing `AccessInventoryQuery` contract. No browser trust check is bypassed.
 
 Add one governed `AcceptedActorKind` set with exactly
 `registered_client_credential`, `browser_session`, and
