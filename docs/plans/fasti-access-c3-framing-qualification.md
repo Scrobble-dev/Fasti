@@ -431,21 +431,23 @@ notice and recovery approval. Hosted checks and merged-tree proof remain open.
 ## GSTACK REVIEW REPORT
 
 Late PR130 workflow review amendment: both required root-manifest trigger paths
-already exist in pull_request (lines26–27), so no duplicate paths are added.
+already exist in pull_request (lines 26–27), so no duplicate paths are added.
 The required test-count contract is checked by local reviewers but not yet
-mechanically enforced in hosted steps. Add explicit matrix counts9/3 for
-signing and20/2 for framing; reuse one Bash debug/release loop in the existing
+mechanically enforced in hosted steps. Add explicit matrix counts of 9 unit
+tests + 3 doctests for signing and 20 unit tests + 2 doctests for framing;
+reuse one Bash debug/release loop in the existing
 job. Preserve raw output and pipefail, require exactly two success summaries
 with the frozen unit/doctest counts and zero failed/ignored/filtered cases.
 Do not add a separate runner framework, change assertions or rename status jobs.
 Verify both actual package suites and mutate retained summary input to prove
 missing, ignored, filtered, removed or failing tests reject before pushing.
 Completed for the working tree: exact authored workflow step passed both
-packages in debug/release (signing9+3; framing20+2). Raw logs are retained at
+packages in debug/release (signing: 9 unit tests + 3 doctests;
+framing: 20 unit tests + 2 doctests). Raw logs are retained at
 `/tmp/fasti-c3-count-workflow-HoCUZw`; evidence ledger
 `2026-09-05T21-05-13-089Z-qualification-counts-232841-c047b1a8.log`.
-All18 separately labelled synthetic count/exit sentinels passed, including
-Cargo exit7 propagation. Those sentinels are not native test executions.
+All 18 separately labelled synthetic count/exit sentinels passed, including
+Cargo exit 7 propagation. Those sentinels are not native test executions.
 Independent exact-delta review found no concrete defect. Frozen counts do not
 prove individual test identities or assertion quality; source review remains.
 
