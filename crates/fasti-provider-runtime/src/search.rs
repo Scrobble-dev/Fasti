@@ -355,6 +355,13 @@ mod tests {
     }
 
     impl SearchPersistencePort for Persistence {
+        fn search_local_records(
+            &self,
+            _: &LocalSearchRequest,
+        ) -> ApplicationResult<LocalSearchPage> {
+            panic!("provider pages must not own local Record search")
+        }
+
         fn prepare_search_page(
             &self,
             request: &SearchPageRequest,

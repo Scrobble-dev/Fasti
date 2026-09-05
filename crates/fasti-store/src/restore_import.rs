@@ -523,6 +523,7 @@ fn import_verified_pass_two(
     )?;
     repair_legacy_provider_coordinates_v1(&transaction).map_err(RestoreImportError::Sqlite)?;
     migrate_imported_legacy_metadata_v12(&transaction).map_err(RestoreImportError::Sqlite)?;
+    crate::local_search::rebuild(&transaction).map_err(RestoreImportError::Sqlite)?;
     verify_imported_database(&transaction, preflight.manifest(), correlation_id)?;
     crash_test_point("import", "verified");
     transaction.commit().map_err(RestoreImportError::Sqlite)?;
@@ -4781,6 +4782,19 @@ mod tests {
             fixture.second_profile_id.to_string(),
             "Second profile title".to_owned(),
         )));
+        // The archive contains authoritative metadata, not disposable postings.
+        // Rebuild must run after import and preserve private visibility partitions.
+        for (profile, gram, expected) in [
+            (fixture.first_profile_id, "fir", 1),
+            (fixture.second_profile_id, "sec", 1),
+            (fixture.second_profile_id, "fir", 0),
+        ] {
+            let count: i64 = database.query_row(
+                "SELECT COUNT(*) FROM local_search_grams WHERE profile_partition=?1 AND gram=?2 AND record_id=?3",
+                params![profile.to_string(), gram, fixture.record_id.to_string()], |r| r.get(0),
+            ).unwrap();
+            assert_eq!(count, expected);
+        }
         assert_eq!(
             database
                 .query_row(

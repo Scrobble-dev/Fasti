@@ -102,6 +102,21 @@ pub(crate) fn migrate(connection: &Connection) -> Result<()> {
 fn migrate_v16(connection: &Connection) -> Result<()> {
     let transaction = Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
     transaction.execute_batch(r#"
+        CREATE TABLE local_search_grams (
+            workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id),
+            profile_partition TEXT NOT NULL,
+            gram TEXT NOT NULL CHECK (length(gram) BETWEEN 1 AND 3),
+            record_id TEXT NOT NULL REFERENCES records(record_id) ON DELETE CASCADE,
+            PRIMARY KEY (workspace_id, profile_partition, gram, record_id)
+        ) STRICT, WITHOUT ROWID;
+        CREATE INDEX local_search_grams_record_idx
+            ON local_search_grams(workspace_id, profile_partition, record_id, gram);
+        CREATE TRIGGER local_search_grams_scope_insert BEFORE INSERT ON local_search_grams
+        WHEN NOT EXISTS (SELECT 1 FROM records WHERE record_id = NEW.record_id AND workspace_id = NEW.workspace_id)
+          OR (NEW.profile_partition <> '' AND NOT EXISTS (SELECT 1 FROM profiles WHERE profile_id = NEW.profile_partition AND workspace_id = NEW.workspace_id))
+        BEGIN SELECT RAISE(ABORT, 'invalid local search scope'); END;
+        CREATE TRIGGER local_search_grams_no_update BEFORE UPDATE ON local_search_grams
+        BEGIN SELECT RAISE(ABORT, 'rebuild local search postings instead of updating scope'); END;
         ALTER TABLE provider_capability_states ADD COLUMN authority_version INTEGER NOT NULL DEFAULT 1 CHECK (authority_version >= 1);
         UPDATE provider_capability_states SET authority_version = capability_version;
         CREATE TRIGGER provider_search_authority_changed AFTER UPDATE ON provider_capability_states
@@ -205,6 +220,7 @@ fn migrate_v16(connection: &Connection) -> Result<()> {
         CREATE TRIGGER search_candidates_immutable_update BEFORE UPDATE ON search_candidate_receipts
         BEGIN SELECT RAISE(ABORT, 'search candidate receipts are immutable'); END;
     "#)?;
+    crate::local_search::rebuild(&transaction)?;
     transaction.pragma_update(None, "user_version", 16)?;
     transaction.commit()
 }
@@ -3605,6 +3621,53 @@ mod tests {
         assert_eq!(connection.query_row("SELECT COUNT(*) FROM sqlite_schema WHERE name LIKE 'workspace_revision_%' AND tbl_name IN ('search_pages', 'search_candidate_receipts')", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
     }
 
+    #[test]
+    fn v16_backfills_local_search_from_published_title_and_private_override_rows() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .unwrap();
+        migrate_to_version_fourteen(&connection);
+        migrate_v15(&connection).unwrap();
+        let workspace = fasti_domain::WorkspaceId::new_v7().to_string();
+        let profile = fasti_domain::ProfileId::new_v7().to_string();
+        let record = fasti_domain::RecordId::new_v7().to_string();
+        connection
+            .execute(
+                "INSERT INTO workspaces(workspace_id,created_at) VALUES (?1,?2)",
+                params![workspace, CREATED_AT],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO profiles(profile_id,workspace_id,created_at) VALUES (?1,?2,?3)",
+                params![profile, workspace, CREATED_AT],
+            )
+            .unwrap();
+        connection.execute("INSERT INTO records(record_id,workspace_id,grain,status,created_at) VALUES (?1,?2,'film','active',?3)", params![record,workspace,CREATED_AT]).unwrap();
+        // Historical SQL fixture uses only the published v15 schema.
+        connection.execute("INSERT INTO metadata_field_claims(workspace_id,record_id,field_key,source,value,fetched_at,created_at) VALUES (?1,?2,'core.title','tmdb','Árbol 東京',?3,?3)", params![workspace,record,CREATED_AT]).unwrap();
+        connection.execute("INSERT INTO metadata_profile_field_overrides(workspace_id,profile_id,record_id,field_key,value,created_at,updated_at,origin) VALUES (?1,?2,?3,'core.title','Private title',?4,?4,'user')", params![workspace,profile,record,CREATED_AT]).unwrap();
+        migrate_v16(&connection).unwrap();
+        for (partition, gram, expected) in [
+            ("", "árb", 1),
+            ("", "東京", 1),
+            (profile.as_str(), "pri", 1),
+            ("", "pri", 0),
+        ] {
+            let count: i64 = connection.query_row("SELECT COUNT(*) FROM local_search_grams WHERE workspace_id=?1 AND profile_partition=?2 AND gram=?3 AND record_id=?4", params![workspace,partition,gram,record], |r| r.get(0)).unwrap();
+            assert_eq!(count, expected);
+        }
+        let original: String = connection
+            .query_row(
+                "SELECT value FROM metadata_field_claims WHERE record_id=?1",
+                [record],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(original, "Árbol 東京");
+    }
+
     #[cfg(target_os = "linux")]
     #[test]
     fn historical_v15_archive_v5_restores_into_v16() {
@@ -5586,6 +5649,7 @@ mod tests {
                 "metadata_cache_entries".to_owned(),
                 "metadata_cache_claims".to_owned(),
                 "metadata_refresh_receipts".to_owned(),
+                "local_search_grams".to_owned(),
                 "search_pages".to_owned(),
                 "search_candidate_receipts".to_owned(),
                 "trailbase_installation".to_owned(),

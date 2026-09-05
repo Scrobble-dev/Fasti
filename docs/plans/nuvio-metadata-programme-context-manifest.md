@@ -555,3 +555,70 @@ ID pagination is not a frozen snapshot under concurrent title/membership changes
 The 10,000-Record gate must measure the full authorized selection and enrichment,
 including extensive-history fixtures; returned-row bounds and SELECT counts do
 not prove bounded scanned work. Existing benchmark script ownership is retained.
+
+### M4 local Record Search implementation checkpoint — 2026-09-05
+
+Prior head `25f220c339963e60dd620ca0f97d641c1bf01613`, tree
+`891b9d655b0be7ce4536b633e07bae569a63e136`, passed all 27 exact-head contract
+gates with a clean receipt. The following local Search slice builds on it.
+
+The existing Search persistence port now implements authorized local Record
+Search without a provider, credential vault or remote call. Literal Unicode
+default-lowercase substring matching covers title and original title, including
+one-/two-character text and punctuation. A single SQLite 1/2/3-character posting
+index avoids a second FTS/short-query mechanism or new dependency. It is a
+candidate accelerator only: all matches pass through the existing profile
+metadata resolver. The Record-summary composition is shared with List Records,
+including exact identifiers and profile-scoped activity. No durable tag owner
+is invented; the existing projected tags are empty. Host/shortcut integration
+must use the explicit default-case contract rather than implicit locale casing.
+
+Public postings cover immutable title claims; private override postings are
+partitioned by profile. Claim writes share the existing savepoint. Override
+replacement rebuilds only its profile/Record postings within a savepoint;
+clearing one field retains its sibling's supported postings. Migration v16
+backfills published metadata rows. Restore rebuilds after legacy conversion and
+before final verification/commit. These disposable rows add no archive stream;
+published migrations v1–v15 and archive-v5's 34 streams remain unchanged.
+
+Each page reads at most 101 postings per public/current-profile partition,
+merges and deduplicates by canonical Record ID, inspects at most 100 IDs, and
+enriches only selected IDs. Grain filtering occurs after this bound. Cursor
+context binds query, grains, workspace, profile and current grant; every page
+reauthorizes. Rejected candidate batches can be empty and still carry a
+continuation. The cursor is a position, not an authorization grant or immutable
+result snapshot. Never label an empty page with continuation as exhausted.
+
+Native review found a measured planner defect: SQLite chose a workspace/grain
+covering index and scanned that workspace per candidate (51,323 VM steps at
+100 Records; 506,839 at 1,001). The query now uses the existing
+`records_workspace_record_idx`; unchanged zero-fullscan and <5,000-VM-step
+assertions pass, including absent/sparse grain filters. No new Record index
+was added. Read-only rereview found no P0/P1/P2 finding in the resulting diff.
+
+The initial optimized 10,000-Record fixture measured 100 samples:
+p50 1.371186 ms, p95 1.429666 ms, max 1.500475 ms. It exercises the full store
+call over short, Unicode, punctuation, common and missing queries, not merely
+posting lookup. This is dirty-slice store evidence, not exact merged-head,
+extensive-history, daemon, concurrent-workload or browser performance proof.
+Run it explicitly with `cargo test --release --locked -p fasti-store
+local_search_10000_records_release_latency -- --ignored --nocapture` and the
+physical TMPDIR. The benchmark refuses debug execution; its p95 <250 ms
+assertion is mandatory when explicitly run.
+
+All 324 then-current store tests passed (four ignored, including the explicit
+release benchmark). Additional populated-v15 backfill and archive-v3 private-
+partition rebuild tests pass. Direct-owner fault injection proves failed gram
+insertion rolls back source and index rows without relying on an outer
+transaction. Strict store Clippy passes. Full exact-head gates follow commit.
+
+Commander retains every shared production surface. One native agent owned only
+the new local Search test file and has released it; independent reviewers remained
+read-only. Codex Security is not used, per the user's repeated instruction.
+Next M4 work includes provider/local host composition, trusted provider-policy
+revision, details refetch, atomic Record actions/action receipts, generated
+contracts/SDK/UI and browser QA. The selected metadata loader still retains up
+to 256 claims per field across a page; extensive-history memory and scanned-work
+gates must be resolved within M4 before runtime completion is claimed. Streaming
+resolution must reuse the existing domain resolver, not truncate history or
+copy its precedence rules. No v17 allocation or shared-file release has occurred.

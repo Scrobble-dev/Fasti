@@ -159,6 +159,13 @@ fn prepare_partition(
 }
 
 impl SearchPersistencePort for SqliteKernel {
+    fn search_local_records(
+        &self,
+        request: &fasti_application::LocalSearchRequest,
+    ) -> ApplicationResult<fasti_application::LocalSearchPage> {
+        crate::local_search::search(self, request)
+    }
+
     fn prepare_search_page(
         &self,
         request: &SearchPageRequest,
