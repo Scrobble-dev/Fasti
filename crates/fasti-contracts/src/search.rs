@@ -1,8 +1,9 @@
 //! Provider Search representations. Receipt authority remains server-side.
 
 use fasti_application::{
-    SearchCacheState, SearchCandidate, SearchCandidateReceipt, SearchReceiptLifetime,
-    StoredSearchCandidate,
+    ProviderCandidateDetailsOutcome, ProviderSearchActionOutcome, ProviderSearchOutcome,
+    SearchCacheState, SearchCandidate, SearchCandidateReceipt, SearchProviderQuery,
+    SearchReceiptLifetime, StoredSearchCandidate,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -104,6 +105,40 @@ pub enum SearchProviderPageResponse {
         provider_id: String,
         problem_code: String,
     },
+}
+
+impl SearchProviderPageResponse {
+    /// Project a governed result with the validated request's route coordinates.
+    pub fn from_outcome(query: &SearchProviderQuery, outcome: ProviderSearchOutcome) -> Self {
+        let provider_id = query.provider().as_str().to_owned();
+        match outcome {
+            ProviderSearchOutcome::Live {
+                candidates,
+                next_page,
+            } => Self::Live {
+                provider_id,
+                page: query.page(),
+                candidates: candidates.iter().map(Into::into).collect(),
+                next_page,
+            },
+            ProviderSearchOutcome::Page {
+                page,
+                upstream_problem,
+            } => Self::Page {
+                provider_id,
+                page: query.page(),
+                candidates: page.candidates.iter().map(Into::into).collect(),
+                next_page: page.next_page,
+                cache_state: page.cache_state.into(),
+                lifetime: (&page.lifetime).into(),
+                upstream_problem: upstream_problem.map(|code| code.as_str().to_owned()),
+            },
+            ProviderSearchOutcome::Unavailable { problem } => Self::Unavailable {
+                provider_id,
+                problem_code: problem.as_str().to_owned(),
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
@@ -302,6 +337,56 @@ pub enum SearchCandidateDetailsResponse {
     },
 }
 
+impl From<Option<ProviderCandidateDetailsOutcome>> for SearchCandidateDetailsResponse {
+    fn from(value: Option<ProviderCandidateDetailsOutcome>) -> Self {
+        match value {
+            None => Self::Missing {},
+            Some(ProviderCandidateDetailsOutcome::Snapshot(snapshot)) => Self::Snapshot {
+                snapshot: (&snapshot).into(),
+            },
+            Some(ProviderCandidateDetailsOutcome::Unavailable { snapshot, problem }) => {
+                Self::Unavailable {
+                    snapshot: (&snapshot).into(),
+                    problem_code: problem.as_str().to_owned(),
+                }
+            }
+            Some(ProviderCandidateDetailsOutcome::Refetched {
+                snapshot,
+                details,
+                locale,
+            }) => Self::Refetched {
+                snapshot: (&snapshot).into(),
+                details: details.as_ref().into(),
+                locale: locale.map(|value| value.as_str().to_owned()),
+            },
+            Some(ProviderCandidateDetailsOutcome::RefetchedWithoutSnapshot {
+                candidate_receipt_id,
+                provider,
+                grain,
+                details,
+                locale,
+            }) => Self::RefetchedWithoutSnapshot {
+                candidate_receipt_id: candidate_receipt_id.to_string(),
+                provider_id: provider.as_str().to_owned(),
+                grain: grain.as_str().to_owned(),
+                details: details.as_ref().into(),
+                locale: locale.map(|value| value.as_str().to_owned()),
+            },
+            Some(ProviderCandidateDetailsOutcome::UnavailableWithoutSnapshot {
+                candidate_receipt_id,
+                provider,
+                grain,
+                problem,
+            }) => Self::UnavailableWithoutSnapshot {
+                candidate_receipt_id: candidate_receipt_id.to_string(),
+                provider_id: provider.as_str().to_owned(),
+                grain: grain.as_str().to_owned(),
+                problem_code: problem.as_str().to_owned(),
+            },
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SearchCandidateActionRequest {
@@ -485,9 +570,396 @@ pub enum SearchCandidateActionResponse {
     },
 }
 
+impl TryFrom<ProviderSearchActionOutcome> for SearchCandidateActionResponse {
+    type Error = &'static str;
+
+    fn try_from(value: ProviderSearchActionOutcome) -> Result<Self, Self::Error> {
+        Ok(match value {
+            ProviderSearchActionOutcome::Saved(receipt) => Self::Saved {
+                receipt: receipt.as_ref().try_into()?,
+            },
+            ProviderSearchActionOutcome::Unavailable { problem } => Self::Unavailable {
+                problem_code: problem.as_str().to_owned(),
+            },
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fasti_application::{
+        AuthorizedActor, AuthorizedApplicationAccess, ProblemCode, ProviderId,
+        ProviderResponseCachePolicy, ProviderResponseReuse, SearchCandidateActionReceipt,
+        SearchCandidateData, SearchCandidateEvidenceMode, SearchReceiptPartition,
+        SearchRecordAction, SearchRecordActionDisposition, StoredSearchPage,
+    };
+    use fasti_domain::{
+        AuthSubjectId, BrowserSessionId, ClientId, FieldClaimStatus, Grain, MetadataLocale,
+        OperationId, ProfileGrantId, ProfileId, RecordId, SearchCandidateReceiptId, SearchQuery,
+        Sha256Digest, WorkspaceId,
+    };
+
+    fn query() -> SearchProviderQuery {
+        SearchProviderQuery::try_new(
+            SearchQuery::try_new("private query").unwrap(),
+            ProviderId::try_new("tmdb").unwrap(),
+            7,
+            Some(MetadataLocale::try_new("fr-FR").unwrap()),
+            None,
+            vec![Grain::Film],
+        )
+        .unwrap()
+    }
+
+    fn snapshot() -> StoredSearchCandidate {
+        let context = query().receipt_context();
+        let life = SearchReceiptLifetime::try_new(
+            "2026-09-05T10:00:00Z".parse().unwrap(),
+            "2026-09-05T10:02:00Z".parse().unwrap(),
+            "2026-09-05T10:10:00Z".parse().unwrap(),
+            "2026-09-06T10:00:00Z".parse().unwrap(),
+        )
+        .unwrap();
+        let partition = SearchReceiptPartition::try_new(
+            AuthorizedApplicationAccess::new(
+                WorkspaceId::new_v7(),
+                ProfileId::new_v7(),
+                ProfileGrantId::new_v7(),
+                AuthorizedActor::BrowserSession {
+                    auth_subject_id: AuthSubjectId::new_v7(),
+                    browser_session_id: BrowserSessionId::new_v7(),
+                    grant_owner_client_id: ClientId::new_v7(),
+                },
+            ),
+            context.digest(),
+            Sha256Digest::from_bytes(&[1; 32]),
+            Sha256Digest::from_bytes(&[2; 32]),
+            "fixture.v1".into(),
+        )
+        .unwrap();
+        StoredSearchCandidate {
+            response_policy: ProviderResponseCachePolicy::new(
+                ProviderResponseReuse::Reusable,
+                life.created_at(),
+                std::time::Duration::ZERO,
+                None,
+                None,
+            ),
+            receipt: SearchCandidateReceipt::new(
+                SearchCandidateReceiptId::new_v7(),
+                partition,
+                SearchCandidate::try_new(SearchCandidateData {
+                    provider: "tmdb".into(),
+                    provider_id: "42".into(),
+                    kind: "movie".into(),
+                    title: "Original observation".into(),
+                    original_title: None,
+                    release_year: Some(2026),
+                    authors: vec![],
+                    image_url: None,
+                    overview: None,
+                })
+                .unwrap(),
+                Sha256Digest::from_bytes(&[3; 32]),
+                life,
+            ),
+            context,
+        }
+    }
+
+    #[test]
+    fn page_projection_preserves_context_continuation_receipts_and_lifetime() {
+        let snapshot = snapshot();
+        let candidate = snapshot.receipt.candidate();
+        let life = snapshot.receipt.lifetime();
+        for populated in [false, true] {
+            for next_page in [None, Some(8)] {
+                let candidates = if populated {
+                    vec![candidate.clone()]
+                } else {
+                    vec![]
+                };
+                assert_eq!(
+                    serde_json::to_value(SearchProviderPageResponse::from_outcome(
+                        &query(),
+                        ProviderSearchOutcome::Live {
+                            candidates,
+                            next_page
+                        }
+                    ))
+                    .unwrap(),
+                    serde_json::json!({"outcome":"live", "provider_id":"tmdb", "page":7,
+                        "candidates": if populated { vec![SearchCandidateDto::from(candidate)] } else { vec![] },
+                        "next_page":next_page}),
+                );
+                for (cache_state, state) in [
+                    (SearchCacheState::Fresh, "fresh"),
+                    (SearchCacheState::Observed, "observed"),
+                    (SearchCacheState::StaleOnError, "stale_on_error"),
+                ] {
+                    let upstream_problem = (cache_state == SearchCacheState::StaleOnError)
+                        .then_some(ProblemCode::ProviderResponseInvalid);
+                    let response = SearchProviderPageResponse::from_outcome(
+                        &query(),
+                        ProviderSearchOutcome::Page {
+                            page: StoredSearchPage {
+                                sequence: 91,
+                                candidates: if populated {
+                                    vec![snapshot.receipt.clone()]
+                                } else {
+                                    vec![]
+                                },
+                                next_page,
+                                cache_state,
+                                lifetime: life.clone(),
+                                response_digest: Sha256Digest::from_bytes(&[4; 32]),
+                            },
+                            upstream_problem,
+                        },
+                    );
+                    assert_eq!(
+                        serde_json::to_value(response).unwrap(),
+                        serde_json::json!({
+                            "outcome":"page", "provider_id":"tmdb", "page":7,
+                            "candidates": if populated { vec![SearchCandidateReceiptDto::from(&snapshot.receipt)] } else { vec![] },
+                            "next_page":next_page, "cache_state":state,
+                            "lifetime": SearchReceiptLifetimeDto::from(life),
+                            "upstream_problem":upstream_problem.map(|code| code.as_str()),
+                        })
+                    );
+                }
+            }
+        }
+        assert_eq!(
+            serde_json::to_value(SearchProviderPageResponse::from_outcome(
+                &query(),
+                ProviderSearchOutcome::Unavailable {
+                    problem: ProblemCode::ProviderResponseInvalid
+                }
+            ))
+            .unwrap(),
+            serde_json::json!({"outcome":"unavailable", "provider_id":"tmdb", "problem_code":"provider_response_invalid"})
+        );
+    }
+
+    #[test]
+    fn details_projection_keeps_original_evidence_separate_from_refetch() {
+        let snapshot = snapshot();
+        let original = SearchCandidateSnapshotDto::from(&snapshot);
+        let mut data = snapshot.receipt.candidate().data().clone();
+        data.title = "New observation".into();
+        let details = SearchCandidate::try_new(data).unwrap();
+        let dto = SearchCandidateDto::from(&details);
+        let receipt = snapshot.receipt.id();
+        for locale in [None, Some(MetadataLocale::try_new("en-US").unwrap())] {
+            for (outcome, expected) in [
+                (None, serde_json::json!({"outcome":"missing"})),
+                (
+                    Some(ProviderCandidateDetailsOutcome::Snapshot(snapshot.clone())),
+                    serde_json::json!({"outcome":"snapshot", "snapshot":original}),
+                ),
+                (
+                    Some(ProviderCandidateDetailsOutcome::Unavailable {
+                        snapshot: snapshot.clone(),
+                        problem: ProblemCode::ProviderResponseInvalid,
+                    }),
+                    serde_json::json!({"outcome":"unavailable", "snapshot":original, "problem_code":"provider_response_invalid"}),
+                ),
+                (
+                    Some(ProviderCandidateDetailsOutcome::Refetched {
+                        snapshot: snapshot.clone(),
+                        details: Box::new(details.clone()),
+                        locale: locale.clone(),
+                    }),
+                    serde_json::json!({"outcome":"refetched", "snapshot":original, "details":dto, "locale":locale.as_ref().map(|value| value.as_str())}),
+                ),
+                (
+                    Some(ProviderCandidateDetailsOutcome::RefetchedWithoutSnapshot {
+                        candidate_receipt_id: receipt,
+                        provider: query().provider().clone(),
+                        grain: Grain::Film,
+                        details: Box::new(details.clone()),
+                        locale: locale.clone(),
+                    }),
+                    serde_json::json!({"outcome":"refetched_without_snapshot", "candidate_receipt_id":receipt, "provider_id":"tmdb", "grain":"film", "details":dto, "locale":locale.as_ref().map(|value| value.as_str())}),
+                ),
+                (
+                    Some(
+                        ProviderCandidateDetailsOutcome::UnavailableWithoutSnapshot {
+                            candidate_receipt_id: receipt,
+                            provider: query().provider().clone(),
+                            grain: Grain::Film,
+                            problem: ProblemCode::ProviderResponseInvalid,
+                        },
+                    ),
+                    serde_json::json!({"outcome":"unavailable_without_snapshot", "candidate_receipt_id":receipt, "provider_id":"tmdb", "grain":"film", "problem_code":"provider_response_invalid"}),
+                ),
+            ] {
+                let actual =
+                    serde_json::to_value(SearchCandidateDetailsResponse::from(outcome)).unwrap();
+                assert_eq!(actual, expected);
+                assert!(
+                    serde_json::from_value::<SearchCandidateDetailsResponse>(actual.clone())
+                        .is_ok()
+                );
+                let mut mixed = actual.clone();
+                mixed[if actual.get("snapshot").is_none() {
+                    "snapshot"
+                } else {
+                    "candidate_receipt_id"
+                }] = serde_json::json!({});
+                assert!(serde_json::from_value::<SearchCandidateDetailsResponse>(mixed).is_err());
+                for required in ["candidate_receipt_id", "details"] {
+                    let mut incomplete = actual.clone();
+                    if incomplete
+                        .as_object_mut()
+                        .unwrap()
+                        .remove(required)
+                        .is_some()
+                    {
+                        assert!(serde_json::from_value::<SearchCandidateDetailsResponse>(
+                            incomplete
+                        )
+                        .is_err());
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn action_projection_preserves_history_and_rejects_invalid_status() {
+        let snapshot = snapshot();
+        let life = snapshot.receipt.lifetime();
+        let mut receipt = SearchCandidateActionReceipt {
+            workspace_id: WorkspaceId::new_v7(),
+            profile_id: ProfileId::new_v7(),
+            actor_client_id: ClientId::new_v7(),
+            actor_subject_id: Some(AuthSubjectId::new_v7()),
+            operation_id: OperationId::new_v7(),
+            candidate_receipt_id: snapshot.receipt.id(),
+            provider: "tmdb".into(),
+            grain: Grain::Film,
+            action: SearchRecordAction::Create,
+            evidence_mode: SearchCandidateEvidenceMode::Cached,
+            record_id: RecordId::new_v7(),
+            disposition: SearchRecordActionDisposition::Created,
+            search_context_digest: snapshot.context.digest(),
+            search_response_digest: Sha256Digest::from_bytes(&[3; 32]),
+            provenance: snapshot.metadata_fields().unwrap()[0]
+                .claim()
+                .provenance()
+                .clone(),
+            fetched_at: life.created_at(),
+            expires_at: Some(life.fresh_until()),
+            initial_status: FieldClaimStatus::Fresh,
+            committed_at: life.stale_until(),
+        };
+        for (
+            action,
+            mode,
+            status,
+            expiry,
+            disposition,
+            action_json,
+            mode_json,
+            status_json,
+            disposition_json,
+        ) in [
+            (
+                SearchRecordAction::Create,
+                SearchCandidateEvidenceMode::Cached,
+                FieldClaimStatus::Fresh,
+                None,
+                SearchRecordActionDisposition::Created,
+                serde_json::json!({"kind":"create"}),
+                "cached",
+                "fresh",
+                "created",
+            ),
+            (
+                SearchRecordAction::Create,
+                SearchCandidateEvidenceMode::Refetch,
+                FieldClaimStatus::Stale,
+                Some(life.fresh_until()),
+                SearchRecordActionDisposition::Reused,
+                serde_json::json!({"kind":"create"}),
+                "refetch",
+                "stale",
+                "reused",
+            ),
+            (
+                SearchRecordAction::Attach(receipt.record_id),
+                SearchCandidateEvidenceMode::Cached,
+                FieldClaimStatus::Stale,
+                None,
+                SearchRecordActionDisposition::Attached,
+                serde_json::json!({"kind":"attach", "record_id":receipt.record_id}),
+                "cached",
+                "stale",
+                "attached",
+            ),
+            (
+                SearchRecordAction::Attach(receipt.record_id),
+                SearchCandidateEvidenceMode::Refetch,
+                FieldClaimStatus::Fresh,
+                Some(life.fresh_until()),
+                SearchRecordActionDisposition::AlreadyAttached,
+                serde_json::json!({"kind":"attach", "record_id":receipt.record_id}),
+                "refetch",
+                "fresh",
+                "already_attached",
+            ),
+        ] {
+            receipt.action = action;
+            receipt.evidence_mode = mode;
+            receipt.initial_status = status;
+            receipt.expires_at = expiry;
+            receipt.disposition = disposition;
+            let response = SearchCandidateActionResponse::try_from(
+                ProviderSearchActionOutcome::Saved(Box::new(receipt.clone())),
+            )
+            .unwrap();
+            assert_eq!(
+                serde_json::to_value(response).unwrap(),
+                serde_json::json!({
+                    "outcome":"saved", "receipt": {
+                        "operation_id":receipt.operation_id, "candidate_receipt_id":receipt.candidate_receipt_id,
+                        "provider_id":"tmdb", "grain":"film", "action":action_json,
+                        "evidence_mode":mode_json, "record_id":receipt.record_id, "disposition":disposition_json,
+                        "fetched_at":life.created_at().to_rfc3339(), "expires_at":expiry.map(|at| at.to_rfc3339()),
+                        "initial_status":status_json, "committed_at":life.stale_until().to_rfc3339(),
+                    }
+                })
+            );
+        }
+        for status in [
+            FieldClaimStatus::Invalid,
+            FieldClaimStatus::Revoked,
+            FieldClaimStatus::Superseded,
+            FieldClaimStatus::Unavailable,
+        ] {
+            receipt.initial_status = status;
+            assert_eq!(
+                SearchCandidateActionResponse::try_from(ProviderSearchActionOutcome::Saved(
+                    Box::new(receipt.clone())
+                ))
+                .unwrap_err(),
+                "Search action receipt has invalid historical status"
+            );
+        }
+        assert_eq!(
+            serde_json::to_value(
+                SearchCandidateActionResponse::try_from(ProviderSearchActionOutcome::Unavailable {
+                    problem: ProblemCode::ProviderResponseInvalid
+                })
+                .unwrap()
+            )
+            .unwrap(),
+            serde_json::json!({"outcome":"unavailable", "problem_code":"provider_response_invalid"})
+        );
+    }
 
     #[test]
     fn create_action_rejects_attach_target_and_caller_metadata() {

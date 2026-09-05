@@ -2915,3 +2915,37 @@ reuse the application outcome types and contracts conversion across transports.
 Commander remains the sole shared writer. Agents provide read-only conversion
 test and current-diff review. No Codex Security, dependency, migration, archive,
 Access component, push, merge or shared-file release is part of this step.
+
+### 2026-09-05 — Shared Search outcome projection
+
+Completed the next bounded M4 integration unit: moved the three existing pure
+provider Search outcome enums to `fasti-application/src/search.rs`, preserving
+the runtime public reexports. The existing contracts Search owner now converts
+page, candidate-details and action outcomes. The API uses those conversions now;
+there is no unused adapter crate, dependency or speculative public response shape.
+Page projection uses the validated query's provider/page coordinates. Details
+retain all six results, including missing and snapshot-free refetch/failure.
+Action projection retains the existing fallible historical-status conversion;
+the API still owns correlation/capability-specific integrity errors and HTTP
+`private, no-store`. Runtime orchestration and Store policy remain unchanged.
+
+Focused verification passed: 6 contract Search tests, 24 API Search tests,
+24 application Search tests, 42 provider-runtime Search tests, and strict
+all-target clippy across those four crates. New table-driven contract checks cover
+live versus receipted pages, empty continuation, all cache states, exact receipt
+and lifetime fields, distinct snapshot/refetch evidence and locale, mixed-variant
+rejection, action/disposition/status/expiry alternatives and all four invalid
+historical evidence statuses. Exact JSON assertions exclude internal authority,
+digests and provenance. No UI behavior or accessibility claim changes in this unit.
+
+The `/review` checklist is scoped to this four-file integration delta against
+`e8b8b5c2`, not the complete unmerged programme. Commander reviewed the full diff;
+independent read-only review and clean canonical qualification are pending at
+this checkpoint. No branch PR exists. No full-branch clean landing review is
+asserted or recorded from this bounded pass. Reversing this pure refactor needs
+no data rollback; revert the four-file unit together before dependent Desktop
+callers land. v17/archive v7 and all Access ownership boundaries remain unchanged.
+
+Next: finish exact qualification, then wire the shared projections into the real
+Desktop commands and browser/Workbench Search flow, retaining native cancellation,
+authority fencing, canonical Record routes and atomic receipt-based actions.

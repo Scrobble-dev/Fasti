@@ -2,7 +2,8 @@
 
 use crate::{
     provider_identity_mapping, ApplicationAccessContext, ApplicationResult, AuthorizedActor,
-    AuthorizedApplicationAccess, OutboundAccessPolicy, ProviderCapabilityState, ProviderId,
+    AuthorizedApplicationAccess, OutboundAccessPolicy, ProblemCode, ProviderCapabilityState,
+    ProviderId,
 };
 use chrono::{DateTime, Duration, Utc};
 use fasti_domain::{
@@ -19,6 +20,58 @@ pub const SEARCH_STALE_ON_ERROR_SECONDS: i64 = 600;
 pub const SEARCH_RECEIPT_SECONDS: i64 = 24 * 60 * 60;
 pub const MAX_SEARCH_PAGE_CANDIDATES: usize = 100;
 pub const MAX_SEARCH_CONTEXT_BYTES: usize = 2048;
+
+/// One source's outcome. Source failure must not discard another source's local
+/// or remote results; authorization and persistence failures remain typed errors.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProviderSearchOutcome {
+    Live {
+        candidates: Vec<SearchCandidate>,
+        next_page: Option<u32>,
+    },
+    Page {
+        page: StoredSearchPage,
+        upstream_problem: Option<ProblemCode>,
+    },
+    Unavailable {
+        problem: ProblemCode,
+    },
+}
+
+/// Read-only observations. A refetch never replaces the immutable Search
+/// snapshot and is not authority to create or attach a Record.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProviderCandidateDetailsOutcome {
+    Snapshot(StoredSearchCandidate),
+    Refetched {
+        snapshot: StoredSearchCandidate,
+        details: Box<SearchCandidate>,
+        locale: Option<MetadataLocale>,
+    },
+    Unavailable {
+        snapshot: StoredSearchCandidate,
+        problem: ProblemCode,
+    },
+    RefetchedWithoutSnapshot {
+        candidate_receipt_id: SearchCandidateReceiptId,
+        provider: ProviderId,
+        grain: Grain,
+        details: Box<SearchCandidate>,
+        locale: Option<MetadataLocale>,
+    },
+    UnavailableWithoutSnapshot {
+        candidate_receipt_id: SearchCandidateReceiptId,
+        provider: ProviderId,
+        grain: Grain,
+        problem: ProblemCode,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProviderSearchActionOutcome {
+    Saved(Box<SearchCandidateActionReceipt>),
+    Unavailable { problem: ProblemCode },
+}
 
 /// Literal Unicode default-case substring matching; never SQL/FTS query syntax.
 /// Locale-specific casing and accent folding are not implicitly applied.
