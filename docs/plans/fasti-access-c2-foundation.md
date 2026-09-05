@@ -200,3 +200,20 @@ resource paths. Metadata released exact commit
 Reuse its standard-library `realpathSync` correction and scope regression;
 do not add another resolver or alter product transport. Preserve the failed
 local build receipt separately from the remote request-interception failure.
+
+### Observable configuration regression gate (2026-09-05)
+
+Review of `0d085fcb` identified a narrow coverage gap: the new configuration
+test checks source syntax, not physical-path behavior. The local symlinked
+build and CI artifact checks remain valid evidence, but CI does not create
+that symlink condition explicitly.
+
+Replace only the source-text assertion with a disposable directory fixture.
+Copy the actual configuration unchanged, link its output directory to a
+physical target, and load it with the already-installed Docusaurus loader.
+Assert the configured docs path resolves to that physical content directory;
+then remove the fixture's content and require configuration loading to fail.
+Keep the existing package-scope guard. Use no new dependency or production
+helper. Verify the focused test and canonical gates, obtain independent
+review, and refresh exact-head PR evidence before merge. This test correction
+supersedes the borrowed test blob, not metadata's production configuration fix.
