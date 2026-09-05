@@ -158,6 +158,12 @@ and theme checks with:
 pnpm test:ui
 ```
 
+For ordinary cases, use `pnpm test:ui --grep-invert @performance`.
+Run Lighthouse separately with `pnpm test:ui --grep @performance --workers=1 --retries=0 --output=test-results-performance`.
+The latter requires Node >=22.19 and an installed stable Chrome with the
+qualified interaction trace event; see the [Access performance guide](docs/plans/fasti-access-parallel-regressions.md#persistent-performance-sentinel-gate).
+CI refreshes Chrome only on its ephemeral runner, not on a contributor's host.
+
 The runner uses `127.0.0.1:4173` and a bounded health stub on
 `127.0.0.1:18422`, and it refuses to reuse occupied ports. It does not take over
 the documented local development URL at `127.0.0.1:5173`. A QA harness is
