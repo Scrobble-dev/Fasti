@@ -98,6 +98,30 @@ M4's reserved `metadata_search` must remain default-denied during integration.
 
 ## Rollback and proof limits
 
+### Inherited licence gate correction (2026-09-05)
+
+The exact-head canonical PR gate, RustSec audit and three-commit secret scan
+passed. The additional all-target licence gate failed on the existing
+`webpki-root-certs 1.0.9` CDLA-Permissive-2.0 declaration. The package and
+checksum are unchanged from merged `dev`; no new dependency caused this gap.
+Metadata confirmed that no writer owns `deny.toml` or `NOTICE` and released
+only this bounded policy/documentation correction to the Commander.
+
+Before delivery, retain the exact upstream agreement and checksum review in
+`third_party/webpki-root-certs/`, reference it from `NOTICE`, and add a
+crate-and-exact-version licence exception in `deny.toml`. Do not add this
+licence to the general allowlist, ignore the scanner, change dependencies,
+or touch integration/schema/transport files. Re-run the licence/source gate,
+verify the retained text and package hashes, and independently review this
+additional diff. The original 16 source/test/manifest blobs remain unchanged.
+
+The all-target graph includes a wasm32-only dependency declared by the
+platform verifier. It is absent from the checked Linux target graph. This is
+not proof of WebAssembly support or a Linux packaging violation. Any future
+artifact that shares this root data must include the retained agreement text;
+an SBOM identifier alone does not satisfy that delivery condition. No native
+package or packaged-Tauri support is activated by this correction.
+
 This PR writes no new durable data and changes no archive version. Before
 downstream consumers land, revert its coherent commits through a reviewed PR;
 never reset shared history. After consumers land, coordinate the revert with
