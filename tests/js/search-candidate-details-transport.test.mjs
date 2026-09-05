@@ -53,6 +53,21 @@ const unavailable = () => ({
   snapshot: snapshot(),
   problem_code: "provider_unavailable",
 });
+const refetchedWithoutSnapshot = () => ({
+  outcome: "refetched_without_snapshot",
+  candidate_receipt_id: receiptId,
+  provider_id: "tmdb",
+  grain: "film",
+  details: refetched().details,
+  locale: "en-ie",
+});
+const unavailableWithoutSnapshot = () => ({
+  outcome: "unavailable_without_snapshot",
+  candidate_receipt_id: receiptId,
+  provider_id: "tmdb",
+  grain: "film",
+  problem_code: "provider_unavailable",
+});
 const json = (value) =>
   new Response(JSON.stringify(value), {
     headers: { "content-type": "application/json" },
@@ -120,7 +135,7 @@ test("browser candidate details remain readable without a CSRF cookie", async ()
   }
 });
 
-test("candidate details parsers preserve all four distinct outcomes and snapshot lifetime", () => {
+test("candidate details parsers preserve all six distinct outcomes and original snapshot lifetime", () => {
   for (const offline of [true, false]) {
     assert.deepEqual(parseSearchCandidateDetailsQueryParameters({ offline }), {
       offline,
@@ -131,6 +146,8 @@ test("candidate details parsers preserve all four distinct outcomes and snapshot
     original(),
     refetched(),
     unavailable(),
+    refetchedWithoutSnapshot(),
+    unavailableWithoutSnapshot(),
   ]) {
     assert.deepEqual(parseSearchCandidateDetailsResponse(response), response);
   }
@@ -140,6 +157,186 @@ test("candidate details parsers preserve all four distinct outcomes and snapshot
     response.snapshot.receipt.candidate.overview,
   );
   assert.deepEqual(response.snapshot.lifetime, snapshot().lifetime);
+});
+
+test("online candidate details preserve locator-only outcomes without inventing cached evidence", async () => {
+  for (const response of [
+    refetchedWithoutSnapshot(),
+    unavailableWithoutSnapshot(),
+  ]) {
+    let calls = 0;
+    const client = clientWith(async (url, init) => {
+      calls += 1;
+      assert.equal(new URL(url).searchParams.get("offline"), "false");
+      assert.equal(init.method, "GET");
+      assert.equal(init.body, undefined);
+      assert.equal(new Headers(init.headers).get("x-csrf-token"), null);
+      return json(response);
+    });
+    const actual = await read(client, { offline: false });
+    assert.deepEqual(actual, response);
+    assert.equal(Object.hasOwn(actual, "snapshot"), false);
+    assert.equal(Object.hasOwn(actual, "lifetime"), false);
+    assert.equal(actual.candidate_receipt_id, receiptId);
+    assert.equal(actual.provider_id, "tmdb");
+    assert.equal(actual.grain, "film");
+    assert.deepEqual(
+      Object.keys(actual).sort(),
+      response.outcome === "refetched_without_snapshot"
+        ? [
+            "candidate_receipt_id",
+            "details",
+            "grain",
+            "locale",
+            "outcome",
+            "provider_id",
+          ]
+        : [
+            "candidate_receipt_id",
+            "grain",
+            "outcome",
+            "problem_code",
+            "provider_id",
+          ],
+    );
+    assert.equal(calls, 1);
+  }
+});
+
+test("snapshot-free candidate details bind both outcomes to the requested locator", async (context) => {
+  for (const factory of [
+    refetchedWithoutSnapshot,
+    unavailableWithoutSnapshot,
+  ]) {
+    for (const [field, value] of [
+      ["candidate_receipt_id", otherReceiptId],
+      ["provider_id", "google-books"],
+      ["grain", "series"],
+    ]) {
+      await context.test(`${factory.name} ${field}`, async () => {
+        const response = factory();
+        response[field] = value;
+        const client = clientWith(async () => json(response));
+        await assert.rejects(
+          read(client, { offline: false }),
+          FastiProtocolError,
+        );
+      });
+    }
+  }
+  const response = refetchedWithoutSnapshot();
+  response.details.provider = "google-books";
+  const client = clientWith(async () => json(response));
+  await assert.rejects(read(client, { offline: false }), FastiProtocolError);
+});
+
+test("snapshot-free candidate detail outcomes reject offline requests despite caller mutation", async (context) => {
+  for (const factory of [
+    refetchedWithoutSnapshot,
+    unavailableWithoutSnapshot,
+  ]) {
+    for (const offline of [false, true]) {
+      await context.test(`${factory.name} offline=${offline}`, async () => {
+        const query = { offline };
+        const response = factory();
+        let sentMode;
+        const client = clientWith(async (url) => {
+          sentMode = new URL(url).searchParams.get("offline");
+          return json(response);
+        });
+        const pending = read(client, query);
+        query.offline = !offline;
+        if (offline) await assert.rejects(pending, FastiProtocolError);
+        else assert.deepEqual(await pending, response);
+        assert.equal(sentMode, String(offline));
+      });
+    }
+  }
+});
+
+test("snapshot-free candidate detail variants reject cached payloads and private policy fields", () => {
+  for (const factory of [
+    refetchedWithoutSnapshot,
+    unavailableWithoutSnapshot,
+  ]) {
+    for (const [field, value] of [
+      ["snapshot", snapshot()],
+      ["lifetime", snapshot().lifetime],
+      ["receipt", snapshot().receipt],
+      ["partition", { profile_id: "private" }],
+      ["response_cache_policy", { reuse: "no_store" }],
+      ["raw_headers", { "cache-control": "no-store" }],
+      ["extra", true],
+    ]) {
+      const response = factory();
+      response[field] = value;
+      assert.throws(
+        () => parseSearchCandidateDetailsResponse(response),
+        FastiContractParseError,
+      );
+    }
+    for (const field of [
+      "candidate_receipt_id",
+      "provider_id",
+      "grain",
+      "outcome",
+    ]) {
+      const response = factory();
+      delete response[field];
+      assert.throws(
+        () => parseSearchCandidateDetailsResponse(response),
+        FastiContractParseError,
+      );
+    }
+  }
+});
+
+test("snapshot-free candidate details reject missing details and mixed outcome shapes", () => {
+  for (const mutate of [
+    (value) => {
+      delete value.details;
+    },
+    (value) => {
+      value.details = null;
+    },
+    (value) => {
+      value.details.title = "x".repeat(513);
+    },
+    (value) => {
+      value.details.extra = true;
+    },
+    (value) => {
+      value.problem_code = "provider_unavailable";
+    },
+    (value) => {
+      value.outcome = "refetched";
+    },
+  ]) {
+    const response = refetchedWithoutSnapshot();
+    mutate(response);
+    assert.throws(
+      () => parseSearchCandidateDetailsResponse(response),
+      FastiContractParseError,
+    );
+  }
+  for (const mutate of [
+    (value) => {
+      delete value.problem_code;
+    },
+    (value) => {
+      value.details = candidate();
+    },
+    (value) => {
+      value.outcome = "unavailable";
+    },
+  ]) {
+    const response = unavailableWithoutSnapshot();
+    mutate(response);
+    assert.throws(
+      () => parseSearchCandidateDetailsResponse(response),
+      FastiContractParseError,
+    );
+  }
 });
 
 test("candidate details reject missing mode, wrong types and forbidden query inputs before transport", () => {

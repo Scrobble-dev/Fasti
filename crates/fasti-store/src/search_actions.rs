@@ -178,6 +178,9 @@ fn prepare_tx(
         .ok_or_else(|| problem(ProblemCode::ValidationFailed, id))?;
     match command.evidence_mode {
         SearchCandidateEvidenceMode::Cached => {
+            if !candidate.payload_is_reusable(now()) {
+                return Err(problem(ProblemCode::ValidationFailed, id));
+            }
             Ok(SearchCandidateActionPreparation::Cached(candidate))
         }
         SearchCandidateEvidenceMode::Refetch => {

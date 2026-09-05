@@ -267,7 +267,7 @@ pub(crate) async fn search_provider_page(
     ),
     security(("credential_bearer" = []), ("browser_session_cookie" = [])),
     responses(
-        (status = 200, description = "Original snapshot, refetched details, source failure with snapshot, or non-enumerating missing outcome", body = SearchCandidateDetailsResponse),
+        (status = 200, description = "Reusable original snapshot, refetched details or source failure with an authorized locator and optional permitted snapshot, or non-enumerating missing outcome", body = SearchCandidateDetailsResponse),
         (status = 400, description = "Malformed request", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 413, description = "Request exceeds the Search body limit", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 415, description = "Unsupported request content type", body = ProblemDetails, content_type = "application/problem+json"),
@@ -311,6 +311,10 @@ pub(crate) async fn read_search_candidate(
         .candidate_details(request, query.offline, lease)
         .await
         .map_err(application_problem)?;
+    Ok(candidate_details_response(outcome))
+}
+
+fn candidate_details_response(outcome: Option<ProviderCandidateDetailsOutcome>) -> Response {
     let response = match outcome {
         None => SearchCandidateDetailsResponse::Missing {},
         Some(ProviderCandidateDetailsOutcome::Snapshot(snapshot)) => {
@@ -328,26 +332,41 @@ pub(crate) async fn read_search_candidate(
             snapshot,
             details,
             locale,
-        }) => {
-            let evidence = details.search_evidence().map_err(|_| {
-                application_problem(Box::new(FastiProblem::from_code(
-                    fasti_application::ProblemCode::ProviderResponseInvalid,
-                    CAPABILITY,
-                    id,
-                )))
-            })?;
-            SearchCandidateDetailsResponse::Refetched {
-                snapshot: (&snapshot).into(),
-                details: (&evidence).into(),
-                locale: locale.map(|value| value.as_str().to_owned()),
-            }
-        }
+        }) => SearchCandidateDetailsResponse::Refetched {
+            snapshot: (&snapshot).into(),
+            details: details.as_ref().into(),
+            locale: locale.map(|value| value.as_str().to_owned()),
+        },
+        Some(ProviderCandidateDetailsOutcome::RefetchedWithoutSnapshot {
+            candidate_receipt_id,
+            provider,
+            grain,
+            details,
+            locale,
+        }) => SearchCandidateDetailsResponse::RefetchedWithoutSnapshot {
+            candidate_receipt_id: candidate_receipt_id.to_string(),
+            provider_id: provider.as_str().to_owned(),
+            grain: grain.as_str().to_owned(),
+            details: details.as_ref().into(),
+            locale: locale.map(|value| value.as_str().to_owned()),
+        },
+        Some(ProviderCandidateDetailsOutcome::UnavailableWithoutSnapshot {
+            candidate_receipt_id,
+            provider,
+            grain,
+            problem,
+        }) => SearchCandidateDetailsResponse::UnavailableWithoutSnapshot {
+            candidate_receipt_id: candidate_receipt_id.to_string(),
+            provider_id: provider.as_str().to_owned(),
+            grain: grain.as_str().to_owned(),
+            problem_code: problem.as_str().to_owned(),
+        },
     };
-    Ok((
+    (
         [(header::CACHE_CONTROL, "private, no-store")],
         Json(response),
     )
-        .into_response())
+        .into_response()
 }
 
 #[utoipa::path(
@@ -575,6 +594,66 @@ pub(crate) fn router() -> Router<SearchApiState> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn search_candidate_snapshot_free_projection_serializes_only_authorized_outcome_fields() {
+        let candidate_receipt_id = fasti_domain::SearchCandidateReceiptId::new_v7();
+        let provider = ProviderId::try_new("tmdb").unwrap();
+        let details =
+            fasti_application::SearchCandidate::try_new(fasti_application::SearchCandidateData {
+                provider: "tmdb".into(),
+                provider_id: "42".into(),
+                kind: "movie".into(),
+                title: "New observation only".into(),
+                original_title: None,
+                release_year: Some(2026),
+                authors: vec![],
+                image_url: None,
+                overview: Some("New overview only".into()),
+            })
+            .unwrap();
+        for (outcome, expected) in [
+            (
+                ProviderCandidateDetailsOutcome::RefetchedWithoutSnapshot {
+                    candidate_receipt_id,
+                    provider: provider.clone(),
+                    grain: Grain::Film,
+                    details: Box::new(details),
+                    locale: Some(MetadataLocale::try_new("fr-FR").unwrap()),
+                },
+                serde_json::json!({
+                    "outcome": "refetched_without_snapshot", "candidate_receipt_id": candidate_receipt_id,
+                    "provider_id": "tmdb", "grain": "film", "locale": "fr-fr",
+                    "details": {"provider": "tmdb", "provider_id": "42", "kind": "movie",
+                        "title": "New observation only", "original_title": null, "release_year": 2026,
+                        "authors": [], "image_url": null, "overview": "New overview only"},
+                }),
+            ),
+            (
+                ProviderCandidateDetailsOutcome::UnavailableWithoutSnapshot {
+                    candidate_receipt_id,
+                    provider,
+                    grain: Grain::Film,
+                    problem: fasti_application::ProblemCode::ProviderResponseInvalid,
+                },
+                serde_json::json!({
+                    "outcome": "unavailable_without_snapshot", "candidate_receipt_id": candidate_receipt_id,
+                    "provider_id": "tmdb", "grain": "film", "problem_code": "provider_response_invalid",
+                }),
+            ),
+        ] {
+            let response = candidate_details_response(Some(outcome));
+            assert_eq!(
+                response.headers()[header::CACHE_CONTROL],
+                "private, no-store"
+            );
+            let bytes = axum::body::to_bytes(response.into_body(), 16 * 1024)
+                .await
+                .unwrap();
+            let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(value, expected);
+        }
+    }
 
     #[test]
     fn provider_query_reuses_byte_bounds_and_domain_grains() {

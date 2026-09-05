@@ -1,5 +1,6 @@
 mod candidate_action_tests {
     include!("search_action_negative_tests.rs");
+    include!("search_candidate_policy_tests.rs");
     use super::*;
     use fasti_application::{
         CreateRecordCommand, IdentityPort, ProfileRecordStatePort, ScopeKey,

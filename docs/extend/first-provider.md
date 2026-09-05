@@ -55,9 +55,12 @@ grant reuse; a newer restrictive page cannot fall back to an older permissive
 page. No-store page payloads do not enter SQLite or the WAL. After reauthorization,
 the store removes only older ephemeral pages in that same partition.
 
-Offline candidate reads, Record actions, metadata refresh and legacy Desktop
-conversion still need the same policy integration. Do not claim complete
-response-policy coverage across those separate consumers from page tests.
+Offline candidate payload reads and cached Record actions enforce retained-use
+permission independently of receipt retention. No-cache evidence cannot be
+reused; must-revalidate evidence requires remaining freshness. Metadata refresh,
+refetched Record actions, durable selected-field reuse and legacy Desktop
+conversion still need policy integration. Do not claim complete response-policy
+coverage across those separate consumers from Search tests.
 
 ## Provider Search transport
 
@@ -129,12 +132,22 @@ continues to use the separate provider operation above.
 requires an explicit `offline=true` or `offline=false` query parameter. The SDK
 operation is `readSearchCandidate(providerId, grain, receiptId, query, options)`.
 This read accepts current Search authority without browser CSRF mutation proof.
-Offline reads return the original authorized snapshot, including its original
+Offline reads return the original authorized, reusable snapshot, including its original
 lifetime. They do not renew the receipt or access the provider credential vault.
 Online reads refetch the stored provider coordinate and recheck authority before
 returning details or a source failure. Refetched fields stay separate from the
 snapshot; its lifetime is not the refetch time. Missing or inaccessible evidence
 returns the same missing outcome. All outcomes remain private/no-store.
+
+Retained coordinates can still authorize an online fetch when the original
+payload requires validation. In that case `refetched_without_snapshot` returns
+the existing receipt locator plus newly fetched details and effective locale;
+`unavailable_without_snapshot` returns the locator and source problem only.
+Neither outcome contains the original snapshot, its lifetime or response digest.
+The service checks the exact fetched identity against the retained coordinate
+before disclosure; a successful fetch does not prove the old payload unchanged.
+Both outcomes are online-only, and the SDK binds their locator to the submitted
+request. Old strict clients reject unfamiliar outcomes instead of misreading them.
 
 `POST` to that candidate path followed by `/actions` accepts only an
 `operation_id`, an `action` and an `evidence_mode`. Actions are `{ "kind": "create" }`
@@ -145,6 +158,9 @@ accepted. Browser saves require CSRF proof. Current `identity_write` permission
 is checked first. A new save also requires Search authority. A completed exact
 replay does not require its ephemeral Search receipt or Search permission, but
 still requires current identity-write authority and the original actor/profile.
+Cached saves recheck retained-use permission in both preparation and the commit
+transaction. Permitted historical evidence keeps its separate 24-hour retention
+window; it does not gain new metadata freshness or become Library membership.
 
 The existing transaction creates or reuses a Record, or attaches evidence to the
 explicit target. It does not change Library, progress or watched state. Refetch

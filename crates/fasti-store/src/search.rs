@@ -548,7 +548,8 @@ impl SearchPersistencePort for SqliteKernel {
         let transaction = map_sql(connection.transaction(), CAPABILITY, id)?;
         let access =
             authorize_application_transaction(&transaction, CAPABILITY, &request.access, id)?;
-        let result = read_search_candidate(&transaction, request, access)?;
+        let result = read_search_candidate(&transaction, request, access)?
+            .filter(|candidate| candidate.payload_is_reusable(now()));
         map_sql(transaction.commit(), CAPABILITY, id)?;
         Ok(result)
     }
@@ -724,7 +725,11 @@ pub(crate) fn read_search_candidate(
     if receipt.candidate().identifier().grain() != request.grain {
         return Ok(None);
     }
-    Ok(Some(StoredSearchCandidate { receipt, context }))
+    Ok(Some(StoredSearchCandidate {
+        receipt,
+        context,
+        response_policy: policy,
+    }))
 }
 
 fn read_candidates(

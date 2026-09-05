@@ -269,6 +269,37 @@ pub enum SearchCandidateDetailsResponse {
         snapshot: SearchCandidateSnapshotDto,
         problem_code: String,
     },
+    RefetchedWithoutSnapshot {
+        #[schemars(
+            length(equal = 36),
+            regex(pattern = r"^scr_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$")
+        )]
+        #[schema(
+            min_length = 36,
+            max_length = 36,
+            pattern = r"^scr_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+        )]
+        candidate_receipt_id: String,
+        provider_id: String,
+        grain: String,
+        details: SearchCandidateDto,
+        locale: Option<String>,
+    },
+    UnavailableWithoutSnapshot {
+        #[schemars(
+            length(equal = 36),
+            regex(pattern = r"^scr_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$")
+        )]
+        #[schema(
+            min_length = 36,
+            max_length = 36,
+            pattern = r"^scr_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+        )]
+        candidate_receipt_id: String,
+        provider_id: String,
+        grain: String,
+        problem_code: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
