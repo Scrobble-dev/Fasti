@@ -580,6 +580,7 @@ define_capabilities!(
             BrowserSessionExpired,
             BrowserSessionRevoked,
             CapabilityUnavailable,
+            CapacityExceeded,
             Forbidden,
             IdempotencyConflict,
             IdentityConflict,

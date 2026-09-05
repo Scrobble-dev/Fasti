@@ -45,7 +45,7 @@
       "next_actions": [
         {
           "id": "release_capacity",
-          "label": "Release retained capacity before retrying"
+          "label": "Increase or release governed capacity before retrying"
         }
       ],
       "param": null,
@@ -423,7 +423,7 @@
       "next_actions": [
         {
           "id": "release_capacity",
-          "label": "Release retained capacity before retrying"
+          "label": "Increase or release governed capacity before retrying"
         }
       ],
       "param": null,
@@ -2110,6 +2110,24 @@
     },
     {
       "capability_id": "identity.identifier.attach",
+      "code": "capacity_exceeded",
+      "detail": "bounded application capacity has been reached",
+      "next_actions": [
+        {
+          "id": "release_capacity",
+          "label": "Increase or release governed capacity before retrying"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 507,
+      "title": "Capacity exceeded",
+      "type": "https://fasti.scrobble.dev/v1/problems/capacity-exceeded"
+    },
+    {
+      "capability_id": "identity.identifier.attach",
       "code": "forbidden",
       "detail": "request is not authorized for this capability",
       "next_actions": [
@@ -3213,7 +3231,7 @@
       "next_actions": [
         {
           "id": "release_capacity",
-          "label": "Release retained capacity before retrying"
+          "label": "Increase or release governed capacity before retrying"
         }
       ],
       "param": null,
@@ -4023,7 +4041,7 @@
       "next_actions": [
         {
           "id": "release_capacity",
-          "label": "Release retained capacity before retrying"
+          "label": "Increase or release governed capacity before retrying"
         }
       ],
       "param": null,
@@ -4401,7 +4419,7 @@
       "next_actions": [
         {
           "id": "release_capacity",
-          "label": "Release retained capacity before retrying"
+          "label": "Increase or release governed capacity before retrying"
         }
       ],
       "param": null,
@@ -4815,7 +4833,7 @@
       "next_actions": [
         {
           "id": "release_capacity",
-          "label": "Release retained capacity before retrying"
+          "label": "Increase or release governed capacity before retrying"
         }
       ],
       "param": null,
@@ -5067,7 +5085,7 @@
       "next_actions": [
         {
           "id": "release_capacity",
-          "label": "Release retained capacity before retrying"
+          "label": "Increase or release governed capacity before retrying"
         }
       ],
       "param": null,

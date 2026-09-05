@@ -15,11 +15,61 @@ use serde::{Deserialize, Serialize};
 use std::{error::Error, fmt};
 
 pub const MAX_SEARCH_CANDIDATE_BYTES: usize = 64 * 1024;
+pub const MAX_SEARCH_ACTION_RECEIPT_BYTES: usize = 16 * 1024;
+pub const DEFAULT_SEARCH_ACTION_RECEIPT_ROWS: u64 = 10_000;
+pub const DEFAULT_SEARCH_ACTION_RECEIPT_JSON_BYTES: u64 =
+    DEFAULT_SEARCH_ACTION_RECEIPT_ROWS * MAX_SEARCH_ACTION_RECEIPT_BYTES as u64;
 pub const SEARCH_FRESH_SECONDS: i64 = 120;
 pub const SEARCH_STALE_ON_ERROR_SECONDS: i64 = 600;
 pub const SEARCH_RECEIPT_SECONDS: i64 = 24 * 60 * 60;
 pub const MAX_SEARCH_PAGE_CANDIDATES: usize = 100;
 pub const MAX_SEARCH_CONTEXT_BYTES: usize = 2048;
+
+/// Node-local admission for immutable Search action receipts.
+///
+/// Exact replay remains available at or above these limits. Only a new action
+/// is rejected, before its transaction commits any Record or metadata state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SearchActionReceiptLimits {
+    max_rows: u64,
+    max_receipt_json_bytes: u64,
+}
+
+impl SearchActionReceiptLimits {
+    pub const fn try_new(max_rows: u64, max_receipt_json_bytes: u64) -> Option<Self> {
+        if max_rows == 0
+            || max_receipt_json_bytes == 0
+            || max_rows > i64::MAX as u64
+            || max_receipt_json_bytes > i64::MAX as u64
+        {
+            return None;
+        }
+        Some(Self {
+            max_rows,
+            max_receipt_json_bytes,
+        })
+    }
+
+    pub const fn supported_default() -> Self {
+        Self {
+            max_rows: DEFAULT_SEARCH_ACTION_RECEIPT_ROWS,
+            max_receipt_json_bytes: DEFAULT_SEARCH_ACTION_RECEIPT_JSON_BYTES,
+        }
+    }
+
+    pub const fn max_rows(self) -> u64 {
+        self.max_rows
+    }
+
+    pub const fn max_receipt_json_bytes(self) -> u64 {
+        self.max_receipt_json_bytes
+    }
+
+    pub const fn meets_supported_floor(self) -> bool {
+        self.max_rows >= DEFAULT_SEARCH_ACTION_RECEIPT_ROWS
+            && self.max_receipt_json_bytes >= DEFAULT_SEARCH_ACTION_RECEIPT_JSON_BYTES
+    }
+}
 
 /// One source's outcome. Source failure must not discard another source's local
 /// or remote results; authorization and persistence failures remain typed errors.
@@ -1392,5 +1442,18 @@ mod tests {
             assert!(!receipt.is_readable(&changed, lifetime().created_at()));
         }
         assert!(!receipt.is_readable(&first, lifetime().expires_at()));
+    }
+
+    #[test]
+    fn action_receipt_limits_are_nonzero_bounded_and_have_a_supported_floor() {
+        assert!(SearchActionReceiptLimits::try_new(0, 1).is_none());
+        assert!(SearchActionReceiptLimits::try_new(1, 0).is_none());
+        assert!(SearchActionReceiptLimits::try_new(u64::MAX, 1).is_none());
+        let small = SearchActionReceiptLimits::try_new(1, 1).unwrap();
+        assert!(!small.meets_supported_floor());
+        let supported = SearchActionReceiptLimits::supported_default();
+        assert!(supported.meets_supported_floor());
+        assert_eq!(supported.max_rows(), 10_000);
+        assert_eq!(supported.max_receipt_json_bytes(), 163_840_000);
     }
 }

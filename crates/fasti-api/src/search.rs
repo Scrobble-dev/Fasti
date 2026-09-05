@@ -318,7 +318,8 @@ fn candidate_details_response(outcome: Option<ProviderCandidateDetailsOutcome>) 
         (status = 422, description = "Invalid candidate locator or action intent", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 500, description = "Receipt state failed integrity checks", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 501, description = "Provider capability is unavailable", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 503, description = "Storage is unavailable", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 503, description = "Storage is unavailable", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 507, description = "Search action receipt capacity is exhausted", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 pub(crate) async fn save_search_candidate(
@@ -412,7 +413,8 @@ pub(crate) async fn save_search_candidate(
         (status = 422, description = "Invalid provider identifier or action intent", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 500, description = "Receipt state failed integrity checks", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 501, description = "Provider capability is unavailable", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 503, description = "Storage is unavailable", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 503, description = "Storage is unavailable", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 507, description = "Search action receipt capacity is exhausted", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 pub(crate) async fn save_provider_identifier(

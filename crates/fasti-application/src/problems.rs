@@ -235,7 +235,7 @@ define_problem_catalog!(
         detail: ProblemDetail::Static("bounded application capacity has been reached"),
         documentation_path: "v1/problems/capacity-exceeded", safe_state: NoMutation,
         retryability: RetryAfterCorrection,
-        default_next_action: ("release_capacity", "Release retained capacity before retrying"),
+        default_next_action: ("release_capacity", "Increase or release governed capacity before retrying"),
         param_policy: ProblemParamPolicy::None
     },
     CapabilityUnavailable => "capability_unavailable" {

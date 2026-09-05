@@ -3193,3 +3193,44 @@ remains the sole shared-surface writer. ~~Codex Security~~ is crossed out in bot
 controlling programme documents and is not a requirement, gate, fallback or
 blocker going forward. Native review, QA, negative tests and product safeguards
 remain active.
+
+### 2026-09-05 — M4 immutable action-receipt capacity closure
+
+The open M4 landing finding is closed without a new migration, archive version,
+table, index, dependency or capability ID. Search action receipts remain
+immutable, non-expiring audit and replay evidence. One node-local admission
+policy now bounds new receipts per workspace at 10,000 rows and 163,840,000
+canonical JSON bytes by default. Those defaults cover one maximum-size 16 KiB
+receipt for every Record in the supported 10,000-Record workload. Local
+environment configuration can raise either ceiling but cannot lower the
+supported floor. No client can choose the limits.
+
+Current identity-mutation authority and Search authority are checked before
+capacity is disclosed. Exact replay and changed-intent conflict detection occur
+before quota admission. A new action rechecks aggregate row and byte use inside
+the same immediate transaction before inserting its canonical receipt. Capacity
+exhaustion returns the existing `capacity_exceeded` problem and rolls back all
+Record, namespace, identifier, metadata and receipt work. Existing reads and
+exact replay remain available at or above the ceiling. The recovery label now
+truthfully permits increasing or releasing governed capacity; this receipt
+family has no automatic deletion or compaction path.
+
+Focused tests prove the row ceiling, independent byte ceiling, late exact-byte
+rollback, replay and idempotency precedence, shared candidate/identifier quota,
+operator increase, and two simultaneous writers competing for the final slot.
+The latter admits exactly one receipt and leaves one Record and identifier.
+Strict application/store/API lint is green. The full Store suite passed with
+467 tests and 6 explicit ignores using the documented physical temporary path;
+the API suite passed 97 tests plus 7 integration tests. Generated registry,
+OpenAPI, problem catalogue, capability example and SDK artifacts are byte-stable.
+The dirty-tree contract run passed every substantive gate and correctly refused
+to emit an exact-head receipt before commit.
+
+A read-only 10,000-row worst-case SQLite probe used the existing composite
+primary key for the workspace lookup. The 163,840,000-byte aggregate took about
+80 ms cold with about 6.7 MiB resident memory; two consecutive scans took about
+160 ms. This evidence does not justify a derived counter, extra index or schema
+change. Archive v7 remains unchanged and v18/archive v8 remain unallocated.
+There was no push, PR, merge or shared-file release in this checkpoint.
+~~Codex Security~~ remains permanently excluded; native exact-diff review found
+and closed the recovery-copy mismatch.

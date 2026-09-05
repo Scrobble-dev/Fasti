@@ -4,12 +4,16 @@ mod candidate_action_tests {
     use super::*;
     use fasti_application::{
         CreateRecordCommand, IdentityPort, ProfileRecordStatePort, ProviderIdentifierActionCommand,
-        ProviderIdentifierActionPreparation, ScopeKey, SearchCandidateActionCommand,
+        ProviderIdentifierActionPreparation, ReadSearchCandidateRequest, ScopeKey,
+        SearchCandidateActionCommand,
         SearchCandidateActionPreparation, SearchCandidateActionReceipt,
-        SearchCandidateEvidenceMode, SearchRecordAction, SearchRecordActionDisposition,
+        SearchCandidateEvidenceMode, SearchActionReceiptLimits, SearchRecordAction,
+        SearchRecordActionDisposition,
         SetTrackingDispositionCommand,
     };
-    use fasti_domain::{Grain, OperationId, RecordId, TrackingDisposition};
+    use fasti_domain::{
+        Grain, OperationId, RecordId, SearchCandidateReceiptId, TrackingDisposition,
+    };
 
     fn fixture() -> (
         TestNode,
@@ -116,7 +120,17 @@ mod candidate_action_tests {
         ProviderIdentifierActionCommand,
         fasti_domain::ExternalIdentifierClaim,
     ) {
-        let (node, request) = setup();
+        provider_identifier_fixture_with_limits(SearchActionReceiptLimits::supported_default())
+    }
+
+    fn provider_identifier_fixture_with_limits(
+        limits: SearchActionReceiptLimits,
+    ) -> (
+        TestNode,
+        ProviderIdentifierActionCommand,
+        fasti_domain::ExternalIdentifierClaim,
+    ) {
+        let node = TestNode::with_search_action_receipt_limits(limits);
         node.kernel
             .put_provider_capability_state(
                 node.access.workspace_id(),
@@ -124,9 +138,9 @@ mod candidate_action_tests {
             )
             .unwrap();
         let command = ProviderIdentifierActionCommand {
-            correlation_id: request.correlation_id,
-            access: request.access,
-            outbound_policy: request.outbound_policy,
+            correlation_id: RequestCorrelationId::new_v7(),
+            access: node.access.into(),
+            outbound_policy: OutboundAccessPolicy::default(),
             terms_revision: "tmdb-v1".into(),
             operation_id: OperationId::new_v7(),
             provider: ProviderId::try_new("tmdb").unwrap(),
@@ -689,6 +703,257 @@ mod candidate_action_tests {
             ProblemCode::IdempotencyConflict
         );
         assert_eq!(rows(&node, MUTATION_TABLES), before);
+    }
+
+    #[test]
+    fn action_receipt_quota_blocks_only_new_operations_and_can_be_raised_locally() {
+        let limits = SearchActionReceiptLimits::try_new(1, 1024 * 1024).unwrap();
+        let (node, command, identifier) = provider_identifier_fixture_with_limits(limits);
+        let saved = act_provider_identifier(&node, &command, &identifier).unwrap();
+        let before = rows(&node, MUTATION_TABLES);
+
+        assert_eq!(
+            act_provider_identifier(&node, &command, &identifier).unwrap(),
+            saved,
+            "exact replay remains available at the limit"
+        );
+        let mut changed_intent = command.clone();
+        changed_intent.provider_record_id = "43".into();
+        let changed_identifier = fasti_application::provider_identity_mapping_for_grain(
+            changed_intent.provider.as_str(),
+            changed_intent.grain,
+        )
+        .unwrap()
+        .identifier(changed_intent.provider_record_id.clone())
+        .unwrap();
+        assert_eq!(
+            act_provider_identifier(&node, &changed_intent, &changed_identifier)
+                .unwrap_err()
+                .code(),
+            ProblemCode::IdempotencyConflict,
+            "operation conflicts take precedence over capacity"
+        );
+        changed_intent.operation_id = OperationId::new_v7();
+        assert_eq!(
+            act_provider_identifier(&node, &changed_intent, &changed_identifier)
+                .unwrap_err()
+                .code(),
+            ProblemCode::CapacityExceeded
+        );
+        let candidate_action = SearchCandidateActionCommand {
+            request: ReadSearchCandidateRequest {
+                correlation_id: RequestCorrelationId::new_v7(),
+                access: node.access.into(),
+                candidate_receipt_id: SearchCandidateReceiptId::new_v7(),
+                provider: ProviderId::try_new("tmdb").unwrap(),
+                grain: Grain::Film,
+                outbound_policy: OutboundAccessPolicy::default(),
+                terms_revision: "tmdb-v1".into(),
+            },
+            operation_id: OperationId::new_v7(),
+            action: SearchRecordAction::Create,
+            evidence_mode: SearchCandidateEvidenceMode::Cached,
+        };
+        assert_eq!(
+            node.kernel
+                .prepare_search_candidate_action(&candidate_action)
+                .unwrap_err()
+                .code(),
+            ProblemCode::CapacityExceeded,
+            "candidate and identifier-only actions share one receipt quota"
+        );
+        assert_eq!(rows(&node, MUTATION_TABLES), before);
+
+        let retained_bytes = u64::try_from(
+            node
+            .kernel
+            .inner
+            .connection
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT length(CAST(receipt_json AS BLOB)) FROM search_action_receipts",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        let (root, access) = node.into_stopped();
+        let kernel = SqliteKernel::open_with_search_action_receipt_limits(
+            root.path(),
+            SearchActionReceiptLimits::try_new(2, retained_bytes).unwrap(),
+        )
+        .unwrap();
+        changed_intent.access = access.into();
+        assert_eq!(
+            kernel
+                .prepare_provider_identifier_action(&changed_intent)
+                .unwrap_err()
+                .code(),
+            ProblemCode::CapacityExceeded,
+            "the byte ceiling independently blocks new operations"
+        );
+        assert_eq!(
+            kernel
+                .prepare_provider_identifier_action(&command)
+                .unwrap(),
+            ProviderIdentifierActionPreparation::Replay(Box::new(saved)),
+            "exact replay remains available at the byte ceiling"
+        );
+        drop(kernel);
+
+        let kernel = SqliteKernel::open_with_search_action_receipt_limits(
+            root.path(),
+            SearchActionReceiptLimits::try_new(2, retained_bytes + 1).unwrap(),
+        )
+        .unwrap();
+        let prepared = kernel
+            .prepare_provider_identifier_action(&changed_intent)
+            .unwrap();
+        assert_eq!(
+            kernel
+                .commit_provider_identifier_action(
+                    &changed_intent,
+                    &prepared,
+                    &changed_identifier,
+                )
+                .unwrap_err()
+                .code(),
+            ProblemCode::CapacityExceeded,
+            "the exact receipt size is rechecked after mutation work"
+        );
+        {
+            let connection = kernel.inner.connection.lock().unwrap();
+            for table in ["records", "external_identifiers", "search_action_receipts"] {
+                assert_eq!(
+                    connection
+                        .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                            row.get::<_, i64>(0)
+                        })
+                        .unwrap(),
+                    1,
+                    "late byte admission must roll back {table}"
+                );
+            }
+        }
+        drop(kernel);
+
+        let kernel = SqliteKernel::open_with_search_action_receipt_limits(
+            root.path(),
+            SearchActionReceiptLimits::try_new(2, retained_bytes + 1024 * 1024).unwrap(),
+        )
+        .unwrap();
+        let prepared = kernel
+            .prepare_provider_identifier_action(&changed_intent)
+            .unwrap();
+        kernel
+            .commit_provider_identifier_action(
+                &changed_intent,
+                &prepared,
+                &changed_identifier,
+            )
+            .unwrap();
+        assert_eq!(
+            kernel
+                .inner
+                .connection
+                .lock()
+                .unwrap()
+                .query_row("SELECT COUNT(*) FROM search_action_receipts", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            2
+        );
+    }
+
+    #[test]
+    fn simultaneous_final_slot_allows_exactly_one_new_action() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let limits = SearchActionReceiptLimits::try_new(1, 1024 * 1024).unwrap();
+        let (node, first, identifier) = provider_identifier_fixture_with_limits(limits);
+        let mut second = first.clone();
+        second.operation_id = OperationId::new_v7();
+        let commands = [first, second];
+        let preparations = commands.each_ref().map(|command| {
+            node.kernel
+                .prepare_provider_identifier_action(command)
+                .unwrap()
+        });
+        let connection = node.kernel.inner.connection.lock().unwrap();
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (start_tx, start_rx) = mpsc::channel();
+        let start_rx = std::sync::Arc::new(std::sync::Mutex::new(start_rx));
+        let (result_tx, result_rx) = mpsc::channel();
+        let workers = commands
+            .into_iter()
+            .zip(preparations)
+            .map(|(command, prepared)| {
+                let kernel = node.kernel.clone();
+                let identifier = identifier.clone();
+                let ready = ready_tx.clone();
+                let start = start_rx.clone();
+                let result = result_tx.clone();
+                std::thread::spawn(move || {
+                    ready.send(()).unwrap();
+                    start
+                        .lock()
+                        .unwrap()
+                        .recv_timeout(Duration::from_secs(10))
+                        .unwrap();
+                    result
+                        .send(
+                            kernel
+                                .commit_provider_identifier_action(
+                                    &command,
+                                    &prepared,
+                                    &identifier,
+                                )
+                                .map(|_| ())
+                                .map_err(|error| error.code()),
+                        )
+                        .unwrap();
+                })
+            })
+            .collect::<Vec<_>>();
+        drop(ready_tx);
+        drop(result_tx);
+        for _ in 0..2 {
+            ready_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        }
+        start_tx.send(()).unwrap();
+        start_tx.send(()).unwrap();
+        drop(connection);
+        let results = (0..2)
+            .map(|_| result_rx.recv_timeout(Duration::from_secs(10)).unwrap())
+            .collect::<Vec<_>>();
+        for worker in workers {
+            worker.join().unwrap();
+        }
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        assert_eq!(
+            results
+                .iter()
+                .filter(|result| matches!(result, Err(ProblemCode::CapacityExceeded)))
+                .count(),
+            1
+        );
+        let connection = node.kernel.inner.connection.lock().unwrap();
+        for table in ["records", "external_identifiers", "search_action_receipts"] {
+            assert_eq!(
+                connection
+                    .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                        row.get::<_, i64>(0)
+                    })
+                    .unwrap(),
+                1,
+                "{table}"
+            );
+        }
     }
 
     #[test]
