@@ -2109,8 +2109,7 @@ impl PersistedFieldClaimRow {
 
 pub(crate) struct RecordListMetadata {
     policy: MetadataProjectionPolicy,
-    claims: HashMap<(RecordId, FieldKey), Vec<FieldClaim>>,
-    overrides: HashMap<(RecordId, FieldKey), ProfileFieldOverride>,
+    resolved: HashMap<(RecordId, FieldKey), ResolvedField>,
     resolved_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -2123,16 +2122,73 @@ impl RecordListMetadata {
         correlation_id: RequestCorrelationId,
     ) -> ApplicationResult<fasti_domain::ResolvedField> {
         let key = (record_id, field_key.clone());
-        resolve_profile_field(
-            self.overrides.get(&key),
-            self.claims.get(&key).map(Vec::as_slice).unwrap_or_default(),
-            &[],
-            &self.policy,
-            self.resolved_at,
-        )
-        .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))
+        if let Some(resolved) = self.resolved.get(&key) {
+            return Ok(resolved.clone());
+        }
+        resolve_profile_field(None, &[], &[], &self.policy, self.resolved_at)
+            .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))
     }
 }
+
+// Keep selection/sorting on narrow keys. LIMIT -1 prevents flattening the ordered
+// subquery; CROSS JOIN keeps payload reads after that coroutine. The outer
+// ORDER BY is still explicit, and the bundled-SQLite plan is regression-tested.
+const SELECT_RECORD_METADATA: &str = r#"
+    WITH page_records AS (
+        SELECT record_id FROM records
+        WHERE workspace_id = ?1 AND status = 'active'
+          AND record_id IN (SELECT value FROM json_each(?2))
+    ), requested_fields AS (
+        SELECT DISTINCT column1 AS field_key FROM (VALUES (?3), (?4), (?5), (?6), (?7))
+    ), selected_keys AS (
+        SELECT provenance.record_id, provenance.field_key, provenance.source,
+               provenance.fetched_at, provenance.claim_id
+        FROM page_records page
+        CROSS JOIN requested_fields field
+        CROSS JOIN metadata_claim_provenance provenance
+        WHERE provenance.claim_id IN (
+            SELECT recent.claim_id
+            FROM metadata_claim_provenance recent
+                INDEXED BY metadata_claim_provenance_recent_idx
+            CROSS JOIN metadata_field_claims claim
+                INDEXED BY metadata_field_claims_record_field_idx
+              ON claim.workspace_id = recent.workspace_id
+             AND claim.record_id = recent.record_id
+             AND claim.field_key = recent.field_key
+             AND claim.source = recent.source
+             AND claim.fetched_at = recent.fetched_at
+            WHERE recent.workspace_id = ?1 AND recent.record_id = page.record_id
+              AND recent.field_key = field.field_key
+            ORDER BY recent.fetched_at DESC, recent.source DESC LIMIT ?8
+        )
+    )
+    SELECT selected.record_id, selected.field_key, provenance.claim_id,
+           selected.source, claim.value, claim.locale,
+           provenance.provider_id, provenance.source_record_id,
+           provenance.region, provenance.source_version,
+           provenance.evidence_digest, provenance.provenance_state,
+           selected.fetched_at, claim.expires_at,
+           COALESCE((
+               SELECT lifecycle.status
+               FROM metadata_claim_lifecycle_events lifecycle
+               WHERE lifecycle.claim_id = provenance.claim_id
+               ORDER BY lifecycle.sequence DESC LIMIT 1
+           ), provenance.initial_status)
+    FROM (
+        SELECT * FROM selected_keys
+        ORDER BY record_id, field_key, fetched_at DESC, source DESC LIMIT -1
+    ) selected
+    CROSS JOIN metadata_field_claims claim
+      ON claim.record_id = selected.record_id
+     AND claim.field_key = selected.field_key
+     AND claim.source = selected.source
+     AND claim.fetched_at = selected.fetched_at
+     AND claim.workspace_id = ?1
+    CROSS JOIN metadata_claim_provenance provenance
+      ON provenance.claim_id = selected.claim_id AND provenance.workspace_id = ?1
+    ORDER BY selected.record_id, selected.field_key,
+             selected.fetched_at DESC, selected.source DESC
+"#;
 
 /// Resolve only the bounded set of Records selected by the caller's query.
 /// Record-list and Search pages share the same profile metadata policy.
@@ -2153,78 +2209,6 @@ pub(crate) fn load_record_metadata_batch(
         capability,
         correlation_id,
     )?;
-    let mut statement = map_sql(
-        connection.prepare(
-            r#"
-            WITH page_records AS (
-                SELECT record_id FROM records
-                WHERE workspace_id = ?1 AND status = 'active'
-                  AND record_id IN (SELECT value FROM json_each(?2))
-            ), ranked_claims AS (
-                SELECT claim.record_id, claim.field_key,
-                       provenance.claim_id, claim.source, claim.value, claim.locale,
-                       provenance.provider_id, provenance.source_record_id,
-                       provenance.region, provenance.source_version,
-                       provenance.evidence_digest, provenance.provenance_state,
-                       claim.fetched_at, claim.expires_at,
-                       COALESCE((
-                           SELECT lifecycle.status
-                           FROM metadata_claim_lifecycle_events lifecycle
-                           WHERE lifecycle.claim_id = provenance.claim_id
-                           ORDER BY lifecycle.sequence DESC
-                           LIMIT 1
-                       ), provenance.initial_status) AS status,
-                       ROW_NUMBER() OVER (
-                           PARTITION BY claim.record_id, claim.field_key
-                           ORDER BY claim.fetched_at DESC, claim.source DESC
-                       ) AS claim_rank
-                FROM metadata_field_claims claim
-                JOIN page_records page ON page.record_id = claim.record_id
-                JOIN metadata_claim_provenance provenance
-                  ON provenance.workspace_id = claim.workspace_id
-                 AND provenance.record_id = claim.record_id
-                 AND provenance.field_key = claim.field_key
-                 AND provenance.source = claim.source
-                 AND provenance.fetched_at = claim.fetched_at
-                WHERE claim.workspace_id = ?1
-                  AND claim.field_key IN (?3, ?4, ?5, ?6, ?7)
-            )
-            SELECT record_id, field_key, claim_id, source, value, locale,
-                   provider_id, source_record_id, region, source_version,
-                   evidence_digest, provenance_state, fetched_at, expires_at, status
-            FROM ranked_claims
-            WHERE claim_rank <= ?8
-            ORDER BY record_id, field_key, fetched_at DESC, source DESC
-            "#,
-        ),
-        capability,
-        correlation_id,
-    )?;
-    let rows = map_sql(
-        statement.query_map(
-            params![
-                workspace_id.to_string(),
-                record_ids_json,
-                field_keys[0].as_str(),
-                field_keys[1].as_str(),
-                field_keys[2].as_str(),
-                field_keys[3].as_str(),
-                field_keys[4].as_str(),
-                MAX_EFFECTIVE_FIELD_CLAIMS,
-            ],
-            PersistedFieldClaimRow::read,
-        ),
-        capability,
-        correlation_id,
-    )?;
-    let mut claims: HashMap<(RecordId, FieldKey), Vec<FieldClaim>> = HashMap::new();
-    for row in rows {
-        let (key, claim) =
-            map_sql(row, capability, correlation_id)?.decode(capability, correlation_id)?;
-        claims.entry(key).or_default().push(claim);
-    }
-    drop(statement);
-
     let mut statement = map_sql(
         connection.prepare(
             r#"
@@ -2300,11 +2284,83 @@ pub(crate) fn load_record_metadata_batch(
             )));
         }
     }
+    drop(statement);
+    let resolved_at = now();
+    let mut resolved = HashMap::new();
+    let mut statement = map_sql(
+        connection.prepare(SELECT_RECORD_METADATA),
+        capability,
+        correlation_id,
+    )?;
+    let rows = map_sql(
+        statement.query_map(
+            params![
+                workspace_id.to_string(),
+                record_ids_json,
+                field_keys[0].as_str(),
+                field_keys[1].as_str(),
+                field_keys[2].as_str(),
+                field_keys[3].as_str(),
+                field_keys[4].as_str(),
+                MAX_EFFECTIVE_FIELD_CLAIMS,
+            ],
+            PersistedFieldClaimRow::read,
+        ),
+        capability,
+        correlation_id,
+    )?;
+    {
+        let mut resolve_group = |key: (RecordId, FieldKey), claims: &[FieldClaim]| {
+            let value = resolve_profile_field(
+                overrides.remove(&key).as_ref(),
+                claims,
+                &[],
+                &policy,
+                resolved_at,
+            )
+            .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
+            if resolved.insert(key, value).is_some() {
+                return Err(Box::new(FastiProblem::integrity_failed(
+                    capability,
+                    correlation_id,
+                )));
+            }
+            Ok(())
+        };
+        // Retain one bounded field history, not every history in the page.
+        // Decode every selected claim even when a profile override wins.
+        let mut group_key = None;
+        let mut claims = Vec::new();
+        for row in rows {
+            let (key, claim) =
+                map_sql(row, capability, correlation_id)?.decode(capability, correlation_id)?;
+            if group_key.as_ref() != Some(&key) {
+                if let Some(previous) = group_key.replace(key) {
+                    resolve_group(previous, &claims)?;
+                    claims.clear();
+                }
+            }
+            if claims.len() >= MAX_EFFECTIVE_FIELD_CLAIMS as usize {
+                return Err(Box::new(FastiProblem::integrity_failed(
+                    capability,
+                    correlation_id,
+                )));
+            }
+            claims.push(claim);
+        }
+        if let Some(key) = group_key {
+            resolve_group(key, &claims)?;
+        }
+    }
+    for (key, override_) in overrides {
+        let value = resolve_profile_field(Some(&override_), &[], &[], &policy, resolved_at)
+            .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
+        resolved.insert(key, value);
+    }
     Ok(RecordListMetadata {
         policy,
-        claims,
-        overrides,
-        resolved_at: now(),
+        resolved,
+        resolved_at,
     })
 }
 
@@ -4325,6 +4381,10 @@ impl MetadataProjectionPort for SqliteKernel {
 }
 
 #[cfg(test)]
+#[path = "metadata_batch_tests.rs"]
+mod batch_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::test_support::TestNode;
@@ -4665,9 +4725,7 @@ mod tests {
             correlation_id,
         )
         .expect("selected metadata");
-        assert_eq!(metadata.claims.len(), 1);
-        assert_eq!(metadata.overrides.len(), 1);
-        assert_eq!(metadata.claims[&(selected, keys[0].clone())].len(), 1);
+        assert_eq!(metadata.resolved.len(), 1);
         assert_eq!(
             metadata
                 .resolve(selected, &keys[0], capability, correlation_id)
@@ -4695,7 +4753,7 @@ mod tests {
             correlation_id,
         )
         .expect("other profile metadata");
-        assert!(other.overrides.is_empty());
+        assert_eq!(other.resolved.len(), 1);
         assert_eq!(
             other
                 .resolve(selected, &keys[0], capability, correlation_id)
@@ -4713,7 +4771,7 @@ mod tests {
             correlation_id,
         )
         .expect("empty page");
-        assert!(empty.claims.is_empty() && empty.overrides.is_empty());
+        assert!(empty.resolved.is_empty());
         assert!(load_record_metadata_batch(
             &transaction,
             node.access.workspace_id(),

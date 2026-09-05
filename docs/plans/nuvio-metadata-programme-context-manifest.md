@@ -622,3 +622,84 @@ to 256 claims per field across a page; extensive-history memory and scanned-work
 gates must be resolved within M4 before runtime completion is claimed. Streaming
 resolution must reuse the existing domain resolver, not truncate history or
 copy its precedence rules. No v17 allocation or shared-file release has occurred.
+
+### M4 metadata-history memory and query-work checkpoint — 2026-09-05
+
+The preceding local Search commit `5d3ae4f9c97242794a1654c00b2dda6ad4e3bd2c`,
+tree `55972c175226ee64f8ff43933a9ed0fe6aa465b3`, passed all 27 contract gates
+with a clean exact-source receipt. Its optimized 10,000-Record Search fixture
+measured p50 1.421807 ms, p95 1.477787 ms and max 2.025606 ms over 100 samples.
+That fixture has sparse metadata history; it does not qualify dense history.
+
+The shared selected-Record metadata loader now resolves one field's bounded
+history at a time and retains only resolved results. It reuses the domain
+resolver, profile overrides and one batch timestamp. Every selected claim is
+still decoded and validated, including claims hidden by an override. The
+256-claim limit, source/time ordering, provenance, lifecycle status, policy,
+empty fields and public Record-summary interface are unchanged.
+
+One compound provenance index in unfrozen v16 selects the first 256 joinable
+claim keys per requested Record/field. The existing claim index supplies the
+covering existence check; payload values are read only after narrow-key sorting.
+The explicit outer order and bundled-SQLite query-plan assertions prevent a
+silent return to a page-wide payload sort. No new table, capability, dependency,
+resolver or cache owner was introduced by this hardening slice. Published
+migrations v1–v15, archive v5/34 streams, and C1 remain unchanged. Migration fault
+injection checks that the new index rolls back with the other v16 objects.
+
+Native differential checks cover 255/256/257 claims, exact selected IDs at a
+same-time/source tie, missing provenance before the cap, duplicate requested
+fields, sparse selected Records, mixed provider/locale/lifecycle history,
+override-only and empty fields, and corruption despite a winning override.
+Query-plan checks distinguish narrow-key sorting, covering existence reads and
+primary-key payload reads. Increasing a selected field from 256 to 4,096 claims
+does not increase the measured VM work or the eight constant-field scan steps.
+With the final covering read, the bundled-library regression records 40,275
+VM steps at both depths. The final sparse 10,000-Record Search run remains green:
+p50 1.427837 ms, p95 1.448247 ms, max 1.482007 ms over 100 samples.
+One test agent owned only `metadata_batch_tests.rs`; independent reviews and
+SQLite diagnostics were read-only. Commander retains all shared production
+files. Codex Security is not used.
+
+After the covering-index refinement, the full store suite passed: 333 unit
+tests and three integration tests, with five explicit ignored unit fixtures.
+Strict all-target store Clippy passed. These are working-tree results; clean
+exact-source contract verification follows the slice commit.
+
+The explicit dense release fixture uses 100 or 500 selected Records, five
+canonical fields, 256 claims per field and 4,096-byte values. It seeds a real
+disk database without retaining the fixture in a Rust vector and checks Linux
+process peak memory against 192 MiB. Run `cargo test --release --locked -p
+fasti-store metadata::batch_tests::metadata_batch_dense_release_memory_and_latency
+-- --ignored --exact --nocapture --test-threads=1`, with physical TMPDIR; set
+`FASTI_METADATA_BATCH_RECORDS=500` for the legacy List Records maximum.
+Before the final covering-index refinement, the bounded-query runs measured
+100 Records: median 4.798923821 s, max 4.988622487 s, peak 21,233,664 bytes;
+500 Records: median 29.990127061 s, max 76.583983004 s, peak 36,474,880 bytes.
+Memory passed; these timings do not meet interactive Search latency. Final
+covering-index measurement for 100 Records: median 2.932160553 s, max
+2.954091063 s, peak 20,926,464 bytes. This improves the measured batch without
+changing its inputs or skipping validation; latency is still not qualified.
+The final 500-Record run measured median 17.614984496 s, max 21.618950448 s,
+peak 37,019,648 bytes. Both final runs preserve the 192 MiB memory ceiling;
+neither is an interactive latency pass. Exact-source gates follow commit.
+
+Do not use persisted `metadata_projections` as an unproved shortcut: generic
+claim writes, other profiles, override/policy changes, lifecycle changes and
+expiry do not maintain their coherence. Restored projections are empty. Current
+reads must retain authoritative resolution and validation. Dense latency remains
+an active M4 gate alongside host composition, policy revision, details refetch,
+atomic actions, contracts and browser QA; it is not deferred to another stage.
+
+The parallel native GitHub advisory audit found current `fast-uri` 3.1.5 and
+`qs` 6.15.3 lockfile matches requiring bounded updates (patched versions reported
+as 3.1.6 and 6.16.0). Existing image-size patches and the documented Tauri/glib
+exception must not be discarded. Open grouped dependency PRs #123/#124 overlap
+these owners. Read-only inspection found neither fixes these two versions:
+#124 at `a06c9a0ec9a198ed568de5f4ddd2bcbd7eb0d622` retains both; #123 at
+`4e454d5360e164457b9dca88d47e00a19b61e071` changes only Rust dependencies.
+Ajv's existing range permits the fast-uri patch. Express/body-parser's qs tilde
+ranges do not permit 6.16.0; use the existing bounded override owner, preserve
+the parents, and verify their loopback docs-dev-server caller when updating.
+No M4 PR or hosted exact-M4-head review exists yet. No v17 allocation or shared-file release
+has occurred.
