@@ -48,6 +48,9 @@
     ProviderCredentialStatus,
     ProviderSearchCandidate,
     ProviderSelection,
+    SearchCandidateReceiptDto,
+    SearchCandidateDetailsResponse,
+    SearchProviderPageResponse,
     ResolveReviewInput,
     RecordSummary,
     ReviewItem,
@@ -720,6 +723,7 @@
   let discoverSelectionExplicit = $state(false);
   let discoverLoadId = 0;
   let discoverSectionActive = false;
+  const searchActionOperationIds = new Map<string, string>();
 
   async function loadDiscover(): Promise<void> {
     if (!canAccessProfileData) {
@@ -1014,6 +1018,7 @@
     recordActionNotice = undefined;
     clearDetailState();
     invalidateDiscoverProviders();
+    searchActionOperationIds.clear();
     reviewsLoadId += 1;
     reviews = [];
     reviewsLoaded = false;
@@ -1137,6 +1142,91 @@
       throw new Error("Account access changed before search completed.");
     }
     return results;
+  }
+
+  async function searchProviderPage(
+    provider: string,
+    query: string,
+    page: number,
+    offline: boolean,
+  ): Promise<SearchProviderPageResponse> {
+    if (!canAccessProfileData || !host.searchProviderPage) {
+      throw new Error("Sign in before searching configured providers.");
+    }
+    const authorityIdentity = profileAuthorityIdentity;
+    const results = await host.searchProviderPage(provider, {
+      query,
+      page,
+      locale: null,
+      region: null,
+      grains: [],
+      offline,
+    });
+    if (authorityIdentity !== profileAuthorityIdentity) {
+      throw new Error("Account access changed before search completed.");
+    }
+    return results;
+  }
+
+  async function saveSearchCandidate(
+    receipt: SearchCandidateReceiptDto,
+    evidenceMode: "cached" | "refetch",
+  ): Promise<CreateRecordResult> {
+    if (!canAccessProfileData || !host.saveSearchCandidate) {
+      throw new Error("Sign in before creating a Record from Search.");
+    }
+    const authorityIdentity = profileAuthorityIdentity;
+    const operationId =
+      searchActionOperationIds.get(receipt.candidate_receipt_id) ??
+      newOperationId();
+    searchActionOperationIds.set(receipt.candidate_receipt_id, operationId);
+    const result = await host.saveSearchCandidate(
+      receipt.candidate.provider,
+      receipt.grain,
+      receipt.candidate_receipt_id,
+      {
+        operation_id: operationId,
+        action: { kind: "create" },
+        evidence_mode: evidenceMode,
+      },
+    );
+    if (authorityIdentity !== profileAuthorityIdentity) {
+      throw new Error(
+        "Account access changed before the Record was confirmed.",
+      );
+    }
+    if (result.outcome === "unavailable") {
+      throw new Error(
+        `The provider could not confirm this candidate (${result.problem_code}).`,
+      );
+    }
+    searchActionOperationIds.delete(receipt.candidate_receipt_id);
+    recordsLoaded = false;
+    await loadRecords();
+    return {
+      record_id: result.receipt.record_id,
+      grain: result.receipt.grain,
+    };
+  }
+
+  async function readSearchCandidate(
+    receipt: SearchCandidateReceiptDto,
+    offline: boolean,
+  ): Promise<SearchCandidateDetailsResponse> {
+    if (!canAccessProfileData || !host.readSearchCandidate) {
+      throw new Error("Sign in before reading provider details.");
+    }
+    const authorityIdentity = profileAuthorityIdentity;
+    const result = await host.readSearchCandidate(
+      receipt.candidate.provider,
+      receipt.grain,
+      receipt.candidate_receipt_id,
+      offline,
+    );
+    if (authorityIdentity !== profileAuthorityIdentity) {
+      throw new Error("Account access changed before details completed.");
+    }
+    return result;
   }
 
   function resetClientEndpoint(): void {
@@ -1688,12 +1778,23 @@
             onSearchLocal={canAccessProfileData && host.searchRecords
               ? searchRecords
               : undefined}
+            onSearchProviderPage={canAccessProfileData &&
+            host.searchProviderPage
+              ? searchProviderPage
+              : undefined}
             onOpenRecord={(recordId) => openRecord(recordId)}
             onOpenSettings={openProviderSettings}
             onRetry={() => loadDiscover()}
             onCandidateAction={canAccessProfileData &&
             host.trackProviderCandidate
               ? createRecordFromDiscover
+              : undefined}
+            onCandidateReceiptAction={canAccessProfileData &&
+            host.saveSearchCandidate
+              ? saveSearchCandidate
+              : undefined}
+            onReadCandidate={canAccessProfileData && host.readSearchCandidate
+              ? readSearchCandidate
               : undefined}
           />
         {/key}

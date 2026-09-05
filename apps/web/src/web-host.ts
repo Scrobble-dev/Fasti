@@ -387,6 +387,25 @@ export function createWebHost(
         })),
       };
     },
+    searchProviderPage: (provider, request) =>
+      (credential ? client : accessClient).searchProviderPage(
+        provider,
+        request,
+      ),
+    readSearchCandidate: (provider, grain, candidateReceiptId, offline) =>
+      (credential ? client : accessClient).readSearchCandidate(
+        provider,
+        grain,
+        candidateReceiptId,
+        { offline },
+      ),
+    saveSearchCandidate: (provider, grain, candidateReceiptId, request) =>
+      (credential ? client : accessClient).saveSearchCandidate(
+        provider,
+        grain,
+        candidateReceiptId,
+        request,
+      ),
     clearSearchCache(): void {},
     getSearchCacheSize(): number {
       return 0;

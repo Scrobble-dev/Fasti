@@ -18,6 +18,11 @@ import type {
   ReadTrailBaseContinuationResponse,
   RefreshMetadataClaimsRequest,
   RefreshMetadataClaimsResponse,
+  SearchCandidateActionRequest,
+  SearchCandidateActionResponse,
+  SearchCandidateDetailsResponse,
+  SearchProviderPageRequest,
+  SearchProviderPageResponse,
   RevokeBrowserSessionsResponse,
   RotateBrowserSessionResponse,
   StartTrailBaseSignInRequest,
@@ -51,6 +56,13 @@ export type {
   RatingClaimDto,
   RefreshMetadataClaimsRequest,
   RefreshMetadataClaimsResponse,
+  SearchCandidateActionRequest,
+  SearchCandidateActionResponse,
+  SearchCandidateDto,
+  SearchCandidateDetailsResponse,
+  SearchCandidateReceiptDto,
+  SearchProviderPageRequest,
+  SearchProviderPageResponse,
   RevokeBrowserSessionsResponse,
   RotateBrowserSessionResponse,
   StartTrailBaseSignInRequest,
@@ -388,6 +400,22 @@ export interface WorkbenchHost {
   searchRecords?(
     request: LocalSearchRequestDto,
   ): Promise<LocalSearchResponseDto>;
+  searchProviderPage?(
+    provider: string,
+    request: SearchProviderPageRequest,
+  ): Promise<SearchProviderPageResponse>;
+  readSearchCandidate?(
+    provider: string,
+    grain: string,
+    candidateReceiptId: string,
+    offline: boolean,
+  ): Promise<SearchCandidateDetailsResponse>;
+  saveSearchCandidate?(
+    provider: string,
+    grain: string,
+    candidateReceiptId: string,
+    request: SearchCandidateActionRequest,
+  ): Promise<SearchCandidateActionResponse>;
   trackProviderCandidate?(
     selection: ProviderSelection,
   ): Promise<CreateRecordResult>;

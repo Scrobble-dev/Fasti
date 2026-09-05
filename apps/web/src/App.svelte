@@ -5,6 +5,11 @@
     connectionEndpoint,
     type LocalSearchRequestDto,
     type LocalSearchResponseDto,
+    type SearchCandidateActionRequest,
+    type SearchCandidateActionResponse,
+    type SearchCandidateDetailsResponse,
+    type SearchProviderPageRequest,
+    type SearchProviderPageResponse,
   } from "@fasti/sdk";
   import type {
     NetworkConfiguration,
@@ -273,6 +278,41 @@
             records: page.records.map(projectNativeRecord),
           };
         },
+        searchProviderPage: (
+          providerId: string,
+          request: SearchProviderPageRequest,
+        ) =>
+          invoke<SearchProviderPageResponse>("search_provider_page", {
+            input: { provider_id: providerId, request },
+          }),
+        readSearchCandidate: (
+          providerId: string,
+          grain: string,
+          candidateReceiptId: string,
+          offline: boolean,
+        ) =>
+          invoke<SearchCandidateDetailsResponse>("read_search_candidate", {
+            input: {
+              provider_id: providerId,
+              grain,
+              candidate_receipt_id: candidateReceiptId,
+              offline,
+            },
+          }),
+        saveSearchCandidate: (
+          providerId: string,
+          grain: string,
+          candidateReceiptId: string,
+          request: SearchCandidateActionRequest,
+        ) =>
+          invoke<SearchCandidateActionResponse>("save_search_candidate", {
+            input: {
+              provider_id: providerId,
+              grain,
+              candidate_receipt_id: candidateReceiptId,
+              request,
+            },
+          }),
         trackProviderCandidate: (selection) =>
           invoke("track_provider_candidate", { input: selection }),
         applyProviderMetadata: (recordId, selection) =>
