@@ -899,8 +899,8 @@ Archive v4 is frozen. C2 must not add secrets, live grants, PATs, consent or
 device authority to it. Restored client shells keep the archived lifecycle but
 are non-authoritative: credential epoch `0`, no credential, grant, scope, PAT,
 consent, subject, or session authority. C2 does not invent an `inactive` client
-lifecycle. Copied PATs and client secrets fail after restore. If M3 creates
-archive v5, C2 preserves its manifest, streams, DTOs, and exporter byte-for-byte.
+lifecycle. Copied PATs and client secrets fail after restore. M3 has created
+archive v5; C2 must preserve its manifest, streams, DTOs, and exporter byte-for-byte.
 When v16 becomes current, restore must retain an explicit historical accepted
 case for archive format v5 at migration v15 using M3's exact handed-off schema
 fingerprint. Any C2 archive evolution requires its own append-only version and

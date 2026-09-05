@@ -107,13 +107,14 @@ checksum are unchanged from merged `dev`; no new dependency caused this gap.
 Metadata confirmed that no writer owns `deny.toml` or `NOTICE` and released
 only this bounded policy/documentation correction to the Commander.
 
-Before delivery, retain the exact upstream agreement and checksum review in
-`third_party/webpki-root-certs/`, reference it from `NOTICE`, and add a
-crate-and-exact-version licence exception in `deny.toml`. Do not add this
-licence to the general allowlist, ignore the scanner, change dependencies,
-or touch integration/schema/transport files. Re-run the licence/source gate,
-verify the retained text and package hashes, and independently review this
-additional diff. The original 16 source/test/manifest blobs remain unchanged.
+The correction is complete: `third_party/webpki-root-certs/` retains the exact
+upstream agreement and checksum review, `NOTICE` references it, and `deny.toml`
+contains the crate-and-exact-version exception. Independent review verified
+the retained text and package hashes. The licence/source gate passed again
+at `9276eb61` on 2026-09-05. The earlier failed receipt remains history.
+No global licence allowance, ignored scanner failure, dependency change or
+integration/schema/transport edit was used for this correction. The original
+16 source/test/manifest blobs remain unchanged.
 
 The all-target graph includes a wasm32-only dependency declared by the
 platform verifier. It is absent from the checked Linux target graph. This is
@@ -175,3 +176,27 @@ The bounded repair order is:
 This adds no direct dependency, framework, endpoint, schema or migration.
 Do not restore the vulnerable version as a convenience rollback; use a
 reviewed non-vulnerable resolution if the patch exposes a compatibility issue.
+
+### Documentation interaction race gate (2026-09-05)
+
+Remote CI at `9276eb61` built the documentation successfully, then failed
+the loading-state test because it inspected an unassigned script route.
+Search and Status render their placeholders before hydration starts their
+requests. Placeholder visibility therefore cannot prove route interception.
+Metadata released this test-only file; it has no competing correction there.
+
+Wait explicitly, with Playwright's bounded assertion polling, for both held
+search routes and the held capability route before continuing or aborting
+them. Preserve every loading, disabled-control, accessibility and failure
+assertion. Do not add a sleep, retry the entire test, alter product code or
+weaken CI. Prove the correction against the built site, then run the full
+documentation interaction suite and required exact-head delivery gates.
+
+Local built-site verification also reproduced the separate symlinked-output
+failure: Docusaurus's MDX include paths did not match webpack's physical
+resource paths. Metadata released exact commit
+`9f8a1182797e4908a4a539c9033d8b839f782f01` for reuse, limited to
+`apps/docs/docusaurus.config.ts` and `tests/js/docs-package-scope.test.mjs`.
+Reuse its standard-library `realpathSync` correction and scope regression;
+do not add another resolver or alter product transport. Preserve the failed
+local build receipt separately from the remote request-interception failure.

@@ -56,6 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Rejected wrong-kind identifiers during typed deserialization and used the existing zeroization dependency for owned secret cleanup.
 - Resolved two Nuvio application-reference links so warning-denied Rust documentation builds pass.
 - Updated the existing schema URI resolver and documentation query parser to patched versions, with regression checks through their actual consumers. The existing image-parser patch and audit policy remain unchanged.
+- Kept documentation builds working with symlinked output directories and made loading-state tests wait for intercepted requests before continuing them.
 
 ### Removed
 
