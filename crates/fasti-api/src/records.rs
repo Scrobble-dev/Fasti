@@ -3,7 +3,7 @@ use crate::local::{
 };
 use crate::problem::{application_problem, json_rejection, HttpProblem};
 use axum::{
-    extract::{rejection::JsonRejection, State},
+    extract::{rejection::JsonRejection, Query, State},
     http::HeaderMap,
     routing::post,
     Json, Router,
@@ -14,8 +14,8 @@ use fasti_application::{
 };
 use fasti_contracts::{
     AttachIdentifierRequest, AttachIdentifierResponse, ClaimedPrecisionDto, ClaimedTrustDto,
-    CreateRecordRequest, CreateRecordResponse, ListRecordsResponse, OccurredTimeDto,
-    ProblemDetails, RecordActivityDto, RecordIdentifierDto, RecordSummaryDto,
+    CreateRecordRequest, CreateRecordResponse, ListRecordsQueryParameters, ListRecordsResponse,
+    OccurredTimeDto, ProblemDetails, RecordActivityDto, RecordIdentifierDto, RecordSummaryDto,
     RegisterNamespaceRequest, RegisterNamespaceResponse, ResolvedFieldDto,
 };
 use fasti_domain::{
@@ -218,10 +218,12 @@ pub(crate) async fn attach_identifier(
     path = "/api/v1/records",
     tag = "records",
     security(("credential_bearer" = []), ("browser_session_cookie" = [])),
+    params(ListRecordsQueryParameters),
     responses(
         (status = 200, description = "Records visible to this credential's workspace", body = ListRecordsResponse),
         (status = 401, description = "Credential or browser session is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "Authenticated principal lacks record-read scope", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "Record selector is invalid", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 500, description = "Durable state failed an integrity check", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 501, description = "This capability is not available in the current runtime body", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 503, description = "Local storage is unavailable", body = ProblemDetails, content_type = "application/problem+json")
@@ -230,6 +232,7 @@ pub(crate) async fn attach_identifier(
 pub(crate) async fn list_records(
     State(state): State<LocalApiState>,
     headers: HeaderMap,
+    query: Result<Query<ListRecordsQueryParameters>, axum::extract::rejection::QueryRejection>,
 ) -> HttpResult<ListRecordsResponse> {
     let correlation_id = RequestCorrelationId::new_v7();
     let capability = CapabilityKey::ListRecords;
@@ -249,7 +252,20 @@ pub(crate) async fn list_records(
             capability,
             correlation_id,
         )?;
-        kernel.list_records(ListRecordsQuery::new(correlation_id, access))
+        let selector = query
+            .map_err(|_| fasti_application::InvalidRecordSelector)
+            .and_then(|Query(parameters)| {
+                parameters
+                    .record_id
+                    .map(|id| {
+                        id.parse()
+                            .map_err(|_| fasti_application::InvalidRecordSelector)
+                    })
+                    .transpose()
+            });
+        kernel.list_records(
+            ListRecordsQuery::new(correlation_id, access).with_record_selector(selector),
+        )
     })
     .await?;
     let truncated = records.truncated();

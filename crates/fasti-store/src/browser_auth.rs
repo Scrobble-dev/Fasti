@@ -1752,6 +1752,63 @@ mod tests {
     }
 
     #[test]
+    fn malformed_record_selector_cannot_mask_browser_revocation() {
+        use fasti_application::{
+            BrowserRequestBoundaryPolicy, BrowserSessionAccessContext, IdentityPort,
+            InvalidRecordSelector, ListRecordsQuery,
+        };
+        let mut fixture = fixture();
+        fixture.created_at = crate::kernel::now();
+        fixture
+            .kernel
+            .inner
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO grant_scopes(grant_id, scope_key) VALUES (?1, 'identity_read')",
+                [fixture.grants[0].to_string()],
+            )
+            .unwrap();
+        let session = create_session(&fixture, &fixture.grants[..1], fixture.grants[0], 0);
+        let query = || {
+            let id = fasti_domain::RequestCorrelationId::new_v7();
+            ListRecordsQuery::new(
+                id,
+                BrowserSessionAccessContext::read(
+                    BrowserSessionQuery::new(
+                        id,
+                        secret_copy(session.session_secret()),
+                        crate::kernel::now(),
+                    ),
+                    BrowserRequestBoundaryPolicy::try_new("https://fasti.example", "fasti.example")
+                        .unwrap()
+                        .validate_read(Some("fasti.example"))
+                        .unwrap(),
+                ),
+            )
+            .with_record_selector(Err(InvalidRecordSelector))
+        };
+        assert_problem(
+            fixture.kernel.list_records(query()),
+            ProblemCode::ValidationFailed,
+        );
+        fixture
+            .kernel
+            .revoke_current_browser_session(mutation_command(
+                fasti_domain::RequestCorrelationId::new_v7(),
+                secret_copy(session.session_secret()),
+                secret_copy(session.csrf_secret()),
+                crate::kernel::now(),
+            ))
+            .unwrap();
+        assert_problem(
+            fixture.kernel.list_records(query()),
+            ProblemCode::BrowserSessionRevoked,
+        );
+    }
+
+    #[test]
     fn candidate_receipt_denies_an_expired_browser_session_and_a_different_authorized_subject() {
         use fasti_application::SearchPersistencePort;
         let (mut fixture, _, saved) = candidate_receipt_fixture();

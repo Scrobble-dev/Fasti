@@ -730,6 +730,29 @@ Each result opens a real details route without first creating a Record:
 
 Changing title or slug redirects to the canonical Record route. Record URLs never use a provider ID as the durable key.
 
+### M4 direct Record selection — 2026-09-05
+
+Record details use the existing `identity.record.list` owner with an optional
+typed Record selector. `GET /api/v1/records?record_id={record_id}` returns zero or
+one active Record with the same authorized-profile metadata and activity
+projection. Missing, foreign-workspace and inactive IDs have the same empty,
+non-truncated response. Without the selector, the existing bounded list is
+unchanged. Direct details must not search that first 500-row list or require a
+separate tracking-state permission.
+
+Malformed selectors reach the same authorized transaction before validation is
+reported. This includes query-shape errors, so a revoked browser session or
+missing IdentityRead scope cannot be masked by a 422 response. The existing
+capability's problem policy includes ValidationFailed; no new capability,
+migration or archive change is needed. The SDK retains CallOptions as its first
+argument and accepts the optional query as its second argument; null and omitted
+selectors both mean ordinary listing. Exact-selector responses are checked for
+matching identity, at most one row and no truncation.
+
+The API/SDK selector is a foundation for canonical-route wiring. It does not
+establish completion of Workbench direct reload, route/grain validation, browser
+provider Search, or local/remote partial-result composition.
+
 ### M4 atomic candidate-action disposition — 2026-09-05
 
 Create and Attach remain explicit actions. Both reuse the existing

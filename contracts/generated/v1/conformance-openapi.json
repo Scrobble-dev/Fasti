@@ -1566,7 +1566,8 @@
                             "forbidden",
                             "integrity_failed",
                             "session_policy_changed",
-                            "storage_unavailable"
+                            "storage_unavailable",
+                            "validation_failed"
                           ],
                           "runtime_body": "b2",
                           "scopes": [

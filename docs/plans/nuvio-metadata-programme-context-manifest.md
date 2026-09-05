@@ -1239,3 +1239,40 @@ separate. In particular, zero freshness is not equivalent to no storage. Resolve
 no-store/private admission and historical-save semantics explicitly before claiming
 response-policy coverage. Public provider Search composition remains unfinished;
 do not confuse backend receipts with verified browser offline/partial behavior.
+
+### M4 direct Record selector integration — 2026-09-05
+
+The commander owns the application/API/registry/generated/SDK integration. The
+store agent's explicitly allocated identity.rs leaf is integrated and released;
+all other agent work remains read-only. Existing ListRecords now supports an
+exact typed selector, using the primary key before the unchanged profile-aware
+enrichment owner. Its ordinary 500-row list behavior is unchanged. The existing
+GET records route takes optional record_id; SDK CallOptions remains first, with
+the optional query second. Generated parsers, OpenAPI and problem catalogs come
+from the canonical generator. No migration, archive or new capability was added.
+
+Independent review found two issues during implementation: malformed selectors
+could precede browser/scope authorization, and nullable generated input disagreed
+with SDK omission behavior. Both are corrected. The application carries a typed
+InvalidRecordSelector to the existing authorized store transaction; null SDK
+input normalizes to omission. Unknown/duplicate/bad selectors remain rejected,
+and exact responses must match identity, contain at most one row and not truncate.
+Independent final review has no remaining concrete findings.
+
+Four focused selector tests pass, including Record 501 enrichment, profile
+override/activity isolation, unknown/foreign/inactive/local-only cases, missing
+IdentityRead, malformed input after real browser revocation, and constant SELECT
+count plus indexed/no-full-scan/no-sort evidence at 10,000 Records. The HTTP
+create/list/attach/namespace regression passes with selector/invalid-query
+extensions. All 63 SDK client tests pass, including the loopback Rust fixture.
+Strict all-target application/store/API Clippy and formatting/diff checks pass.
+An initial browser fixture used its historical timestamp and correctly expired;
+the regression now creates its session at the current test clock. No runtime
+expiry behavior was changed.
+
+Run the complete canonical PR gate on the next clean commit before extending the
+shared diff. Workbench/host canonical-detail wiring and provider/local Search
+composition are still required. Existing parallel maps cover that next step and
+response-header policy; they are preparation, not activated contracts. M4 retains
+v16/archive v6 and all shared surfaces. No M4 PR/merge, v17 allocation or C2
+activation release has occurred. Codex Security remains prohibited.

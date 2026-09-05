@@ -664,10 +664,14 @@ impl RegisterNamespaceDefinitionOutcome {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InvalidRecordSelector;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListRecordsQuery {
     correlation_id: fasti_domain::RequestCorrelationId,
     access: ApplicationAccessContext,
+    record_id: Result<Option<fasti_domain::RecordId>, InvalidRecordSelector>,
 }
 
 impl ListRecordsQuery {
@@ -678,7 +682,27 @@ impl ListRecordsQuery {
         Self {
             correlation_id,
             access: access.into(),
+            record_id: Ok(None),
         }
+    }
+
+    /// Select one active Record without depending on the bounded listing page.
+    pub const fn with_record_id(mut self, record_id: fasti_domain::RecordId) -> Self {
+        self.record_id = Ok(Some(record_id));
+        self
+    }
+
+    /// Carry transport validation failure to the authorized persistence boundary.
+    pub const fn with_record_selector(
+        mut self,
+        selector: Result<Option<fasti_domain::RecordId>, InvalidRecordSelector>,
+    ) -> Self {
+        self.record_id = selector;
+        self
+    }
+
+    pub const fn record_id(&self) -> Result<Option<fasti_domain::RecordId>, InvalidRecordSelector> {
+        self.record_id
     }
 
     pub const fn correlation_id(&self) -> fasti_domain::RequestCorrelationId {

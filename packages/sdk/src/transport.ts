@@ -24,6 +24,7 @@ import {
   parseInitializeNodeRequest,
   parseInitializeNodeResponse,
   parseListRecordsResponse,
+  parseListRecordsQueryParameters,
   parseListBrowserSessionsResponse,
   parseListProvidersResponse,
   parseListTrackingDispositionsResponse,
@@ -79,6 +80,7 @@ import {
   type InitializeNodeRequest,
   type InitializeNodeResponse,
   type ListRecordsResponse,
+  type ListRecordsQueryParameters,
   type ListBrowserSessionsResponse,
   type ListProvidersResponse,
   type ListTrackingDispositionsResponse,
@@ -585,15 +587,43 @@ export class FastiClient {
     });
   }
 
-  listRecords(options: CallOptions = {}): Promise<ListRecordsResponse> {
+  listRecords(
+    options: CallOptions = {},
+    query: ListRecordsQueryParameters = {},
+  ): Promise<ListRecordsResponse> {
     const operation = LOCAL_RUNTIME_OPERATIONS.listRecords;
+    query = parseOutgoing(
+      parseListRecordsQueryParameters,
+      query,
+      "List-records query",
+    );
+    const recordId =
+      query.record_id == null
+        ? undefined
+        : contractPathIdentifier(query.record_id, RECORD_ID, "record_id");
     return this.#jsonOperation({
       method: operation.method,
-      path: operation.path,
+      path:
+        recordId === undefined
+          ? operation.path
+          : `${operation.path}?record_id=${encodeURIComponent(recordId)}`,
       authenticated: operation.authenticated,
       problemContract: operation,
       retryMode: "safe",
-      responseParser: parseListRecordsResponse,
+      responseParser: (value) => {
+        const response = parseListRecordsResponse(value);
+        if (
+          recordId !== undefined &&
+          (response.truncated ||
+            response.records.length > 1 ||
+            response.records.some((record) => record.record_id !== recordId))
+        ) {
+          throw new FastiContractParseError(
+            "Record selector response does not match the requested Record",
+          );
+        }
+        return response;
+      },
       responseLabel: "List-records response",
       options,
     });

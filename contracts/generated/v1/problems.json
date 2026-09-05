@@ -2919,6 +2919,24 @@
       "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
     },
     {
+      "capability_id": "identity.record.list",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
       "capability_id": "identity.review.defer",
       "code": "capability_unavailable",
       "detail": "requested capability is not available in this body; it is owned by b2",

@@ -1447,6 +1447,22 @@
         ],
         "type": "object"
       },
+      "ListRecordsQueryParameters": {
+        "additionalProperties": false,
+        "properties": {
+          "record_id": {
+            "description": "Select one active Record; missing or inaccessible Records return an empty page.",
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
       "ListRecordsResponse": {
         "additionalProperties": false,
         "properties": {
@@ -9132,6 +9148,20 @@
     "/api/v1/records": {
       "get": {
         "operationId": "list_records",
+        "parameters": [
+          {
+            "description": "Select one active Record; missing or inaccessible Records return an empty page.",
+            "in": "query",
+            "name": "record_id",
+            "required": false,
+            "schema": {
+              "maxLength": 36,
+              "minLength": 36,
+              "pattern": "^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -9186,6 +9216,16 @@
               }
             },
             "description": "Authenticated principal lacks record-read scope"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Record selector is invalid"
           },
           "500": {
             "content": {
@@ -9242,7 +9282,8 @@
           "forbidden",
           "integrity_failed",
           "session_policy_changed",
-          "storage_unavailable"
+          "storage_unavailable",
+          "validation_failed"
         ],
         "x-fasti-required-scopes": [
           "identity_read"
