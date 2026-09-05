@@ -232,3 +232,43 @@ are not baseline RED evidence. Canonical delivery, shared workflow/discovery
 integration, final hosted review/checks and merge remain open. Production C3,
 recovery, other hardware and packaged Tauri authentication remain unapproved
 or deferred as previously recorded. No migration/archive/shared ownership changes.
+
+## Independent CI preparation release — 2026-09-05
+
+The Commander is the sole writer of the qualification workflow in both PR130
+and this worktree. Its reviewed source is frozen at PR130 head
+`41a359e5e22ccaa0152d63a6f22b075f7307cf3d`. Preparing the dependent KDF
+workflow now does not require waiting for its hosted hardware gates. Integrate
+that exact source with a normal local merge after checking the merge tree;
+preserve both worktrees and histories. Do not push KDF as a duplicate framing
+delivery. Before its own PR, reconcile the actual merged PR130 tree and current
+dev, then run final evidence against the resulting KDF delivery source.
+
+After independent delta-plan review, release only the existing qualification
+workflow, its AGENTS qualification paragraph and one CHANGELOG entry to the
+Commander. No M4-owned production, canonical-plan or other shared path is
+released. Preserve M4's later programme-wide tool prohibition when integrating
+its source. No migration or archive allocation is made.
+
+Add KDF to the existing explicit test/advisory matrices and both path filters.
+Retain pinned actions/toolchain, read-only permissions, native-override
+rejection, locked dependencies, isolated target, two build jobs and serial
+tests. KDF has 13 unit tests and no doctest target; enforce one summary for
+that binary, while signing and framing retain their exact two-summary counts.
+Reuse the existing Bash guard with the minimum explicit zero-doctest handling.
+No new runner framework, workflow, dependency or hosted measurement is needed.
+
+Verify the exact authored step against all three real packages in debug and
+release. Extend the existing synthetic count/exit sentinels for the binary's
+one-summary case, including rejection of unexpected zero-test doctest output.
+Keep synthetic guard evidence distinct from native tests. Run formatting,
+strict Clippy, actionlint, local documentation links and canonical verification
+after Metadata's actual browser/CPU release. Existing measured-code evidence
+stays bound to 82a9e21a; do not repeat the measurement for documentation or CI
+changes. Final source review, hosted checks and merged-tree evidence remain
+delivery gates, not reasons to stop independent source preparation.
+
+Independent delta-plan review is clear: the one-summary binary case must reject
+extra summaries, existing matrix counts and isolation remain unchanged, and
+normal local integration is preparation only. The Commander may now perform
+the narrowly named integration and checks above.
