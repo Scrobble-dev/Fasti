@@ -45,7 +45,10 @@ Keep failures and investigate their cause instead of removing assertions.
 
 The [dedicated qualification workflow](../../.github/workflows/access-c3-signing-qualification.yml)
 runs the signing and framing packages independently on matching PRs into `dev`
-and pushes on `dev`. A topic-branch push alone does not trigger it. Root
+and pushes on `dev`. A topic-branch push alone does not trigger it.
+CI checks both test-result summaries against each package's exact unit and
+doctest counts; removed, ignored, filtered or failed tests cannot pass that gate.
+Raw output remains visible in the job log. Root
 workspace tests exclude both packages; their focused checks supplement, not
 replace, the required `cargo xtask test pr` gate.
 

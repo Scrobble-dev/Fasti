@@ -38,8 +38,12 @@ jobs:
         include:
           - package: access-c3-signing
             label: Detached-signature
+            unit_tests: 9
+            doctests: 3
           - package: access-c3-framing
             label: Framing
+            unit_tests: 20
+            doctests: 2
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -68,10 +72,24 @@ jobs:
         run: cargo fetch --locked --manifest-path qualification/${{ matrix.package }}/Cargo.toml
       - name: Check formatting
         run: cargo fmt --manifest-path qualification/${{ matrix.package }}/Cargo.toml -- --check
-      - name: Run all debug checks
-        run: cargo test --offline --locked --manifest-path qualification/${{ matrix.package }}/Cargo.toml -- --test-threads=1
-      - name: Run all release checks
-        run: cargo test --release --offline --locked --manifest-path qualification/${{ matrix.package }}/Cargo.toml -- --test-threads=1
+      - name: Run complete debug and release suites
+        shell: bash
+        env:
+          QUALIFICATION_PACKAGE: ${{ matrix.package }}
+          EXPECTED_UNIT_TESTS: ${{ matrix.unit_tests }}
+          EXPECTED_DOCTESTS: ${{ matrix.doctests }}
+        run: |
+          set -euo pipefail
+          for profile in debug release; do
+            args=()
+            if [[ "$profile" == release ]]; then args+=(--release); fi
+            log="$RUNNER_TEMP/$QUALIFICATION_PACKAGE-$profile.log"
+            cargo test "${args[@]}" --offline --locked --manifest-path "qualification/$QUALIFICATION_PACKAGE/Cargo.toml" -- --test-threads=1 2>&1 | tee "$log"
+            test "$(grep -c '^test result:' "$log")" -eq 2
+            for expected in "$EXPECTED_UNIT_TESTS" "$EXPECTED_DOCTESTS"; do
+              grep -Eq "^test result: ok\\. $expected passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in [0-9.]+s$" "$log"
+            done
+          done
       - name: Deny compiler warnings
         run: cargo clippy --offline --locked --manifest-path qualification/${{ matrix.package }}/Cargo.toml --all-targets -- -D warnings
 
