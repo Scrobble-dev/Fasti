@@ -3402,3 +3402,40 @@ origin-client suppression and lane-specific pagination. Current official
 Public PKCE/S256 and bearer tokens for local apps; app registration and governed
 token lifecycle remain required. No query-key fallback or invented Cloud ratings
 or Collections RPC is authorized. ~~Codex Security~~ remains excluded permanently.
+
+### 2026-09-05 — Packaged Search permission regression and mobile QA
+
+The preceding goal turn produced new evidence: the five-case mobile notice run
+was terminal with four passes and one failure. At 320 px, Library's non-wrapping
+filter radiogroups expanded the page to 483 px. Both groups now use Tabler's
+existing `flex-wrap` utility; all controls remain. Browser verification of this
+dirty correction is pending Access's current terminal-process port release.
+The new deferred tracking-notice regressions also remain unverified: they hold
+the global Record read while a confirmed tracking mutation advances its revision.
+Do not describe these UI corrections as complete before those oracles run.
+
+The native ACL audit found all five new Search handlers registered but absent
+from `main-runtime`. Commit `4165cdd4` adds exactly those five command grants and
+a new test of Tauri's generated ACL composition. The regression first failed
+with zero grants for `search_records`, then passed after the permission fix.
+All 83 ordinary native library tests passed; two existing opt-in tests remained
+ignored. Exact-origin/window capability checks also passed. Generated ACL JSON is
+ignored build output, not an authored contract. No origin, window, authentication
+policy, schema, archive, dependency or Access-owned file changed. This verifies
+permission composition, not a complete packaged provider Search journey.
+
+Current parallel allocation supersedes the preceding allocation paragraph:
+commander is the only production integration writer. Agent A prepares the M4
+media-domain filter map read-only; agent B reviews the new tracking race fixture
+read-only; agent C reconciles M5 preparation with existing Library/Record owners
+read-only. No shared production files are allocated to delegated writers.
+Access additionally owns only the browser-QA paragraph in `AGENTS.md`, besides
+its already allocated performance files, pins, workflow job and changelog entry.
+
+Material Access handoff: PR #127 merged at `origin/dev`
+`4bd84a562e60b04c278173529164f06cc41c7753`, tree
+`fee25a2ddb810ce01acb1d0c0ca87fc9388c1ad0`. Its qualification-only additions
+must be preserved in the next normal merge into the published M4 branch; no
+history rewriting is authorized. This merge is still pending a clean M4 tree.
+M4 retains schema 17/archive 7 and all previously recorded acceptance gaps.
+No next-migration allocation or shared-runtime release occurred.
