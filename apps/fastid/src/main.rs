@@ -1,12 +1,12 @@
 use anyhow::{Context, Result};
 use fasti_api::{
-    api_router, direct_loopback_api_router, health_router, integration_router, metadata_api_router,
-    provider_api_router, remote_api_router, with_static_fallback,
+    api_router, health_router, integration_router, metadata_api_router, provider_api_router,
+    remote_api_router, search_api_router, with_static_fallback, DirectLoopbackAccessRuntime,
 };
-use fasti_application::OutboundAccessPolicy;
+use fasti_application::{BrowserRequestBoundaryPolicy, OutboundAccessPolicy};
 use fasti_provider_runtime::{
     PlatformCredentialVault, ProviderMetadataRefreshService, ProviderRuntime,
-    PLATFORM_CREDENTIAL_SERVICE,
+    ProviderSearchService, PLATFORM_CREDENTIAL_SERVICE,
 };
 use fasti_store::SqliteKernel;
 use sha2::{Digest, Sha256};
@@ -227,6 +227,7 @@ fn provider_runtime(kernel: &SqliteKernel) -> Result<Arc<ProviderRuntime>> {
 fn metadata_and_provider_router(
     kernel: Arc<SqliteKernel>,
     providers: Arc<ProviderRuntime>,
+    browser_boundary: Option<BrowserRequestBoundaryPolicy>,
 ) -> axum::Router {
     let refresh = Arc::new(ProviderMetadataRefreshService::new(
         providers.clone(),
@@ -238,14 +239,21 @@ fn metadata_and_provider_router(
     provider_api_router(
         kernel.clone(),
         kernel.clone(),
-        providers,
+        providers.clone(),
         provider_operation_locks.clone(),
     )
     .merge(metadata_api_router(
         kernel.clone(),
         refresh,
-        kernel,
+        kernel.clone(),
+        provider_operation_locks.clone(),
+    ))
+    .merge(search_api_router(
+        kernel.clone(),
+        kernel.clone(),
+        Arc::new(ProviderSearchService::new(providers, kernel)),
         provider_operation_locks,
+        browser_boundary,
     ))
 }
 
@@ -343,31 +351,41 @@ async fn main() -> Result<()> {
                     "Fasti durable remote listener starting behind the trusted HTTPS proxy on http://{} with data root {:?}",
                     addr, data_root
                 );
-                remote_api_router(kernel.clone(), addr, data_root)
-                    .merge(metadata_and_provider_router(kernel.clone(), providers))
+                remote_api_router(kernel.clone(), addr, data_root).merge(
+                    metadata_and_provider_router(kernel.clone(), providers, None),
+                )
             } else {
                 info!(
                     "Fasti durable local listener starting on http://{} with data root {:?}",
                     addr, data_root
                 );
-                let local_router = if browser_access_is_direct(requested_addr, addr, used_fallback)
-                {
-                    direct_loopback_api_router(
-                        kernel.clone(),
-                        addr,
-                        used_fallback,
-                        data_root,
-                        configured_trailbase_root.as_deref(),
-                    )?
-                } else {
-                    api_router(
-                        kernel.clone(),
-                        local_api_addr
-                            .expect("configured durable local routes require local exposure"),
-                        data_root,
-                    )
-                };
-                local_router.merge(metadata_and_provider_router(kernel.clone(), providers))
+                let (local_router, browser_boundary) =
+                    if browser_access_is_direct(requested_addr, addr, used_fallback) {
+                        let direct = DirectLoopbackAccessRuntime::new(
+                            kernel.clone(),
+                            addr,
+                            used_fallback,
+                            data_root,
+                            configured_trailbase_root.as_deref(),
+                        )?;
+                        (direct.router(), Some(direct.browser_boundary()))
+                    } else {
+                        (
+                            api_router(
+                                kernel.clone(),
+                                local_api_addr.expect(
+                                    "configured durable local routes require local exposure",
+                                ),
+                                data_root,
+                            ),
+                            None,
+                        )
+                    };
+                local_router.merge(metadata_and_provider_router(
+                    kernel.clone(),
+                    providers,
+                    browser_boundary,
+                ))
             }
         }
         _ => {

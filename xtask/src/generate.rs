@@ -194,7 +194,18 @@ const PRODUCTION_BOOTSTRAP_OPERATIONS: [ConformanceOperation; 2] = [
 /// surface. Kept separate from `PRODUCTION_BOOTSTRAP_OPERATIONS` because that
 /// array also drives the bootstrap-only SDK slice in
 /// `render_production_bootstrap_contract`, which must not grow to include them.
-const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 40] = [
+const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 41] = [
+    ConformanceOperation {
+        alias: "searchProviderPage",
+        operation_id: "search_provider_page",
+        method: "post",
+        path: "/api/v1/search/providers/{provider_id}",
+        capability_id: "metadata.search",
+        authenticated: true,
+        request: Some("SearchProviderPageRequest"),
+        response: Some("SearchProviderPageResponse"),
+        retry: "never",
+    },
     ConformanceOperation {
         alias: "submitObservation",
         operation_id: "submit_observation",
@@ -1942,6 +1953,20 @@ fn enrich_production_openapi(
             .context("anime grouping policy change variant must be an object")?
             .insert("additionalProperties".to_owned(), Value::Bool(false));
     }
+    let search_outcomes = openapi
+        .pointer_mut("/components/schemas/SearchProviderPageResponse/oneOf")
+        .and_then(Value::as_array_mut)
+        .context("SearchProviderPageResponse variants are absent")?;
+    ensure!(
+        search_outcomes.len() == 2,
+        "Search page outcome count changed"
+    );
+    for variant in search_outcomes {
+        variant
+            .as_object_mut()
+            .context("Search outcome must be an object")?
+            .insert("additionalProperties".to_owned(), Value::Bool(false));
+    }
     let capabilities = array_at(public_registry, "/capabilities")?;
     for expected in PRODUCTION_BOOTSTRAP_OPERATIONS
         .into_iter()
@@ -2336,6 +2361,7 @@ fn validate_production_operation_security(
             "csrf_header": []
         }])),
         "submit_observation"
+        | "search_provider_page"
         | "create_record"
         | "attach_identifier"
         | "register_namespace"
@@ -3557,6 +3583,7 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         "AnimeGroupingPolicyScopeKindDto",
         "AnimeGroupingPolicySourceDto",
         "AnimeGroupingPolicyChangeDto",
+        "SearchCacheStateDto",
     ] {
         let schema = schemas
             .get(name)
@@ -3600,6 +3627,11 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         "ProviderCapabilityResponse",
         "ProviderHealthResponse",
         "RefreshMetadataClaimsRequest",
+        "SearchProviderPageRequest",
+        "SearchProviderPageResponse",
+        "SearchCandidateReceiptDto",
+        "SearchCandidateDto",
+        "SearchReceiptLifetimeDto",
         "MetadataClaimProvenanceDto",
         "MetadataClaimDto",
         "RatingScaleDto",
@@ -3811,6 +3843,14 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
             "ProviderCapabilityResponse",
         ),
         ("parseProviderHealthResponse", "ProviderHealthResponse"),
+        (
+            "parseSearchProviderPageRequest",
+            "SearchProviderPageRequest",
+        ),
+        (
+            "parseSearchProviderPageResponse",
+            "SearchProviderPageResponse",
+        ),
         (
             "parseRefreshMetadataClaimsRequest",
             "RefreshMetadataClaimsRequest",

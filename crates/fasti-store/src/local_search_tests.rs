@@ -15,10 +15,11 @@ use fasti_domain::{
 
 fn node() -> TestNode {
     let node = TestNode::new();
-    node.kernel.inner.connection.lock().unwrap().execute(
-        "INSERT OR IGNORE INTO grant_scopes(grant_id, scope_key) VALUES (?1, 'metadata_search')",
+    assert_eq!(node.kernel.inner.connection.lock().unwrap().query_row(
+        "SELECT COUNT(*) FROM grant_scopes WHERE grant_id = ?1 AND scope_key = 'metadata_search'",
         [node.access.grant_id().to_string()],
-    ).unwrap();
+        |row| row.get::<_, i64>(0),
+    ).unwrap(), 1);
     node
 }
 

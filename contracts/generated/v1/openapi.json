@@ -3239,6 +3239,261 @@
         ],
         "type": "object"
       },
+      "SearchCacheStateDto": {
+        "enum": [
+          "fresh",
+          "stale_on_error"
+        ],
+        "type": "string"
+      },
+      "SearchCandidateDto": {
+        "additionalProperties": false,
+        "properties": {
+          "authors": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10,
+            "type": "array"
+          },
+          "image_url": {
+            "maxLength": 2048,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "type": "string"
+          },
+          "original_title": {
+            "maxLength": 512,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "overview": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider": {
+            "type": "string"
+          },
+          "provider_id": {
+            "type": "string"
+          },
+          "release_year": {
+            "format": "int32",
+            "maximum": 9999,
+            "minimum": 1000,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "title": {
+            "maxLength": 512,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "provider_id",
+          "kind",
+          "title",
+          "authors"
+        ],
+        "type": "object"
+      },
+      "SearchCandidateReceiptDto": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate": {
+            "$ref": "#/components/schemas/SearchCandidateDto"
+          },
+          "candidate_receipt_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^scr_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          },
+          "grain": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "candidate_receipt_id",
+          "grain",
+          "candidate"
+        ],
+        "type": "object"
+      },
+      "SearchProviderPageRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "grains": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "type": "array"
+          },
+          "locale": {
+            "maxLength": 16,
+            "minLength": 2,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "offline": {
+            "type": "boolean"
+          },
+          "page": {
+            "format": "int32",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "query": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "region": {
+            "description": "Reserved query context; current provider Search routes do not filter by region.",
+            "maxLength": 8,
+            "minLength": 2,
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "query",
+          "page",
+          "grains",
+          "offline"
+        ],
+        "type": "object"
+      },
+      "SearchProviderPageResponse": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "cache_state": {
+                "$ref": "#/components/schemas/SearchCacheStateDto"
+              },
+              "candidates": {
+                "items": {
+                  "$ref": "#/components/schemas/SearchCandidateReceiptDto"
+                },
+                "maxItems": 100,
+                "type": "array"
+              },
+              "lifetime": {
+                "$ref": "#/components/schemas/SearchReceiptLifetimeDto"
+              },
+              "next_page": {
+                "format": "int32",
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "outcome": {
+                "enum": [
+                  "page"
+                ],
+                "type": "string"
+              },
+              "page": {
+                "format": "int32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "provider_id": {
+                "type": "string"
+              },
+              "upstream_problem": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "provider_id",
+              "page",
+              "candidates",
+              "cache_state",
+              "lifetime",
+              "outcome"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "outcome": {
+                "enum": [
+                  "unavailable"
+                ],
+                "type": "string"
+              },
+              "problem_code": {
+                "type": "string"
+              },
+              "provider_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "provider_id",
+              "problem_code",
+              "outcome"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "SearchReceiptLifetimeDto": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "fresh_until": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "stale_until": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "created_at",
+          "fresh_until",
+          "stale_until",
+          "expires_at"
+        ],
+        "type": "object"
+      },
       "SelectBrowserSessionProfileRequest": {
         "additionalProperties": false,
         "properties": {
@@ -9957,6 +10212,190 @@
         ],
         "x-fasti-required-scopes": [
           "metadata_projection_read"
+        ],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/v1/search/providers/{provider_id}": {
+      "post": {
+        "operationId": "search_provider_page",
+        "parameters": [
+          {
+            "description": "Registered provider identity",
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchProviderPageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchProviderPageResponse"
+                }
+              }
+            },
+            "description": "Provider page or explicit source-unavailable outcome; no Record was created"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Malformed JSON"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Authentication is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Search authority or browser boundary denied"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Current session or receipt authority changed"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Request exceeds the Search body limit"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Content-Type is not application/json"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Invalid Search input"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Receipt state failed integrity checks"
+          },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Provider capability is unavailable"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Storage is unavailable"
+          },
+          "507": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Receipt capacity is exhausted"
+          }
+        },
+        "security": [
+          {
+            "credential_bearer": []
+          },
+          {
+            "browser_session_cookie": [],
+            "csrf_cookie": [],
+            "csrf_header": []
+          }
+        ],
+        "tags": [
+          "search"
+        ],
+        "x-fasti-authorization": "scoped_or_browser_session",
+        "x-fasti-capability-id": "metadata.search",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "browser_session_expired",
+          "browser_session_revoked",
+          "capability_unavailable",
+          "capacity_exceeded",
+          "forbidden",
+          "idempotency_conflict",
+          "integrity_failed",
+          "malformed_json",
+          "payload_too_large",
+          "session_policy_changed",
+          "storage_unavailable",
+          "unsupported_media_type",
+          "validation_failed"
+        ],
+        "x-fasti-required-scopes": [
+          "metadata_search"
         ],
         "x-fasti-runtime-availability": "implemented"
       }

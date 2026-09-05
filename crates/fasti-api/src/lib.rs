@@ -48,6 +48,7 @@ mod problem;
 mod profile_state;
 mod providers;
 mod records;
+mod search;
 mod trailbase;
 
 /// Provider-scoped gates shared by credential mutation, provider checks, and
@@ -210,6 +211,7 @@ impl Modify for ProductionSecurityAddon {
         records::create_record,
         records::attach_identifier,
         records::list_records,
+        search::search_provider_page,
         records::register_namespace,
         integrations::integration_status,
         integrations::nuvio_webhook,
@@ -227,6 +229,12 @@ impl Modify for ProductionSecurityAddon {
     ),
     components(schemas(
         HealthResponse,
+        fasti_contracts::SearchProviderPageRequest,
+        fasti_contracts::SearchProviderPageResponse,
+        fasti_contracts::SearchCandidateReceiptDto,
+        fasti_contracts::SearchCandidateDto,
+        fasti_contracts::SearchReceiptLifetimeDto,
+        fasti_contracts::SearchCacheStateDto,
         fasti_contracts::StartTrailBaseSignInRequest,
         fasti_contracts::StartTrailBaseSignInResponse,
         fasti_contracts::TrailBaseContinuationChoiceDto,
@@ -422,6 +430,24 @@ pub fn metadata_api_router(
     })
 }
 
+/// Search shares the provider runtime and mutation gate; only the exact direct
+/// listener supplies a browser boundary. Other listeners remain bearer-only.
+pub fn search_api_router(
+    kernel: Arc<dyn LocalKernel>,
+    persistence: Arc<dyn fasti_application::SearchPersistencePort>,
+    service: Arc<fasti_provider_runtime::ProviderSearchService>,
+    locks: ProviderOperationLocks,
+    browser_boundary: Option<BrowserRequestBoundaryPolicy>,
+) -> Router {
+    search::router().with_state(search::SearchApiState {
+        kernel,
+        persistence,
+        service,
+        locks,
+        browser_boundary,
+    })
+}
+
 /// Constructs the durable local API router for fastid.
 ///
 /// # Contract
@@ -472,6 +498,7 @@ pub fn direct_loopback_api_router(
 /// One fixed-origin Access runtime shared by its router and packaged host.
 pub struct DirectLoopbackAccessRuntime {
     router: Router,
+    browser_boundary: BrowserRequestBoundaryPolicy,
     trailbase: Option<Arc<trailbase::TrailBaseOrchestrator>>,
 }
 
@@ -602,13 +629,21 @@ impl DirectLoopbackAccessRuntime {
             .map(|root| verified_trailbase_orchestrator(&kernel, root))
             .transpose()?
             .flatten();
-        let browser_runtime = Some((boundary, trailbase.as_ref().map(Arc::clone)));
+        let browser_runtime = Some((boundary.clone(), trailbase.as_ref().map(Arc::clone)));
         let router = durable_loopback_router(Arc::clone(&kernel), data_root, browser_runtime);
-        Ok(Self { router, trailbase })
+        Ok(Self {
+            router,
+            trailbase,
+            browser_boundary: boundary,
+        })
     }
 
     pub fn router(&self) -> Router {
         self.router.clone()
+    }
+
+    pub fn browser_boundary(&self) -> BrowserRequestBoundaryPolicy {
+        self.browser_boundary.clone()
     }
 
     #[cfg(test)]
@@ -623,10 +658,11 @@ impl DirectLoopbackAccessRuntime {
         let router = durable_loopback_router(
             Arc::clone(&kernel),
             data_root,
-            Some((boundary, Some(Arc::clone(&trailbase)))),
+            Some((boundary.clone(), Some(Arc::clone(&trailbase)))),
         );
         Self {
             router,
+            browser_boundary: boundary,
             trailbase: Some(trailbase),
         }
     }
@@ -832,6 +868,7 @@ pub fn with_static_fallback(router: Router, static_dir: Option<&Path>) -> Router
 
 #[cfg(test)]
 mod tests {
+    include!("search_http_tests.rs");
     use super::*;
     use axum::{
         body::{to_bytes, Body},
@@ -1101,7 +1138,7 @@ mod tests {
         ] {
             assert!(document.paths.paths.contains_key(path), "missing {path}");
         }
-        assert_eq!(document.paths.paths.len(), 36);
+        assert_eq!(document.paths.paths.len(), 37);
 
         let serialized = serde_json::to_string(&document).expect("serializable OpenAPI document");
         assert!(serialized.contains("#/components/schemas/HealthResponse"));

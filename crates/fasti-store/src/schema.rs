@@ -269,6 +269,20 @@ fn migrate_v16(connection: &Connection) -> Result<()> {
     );
     transaction.execute_batch(&revision_sql)?;
     crate::local_search::rebuild(&transaction)?;
+    // C1's first human administrator links this same node-owner grant. Do not
+    // expand delegated grants or provisional enrollment/recovery authority.
+    transaction.execute(
+        "INSERT OR IGNORE INTO grant_scopes(grant_id, scope_key)
+         SELECT pg.grant_id, ?1 FROM node_state ns
+         JOIN profile_grants pg ON pg.workspace_id = ns.workspace_id
+           AND pg.profile_id = ns.profile_id AND pg.client_id = ns.client_id
+         JOIN clients c ON c.client_id = pg.client_id AND c.workspace_id = pg.workspace_id
+         WHERE ns.singleton = 1 AND ns.initialized = 1
+           AND ns.initialization_consumed_at IS NOT NULL
+           AND ns.recovery_restore_attempt_id IS NULL
+           AND pg.status = 'active' AND c.status = 'active'",
+        [scope_storage_key(ScopeKey::MetadataSearch)],
+    )?;
     transaction.pragma_update(None, "user_version", 16)?;
     transaction.commit()
 }
@@ -3541,6 +3555,7 @@ pub(crate) fn workspace_revision(connection: &Connection, workspace_id: &str) ->
 
 #[cfg(test)]
 mod tests {
+    include!("search_scope_migration_tests.rs");
     use super::*;
     use crate::access::FULL_ADMIN_SCOPES;
     use rusqlite::params;

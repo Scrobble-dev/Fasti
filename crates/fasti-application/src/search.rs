@@ -491,6 +491,14 @@ pub enum SearchCandidateActionPreparation {
 }
 
 pub trait SearchPersistencePort: Send + Sync {
+    /// Page acquisition can persist evidence, including on a cache miss. This
+    /// preliminary check reveals no provider state and grants no reusable proof.
+    fn authorize_search_page_request(
+        &self,
+        correlation_id: RequestCorrelationId,
+        access: &ApplicationAccessContext,
+    ) -> ApplicationResult<()>;
+
     fn search_local_records(
         &self,
         request: &LocalSearchRequest,

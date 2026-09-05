@@ -69,6 +69,9 @@ mod candidate_details_tests {
     }
 
     impl SearchPersistencePort for DetailsPersistence {
+        fn authorize_search_page_request(&self, _: RequestCorrelationId, _: &ApplicationAccessContext) -> ApplicationResult<()> {
+            unreachable!("details tests do not acquire pages through HTTP")
+        }
         fn prepare_search_candidate_action(&self, _: &fasti_application::SearchCandidateActionCommand) -> ApplicationResult<fasti_application::SearchCandidateActionPreparation> {
             panic!("detail reads must not prepare actions")
         }
