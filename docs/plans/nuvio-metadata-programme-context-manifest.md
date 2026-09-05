@@ -1080,3 +1080,65 @@ in progress: this host's /tmp is now tmpfs, unlike the prior explicit SSD
 benchmark environment. Do not classify the cause or change the resolver until
 the underlying failure and a controlled physical-SSD baseline are verified.
 Codex Security remains prohibited; all review and verification here are native.
+
+The storage investigation subsequently confirmed **EDQUOT**, not a resolver
+regression: the unchanged release test's SQLite database and temporary-file
+`pwrite64` calls returned `Disk quota exceeded` on the user-quota-enabled /tmp
+tmpfs. Remaining filesystem-wide capacity did not establish available user quota.
+The scoped diagnostic is `target/dense500-storage-failures.strace`; its traced
+723-second runtime is not performance evidence. No quota, global temporary
+directory or production error mapping was changed.
+
+The same unchanged release binary passes all five 500-Record samples with
+`TMPDIR=/mnt/secondary-ssd/cache/home/tmp`: median 18.174888723 s, max
+68.175424069 s, peak 35,889,152 bytes. This controlled reproduction resolves the
+storage failure, not the outstanding dense-latency gate. Benchmark commands on
+this host must use that explicit physical SSD location: resolving /tmp with
+readlink is insufficient now that /tmp is a real, quota-limited mount.
+
+The test-only profile-switch commit is
+`010478224061153508cbad9a31367bb73715dfc3`, tree
+`f89947b4b1905d814640de7a7a84959e345738ce`; its focused regression and strict
+all-target store Clippy pass. Independent review is clear. The session comparison
+does not force an activity-write rollback because the fresh session remains
+inside its activity throttle; do not claim that additional coverage.
+
+Next bounded resolver ownership: one agent may change only the domain metadata
+validator and its tests, using the standard-library HashSet while preserving
+per-claim error precedence. No speculative cache or new abstraction is allocated.
+Commander measures the same dense fixture and retains shared integration files.
+The next transport pass can reuse ListRecords with an optional exact RecordId
+selector and the existing selected-ID enrichment loader. Default list behavior
+and profile authorization must remain unchanged; direct details must not scan
+the first 500 Records or implicitly gain tracking-state authority.
+
+The matching unchanged-binary 100-Record SSD baseline also passes: median
+2.932622939 s, max 2.949880879 s, peak 21,225,472 bytes. Compare the resolver
+change against these SSD baselines, not the tmpfs run or traced timings.
+
+The bounded validator change replaces only duplicate-ID and unknown-lifecycle
+membership rescans with a temporary standard-library HashSet. Each ID is inserted
+at the original per-claim validation point; target, lifecycle, override, expiry
+and winner-selection rules remain unchanged. The set is dropped before ranking.
+All 23 domain metadata tests and strict all-target domain Clippy pass. Independent
+native review is clear. This does not change the separate lifecycle traversal
+algorithm or claim to make the entire resolver linear for arbitrary event lists.
+
+The changed 100-Record SSD measurement passes: median 2.917748803 s, max
+2.929780586 s, peak 20,946,944 bytes. The approximately 0.5% median difference
+does not establish a meaningful end-to-end speedup. No cache was added, no dense
+latency gate was waived, and the 500-Record comparison remains to be completed.
+
+The changed 500-Record SSD run also passes: median 16.353478279 s, max
+16.638940383 s, peak 37,134,336 bytes. Its median is lower than the 18.174888723 s
+baseline, but this single sequential comparison does not isolate filesystem/cache
+variation or establish interactive latency. Both sizes remain within the
+192 MiB peak-memory ceiling; dense latency still fails the programme's intended
+interactive outcome. The separate sparse 10,000-Record query gate remains distinct.
+
+Post-change sparse Search evidence: 10,000 Records, 100 samples, p50 1.476397 ms,
+p95 1.592627 ms, max 2.708454 ms. Full store verification passes 363 unit tests
+and three integration tests, with five declared ignored unit fixtures and one
+ignored documentation example. Strict all-target domain/store Clippy, formatting
+and diff checks pass. Clean exact-source canonical verification follows commit;
+the preceding head's receipt is not evidence for this changed source.
