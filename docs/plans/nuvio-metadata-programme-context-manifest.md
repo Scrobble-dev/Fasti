@@ -2623,3 +2623,37 @@ and invalidation-failure fallback. The commander is saving this verified logical
 unit as a local integration checkpoint before the clean-source canonical gate.
 This is not PR delivery, native rendering qualification, or M4 completion; all
 remaining programme scope and the current v17/archive-v7 ownership remain intact.
+
+### 2026-09-05 — Exact integration checkpoint verified
+
+Local integration commit `8d03cf1c4d0064621e27efb908ef17691c747352`, tree
+`9e64a71f0bfee934b98595d0f21d338c7d39ca2e`, passed `cargo xtask test pr`
+with physical TMPDIR and system pkg-config. Both receipts declare `dirty: false`
+and that exact commit/tree: `target/fasti-receipts/b1-contract-verification.json`
+has 27 passing gates; `target/fasti-receipts/b1-portable.json` has 11 passing
+gates. Documentation verification also passed. The worktree was clean when the
+command completed. These receipts replace the missing dirty-source receipt
+noted earlier; they are software gates, not native product rendering or M4
+completion. This following checkpoint update changes documentation only.
+
+Live GitHub inspection found no PR for `codex/nuvio-metadata-programme-m4` and
+no open code-scanning alerts. Dependabot alerts 1/3 remain on glib 0.18.5 in the
+two Tauri lockfiles; alerts 4/5 remain on image-size 2.0.2. The existing image-size
+patch and prior Tauri/glib disposition remain present. Do not describe this as
+zero vulnerabilities or dismiss an advisory. No hosted review or merge occurred.
+
+The next vertical integration must replace the old Workbench provider-selection
+path with existing `searchProviderPage`, `readSearchCandidate`,
+`saveSearchCandidate` and `searchRecords` owners. Preserve receipt IDs, explicit
+Cached/Refetch intent, stable operation IDs, offline/partial results, profile
+generation fences and existing canonical Record navigation. The browser host
+still rejects legacy provider Search; Desktop still uses its legacy commands.
+This is a proven implementation gap, not a new API or migration requirement.
+Commander owns these shared surfaces; native fixture preparation stays test-only.
+
+Access's existing exclusive `account-security-view.svelte` exception is expanded
+only to the source/browser-proven mobile `flex-basis` correction for
+`.access-heading > div` and `.task-copy` at the existing breakpoint. Preserve all
+controls and desktop behavior. No other file is allocated; delayed-notice layout
+shifts are a separate disposition and are not included in this permission.
+M4 stays read-only on that component until exact handback. No v18 release.
