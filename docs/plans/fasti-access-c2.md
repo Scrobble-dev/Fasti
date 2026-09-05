@@ -1761,3 +1761,43 @@ reconciliation. Runtime, accessibility, and TTHW claims remain unverified until 
 implemented and the exact delivery gates pass.
 
 NO UNRESOLVED DECISIONS
+
+## Independent boundary-test delivery amendment — 2026-09-05
+
+Deliver only the reviewed C2 test and factual plan corrections from current
+dev `ee0d537d7bc8b7ed7ff7fdc90fad8613fe1b4ab0`, tree
+`e2a3180bed0748863cb3e829a06a677a0561a6b8`. Preserve this research worktree.
+Use a separate `codex/fasti-access-c2-boundary-tests` delivery branch, without
+merging this branch's older C3/D0 research or already-merged foundation history.
+
+Reuse these reviewed deltas in order:
+
+1. `0e20611c34a8e3d1f97036408a22535d86aaf406`: merged foundation/current
+   runtime boundary and M4 reservation.
+2. `c831ca401ec73f8b716a5bc983526171f3fbc6ac`: inventory read and sensitive
+   mutation distinction.
+3. `479c87862d37b1312516d0323ddde3659e4f8d5f`: two PAT timestamp-boundary
+   tests and their scoped historical evidence.
+
+One named integration writer may edit only this plan,
+`docs/plans/fasti-access-c2-foundation.md` and
+`crates/fasti-domain/tests/c2_personal_tokens.rs`. Carry this amendment too.
+Independent preflight found one expected plan conflict: retain dev's delivery
+sequencing, section 8/M4/T1 corrections and all merged foundation evidence;
+insert the new completion boundary without restoring unpublished C3 links or
+candidate-selection prose. Keep useful earlier test evidence explicitly
+historical. Review actual resulting deltas, never replace whole plan files.
+
+Run the 33 focused PAT/consent domain/application tests plus five inventory
+tests, formatting, strict domain/application Clippy and changed-plan links.
+Then run the unchanged canonical PR gate on the clean delivery source with
+resource coordination. Independent exact-diff review, one PR to dev, hosted
+checks/reconciliation, merge and exact merged-tree readback remain required.
+Earlier test results are not fresh delivery receipts. Add no dependency or
+production change to force a pass, and claim no before-fix failing execution.
+
+This amendment authorizes isolated source preparation in parallel with KDF
+hosted checks. It does not release M4 migration 17, archive 7, persistence,
+registry/generator, API/SDK, host or Workbench paths. Allocate no next migration.
+After delivery, tell Metadata the exact merged identity and unchanged ownership.
+The full C2 runtime gates and deferred packaged Tauri authentication remain open.
