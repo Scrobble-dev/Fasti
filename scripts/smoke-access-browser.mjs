@@ -317,7 +317,12 @@ async function verifyRestartedRecord() {
       });
     await row.waitFor();
     await requireCount(row, 1, `persisted TMDB identity ${providerId}`);
-    await row.getByRole("cell", { name: "tmdb.movie", exact: true }).waitFor();
+    const cells = row.getByRole("cell");
+    await requireCount(cells, 5, "persisted identifier columns");
+    requireValue(
+      (await cells.nth(0).innerText()).trim() === "tmdb.movie",
+      `persisted TMDB identity ${providerId} has the wrong namespace`,
+    );
   }
   await requireNoAccessibilityViolations("restarted canonical Record");
   return {
