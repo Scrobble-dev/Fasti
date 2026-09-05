@@ -3531,3 +3531,133 @@ semantic freeze before implementation. An extra advanced grain control is not
 automatically required by the approved media-domain filter. This is preparation,
 not a new API/schema allocation or a reduction of the required filter scope.
 All other M4 and later programme requirements remain active.
+
+### 2026-09-05 — M4 explicit Attach interface and parallel evidence refinement
+
+The preceding requirement-only turn confirmed the already-recorded Codex
+Security exclusion; it did not advance production. This continuation advances
+the remaining M4 Attach requirement from the preserved published base
+`f5e0978ff5337ca96c95951024f747c7115d8d3f`, tree
+`f42b09a36d8477ecb263c1b633b6a2b3f7b61784`. The commander remains the sole shared
+production writer. Schema v17 and archive v7 are unchanged. PR #128 is open;
+neither M4 completion nor a shared-file release is implied.
+
+Discover now composes the existing Search action union, local keyset reader and
+dialog focus owner into an explicit Attach picker for retained and no-store
+candidates. Workbench forwards the exact selected target and keeps retry IDs
+bound to the complete backend intent. Authority is checked after the mutation
+and again after Record-list refresh. Search/route/component generations prevent
+a late result from restoring a closed picker or undoing navigation. Existing
+Create and embedded metadata-selection callers retain their behavior. No new
+API, capability, migration, dependency or identity writer is introduced.
+
+The old blanket offline/stale guard contradicted
+`StoredSearchCandidate::payload_is_reusable` and the existing reusable-stale
+action tests. It is removed: explicit cached actions now reach server policy;
+no-cache, must-revalidate expiry, receipt expiry and authorization still fail
+closed at the existing owner. Retained actions never switch to no-store.
+
+Initial evidence on the dirty implementation: eight focused Attach browser
+tests pass (both paths, complete-intent retry, target change, sparse keyset
+continuation, wrong grain, late picker read, route departure, offline request,
+320px reflow, light/dark Axe and keyboard containment). The earlier related run
+passed 22/22 before the three additional checks. All 26 existing Store candidate
+action tests pass, including cached-policy negatives, atomicity and replay.
+An initial mistyped Rust test filter selected zero tests; that result is not
+evidence and was replaced by the real `candidate_action_tests` run. Native fixture
+browser tests are UI evidence, not real SQLite/provider/browser-session E2E.
+Fresh final-head gates and publication remain required after independent review.
+
+The same UI slice corrects Search's local result region and source label from
+Library to Records. Existing Search authorization/indexing does not establish
+saved Library membership; the change makes that boundary visible without changing
+data or removing search results. Two goal-created regression tests adopt the new
+label, including an assertion that Search no longer presents a Library region.
+Existing pre-programme tests and CI configuration remain unchanged. Manual light,
+dark and 320px screenshot review also scoped the old Discover button skin away
+from the native dialog, preserving Tabler's secondary Cancel presentation.
+
+Current compact workfront allocation:
+
+- Commander: Attach production integration, independent finding validation,
+  browser reservation 4173/18422, exact-head verification and delivery.
+- Agent A: completed exact domain/identity review; now source-backed preparation
+  for the remaining Manga/Comic/Game/Music/Podcast/Custom coordinate evidence.
+- Agent B: current Attach diff review found no confirmed P0/P1/P2 defect; owns
+  only the new `tests/e2e/search-attach-browser.regression-1.spec.ts` test leaf for
+  browser-session/SDK authority races. No production or listener ownership.
+- Agent C: completed domain query/compatibility preparation; rotates to read-only
+  M5 authored Library-state preparation. No production ownership.
+
+Domain preparation corrected an invalid example: attached identifiers must have
+the same grain as their Record. Anime/Show overlap can instead come from direct
+MAL Release evidence plus an effective Accepted, Exact M3 assertion targeting
+TMDB Series. SubsetOf and other relations do not confer general domain identity.
+All ten approved product domain values remain in scope; only proven governed
+coordinates may classify a Record, never arbitrary namespace labels or grain
+heuristics. The future filter must preserve legacy empty-filter receipt/context
+bytes and use exact selected-ID batches before oversized metadata/identifier
+hydration. Existing range-based preview and per-Record route loaders cannot be
+reused unchanged for sparse Search pages.
+
+No domain table is required by current evidence. A compact projection must
+validate source/target coordinate values, ownership, Exact relation, evidence
+class and the complete lifecycle through shared domain rules. Omitting large
+non-route assertion payloads relies on full restore-activation validation and
+immutable persisted rows; it cannot also claim detection of later out-of-band
+tampering in omitted JSON. That trust/performance choice is not frozen merely by
+the read-only proposals. Full-payload revalidation under cumulative bounds remains
+an alternative to assess before implementation, not permission to remove filters.
+
+Access PR #129 reports a newer published head but no exact merged handoff. Its
+qualification and shared-file reservations remain unchanged. Do not poll it
+unchanged or merge unhanded work. ~~Codex Security~~ remains permanently excluded
+for the commander and all agents; ordinary native checks remain required.
+
+The independent browser-session leaf then exposed a production gap that native
+invoke serialization hid: Workbench included `after: undefined` on first-page
+local Search requests, and the strict SDK rejected that object before transport.
+All five browser checks reproduced the failure before reaching their intended
+authority assertions. The commander corrected the shared request to explicit
+`after: null`, which is already permitted by the generated contract. Neither the
+SDK validator nor the HTTP fixture was weakened. This fixes both ordinary local
+Search and the new Attach picker; fresh browser evidence is required below.
+
+A material hosted PR #128 check was also inspected on published `f5e0978f`:
+Retained JavaScript job `101367451379` failed while building
+`b1-conformance-server` inside the SDK test's existing 120-second setup budget
+(120123 ms, no compiler diagnostic). The JavaScript job had neither the pinned
+Rust toolchain/cache nor an explicit conformance build step. Its narrow fix adds
+the repository's existing pinned Rust setup/cache and a locked fixture build
+before `pnpm test`; it does not raise the timeout or change the test. A new
+workflow-order regression passes, and the same fixture build plus the actual
+loopback SDK route test passes locally. Hosted recovery remains unverified until
+the correction is published and checked. Access was notified of this independent
+JavaScript-job hunk; its Browser UI and qualification regions remain untouched.
+
+After the shared first-page fix, four browser-session tests passed immediately.
+The remaining malformed-target test expected an internal SDK cause rather than
+the stable public protocol-error message. Its oracle now checks that exact public
+error, retained selection, no premature navigation and successful same-intent
+retry. All five browser-session tests then passed in
+`.gstack/qa-reports/m4-attach-browser-green`. The subject-switch fixture also clears
+old subject evidence and changes the workspace-bound client. The commander
+removed duplicate equivalent fixture fields from a test-leaf handoff race before
+the strict standalone TypeScript check passed. All production files retained a
+single writer throughout.
+
+All 23 current Rust Search HTTP tests also pass, covering real router/store
+authority, CSRF, explicit Attach, revoked sessions and cached-policy boundaries.
+The new browser tests retain intercepted HTTP responses; they complement those
+Rust tests but do not replace the still-required real-process Search journey.
+CI fixture setup is committed separately as `bc88bbd6`; the Attach slice receives
+fresh clean-head full browser and canonical verification before publication.
+
+Read-only M5 preparation establishes a real dependency, not a scope reduction:
+full M5 Collection filtering requires the M7 native membership owner. After M4
+merges and releases shared files, implement M5 independent state/query core, the
+bounded M7 native membership prerequisite, then M5 Collection-filter integration
+and full acceptance. Do not close M5 after the core alone, derive membership from
+the raw Nuvio envelope, or allocate its next migration before the explicit M4
+handoff. Saved intent, tracking, progress, completion, personal rating and personal
+note remain independent; activity cannot infer saved intent or tracking state.

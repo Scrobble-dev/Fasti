@@ -9,7 +9,10 @@
     SearchCandidateDetailsResponse,
     SearchCandidateReceiptDto,
     SearchProviderPageResponse,
+    SearchRecordActionDto,
   } from "./types.js";
+  import { onDestroy, untrack } from "svelte";
+  import { dialogFocus } from "./dialog-focus.js";
   import { routeSlug, type SearchCandidateRoute } from "./route-slug.js";
   import { hostProblemText } from "./host-problem.js";
   import IconCompass from "@tabler/icons-svelte/icons/compass";
@@ -27,6 +30,11 @@
       query: string,
       after?: LocalSearchCursorDto,
     ) => Promise<LocalSearchResponseDto>;
+    onSearchAttachTargets?: (
+      query: string,
+      grain: string,
+      after?: LocalSearchCursorDto,
+    ) => Promise<LocalSearchResponseDto>;
     onSearchProviderPage?: (
       provider: string,
       query: string,
@@ -38,10 +46,12 @@
     onOpenRecord?: (recordId: string) => void;
     onCandidateAction?: (
       candidate: ProviderSearchCandidate,
+      action?: SearchRecordActionDto,
     ) => Promise<CreateRecordResult | void>;
     onCandidateReceiptAction?: (
       receipt: SearchCandidateReceiptDto,
       evidenceMode: "cached" | "refetch",
+      action?: SearchRecordActionDto,
     ) => Promise<CreateRecordResult | void>;
     onReadCandidate?: (
       receipt: SearchCandidateReceiptDto,
@@ -72,6 +82,7 @@
     hostProblem,
     onSearch,
     onSearchLocal,
+    onSearchAttachTargets,
     onSearchProviderPage,
     onOpenSettings,
     onRetry,
@@ -147,6 +158,17 @@
   let routeLoading = $state(false);
   let routeProblem = $state("");
   let routeGeneration = 0;
+  let attachDialog = $state<HTMLDialogElement>();
+  let attachResult = $state<{ result: ProviderResult; index: number }>();
+  let attachQuery = $state("");
+  let attachCompletedQuery = "";
+  let attachRecords = $state<LocalSearchResponseDto["records"]>([]);
+  let attachNext = $state<LocalSearchCursorDto>();
+  let attachRecordId = $state("");
+  let attachLoading = $state(false);
+  let attachSearched = $state(false);
+  let attachProblem = $state("");
+  let attachGeneration = 0;
   const ALL_PROVIDERS = "all";
 
   function canonicalCandidatePath(
@@ -234,6 +256,7 @@
     const route = candidateRoute;
     const offline = providerOffline();
     const generation = ++routeGeneration;
+    untrack(closeAttachPicker);
     routeCandidate = undefined;
     routeReceipt = undefined;
     routeLoading = false;
@@ -245,6 +268,115 @@
     };
   });
 
+  onDestroy(() => {
+    searchRevision += 1;
+    attachGeneration += 1;
+  });
+
+  function closeAttachPicker(): void {
+    attachGeneration += 1;
+    attachDialog?.close();
+    attachResult = undefined;
+    attachRecords = [];
+    attachNext = undefined;
+    attachRecordId = "";
+    attachProblem = "";
+    attachLoading = false;
+    attachSearched = false;
+  }
+
+  function openAttachPicker(result: ProviderResult, index: number): void {
+    if (!onSearchAttachTargets || searching || actionKey || detailKey) return;
+    closeAttachPicker();
+    attachQuery = result.candidate.title;
+    attachResult = { result, index };
+  }
+
+  $effect(() => {
+    if (attachResult && attachDialog && !attachDialog.open)
+      attachDialog.showModal();
+  });
+
+  async function searchAttachTargets(
+    after?: LocalSearchCursorDto,
+  ): Promise<void> {
+    const selection = attachResult;
+    const value = after ? attachCompletedQuery : attachQuery.trim();
+    if (
+      !selection ||
+      !onSearchAttachTargets ||
+      attachLoading ||
+      actionKey ||
+      !value
+    )
+      return;
+    const generation = ++attachGeneration;
+    attachLoading = true;
+    attachProblem = "";
+    if (!after) {
+      attachRecords = [];
+      attachNext = undefined;
+      attachRecordId = "";
+      attachSearched = false;
+    }
+    try {
+      const page = await onSearchAttachTargets(
+        value,
+        selection.result.candidate.grain,
+        after,
+      );
+      if (generation !== attachGeneration) return;
+      if (
+        page.records.some(
+          (record) => record.grain !== selection.result.candidate.grain,
+        )
+      )
+        throw new Error(
+          "The host returned a Record with an incompatible identity grain.",
+        );
+      attachRecords = after
+        ? [...attachRecords, ...page.records]
+        : [...page.records];
+      attachNext = page.next ?? undefined;
+      attachCompletedQuery = value;
+      attachSearched = true;
+    } catch (error) {
+      if (generation === attachGeneration)
+        attachProblem = hostProblemText(
+          error,
+          "Fasti could not search local Records.",
+        );
+    } finally {
+      if (generation === attachGeneration) attachLoading = false;
+    }
+  }
+
+  async function confirmAttach(): Promise<void> {
+    const selection = attachResult;
+    if (
+      !selection ||
+      attachLoading ||
+      !attachRecords.some((record) => record.record_id === attachRecordId)
+    )
+      return;
+    const generation = attachGeneration;
+    const outcome = await runCandidateAction(
+      selection.result,
+      selection.index,
+      {
+        kind: "attach",
+        record_id: attachRecordId,
+      },
+    );
+    if (generation !== attachGeneration) return;
+    if (outcome) {
+      closeAttachPicker();
+      onOpenRecord?.(outcome.record_id);
+    } else {
+      attachProblem = actionProblem;
+    }
+  }
+
   function candidateKey(result: ProviderResult, index: number): string {
     return (
       result.receipt?.candidate_receipt_id ??
@@ -255,7 +387,8 @@
   async function runCandidateAction(
     result: ProviderResult,
     index: number,
-  ): Promise<void> {
+    recordAction: SearchRecordActionDto = { kind: "create" },
+  ): Promise<CreateRecordResult | undefined> {
     const key = candidateKey(result, index);
     const action = result.receipt
       ? onCandidateReceiptAction
@@ -263,33 +396,37 @@
             onCandidateReceiptAction(
               result.receipt!,
               providerOffline() ? "cached" : "refetch",
+              recordAction,
             )
         : undefined
       : onCandidateAction
-        ? () => onCandidateAction(result.candidate)
+        ? () => onCandidateAction(result.candidate, recordAction)
         : undefined;
     if (
       !action ||
       searching ||
       actionKey ||
       detailKey ||
-      completedKeys.has(key) ||
-      (result.cacheState === "stale_on_error" && providerOffline())
+      completedKeys.has(key)
     )
       return;
     const revision = searchRevision;
+    const routeRevision = routeGeneration;
     actionKey = key;
     actionProblem = "";
     actionProblemKey = "";
     try {
       const outcome = await action();
-      if (revision !== searchRevision) return;
+      if (revision !== searchRevision || routeRevision !== routeGeneration)
+        return;
       completedKeys = new Set([...completedKeys, key]);
       if (outcome) {
         createdRecordIds = { ...createdRecordIds, [key]: outcome.record_id };
+        return outcome;
       }
     } catch (error) {
-      if (revision !== searchRevision) return;
+      if (revision !== searchRevision || routeRevision !== routeGeneration)
+        return;
       actionProblem = hostProblemText(error, actionProblemFallback);
       actionProblemKey = key;
     } finally {
@@ -301,9 +438,8 @@
     const candidate = routeCandidate;
     const receipt = routeReceipt;
     if (!candidate || !receipt) return;
-    await runCandidateAction({ candidate, receipt }, 0);
-    const recordId = createdRecordIds[receipt.candidate_receipt_id];
-    if (recordId) onOpenRecord?.(recordId);
+    const outcome = await runCandidateAction({ candidate, receipt }, 0);
+    if (outcome) onOpenRecord?.(outcome.record_id);
   }
 
   async function readCandidateDetails(
@@ -634,7 +770,7 @@
         if (localOutcome.status === "rejected") {
           localProblem = hostProblemText(
             localOutcome.reason,
-            "Fasti could not search the local Library.",
+            "Fasti could not search local Records.",
           );
         }
       }
@@ -781,8 +917,22 @@
             onclick={runRoutedCandidateAction}
             >{actionKey ? pendingLabel : actionLabel}</button
           >
+          {#if onSearchAttachTargets}
+            <button
+              type="button"
+              class="btn btn-outline-secondary"
+              disabled={Boolean(actionKey) ||
+                routeLoading ||
+                completedKeys.has(routeReceipt.candidate_receipt_id)}
+              onclick={() =>
+                openAttachPicker(
+                  { candidate: routeCandidate!, receipt: routeReceipt! },
+                  0,
+                )}>Attach to existing Record</button
+            >
+          {/if}
         {/if}
-        {#if actionProblem && actionProblemKey === routeReceipt?.candidate_receipt_id}
+        {#if !attachResult && actionProblem && actionProblemKey === routeReceipt?.candidate_receipt_id}
           <p class="problem" role="alert">{actionProblem}</p>
         {/if}
       {:else if !routeLoading && !routeProblem}
@@ -804,7 +954,7 @@
 
   <form class="search-form" onsubmit={search} role="search">
     <label for="provider-search">
-      Search {selectedProvider?.label ?? "your Library and providers"}
+      Search {selectedProvider?.label ?? "local Records and providers"}
     </label>
     <div class="search-row">
       <input
@@ -845,7 +995,7 @@
       this={embedded ? "h4" : "h2"}
       id="local-search-results-title"
     >
-      Your Library
+      Local Records
     </svelte:element>
     {#if localProblem}
       <p class="problem" role="alert">{localProblem}</p>
@@ -870,7 +1020,7 @@
             <dl>
               <div>
                 <dt>Source</dt>
-                <dd>Local Library</dd>
+                <dd>Local Record</dd>
               </div>
               <div>
                 <dt>Type</dt>
@@ -1134,9 +1284,7 @@
                     aria-disabled={searching ||
                       Boolean(actionKey) ||
                       Boolean(detailKey) ||
-                      completedKeys.has(resultKey) ||
-                      (result.cacheState === "stale_on_error" &&
-                        providerOffline())}
+                      completedKeys.has(resultKey)}
                     onclick={() => runCandidateAction(result, index)}
                   >
                     {#if completedKeys.has(resultKey)}
@@ -1147,18 +1295,30 @@
                       {actionLabel}
                     {/if}
                   </button>
+                  {#if onSearchAttachTargets}
+                    <button
+                      type="button"
+                      class="btn btn-outline-secondary"
+                      disabled={searching ||
+                        Boolean(actionKey) ||
+                        Boolean(detailKey) ||
+                        completedKeys.has(resultKey)}
+                      onclick={() => openAttachPicker(result, index)}
+                      >Attach to existing Record</button
+                    >
+                  {/if}
                   {#if createdRecordIds[resultKey]}
                     <p class="result-action-status" role="status">
                       Record ID: <code>{createdRecordIds[resultKey]}</code>
                     </p>
                   {/if}
-                  {#if actionProblemKey === resultKey}
+                  {#if !attachResult && actionProblemKey === resultKey}
                     <p class="problem" role="alert">{actionProblem}</p>
                   {/if}
                   {#if result.cacheState === "stale_on_error" && providerOffline()}
                     <p class="result-action-note">
-                      Reconnect before creating a Record from stale provider
-                      evidence.
+                      Fasti will check whether this retained evidence can still
+                      be used. Expired evidence requires a new provider search.
                     </p>
                   {/if}
                 {:else}
@@ -1188,7 +1348,159 @@
   {/if}
 </div>
 
+<dialog
+  class="attach-dialog"
+  bind:this={attachDialog}
+  use:dialogFocus
+  aria-labelledby="attach-record-title"
+  oncancel={(event) => {
+    event.preventDefault();
+    if (!actionKey) closeAttachPicker();
+  }}
+>
+  {#if attachResult}
+    <section class="card m-0">
+      <header class="card-header">
+        <h2 id="attach-record-title" class="card-title">
+          Attach to existing Record
+        </h2>
+      </header>
+      <div class="card-body">
+        <p>
+          Attach {attachResult.result.candidate.provider} identifier
+          <code>{attachResult.result.candidate.provider_id}</code> for
+          <strong>{attachResult.result.candidate.title}</strong> to a Record you select.
+          This does not merge Records or change tracking state.
+        </p>
+        <form
+          onsubmit={(event) => {
+            event.preventDefault();
+            void searchAttachTargets();
+          }}
+        >
+          <label for="attach-record-search" class="form-label"
+            >Search local Records</label
+          >
+          <div class="d-flex flex-wrap gap-2">
+            <input
+              id="attach-record-search"
+              type="search"
+              class="form-control"
+              bind:value={attachQuery}
+              required
+              maxlength="256"
+              autocomplete="off"
+              disabled={attachLoading || Boolean(actionKey)}
+            />
+            <button
+              type="submit"
+              class="btn btn-outline-secondary"
+              disabled={attachLoading ||
+                Boolean(actionKey) ||
+                !attachQuery.trim()}>Find Records</button
+            >
+          </div>
+        </form>
+        <p class="text-secondary mt-2">
+          Only Records with the same identity grain ({attachResult.result
+            .candidate.grain}) can receive this identifier.
+        </p>
+        {#if attachLoading}
+          <p role="status">Searching local Records…</p>
+        {:else if attachSearched && attachRecords.length === 0}
+          <p role="status">
+            No compatible Records found{attachNext ? " on this page" : ""}.
+          </p>
+        {/if}
+        {#if attachRecords.length > 0}
+          <fieldset disabled={Boolean(actionKey) || attachLoading}>
+            <legend class="form-label">Select a Record</legend>
+            {#each attachRecords as record (record.record_id)}
+              <label class="form-check py-2">
+                <input
+                  class="form-check-input"
+                  type="radio"
+                  name="attach-record"
+                  value={record.record_id}
+                  bind:group={attachRecordId}
+                />
+                <span class="form-check-label">
+                  <strong>{record.title.value ?? "Untitled Record"}</strong>
+                  {#if record.release_year?.value}
+                    · {record.release_year.value}{/if}
+                  · {record.grain}
+                  <code class="d-block">{record.record_id}</code>
+                </span>
+              </label>
+            {/each}
+          </fieldset>
+        {/if}
+        {#if attachNext}
+          <button
+            type="button"
+            class="btn btn-outline-secondary"
+            disabled={attachLoading || Boolean(actionKey)}
+            onclick={() => searchAttachTargets(attachNext)}
+            >Load more matching Records</button
+          >
+        {/if}
+        {#if attachProblem}
+          <p class="problem mt-3" role="alert">{attachProblem}</p>
+        {/if}
+        {#if actionKey}
+          <p role="status">Attaching identifier. Waiting for confirmation…</p>
+        {/if}
+      </div>
+      <footer class="card-footer d-flex flex-wrap gap-2">
+        <button
+          type="button"
+          class="btn btn-outline-secondary"
+          disabled={Boolean(actionKey)}
+          onclick={closeAttachPicker}>Cancel</button
+        >
+        <button
+          type="button"
+          class="btn btn-primary"
+          disabled={!attachRecordId || attachLoading || Boolean(actionKey)}
+          onclick={confirmAttach}>Confirm attachment</button
+        >
+      </footer>
+    </section>
+  {/if}
+</dialog>
+
 <style>
+  .attach-dialog {
+    width: min(42rem, calc(100vw - 2rem));
+    max-height: calc(100dvh - 2rem);
+    margin: auto;
+    padding: 0;
+    border: 0;
+    border-radius: calc(
+      var(--tblr-border-radius-lg, 0.5rem) * var(--tblr-border-radius-scale, 1)
+    );
+    background: var(--fasti-surface-paper);
+    color: var(--fasti-text-primary);
+    overflow: auto;
+  }
+
+  .attach-dialog::backdrop {
+    background: rgb(15 23 42 / 58%);
+  }
+
+  .attach-dialog code {
+    overflow-wrap: anywhere;
+  }
+
+  .attach-dialog .form-check {
+    min-height: 44px;
+  }
+
+  .attach-dialog input[type="radio"] {
+    min-height: 0;
+    padding: 0;
+  }
+
   .discover-container {
     max-width: 1000px;
     margin: 0 auto;
@@ -1283,6 +1595,9 @@
   input,
   select {
     min-height: 44px;
+  }
+
+  .discover-container :is(button, input, select) {
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 35%, transparent);
     border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
@@ -1290,7 +1605,7 @@
     color: var(--fasti-text-primary);
   }
 
-  button {
+  .discover-container button {
     display: inline-flex;
     align-items: center;
     justify-content: center;

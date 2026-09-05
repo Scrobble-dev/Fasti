@@ -807,6 +807,22 @@ cannot redirect an identifier already owned by another Record. No Library intent
 progress, completion, rating, note, override or Collection state changes are
 implicit in either action.
 
+Workbench exposes Attach beside Create for both retained candidate receipts and
+no-store results. Its labelled native dialog uses Tabler controls and the shared
+focus owner. Search for a target through the existing local Search capability,
+filtered by the candidate's exact identity grain; preserve the returned keyset
+continuation. Do not select from the bounded Library projection or infer a target
+from title similarity. Show title, year, grain and stable Record ID, require an
+explicit selection and confirmation, then open the authoritative returned Record
+through the existing exact-read/canonical-route owner. A failed action keeps the
+selection and complete-intent retry ID; changing the target changes the operation.
+Before submission, Cancel/Escape restores opener focus without mutation. During
+submission, keep the selected intent fixed until confirmation; navigation or an
+authority change invalidates private UI without pretending to cancel a committed
+write. Candidate cache labels do not override the server's retained-evidence
+policy. No-store results use only the existing governed identifier-refetch action,
+never a fabricated retained receipt or a fallback from a rejected receipt.
+
 One durable action-receipt family binds workspace operation uniqueness, actor
 kind, stable actor and attribution client, profile, Create/Attach and explicit
 target, candidate receipt/route and selected evidence mode. The immutable result

@@ -357,7 +357,7 @@ test("local and receipt-backed provider Search survive a partial source failure"
   ).toBeVisible();
   await provider.selectOption("all");
   await page
-    .getByRole("searchbox", { name: "Search your Library and providers" })
+    .getByRole("searchbox", { name: "Search local Records and providers" })
     .fill("Dune");
   await page.getByRole("button", { name: "Search", exact: true }).click();
 
