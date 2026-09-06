@@ -4415,3 +4415,38 @@ remains an ordinary title query. Preserve keyset position, complete identifiers
 and the 4 MiB budget. Extend existing selector/query-count/10,000-Record evidence,
 not duplicated SQL. Raw provider-value lookup remains separately owned and must
 not invent an unallocated migration.
+
+The main/picker cancellation increment is committed at
+`523de6580af4dafaaa5e5410eef32827089976b5`, tree
+`2c6920d1b48d0262d42dc33bdfea59f6bdbbb8f3`. Independent four-file review found
+no cancellation-state blocker. Its exact clean canonical receipts pass all
+27 contract and 11 portable gates, followed by the real retained/no-store
+browser and restart receipt on the same head/tree. These are still disposable
+upstream fixtures, not public-provider acceptance.
+
+The first focused Chrome run at that head had 26 passes and one failure during
+the initial Search click, before the intended profile switch. The preserved trace
+shows Vite hot updates of App, Workbench and Account security at trace times
+31746.932–31797.494 while the canonical JavaScript rebuild ran concurrently.
+That reload replaced the populated input; this run is not passing evidence.
+The unchanged isolated reproduction then passed. No product/test code or timeout
+was altered. Run future browser gates sequentially after any generator/build
+that can rewrite watched outputs, even when Git remains clean. Preserve the
+failed trace under `/tmp/fasti-m4-search-cancellation-first-browser-523de658/`.
+
+The material PR133 handoff was freshly fetched and normally merged at
+`13c0b06e866659c7d99cac851ccc9ac62d37988f`, tree
+`cbff8ac411f6c97952a80729d1ac38a245a79ed1`, equal to the merge-tree preview.
+Its exact origin/dev parent is `6ce40dd21b4267a5bd0131e3b18150df0d779999`,
+tree `730417c551a83f9fbeb8e483bebee0dff985d0fc`. Only the reported PAT boundary
+tests and two Access plans changed. Final combined-head canonical, focused
+browser and real-process gates remain to be run sequentially after this note.
+No M4 PR merge, migration18 allocation or shared-file release is made.
+
+PR134 received one narrow ownership allocation in its own worktree: temporary
+cfg(test)-only SnapshotError capture in `online_archive.rs` for the reported
+historical-archive export failure. No production limits, retries, schema,
+serialization or error mapping changes are authorized, and diagnostic
+instrumentation must not be committed/pushed or integrated without review.
+This is not a release of M4 integration ownership. The old failure remains
+evidence; the inferred one-second export step timeout is not yet a proven cause.
