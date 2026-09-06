@@ -18,6 +18,11 @@ from urllib.parse import parse_qs, urlsplit
 HOST = "api.themoviedb.org"
 TITLE = "Fasti Fixture Film"
 PROVIDER_IDS = (842001, 842002)
+NO_STORE_TITLE = "Fasti Transient Fixture Film"
+NO_STORE_OVERVIEW = (
+    "Transient provider payload sentinel 94a8bcd73cdd4ef5b350f838d5ec4dd1."
+)
+NO_STORE_PROVIDER_IDS = (843001, 843002)
 
 
 class TmdbSmokeFixture:
@@ -78,6 +83,7 @@ class TmdbSmokeFixture:
 
             def do_GET(self):
                 payload = None
+                cache_control = "private, max-age=300, stale-if-error=300"
                 parsed = urlsplit(self.path)
                 try:
                     query = parse_qs(parsed.query, strict_parsing=True, max_num_fields=8)
@@ -102,8 +108,18 @@ class TmdbSmokeFixture:
                           and query.get("page", ["1"]) == ["1"]):
                         payload = {"page": 1, "total_pages": 1,
                                    "results": [owner._movie(value) for value in PROVIDER_IDS]}
+                    elif (parsed.path == "/3/search/multi"
+                          and query.get("query") == [NO_STORE_TITLE]
+                          and query.get("page", ["1"]) == ["1"]):
+                        payload = {"page": 1, "total_pages": 1,
+                                   "results": [owner._movie(value)
+                                               for value in NO_STORE_PROVIDER_IDS]}
+                        cache_control = "private, no-store"
                     elif parsed.path in [f"/3/movie/{value}" for value in PROVIDER_IDS]:
                         payload = owner._movie(int(parsed.path.rsplit("/", 1)[1]))
+                    elif parsed.path in [f"/3/movie/{value}" for value in NO_STORE_PROVIDER_IDS]:
+                        payload = owner._movie(int(parsed.path.rsplit("/", 1)[1]))
+                        cache_control = "private, no-store"
                 with owner._lock:
                     if len(owner._requests) >= 128:
                         payload = None
@@ -114,7 +130,7 @@ class TmdbSmokeFixture:
                 self.send_response(200 if payload is not None else 400)
                 self.send_header("content-type", "application/json")
                 self.send_header("content-length", str(len(body)))
-                self.send_header("cache-control", "private, max-age=300, stale-if-error=300")
+                self.send_header("cache-control", cache_control)
                 self.end_headers()
                 self.wfile.write(body)
 
@@ -143,9 +159,13 @@ class TmdbSmokeFixture:
 
     @staticmethod
     def _movie(provider_id: int) -> dict[str, object]:
-        return {"id": provider_id, "media_type": "movie", "title": TITLE,
-                "original_title": TITLE, "release_date": "2020-01-01",
-                "overview": "Deterministic provider detail for the real Search journey.",
+        no_store = provider_id in NO_STORE_PROVIDER_IDS
+        title = NO_STORE_TITLE if no_store else TITLE
+        overview = (NO_STORE_OVERVIEW if no_store else
+                    "Deterministic provider detail for the real Search journey.")
+        return {"id": provider_id, "media_type": "movie", "title": title,
+                "original_title": title, "release_date": "2020-01-01",
+                "overview": overview,
                 "poster_path": None, "adult": False}
 
     def child_environment(self) -> dict[str, str]:

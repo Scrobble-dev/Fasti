@@ -7,6 +7,8 @@
     type LocalSearchResponseDto,
     type ProviderIdentifierActionRequest,
     type ProviderIdentifierActionResponse,
+    type ProviderIdentifierDetailsQueryParameters,
+    type ProviderIdentifierDetailsResponse,
     type SearchCandidateActionRequest,
     type SearchCandidateActionResponse,
     type SearchCandidateDetailsResponse,
@@ -301,6 +303,17 @@
               offline,
             },
           }),
+        readProviderIdentifierDetails: (
+          providerId: string,
+          grain: string,
+          query: ProviderIdentifierDetailsQueryParameters,
+        ) =>
+          invoke<ProviderIdentifierDetailsResponse>(
+            "read_provider_identifier_details",
+            {
+              input: { provider_id: providerId, grain, query },
+            },
+          ),
         saveSearchCandidate: (
           providerId: string,
           grain: string,

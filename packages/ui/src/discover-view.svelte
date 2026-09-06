@@ -7,13 +7,18 @@
     ProviderSearchCandidate,
     SearchCandidateDto,
     SearchCandidateDetailsResponse,
+    ProviderIdentifierDetailsResponse,
     SearchCandidateReceiptDto,
     SearchProviderPageResponse,
     SearchRecordActionDto,
   } from "./types.js";
   import { onDestroy, untrack } from "svelte";
   import { dialogFocus } from "./dialog-focus.js";
-  import { routeSlug, type SearchCandidateRoute } from "./route-slug.js";
+  import {
+    routeSlug,
+    canonicalLiveCandidatePath,
+    type SearchCandidateRoute,
+  } from "./route-slug.js";
   import { hostProblemText } from "./host-problem.js";
   import IconCompass from "@tabler/icons-svelte/icons/compass";
   import IconSearch from "@tabler/icons-svelte/icons/search";
@@ -69,11 +74,14 @@
     candidateRoute?: SearchCandidateRoute;
     candidateRouteProblem?: string;
     onOpenCandidate?: (receipt: SearchCandidateReceiptDto) => void;
+    onOpenLiveCandidate?: (candidate: ProviderSearchCandidate) => void;
     onCloseCandidateRoute?: () => void;
     onReadCandidateRoute?: (
       route: SearchCandidateRoute,
       offline: boolean,
-    ) => Promise<SearchCandidateDetailsResponse>;
+    ) => Promise<
+      SearchCandidateDetailsResponse | ProviderIdentifierDetailsResponse
+    >;
   }
 
   let {
@@ -102,6 +110,7 @@
     candidateRoute,
     candidateRouteProblem,
     onOpenCandidate,
+    onOpenLiveCandidate,
     onCloseCandidateRoute,
     onReadCandidateRoute,
   }: Props = $props();
@@ -181,23 +190,17 @@
   }
 
   function routeSnapshot(
-    response: SearchCandidateDetailsResponse,
+    response:
+      SearchCandidateDetailsResponse | ProviderIdentifierDetailsResponse,
   ): SearchCandidateReceiptDto | undefined {
-    return response.outcome === "snapshot" ||
-      response.outcome === "refetched" ||
-      response.outcome === "unavailable"
-      ? response.snapshot.receipt
-      : undefined;
+    return "snapshot" in response ? response.snapshot.receipt : undefined;
   }
 
   function routeDetails(
-    response: SearchCandidateDetailsResponse,
+    response:
+      SearchCandidateDetailsResponse | ProviderIdentifierDetailsResponse,
   ): ProviderSearchCandidate | undefined {
-    if (
-      response.outcome === "refetched" ||
-      response.outcome === "refetched_without_snapshot"
-    )
-      return providerCandidate(response.details);
+    if ("details" in response) return providerCandidate(response.details);
     const receipt = routeSnapshot(response);
     return receipt ? providerCandidate(receipt.candidate) : undefined;
   }
@@ -228,17 +231,21 @@
         routeProblem = `Provider details are unavailable (${response.problem_code}).`;
       }
       if (routeCandidate) {
-        const receiptId =
-          routeReceipt?.candidate_receipt_id ?? route.candidateReceiptId;
-        const providerId = routeReceipt?.candidate.provider ?? route.providerId;
-        const grain = routeReceipt?.grain ?? route.grain;
-        const path = canonicalCandidatePath(
-          providerId,
-          grain,
-          receiptId,
-          routeCandidate.title,
-        );
-        if (window.location.pathname !== path)
+        const path =
+          route.kind === "live"
+            ? canonicalLiveCandidatePath(
+                route.providerId,
+                route.grain,
+                route.providerRecordId,
+                route.locale,
+              )
+            : canonicalCandidatePath(
+                routeReceipt?.candidate.provider ?? route.providerId,
+                routeReceipt?.grain ?? route.grain,
+                routeReceipt?.candidate_receipt_id ?? route.candidateReceiptId,
+                routeCandidate.title,
+              );
+        if (window.location.pathname + window.location.search !== path)
           window.history.replaceState(window.history.state, "", path);
       }
     } catch (error) {
@@ -437,7 +444,7 @@
   async function runRoutedCandidateAction(): Promise<void> {
     const candidate = routeCandidate;
     const receipt = routeReceipt;
-    if (!candidate || !receipt) return;
+    if (!candidate || (candidateRoute?.kind !== "live" && !receipt)) return;
     const outcome = await runCandidateAction({ candidate, receipt }, 0);
     if (outcome) onOpenRecord?.(outcome.record_id);
   }
@@ -909,7 +916,7 @@
             <dd><code>{routeCandidate.provider_id}</code></dd>
           </div>
         </dl>
-        {#if routeReceipt && onCandidateReceiptAction}
+        {#if (candidateRoute?.kind === "retained" && routeReceipt && onCandidateReceiptAction) || (candidateRoute?.kind === "live" && onCandidateAction)}
           <button
             type="button"
             class="btn btn-primary"
@@ -923,16 +930,21 @@
               class="btn btn-outline-secondary"
               disabled={Boolean(actionKey) ||
                 routeLoading ||
-                completedKeys.has(routeReceipt.candidate_receipt_id)}
+                completedKeys.has(
+                  candidateKey(
+                    { candidate: routeCandidate, receipt: routeReceipt },
+                    0,
+                  ),
+                )}
               onclick={() =>
                 openAttachPicker(
-                  { candidate: routeCandidate!, receipt: routeReceipt! },
+                  { candidate: routeCandidate!, receipt: routeReceipt },
                   0,
                 )}>Attach to existing Record</button
             >
           {/if}
         {/if}
-        {#if !attachResult && actionProblem && actionProblemKey === routeReceipt?.candidate_receipt_id}
+        {#if !attachResult && actionProblem && actionProblemKey === candidateKey({ candidate: routeCandidate, receipt: routeReceipt }, 0)}
           <p class="problem" role="alert">{actionProblem}</p>
         {/if}
       {:else if !routeLoading && !routeProblem}
@@ -1243,6 +1255,19 @@
                     onclick={(event) => {
                       event.preventDefault();
                       onOpenCandidate?.(result.receipt!);
+                    }}>View details</a
+                  >
+                {:else if !result.receipt && onOpenLiveCandidate}
+                  <a
+                    class="btn btn-outline-secondary"
+                    href={canonicalLiveCandidatePath(
+                      candidate.provider,
+                      candidate.grain,
+                      candidate.provider_id,
+                    )}
+                    onclick={(event) => {
+                      event.preventDefault();
+                      onOpenLiveCandidate?.(candidate);
                     }}>View details</a
                   >
                 {:else if result.receipt && onReadCandidate}

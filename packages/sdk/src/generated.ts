@@ -2959,6 +2959,105 @@ const PRODUCTION_SCHEMAS = {
       }
     ]
   },
+  "ProviderIdentifierDetailsQueryParameters": {
+    "additionalProperties": false,
+    "properties": {
+      "locale": {
+        "maxLength": 16,
+        "minLength": 2,
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "offline": {
+        "type": "boolean"
+      },
+      "provider_record_id": {
+        "maxLength": 256,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "provider_record_id",
+      "offline"
+    ],
+    "type": "object"
+  },
+  "ProviderIdentifierDetailsResponse": {
+    "description": "Transient detail projection. No receipt, snapshot or reusable lifetime exists.",
+    "oneOf": [
+      {
+        "additionalProperties": false,
+        "properties": {
+          "details": {
+            "$ref": "#/components/schemas/SearchCandidateDto"
+          },
+          "grain": {
+            "type": "string"
+          },
+          "locale": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "outcome": {
+            "enum": [
+              "details"
+            ],
+            "type": "string"
+          },
+          "provider_id": {
+            "type": "string"
+          },
+          "provider_record_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider_id",
+          "grain",
+          "provider_record_id",
+          "details",
+          "outcome"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "grain": {
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "unavailable"
+            ],
+            "type": "string"
+          },
+          "problem_code": {
+            "type": "string"
+          },
+          "provider_id": {
+            "type": "string"
+          },
+          "provider_record_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider_id",
+          "grain",
+          "provider_record_id",
+          "problem_code",
+          "outcome"
+        ],
+        "type": "object"
+      }
+    ]
+  },
   "ProviderKindDto": {
     "enum": [
       "metadata",
@@ -5016,6 +5115,15 @@ export interface SearchCandidateDetailsQueryParameters {
 // prettier-ignore
 export type SearchCandidateDetailsResponse = { readonly candidate_receipt_id: string; readonly details: SearchCandidateDto; readonly grain: string; readonly locale?: null | string; readonly outcome: "refetched_without_snapshot"; readonly provider_id: string } | { readonly candidate_receipt_id: string; readonly grain: string; readonly outcome: "unavailable_without_snapshot"; readonly problem_code: string; readonly provider_id: string } | { readonly details: SearchCandidateDto; readonly locale?: null | string; readonly outcome: "refetched"; readonly snapshot: SearchCandidateSnapshotDto } | { readonly outcome: "missing" } | { readonly outcome: "snapshot"; readonly snapshot: SearchCandidateSnapshotDto } | { readonly outcome: "unavailable"; readonly problem_code: string; readonly snapshot: SearchCandidateSnapshotDto };
 
+export interface ProviderIdentifierDetailsQueryParameters {
+  readonly locale?: null | string;
+  readonly offline: boolean;
+  readonly provider_record_id: string;
+}
+
+// prettier-ignore
+export type ProviderIdentifierDetailsResponse = { readonly details: SearchCandidateDto; readonly grain: string; readonly locale?: null | string; readonly outcome: "details"; readonly provider_id: string; readonly provider_record_id: string } | { readonly grain: string; readonly outcome: "unavailable"; readonly problem_code: string; readonly provider_id: string; readonly provider_record_id: string };
+
 export interface SearchCandidateSnapshotDto {
   readonly lifetime: SearchReceiptLifetimeDto;
   readonly locale?: null | string;
@@ -5487,6 +5595,7 @@ export interface AccessProjectionResponse {
 
 // prettier-ignore
 export const LOCAL_RUNTIME_OPERATIONS = {
+  readProviderIdentifierDetails: { operationId: "read_provider_identifier_details", method: "GET", path: "/api/v1/search/providers/{provider_id}/{grain}/details", capabilityId: "metadata.search", authorization: "scoped_or_browser_session", requiredScopes: ["metadata_search"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ProviderIdentifierDetailsResponse" },
   searchRecords: { operationId: "search_local_records", method: "POST", path: "/api/v1/search/records", capabilityId: "metadata.search", authorization: "scoped_or_browser_session", requiredScopes: ["metadata_search"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: "LocalSearchRequestDto", responseSchema: "LocalSearchResponseDto" },
   saveSearchCandidate: { operationId: "save_search_candidate", method: "POST", path: "/api/v1/search/candidates/{provider_id}/{grain}/{candidate_receipt_id}/actions", capabilityId: "identity.identifier.attach", authorization: "scoped_or_browser_session", requiredScopes: ["identity_write"], conditionalRequiredScopes: {"new_operation":["metadata_search"]}, problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","capacity_exceeded","forbidden","idempotency_conflict","identity_conflict","integrity_failed","invalid_identifier","malformed_json","payload_too_large","record_not_found","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["identity.identifier.attach.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: "SearchCandidateActionRequest", responseSchema: "SearchCandidateActionResponse" },
   saveProviderIdentifier: { operationId: "save_provider_identifier", method: "POST", path: "/api/v1/search/providers/{provider_id}/{grain}/actions", capabilityId: "identity.identifier.attach", authorization: "scoped_or_browser_session", requiredScopes: ["identity_write"], conditionalRequiredScopes: {"new_operation":["metadata_search"]}, problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","capacity_exceeded","forbidden","idempotency_conflict","identity_conflict","integrity_failed","invalid_identifier","malformed_json","payload_too_large","record_not_found","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["identity.identifier.attach.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: "ProviderIdentifierActionRequest", responseSchema: "ProviderIdentifierActionResponse" },
@@ -5659,6 +5768,16 @@ export function parseSearchCandidateDetailsQueryParameters(value: unknown): Sear
 // prettier-ignore
 export function parseSearchCandidateDetailsResponse(value: unknown): SearchCandidateDetailsResponse {
   return parseProductionDto("SearchCandidateDetailsResponse", value);
+}
+
+// prettier-ignore
+export function parseProviderIdentifierDetailsQueryParameters(value: unknown): ProviderIdentifierDetailsQueryParameters {
+  return parseProductionDto("ProviderIdentifierDetailsQueryParameters", value);
+}
+
+// prettier-ignore
+export function parseProviderIdentifierDetailsResponse(value: unknown): ProviderIdentifierDetailsResponse {
+  return parseProductionDto("ProviderIdentifierDetailsResponse", value);
 }
 
 // prettier-ignore

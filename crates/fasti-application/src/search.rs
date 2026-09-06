@@ -117,6 +117,18 @@ pub enum ProviderCandidateDetailsOutcome {
     },
 }
 
+/// A transient coordinate read: never a snapshot, receipt or Record mutation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProviderIdentifierDetailsOutcome {
+    Details {
+        details: Box<SearchCandidate>,
+        locale: Option<MetadataLocale>,
+    },
+    Unavailable {
+        problem: ProblemCode,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderSearchActionOutcome {
     Saved(Box<SearchCandidateActionReceipt>),
@@ -450,6 +462,25 @@ pub struct ReadSearchCandidateRequest {
     pub outbound_policy: OutboundAccessPolicy,
     /// Derive from the current provider descriptor, not the stored receipt.
     pub terms_revision: String,
+}
+
+/// Exact provider coordinate, not a caller-selected URL or durable identity.
+#[derive(Debug, Clone)]
+pub struct ReadProviderIdentifierDetailsRequest {
+    pub correlation_id: RequestCorrelationId,
+    pub access: ApplicationAccessContext,
+    pub provider: ProviderId,
+    pub grain: Grain,
+    pub provider_record_id: String,
+    pub locale: Option<MetadataLocale>,
+    pub outbound_policy: OutboundAccessPolicy,
+}
+
+#[derive(Debug, Clone)]
+pub struct PreparedProviderIdentifierDetails {
+    pub authorized_access: AuthorizedApplicationAccess,
+    pub provider_state: ProviderCapabilityState,
+    pub provider_authority_fingerprint: Sha256Digest,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -812,6 +843,11 @@ pub trait SearchPersistencePort: Send + Sync {
         &self,
         request: &ReadSearchCandidateRequest,
     ) -> ApplicationResult<Option<PreparedSearchCandidateDetails>>;
+    /// Read-only preflight. No cache lookup, receipt admission or action authority.
+    fn prepare_provider_identifier_details(
+        &self,
+        request: &ReadProviderIdentifierDetailsRequest,
+    ) -> ApplicationResult<PreparedProviderIdentifierDetails>;
     fn prepare_search_candidate_action(
         &self,
         command: &SearchCandidateActionCommand,

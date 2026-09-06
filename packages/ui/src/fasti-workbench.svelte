@@ -36,7 +36,13 @@
   import { hostProblemText } from "./host-problem.js";
   import { newOperationId } from "./operation-id.js";
   import { projectRecordSummary } from "./record-projection.js";
-  import { routeSlug, type SearchCandidateRoute } from "./route-slug.js";
+  import {
+    routeSlug,
+    canonicalLiveCandidatePath,
+    parseSearchCandidateRoute,
+    type SearchCandidateRoute,
+    type RetainedSearchCandidateRoute,
+  } from "./route-slug.js";
   import type {
     ActiveNavSection,
     AccessProjectionResponse,
@@ -51,6 +57,7 @@
     ProviderSelection,
     SearchCandidateReceiptDto,
     SearchCandidateDetailsResponse,
+    ProviderIdentifierDetailsResponse,
     SearchProviderPageResponse,
     SearchRecordActionDto,
     ResolveReviewInput,
@@ -276,24 +283,8 @@
     if (path.startsWith("/explore/")) {
       candidateRoute = undefined;
       candidateRouteProblem = undefined;
-      const segments = path.split("/");
       try {
-        if (segments.length !== 6 || !segments[5])
-          throw new Error("Invalid candidate route");
-        const providerId = decodeURIComponent(segments[2]);
-        const grain = decodeURIComponent(segments[3]);
-        const candidateReceiptId = decodeURIComponent(segments[4]);
-        const slug = decodeURIComponent(segments[5]);
-        if (
-          !/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(providerId) ||
-          !/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(grain) ||
-          !/^scr_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/.test(
-            candidateReceiptId,
-          ) ||
-          !slug
-        )
-          throw new Error("Invalid candidate route");
-        candidateRoute = { providerId, grain, candidateReceiptId, slug };
+        candidateRoute = parseSearchCandidateRoute(url);
       } catch {
         candidateRouteProblem =
           "This candidate link is invalid. Start a new Search.";
@@ -889,6 +880,7 @@
 
   function openSearchCandidate(receipt: SearchCandidateReceiptDto): void {
     candidateRoute = {
+      kind: "retained",
       providerId: receipt.candidate.provider,
       grain: receipt.grain,
       candidateReceiptId: receipt.candidate_receipt_id,
@@ -898,6 +890,31 @@
     activeSection = "discover";
     const path = canonicalCandidatePath(receipt);
     if (window.location.pathname !== path)
+      window.history.pushState(
+        { ...window.history.state, [SEARCH_CANDIDATE_HISTORY_KEY]: true },
+        "",
+        path,
+      );
+    window.requestAnimationFrame(() =>
+      document.getElementById("candidate-detail-title")?.focus(),
+    );
+  }
+
+  function openLiveSearchCandidate(candidate: ProviderSearchCandidate): void {
+    candidateRoute = {
+      kind: "live",
+      providerId: candidate.provider,
+      grain: candidate.grain,
+      providerRecordId: candidate.provider_id,
+    };
+    candidateRouteProblem = undefined;
+    activeSection = "discover";
+    const path = canonicalLiveCandidatePath(
+      candidate.provider,
+      candidate.grain,
+      candidate.provider_id,
+    );
+    if (window.location.pathname + window.location.search !== path)
       window.history.pushState(
         { ...window.history.state, [SEARCH_CANDIDATE_HISTORY_KEY]: true },
         "",
@@ -1334,6 +1351,7 @@
   ): Promise<SearchCandidateDetailsResponse> {
     return readSearchCandidateRoute(
       {
+        kind: "retained",
         providerId: receipt.candidate.provider,
         grain: receipt.grain,
         candidateReceiptId: receipt.candidate_receipt_id,
@@ -1344,7 +1362,7 @@
   }
 
   async function readSearchCandidateRoute(
-    route: SearchCandidateRoute,
+    route: RetainedSearchCandidateRoute,
     offline: boolean,
   ): Promise<SearchCandidateDetailsResponse> {
     if (!canAccessProfileData || !host.readSearchCandidate) {
@@ -1360,6 +1378,31 @@
     if (authorityIdentity !== profileAuthorityIdentity) {
       throw new Error("Account access changed before details completed.");
     }
+    return result;
+  }
+
+  async function readCandidateRoute(
+    route: SearchCandidateRoute,
+    offline: boolean,
+  ): Promise<
+    SearchCandidateDetailsResponse | ProviderIdentifierDetailsResponse
+  > {
+    if (route.kind === "retained")
+      return readSearchCandidateRoute(route, offline);
+    if (!canAccessProfileData || !host.readProviderIdentifierDetails)
+      throw new Error("Sign in before reading provider details.");
+    const authorityIdentity = profileAuthorityIdentity;
+    const result = await host.readProviderIdentifierDetails(
+      route.providerId,
+      route.grain,
+      {
+        provider_record_id: route.providerRecordId,
+        offline,
+        locale: route.locale ?? null,
+      },
+    );
+    if (authorityIdentity !== profileAuthorityIdentity)
+      throw new Error("Account access changed before details completed.");
     return result;
   }
 
@@ -1940,10 +1983,14 @@
             {candidateRoute}
             {candidateRouteProblem}
             onOpenCandidate={openSearchCandidate}
+            onOpenLiveCandidate={canAccessProfileData &&
+            host.readProviderIdentifierDetails
+              ? openLiveSearchCandidate
+              : undefined}
             onCloseCandidateRoute={closeSearchCandidate}
             onReadCandidateRoute={canAccessProfileData &&
-            host.readSearchCandidate
-              ? readSearchCandidateRoute
+            (host.readSearchCandidate || host.readProviderIdentifierDetails)
+              ? readCandidateRoute
               : undefined}
           />
         {/key}

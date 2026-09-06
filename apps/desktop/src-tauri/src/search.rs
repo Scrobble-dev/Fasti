@@ -52,6 +52,14 @@ pub(crate) struct CandidateDetailsInput {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub(crate) struct ProviderIdentifierDetailsInput {
+    provider_id: String,
+    grain: String,
+    query: fasti_contracts::ProviderIdentifierDetailsQueryParameters,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct CandidateActionInput {
     provider_id: String,
     grain: String,
@@ -176,6 +184,33 @@ pub(crate) async fn candidate_details(
         .await
         .map_err(|problem| DesktopProblem::application(&problem))?;
     Ok(SearchCandidateDetailsResponse::from(outcome))
+}
+
+pub(crate) async fn provider_identifier_details(
+    runtime: Arc<ProviderRuntime>,
+    kernel: Arc<SqliteKernel>,
+    access: RequestAccessContext,
+    policy: OutboundAccessPolicy,
+    input: ProviderIdentifierDetailsInput,
+    lease: ProviderOperationLease,
+) -> Result<fasti_contracts::ProviderIdentifierDetailsResponse, DesktopProblem> {
+    let request = fasti_application::ReadProviderIdentifierDetailsRequest {
+        correlation_id: RequestCorrelationId::new_v7(),
+        access: access.into(),
+        provider: ProviderId::try_new(input.provider_id)
+            .map_err(|_| DesktopProblem::invalid_input("The Search provider is invalid."))?,
+        grain: input.grain.parse()
+            .map_err(|_| DesktopProblem::invalid_input("The Search grain is invalid."))?,
+        provider_record_id: input.query.provider_record_id,
+        locale: input.query.locale.map(MetadataLocale::try_new).transpose()
+            .map_err(|_| DesktopProblem::invalid_input("The Search locale is invalid."))?,
+        outbound_policy: policy,
+    };
+    let outcome = ProviderSearchService::new(runtime, kernel)
+        .provider_identifier_details(request.clone(), input.query.offline, lease)
+        .await
+        .map_err(|problem| DesktopProblem::application(&problem))?;
+    Ok(fasti_contracts::ProviderIdentifierDetailsResponse::from((&request, outcome)))
 }
 
 pub(crate) async fn save_candidate(

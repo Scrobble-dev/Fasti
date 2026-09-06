@@ -197,7 +197,18 @@ const PRODUCTION_BOOTSTRAP_OPERATIONS: [ConformanceOperation; 2] = [
 /// surface. Kept separate from `PRODUCTION_BOOTSTRAP_OPERATIONS` because that
 /// array also drives the bootstrap-only SDK slice in
 /// `render_production_bootstrap_contract`, which must not grow to include them.
-const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 45] = [
+const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 46] = [
+    ConformanceOperation {
+        alias: "readProviderIdentifierDetails",
+        operation_id: "read_provider_identifier_details",
+        method: "get",
+        path: "/api/v1/search/providers/{provider_id}/{grain}/details",
+        capability_id: "metadata.search",
+        authenticated: true,
+        request: None,
+        response: Some("ProviderIdentifierDetailsResponse"),
+        retry: "safe",
+    },
     ConformanceOperation {
         alias: "searchRecords",
         operation_id: "search_local_records",
@@ -2039,6 +2050,7 @@ fn enrich_production_openapi(
     for (name, count) in [
         ("SearchProviderPageResponse", 3),
         ("SearchCandidateDetailsResponse", 6),
+        ("ProviderIdentifierDetailsResponse", 2),
         ("SearchCandidateActionResponse", 2),
         ("ProviderIdentifierActionResponse", 2),
         ("SearchRecordActionDto", 2),
@@ -2512,6 +2524,7 @@ fn validate_production_operation_security(
         "list_records"
         | "list_providers"
         | "read_search_candidate"
+        | "read_provider_identifier_details"
         | "search_local_records"
         | "list_tracking_dispositions"
         | "get_nuvio_collections"
@@ -3756,6 +3769,8 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         "SearchProviderPageResponse",
         "SearchCandidateDetailsQueryParameters",
         "SearchCandidateDetailsResponse",
+        "ProviderIdentifierDetailsQueryParameters",
+        "ProviderIdentifierDetailsResponse",
         "SearchCandidateSnapshotDto",
         "SearchCandidateActionRequest",
         "SearchCandidateActionResponse",
@@ -4011,6 +4026,14 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         (
             "parseSearchCandidateDetailsResponse",
             "SearchCandidateDetailsResponse",
+        ),
+        (
+            "parseProviderIdentifierDetailsQueryParameters",
+            "ProviderIdentifierDetailsQueryParameters",
+        ),
+        (
+            "parseProviderIdentifierDetailsResponse",
+            "ProviderIdentifierDetailsResponse",
         ),
         (
             "parseSearchCandidateActionRequest",

@@ -959,6 +959,7 @@ test("credentials are header-only on authenticated surfaces and no offline queue
           "readBrowserSession",
           "readMetadataProjection",
           "readProviderHealth",
+          "readProviderIdentifierDetails",
           "readSearchCandidate",
           "readTrailBaseContinuation",
           "receiptEvents",

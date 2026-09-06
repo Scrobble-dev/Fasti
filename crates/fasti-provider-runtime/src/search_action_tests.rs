@@ -277,6 +277,12 @@ mod candidate_action_tests {
         ) -> ApplicationResult<Option<PreparedSearchCandidateDetails>> {
             panic!("detail-read permission alone must not authorize a save")
         }
+        fn prepare_provider_identifier_details(
+            &self,
+            _: &ReadProviderIdentifierDetailsRequest,
+        ) -> ApplicationResult<PreparedProviderIdentifierDetails> {
+            panic!("coordinate detail reads must not authorize an action")
+        }
     }
 
     fn candidate() -> ProviderCandidate {

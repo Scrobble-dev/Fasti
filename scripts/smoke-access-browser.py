@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 from collections import Counter
 from contextlib import closing
+import hashlib
 import http.server
 import importlib.util
 import json
@@ -22,10 +23,15 @@ import threading
 import time
 import urllib.request
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import trailbase_runtime as runtime
-from tmdb_smoke_fixture import TmdbSmokeFixture, PROVIDER_IDS
+from tmdb_smoke_fixture import (
+    NO_STORE_OVERVIEW,
+    NO_STORE_PROVIDER_IDS,
+    TmdbSmokeFixture,
+    PROVIDER_IDS,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -114,14 +120,67 @@ def _start_fastid(
     return process
 
 
-def _browser(payload: dict[str, object]) -> dict[str, object]:
+def _browser(
+    payload: dict[str, object],
+    checkpoint: tuple[Path, Path, Callable[[], None]] | None = None,
+) -> dict[str, object]:
+    timeout = 180 if payload.get("m4SearchJourney") or checkpoint else 60
+    if checkpoint is not None:
+        ready, continuation, validate = checkpoint
+        process = subprocess.Popen(  # nosec B603 -- fixed local script and no shell.
+            ["node", ROOT / "scripts/smoke-access-browser.mjs"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        try:
+            assert process.stdin is not None
+            process.stdin.write(json.dumps(payload).encode())
+            process.stdin.close()
+            deadline = time.monotonic() + timeout
+            while not ready.exists():
+                if process.poll() is not None:
+                    assert process.stderr is not None
+                    raise RuntimeError(process.stderr.read().decode(errors="replace")[-4000:])
+                if time.monotonic() >= deadline:
+                    raise RuntimeError("ordinary-browser durability checkpoint timed out")
+                time.sleep(0.05)
+            try:
+                validate()
+            except BaseException:
+                continuation.write_text("abort\n", encoding="ascii")
+                try:
+                    process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    pass
+                raise
+            continuation.write_text("continue\n", encoding="ascii")
+            remaining = max(1.0, deadline - time.monotonic())
+            process.wait(timeout=remaining)
+            assert process.stdout is not None and process.stderr is not None
+            output = process.stdout.read()
+            error = process.stderr.read()
+            if process.returncode != 0:
+                raise RuntimeError(error.decode(errors="replace")[-4000:])
+            result = json.loads(output)
+            if not isinstance(result, dict):
+                raise RuntimeError("ordinary-browser helper returned a non-object result")
+            return result
+        finally:
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=5)
     completed = subprocess.run(  # nosec B603 -- fixed local script and no shell.
         ["node", ROOT / "scripts/smoke-access-browser.mjs"],
         input=json.dumps(payload).encode(),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         check=False,
-        timeout=120 if payload.get("m4SearchJourney") else 60,
+        timeout=timeout,
     )
     if completed.returncode != 0:
         raise RuntimeError(completed.stderr.decode(errors="replace")[-4000:])
@@ -389,6 +448,93 @@ def main() -> None:
                         ROOT / "target/tmdb-smoke-fixture/debug/fastid"
                     ),
                 }
+                no_store_baseline = _content_database_snapshot(database)
+                no_store_requests = provider.requests()
+                ready = workspace / "m4-no-store-details-ready.json"
+                continuation = workspace / "m4-no-store-continue"
+                detail_evidence: dict[str, object] = {}
+
+                def validate_no_store_detail_checkpoint() -> None:
+                    staged = json.loads(ready.read_text(encoding="utf-8"))
+                    if (staged.get("stage") != "details_only"
+                            or staged.get("providerRecordId") !=
+                            str(NO_STORE_PROVIDER_IDS[0])
+                            or staged.get("route") !=
+                            f"/explore/live/tmdb/film/{NO_STORE_PROVIDER_IDS[0]}/candidate"):
+                        raise RuntimeError("browser no-store detail checkpoint differs")
+                    current = _content_database_snapshot(database)
+                    if current != no_store_baseline:
+                        raise RuntimeError("no-store Search/details changed durable content")
+                    _require_no_store_payload_absent(database)
+                    delta = provider.requests()[len(no_store_requests):]
+                    if Counter(delta) != Counter({
+                        "/3/search/multi": 1,
+                        f"/3/movie/{NO_STORE_PROVIDER_IDS[0]}": 2,
+                    }):
+                        raise RuntimeError("no-store Search/details provider evidence differs")
+                    detail_evidence.update({
+                        "content_digest": _snapshot_digest(current),
+                        "provider_requests": delta,
+                        "sqlite_and_wal_payload_absent": True,
+                    })
+
+                fastid = _start_fastid(data_root, trailbase_root, provider)
+                no_store = _browser(
+                    {
+                        "mode": "m4-no-store",
+                        "email": email,
+                        "password": password,
+                        "noStoreCheckpoint": {
+                            "readyPath": str(ready),
+                            "continuePath": str(continuation),
+                        },
+                        "attachRecordId": journey["recordId"],
+                        "attachRecordPath": journey["recordPath"],
+                    },
+                    (ready, continuation, validate_no_store_detail_checkpoint),
+                )
+                runtime.stop_managed_process_group(fastid)
+                fastid = None
+                no_store_journey = no_store["m4NoStoreJourney"]
+                no_store_after = _no_store_database_evidence(
+                    database,
+                    no_store_journey["recordId"],
+                    journey["recordId"],
+                    no_store_baseline,
+                )
+                _require_no_store_payload_absent(database)
+                delta = provider.requests()[len(no_store_requests):]
+                if Counter(delta) != Counter({
+                    "/3/search/multi": 1,
+                    f"/3/movie/{NO_STORE_PROVIDER_IDS[0]}": 3,
+                    f"/3/movie/{NO_STORE_PROVIDER_IDS[1]}": 2,
+                }):
+                    raise RuntimeError("complete no-store provider exchange differs")
+                requests_after_actions = provider.requests()
+                content_after_actions = _content_database_snapshot(database)
+                fastid = _start_fastid(data_root, trailbase_root, provider)
+                no_store_restart = _browser({
+                    "mode": "restart-no-store-record",
+                    "email": email,
+                    "password": password,
+                    "recordId": no_store_journey["recordId"],
+                    "recordPath": no_store_journey["recordPath"],
+                    "attachRecordId": journey["recordId"],
+                    "attachRecordPath": journey["recordPath"],
+                })
+                runtime.stop_managed_process_group(fastid)
+                fastid = None
+                if (_content_database_snapshot(database) != content_after_actions
+                        or provider.requests() != requests_after_actions):
+                    raise RuntimeError(
+                        "no-store Record restart changed durable content or queried TMDB"
+                    )
+                _require_no_store_payload_absent(database)
+                evidence["m4NoStoreJourney"] = no_store_journey
+                evidence["m4NoStoreDetailCheckpoint"] = detail_evidence
+                evidence["m4NoStoreDatabase"] = no_store_after
+                evidence["m4NoStoreProviderRequests"] = delta
+                evidence["m4NoStoreRestart"] = no_store_restart
             receipt = {
                 "schema_version": "fasti.access-ordinary-browser.v1",
                 "source": {
@@ -491,6 +637,125 @@ def _search_database_evidence(database: Path, record_id: str) -> dict[str, objec
             raise RuntimeError("durable Search action is not bound to its expected candidate")
     return {"recordId": record_id, "identifiers": identifiers, "candidateCount": len(candidates),
             "actions": receipts, "completeProvenanceSourceIds": expected_ids}
+
+
+_CONTENT_TABLES = (
+    "records",
+    "namespace_definitions",
+    "external_identifiers",
+    "search_pages",
+    "search_candidate_receipts",
+    "search_action_receipts",
+    "metadata_field_claims",
+    "metadata_claims",
+    "metadata_claim_provenance",
+    "metadata_projections",
+    "metadata_attributions",
+    "metadata_cache_entries",
+    "metadata_cache_claims",
+    "local_search_grams",
+)
+
+
+def _content_database_snapshot(database: Path) -> dict[str, list[tuple[object, ...]]]:
+    snapshot: dict[str, list[tuple[object, ...]]] = {}
+    with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as connection:
+        for table in _CONTENT_TABLES:
+            columns = connection.execute(f"PRAGMA table_info({table})").fetchall()
+            order = ", ".join(str(index) for index in range(1, len(columns) + 1))
+            snapshot[table] = connection.execute(
+                f"SELECT * FROM {table} ORDER BY {order}"
+            ).fetchall()
+    return snapshot
+
+
+def _snapshot_digest(snapshot: dict[str, list[tuple[object, ...]]]) -> str:
+    return "sha256:" + hashlib.sha256(repr(snapshot).encode()).hexdigest()
+
+
+def _require_no_store_payload_absent(database: Path) -> None:
+    sentinel = NO_STORE_OVERVIEW.encode()
+    for path in (database, Path(f"{database}-wal")):
+        if path.exists() and sentinel in path.read_bytes():
+            raise RuntimeError(f"no-store provider payload reached {path.name}")
+
+
+def _no_store_database_evidence(
+    database: Path,
+    record_id: str,
+    attach_record_id: str,
+    before: dict[str, list[tuple[object, ...]]],
+) -> dict[str, object]:
+    after = _content_database_snapshot(database)
+    unchanged = set(_CONTENT_TABLES) - {
+        "records", "external_identifiers", "search_action_receipts"
+    }
+    if any(after[table] != before[table] for table in unchanged):
+        raise RuntimeError("no-store action invented durable Search or metadata content")
+    if (len(after["records"]) != len(before["records"]) + 1
+            or len(after["external_identifiers"]) !=
+            len(before["external_identifiers"]) + 2
+            or len(after["search_action_receipts"]) !=
+            len(before["search_action_receipts"]) + 2):
+        raise RuntimeError("no-store action changed an unexpected content row count")
+    expected_ids = [str(value) for value in NO_STORE_PROVIDER_IDS]
+    with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as connection:
+        created_identifiers = connection.execute(
+            "SELECT namespace, grain, value FROM external_identifiers "
+            "WHERE record_id = ? ORDER BY value", (record_id,),
+        ).fetchall()
+        attached_identifiers = connection.execute(
+            "SELECT namespace, grain, value FROM external_identifiers "
+            "WHERE record_id = ? ORDER BY value", (attach_record_id,),
+        ).fetchall()
+        receipts = [
+            receipt for receipt in (
+                json.loads(row[0]) for row in connection.execute(
+                    "SELECT receipt_json FROM search_action_receipts "
+                    "ORDER BY operation_id"
+                ).fetchall()
+            )
+            if (receipt.get("provider") == "tmdb"
+                and receipt.get("provider_record_id") in expected_ids)
+        ]
+        record = connection.execute(
+            "SELECT grain, status FROM records WHERE record_id = ?", (record_id,),
+        ).fetchone()
+    actions = {row["action"]["kind"]: row for row in receipts}
+    if (record != ("film", "active")
+            or created_identifiers != [("tmdb.movie", "film", expected_ids[0])]
+            or attached_identifiers != [
+                ("tmdb.movie", "film", value)
+                for value in [str(item) for item in PROVIDER_IDS] + [expected_ids[1]]
+            ]
+            or len(receipts) != 2
+            or set(actions) != {"attach", "create"}
+            or actions["create"]["provider_record_id"] != expected_ids[0]
+            or actions["create"]["record_id"] != record_id
+            or actions["create"]["disposition"] not in {"created", "reused"}
+            or actions["attach"]["provider_record_id"] != expected_ids[1]
+            or actions["attach"]["record_id"] != attach_record_id
+            or actions["attach"]["action"].get("record_id") != attach_record_id
+            or actions["attach"]["disposition"] not in
+            {"attached", "already_attached"}
+            or any(row["provider"] != "tmdb" or row["grain"] != "film"
+                   or row["record_id"] not in {record_id, attach_record_id}
+                   or row["origin"] != "UserSelectedProviderIdentifier"
+                   or row["provider_record_id"] not in expected_ids
+                   or "candidate_receipt_id" in row or "snapshot" in row
+                   for row in receipts)):
+        raise RuntimeError("durable no-store identifier/action evidence differs")
+    return {
+        "recordId": record_id,
+        "createdIdentifiers": created_identifiers,
+        "attachRecordId": attach_record_id,
+        "attachedIdentifiers": attached_identifiers,
+        "providerIdentifierActions": receipts,
+        "retainedSearchRowsUnchanged": True,
+        "metadataRowsUnchanged": True,
+        "providerPayloadAbsent": True,
+        "contentDigest": _snapshot_digest(after),
+    }
 
 
 if __name__ == "__main__":

@@ -295,6 +295,71 @@ fn candidate_details_response(outcome: Option<ProviderCandidateDetailsOutcome>) 
 }
 
 #[utoipa::path(
+    get,
+    path = "/api/v1/search/providers/{provider_id}/{grain}/details",
+    operation_id = "read_provider_identifier_details",
+    tag = "search",
+    params(
+        ("provider_id" = String, Path, description = "Registered provider identity"),
+        ("grain" = String, Path, description = "Canonical media grain"),
+        fasti_contracts::ProviderIdentifierDetailsQueryParameters
+    ),
+    security(("credential_bearer" = []), ("browser_session_cookie" = [])),
+    responses(
+        (status = 200, description = "Transient exact-coordinate details or source failure; never a receipt or persisted snapshot", body = fasti_contracts::ProviderIdentifierDetailsResponse),
+        (status = 400, description = "Malformed request", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 401, description = "Authentication is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "Search authority or browser boundary denied", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "Current session authority changed", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 413, description = "Request exceeds the body limit", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 415, description = "Unsupported request media type", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "Invalid provider coordinate or locale", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 500, description = "Provider state failed integrity checks", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 501, description = "Provider capability is unavailable", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 503, description = "Storage is unavailable", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 507, description = "Governed Search capacity exceeded", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub(crate) async fn read_provider_identifier_details(
+    State(state): State<SearchApiState>,
+    SearchAccess { id, access }: SearchAccess<false>,
+    locator: Result<Path<(String, String)>, PathRejection>,
+    query: Result<Query<fasti_contracts::ProviderIdentifierDetailsQueryParameters>, QueryRejection>,
+) -> Result<Response, HttpProblem> {
+    let (provider, grain) = locator.map_err(|_| invalid(id, "/provider_id"))?.0;
+    let query = query.map_err(|_| invalid(id, "/query"))?.0;
+    let request = fasti_application::ReadProviderIdentifierDetailsRequest {
+        correlation_id: id,
+        access,
+        provider: ProviderId::try_new(provider.clone()).map_err(|_| invalid(id, "/provider_id"))?,
+        grain: grain.parse().map_err(|_| invalid(id, "/grain"))?,
+        provider_record_id: query.provider_record_id,
+        locale: query
+            .locale
+            .map(MetadataLocale::try_new)
+            .transpose()
+            .map_err(|_| invalid(id, "/locale"))?,
+        outbound_policy: OutboundAccessPolicy::default(),
+    };
+    let gate = state
+        .locks
+        .get(&provider)
+        .ok_or_else(|| invalid(id, "/provider_id"))?;
+    let lease = ProviderOperationLease::new(gate.lock_owned().await);
+    let outcome = state
+        .service
+        .provider_identifier_details(request.clone(), query.offline, lease)
+        .await
+        .map_err(application_problem)?;
+    let response = fasti_contracts::ProviderIdentifierDetailsResponse::from((&request, outcome));
+    Ok((
+        [(header::CACHE_CONTROL, "private, no-store")],
+        Json(response),
+    )
+        .into_response())
+}
+
+#[utoipa::path(
     post,
     path = "/api/v1/search/candidates/{provider_id}/{grain}/{candidate_receipt_id}/actions",
     operation_id = "save_search_candidate",
@@ -579,6 +644,10 @@ pub(crate) fn router() -> Router<SearchApiState> {
         .route(
             "/api/v1/search/providers/{provider_id}/{grain}/actions",
             post(save_provider_identifier),
+        )
+        .route(
+            "/api/v1/search/providers/{provider_id}/{grain}/details",
+            get(read_provider_identifier_details),
         )
         .route(
             "/api/v1/search/candidates/{provider_id}/{grain}/{candidate_receipt_id}",

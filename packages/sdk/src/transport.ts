@@ -43,6 +43,8 @@ import {
   parseSearchProviderPageResponse,
   parseSearchCandidateDetailsQueryParameters,
   parseSearchCandidateDetailsResponse,
+  parseProviderIdentifierDetailsQueryParameters,
+  parseProviderIdentifierDetailsResponse,
   parseSearchCandidateActionRequest,
   parseSearchCandidateActionResponse,
   parseProviderIdentifierActionRequest,
@@ -111,6 +113,8 @@ import {
   type SearchProviderPageResponse,
   type SearchCandidateDetailsQueryParameters,
   type SearchCandidateDetailsResponse,
+  type ProviderIdentifierDetailsQueryParameters,
+  type ProviderIdentifierDetailsResponse,
   type SearchCandidateActionRequest,
   type SearchCandidateActionResponse,
   type ProviderIdentifierActionRequest,
@@ -1103,6 +1107,56 @@ export class FastiClient {
         return response;
       },
       responseLabel: "Candidate details response",
+      options,
+    });
+  }
+
+  readProviderIdentifierDetails(
+    providerId: string,
+    grain: string,
+    query: ProviderIdentifierDetailsQueryParameters,
+    options: CallOptions = {},
+  ): Promise<ProviderIdentifierDetailsResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.readProviderIdentifierDetails;
+    const locator = searchProviderGrainPath(operation.path, providerId, grain);
+    const {
+      provider_record_id: providerRecordId,
+      offline,
+      locale,
+    } = parseOutgoing(
+      parseProviderIdentifierDetailsQueryParameters,
+      query,
+      "Provider identifier details query",
+    );
+    const search = new URLSearchParams({
+      provider_record_id: providerRecordId,
+      offline: String(offline),
+    });
+    if (locale != null) search.set("locale", locale);
+    return this.#jsonOperation({
+      method: operation.method,
+      path: `${locator.path}?${search}`,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      responseParser: (value) => {
+        const response = parseProviderIdentifierDetailsResponse(value);
+        if (
+          response.provider_id !== locator.providerId ||
+          response.grain !== locator.grain ||
+          response.provider_record_id !== providerRecordId ||
+          (response.outcome === "details" &&
+            (offline ||
+              response.details.provider !== locator.providerId ||
+              response.details.grain !== locator.grain ||
+              response.details.provider_id !== providerRecordId))
+        )
+          throw new FastiContractParseError(
+            "Provider identifier details do not match the requested coordinate and mode",
+          );
+        return response;
+      },
+      responseLabel: "Provider identifier details response",
       options,
     });
   }

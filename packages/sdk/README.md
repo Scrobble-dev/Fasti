@@ -72,6 +72,27 @@ The M2 client surface uses only generated production contracts:
 
 These authenticated operations require the generated metadata scopes. Provider credentials, raw provider responses, and cache secrets are not part of their DTOs.
 
+## Provider candidate details
+
+`readSearchCandidate(providerId, grain, receiptId, { offline })` reads retained
+Search evidence. `readProviderIdentifierDetails(providerId, grain,
+{ provider_record_id, offline, locale })` reads a live provider coordinate without
+creating a receipt, snapshot, Record or metadata claim. Both use the existing
+authenticated Search capability; the live read rechecks current access and
+provider authority after the fetch. Offline live reads return an explicit
+source-unavailable outcome because there is no retained payload to read.
+
+The live response has only `details` or `unavailable` outcomes. Its outer
+coordinate and inner details must match the request. Provider credentials never
+enter these requests. Both HTTP responses are `private, no-store`; the SDK does
+not store a browser copy. Explicit Create/Attach uses the separate
+`saveProviderIdentifier` action and its existing idempotency owner.
+
+The generated production operation classification `durability: "durable"`
+identifies the real durable-node runtime rather than the B1 memory-only fixture.
+It does not promise persistence for read responses. Only the operation's
+documented receipt or state-mutation contract makes that promise.
+
 ## Exercise the B1 contract
 
 The focused client test builds and starts the loopback-only Rust fixture on an ephemeral port, executes the generated SDK against it, and stops it:

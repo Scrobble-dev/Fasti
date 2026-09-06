@@ -268,6 +268,79 @@ pub struct SearchCandidateDetailsQueryParameters {
     pub offline: bool,
 }
 
+#[derive(
+    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema, utoipa::IntoParams,
+)]
+#[serde(deny_unknown_fields)]
+#[into_params(parameter_in = Query)]
+pub struct ProviderIdentifierDetailsQueryParameters {
+    #[schemars(length(min = 1, max = 256))]
+    #[schema(min_length = 1, max_length = 256)]
+    #[param(min_length = 1, max_length = 256)]
+    pub provider_record_id: String,
+    pub offline: bool,
+    #[schemars(length(min = 2, max = 16))]
+    #[schema(min_length = 2, max_length = 16)]
+    #[param(min_length = 2, max_length = 16)]
+    pub locale: Option<String>,
+}
+
+/// Transient detail projection. No receipt, snapshot or reusable lifetime exists.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(tag = "outcome", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ProviderIdentifierDetailsResponse {
+    Details {
+        provider_id: String,
+        grain: String,
+        provider_record_id: String,
+        details: Box<SearchCandidateDto>,
+        locale: Option<String>,
+    },
+    Unavailable {
+        provider_id: String,
+        grain: String,
+        provider_record_id: String,
+        problem_code: String,
+    },
+}
+
+impl
+    From<(
+        &fasti_application::ReadProviderIdentifierDetailsRequest,
+        fasti_application::ProviderIdentifierDetailsOutcome,
+    )> for ProviderIdentifierDetailsResponse
+{
+    fn from(
+        (request, outcome): (
+            &fasti_application::ReadProviderIdentifierDetailsRequest,
+            fasti_application::ProviderIdentifierDetailsOutcome,
+        ),
+    ) -> Self {
+        let provider_id = request.provider.as_str().to_owned();
+        let grain = request.grain.as_str().to_owned();
+        let provider_record_id = request.provider_record_id.clone();
+        match outcome {
+            fasti_application::ProviderIdentifierDetailsOutcome::Details { details, locale } => {
+                Self::Details {
+                    provider_id,
+                    grain,
+                    provider_record_id,
+                    details: Box::new(details.as_ref().into()),
+                    locale: locale.map(|locale| locale.as_str().to_owned()),
+                }
+            }
+            fasti_application::ProviderIdentifierDetailsOutcome::Unavailable { problem } => {
+                Self::Unavailable {
+                    provider_id,
+                    grain,
+                    provider_record_id,
+                    problem_code: problem.as_str().to_owned(),
+                }
+            }
+        }
+    }
+}
+
 /// Original Search evidence. Its lifetime never describes a subsequent refetch.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(deny_unknown_fields)]

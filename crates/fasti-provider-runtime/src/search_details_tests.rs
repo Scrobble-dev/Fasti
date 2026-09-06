@@ -8,6 +8,7 @@ mod candidate_details_tests {
     const EXPIRED: u8 = 2;
     const CHANGED_AUTHORITY: u8 = 3;
     const CHANGED_SNAPSHOT: u8 = 4;
+    const CHANGED_AUTHORIZED_ACCESS: u8 = 5;
 
     struct DetailsPersistence {
         prepared: PreparedSearchCandidateDetails,
@@ -67,15 +68,87 @@ mod candidate_details_tests {
             }
             Ok(Some(prepared))
         }
+
+        fn current_identifier_details(
+            &self,
+            request: &ReadProviderIdentifierDetailsRequest,
+        ) -> ApplicationResult<PreparedProviderIdentifierDetails> {
+            assert_eq!(request.provider.as_str(), "tmdb");
+            assert_eq!(request.grain, Grain::Film);
+            assert_eq!(request.provider_record_id, "42");
+            assert_eq!(
+                request.locale.as_ref().map(MetadataLocale::as_str),
+                Some("fr-fr")
+            );
+            let ApplicationAccessContext::Credential(access) = &request.access else {
+                panic!("coordinate-details fixture uses credential access")
+            };
+            let mut prepared = PreparedProviderIdentifierDetails {
+                authorized_access: AuthorizedApplicationAccess::new(
+                    access.workspace_id(),
+                    access.profile_id(),
+                    access.grant_id(),
+                    AuthorizedActor::Credential {
+                        presented_client_id: access.client_id(),
+                        credential_id: access.credential_id(),
+                    },
+                ),
+                provider_state: self.prepared.provider_state.clone(),
+                provider_authority_fingerprint: self
+                    .prepared
+                    .provider_authority_fingerprint
+                    .clone(),
+            };
+            match self.disposition.load(Ordering::SeqCst) {
+                DENIED => {
+                    return Err(Box::new(FastiProblem::forbidden(
+                        CapabilityKey::SearchMetadata,
+                        request.correlation_id,
+                    )))
+                }
+                CHANGED_AUTHORITY => {
+                    prepared.provider_authority_fingerprint = Sha256Digest::from_bytes(&[9; 32]);
+                }
+                CHANGED_AUTHORIZED_ACCESS => {
+                    let access = prepared.authorized_access;
+                    let AuthorizedActor::Credential {
+                        presented_client_id,
+                        ..
+                    } = access.actor()
+                    else {
+                        panic!("coordinate-details fixture uses a credential actor")
+                    };
+                    prepared.authorized_access = AuthorizedApplicationAccess::new(
+                        access.workspace_id(),
+                        access.profile_id(),
+                        access.grant_id(),
+                        AuthorizedActor::Credential {
+                            presented_client_id,
+                            credential_id: CredentialId::new_v7(),
+                        },
+                    );
+                }
+                CURRENT => {}
+                other => panic!("unexpected coordinate-details disposition {other}"),
+            }
+            Ok(prepared)
+        }
     }
 
     impl SearchPersistencePort for DetailsPersistence {
         fn authorize_search_candidate_read_request(
             &self,
-            _: RequestCorrelationId,
+            correlation_id: RequestCorrelationId,
             _: &ApplicationAccessContext,
         ) -> ApplicationResult<()> {
-            unreachable!("runtime tests enter after transport authorization")
+            self.calls.lock().unwrap().push("authorize-read");
+            if self.disposition.load(Ordering::SeqCst) == DENIED {
+                return Err(Box::new(FastiProblem::forbidden(
+                    CapabilityKey::SearchMetadata,
+                    correlation_id,
+                )));
+            }
+            Ok(())
         }
         fn authorize_search_candidate_action_request(
             &self,
@@ -171,6 +244,17 @@ mod candidate_details_tests {
                     .expect("blocked preparation must be released within the test bound");
             }
             self.current(request)
+        }
+
+        fn prepare_provider_identifier_details(
+            &self,
+            request: &ReadProviderIdentifierDetailsRequest,
+        ) -> ApplicationResult<PreparedProviderIdentifierDetails> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push("prepare-identifier-details");
+            self.current_identifier_details(request)
         }
     }
 
@@ -294,6 +378,234 @@ mod candidate_details_tests {
 
     fn candidate() -> ProviderCandidate {
         crate::providers::search_page_fixture().candidates.remove(0)
+    }
+
+    fn identifier_details_fixture() -> (
+        ProviderSearchService,
+        Arc<DetailsPersistence>,
+        ReadProviderIdentifierDetailsRequest,
+    ) {
+        let (service, persistence, request) = fixture();
+        (
+            service,
+            persistence,
+            ReadProviderIdentifierDetailsRequest {
+                correlation_id: request.correlation_id,
+                access: request.access,
+                provider: ProviderId::try_new("tmdb").unwrap(),
+                grain: Grain::Film,
+                provider_record_id: "42".into(),
+                locale: Some(MetadataLocale::try_new("fr-FR").unwrap()),
+                outbound_policy: request.outbound_policy,
+            },
+        )
+    }
+
+    #[tokio::test]
+    async fn coordinate_details_offline_and_denied_never_fetch_or_mutate() {
+        let (service, persistence, request) = identifier_details_fixture();
+        let outcome = service
+            .provider_identifier_details_with(request, true, lease().await, |_, _| async {
+                panic!("offline coordinate details must not fetch")
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            outcome,
+            ProviderIdentifierDetailsOutcome::Unavailable {
+                problem: ProblemCode::ProviderUnavailable
+            }
+        );
+        assert_eq!(*persistence.calls.lock().unwrap(), ["authorize-read"]);
+
+        let (service, persistence, request) = identifier_details_fixture();
+        persistence.disposition.store(DENIED, Ordering::SeqCst);
+        let error = service
+            .provider_identifier_details_with(request, false, lease().await, |_, _| async {
+                panic!("denied coordinate details must not fetch")
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), ProblemCode::Forbidden);
+        assert_eq!(
+            *persistence.calls.lock().unwrap(),
+            ["prepare-identifier-details"]
+        );
+    }
+
+    #[tokio::test]
+    async fn coordinate_details_use_exact_identity_locale_and_have_no_action_side_effect() {
+        let (service, persistence, request) = identifier_details_fixture();
+        let expected_state = persistence.prepared.provider_state.clone();
+        let mut fetched = candidate();
+        fetched.title = "Fresh coordinate detail".into();
+        let expected = fetched.clone().search_evidence().unwrap();
+        let outcome = service
+            .provider_identifier_details_with(
+                request,
+                false,
+                lease().await,
+                move |selection, state| async move {
+                    assert_eq!(
+                        selection,
+                        ProviderSelectionInput {
+                            provider: "tmdb".into(),
+                            provider_id: "42".into(),
+                            kind: "movie".into(),
+                            locale: Some("fr-fr".into()),
+                            region: None,
+                        }
+                    );
+                    assert_eq!(state, expected_state);
+                    Ok(fetched)
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            outcome,
+            ProviderIdentifierDetailsOutcome::Details {
+                details: Box::new(expected),
+                locale: Some(MetadataLocale::try_new("fr-FR").unwrap()),
+            }
+        );
+        assert_eq!(
+            *persistence.calls.lock().unwrap(),
+            ["prepare-identifier-details", "prepare-identifier-details"]
+        );
+    }
+
+    #[tokio::test]
+    async fn coordinate_details_reject_invalid_requested_coordinates_before_persistence() {
+        for invalid in 0..3 {
+            let (service, persistence, mut request) = identifier_details_fixture();
+            match invalid {
+                0 => request.provider = ProviderId::try_new("unknown-provider").unwrap(),
+                1 => request.grain = Grain::Episode,
+                _ => request.provider_record_id = "not-a-positive-decimal".into(),
+            }
+            let error = service
+                .provider_identifier_details_with(request, false, lease().await, |_, _| async {
+                    panic!("invalid coordinates must not fetch")
+                })
+                .await
+                .unwrap_err();
+            assert_eq!(error.code(), ProblemCode::ValidationFailed);
+            assert!(persistence.calls.lock().unwrap().is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn coordinate_details_recheck_changed_authority_after_success_and_failure() {
+        for success in [false, true] {
+            let (service, persistence, request) = identifier_details_fixture();
+            let during_fetch = Arc::clone(&persistence);
+            let result = service
+                .provider_identifier_details_with(
+                    request,
+                    false,
+                    lease().await,
+                    move |_, _| async move {
+                        during_fetch
+                            .disposition
+                            .store(CHANGED_AUTHORITY, Ordering::SeqCst);
+                        if success {
+                            Ok(candidate())
+                        } else {
+                            Err(ProviderRuntimeError::provider(
+                                "changed authority must suppress provider failure",
+                            ))
+                        }
+                    },
+                )
+                .await;
+            assert_eq!(result.unwrap_err().code(), ProblemCode::Forbidden);
+            assert_eq!(
+                *persistence.calls.lock().unwrap(),
+                ["prepare-identifier-details", "prepare-identifier-details"]
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn coordinate_details_recheck_changed_authorized_access_after_success_and_failure() {
+        for success in [false, true] {
+            let (service, persistence, request) = identifier_details_fixture();
+            let initial_fingerprint = persistence.prepared.provider_authority_fingerprint.clone();
+            let initial_state = persistence.prepared.provider_state.clone();
+            let during_fetch = Arc::clone(&persistence);
+            let result = service
+                .provider_identifier_details_with(
+                    request,
+                    false,
+                    lease().await,
+                    move |_, _| async move {
+                        during_fetch
+                            .disposition
+                            .store(CHANGED_AUTHORIZED_ACCESS, Ordering::SeqCst);
+                        if success {
+                            Ok(candidate())
+                        } else {
+                            Err(ProviderRuntimeError::provider(
+                                "changed actor must suppress provider failure",
+                            ))
+                        }
+                    },
+                )
+                .await;
+            assert_eq!(result.unwrap_err().code(), ProblemCode::Forbidden);
+            assert_eq!(
+                persistence.prepared.provider_authority_fingerprint, initial_fingerprint,
+                "authorized-access drift is independent of provider authority"
+            );
+            assert_eq!(
+                persistence.prepared.provider_state, initial_state,
+                "authorized-access drift does not change provider state"
+            );
+            assert_eq!(
+                *persistence.calls.lock().unwrap(),
+                ["prepare-identifier-details", "prepare-identifier-details"]
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn coordinate_details_reject_wrong_identity_and_unbounded_payload_after_recheck() {
+        let changes: [fn(&mut ProviderCandidate); 9] = [
+            |value| value.provider_id = "43".into(),
+            |value| value.kind = "show",
+            |value| value.provider = "google-books",
+            |value| value.title = "x".repeat(513),
+            |value| value.original_title = Some("x".repeat(513)),
+            |value| value.overview = Some("x".repeat(4097)),
+            |value| value.authors = vec!["author".into(); 11],
+            |value| value.authors = vec!["x".repeat(129)],
+            |value| value.image_url = Some("https://evil.example/poster.jpg".into()),
+        ];
+        for change in changes {
+            let (service, persistence, request) = identifier_details_fixture();
+            let mut fetched = candidate();
+            change(&mut fetched);
+            let outcome = service
+                .provider_identifier_details_with(
+                    request,
+                    false,
+                    lease().await,
+                    |_, _| async move { Ok(fetched) },
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                outcome,
+                ProviderIdentifierDetailsOutcome::Unavailable {
+                    problem: ProblemCode::ProviderResponseInvalid
+                }
+            );
+            assert_eq!(
+                *persistence.calls.lock().unwrap(),
+                ["prepare-identifier-details", "prepare-identifier-details"]
+            );
+        }
     }
 
     #[tokio::test]

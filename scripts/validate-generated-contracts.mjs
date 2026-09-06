@@ -186,6 +186,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     "/api/v1/search/candidates/{provider_id}/{grain}/{candidate_receipt_id}/actions",
     "/api/v1/search/providers/{provider_id}",
     "/api/v1/search/providers/{provider_id}/{grain}/actions",
+    "/api/v1/search/providers/{provider_id}/{grain}/details",
     "/api/v1/search/records",
   ]);
   assert.deepEqual(Object.keys(openapi.components.securitySchemes), [
@@ -492,6 +493,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     "save_search_candidate",
     "save_provider_identifier",
     "read_search_candidate",
+    "read_provider_identifier_details",
     "search_provider_page",
     "submit_observation",
     "create_record",
@@ -715,6 +717,20 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
         );
       }
     }
+  }
+
+  const liveDetailsParameters =
+    openapi.paths["/api/v1/search/providers/{provider_id}/{grain}/details"].get
+      .parameters;
+  for (const [name, minLength, maxLength] of [
+    ["provider_record_id", 1, 256],
+    ["locale", 2, 16],
+  ]) {
+    const parameter = liveDetailsParameters.find(
+      (value) => value.in === "query" && value.name === name,
+    );
+    assert.equal(parameter?.schema?.minLength, minLength);
+    assert.equal(parameter?.schema?.maxLength, maxLength);
   }
 
   const httpOperations = new Map(

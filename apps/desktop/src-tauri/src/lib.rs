@@ -581,6 +581,32 @@ async fn read_search_candidate(
 
 #[cfg(feature = "desktop-runtime")]
 #[tauri::command]
+async fn read_provider_identifier_details(
+    state: tauri::State<'_, DesktopState>,
+    input: search::ProviderIdentifierDetailsInput,
+) -> Result<fasti_contracts::ProviderIdentifierDetailsResponse, DesktopProblem> {
+    let kernel = state.kernel()?;
+    let access = records::require_access(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+    )?;
+    let runtime = state.provider_runtime(&kernel)?;
+    let configuration = state.network.load()?;
+    let lease = ProviderOperationLease::new(
+        Arc::clone(&state.provider_operation_gate).lock_owned().await,
+    );
+    search::provider_identifier_details(
+        runtime,
+        kernel,
+        access,
+        configuration.outbound_policy().clone(),
+        input,
+        lease,
+    ).await
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command]
 async fn save_search_candidate(
     state: tauri::State<'_, DesktopState>,
     input: search::CandidateActionInput,
@@ -1151,6 +1177,7 @@ pub fn run() {
             search_provider,
             search_provider_page,
             read_search_candidate,
+            read_provider_identifier_details,
             save_search_candidate,
             save_provider_identifier,
             track_provider_candidate,

@@ -237,6 +237,39 @@ impl SqliteKernel {
 }
 
 impl SearchPersistencePort for SqliteKernel {
+    fn prepare_provider_identifier_details(
+        &self,
+        request: &fasti_application::ReadProviderIdentifierDetailsRequest,
+    ) -> ApplicationResult<fasti_application::PreparedProviderIdentifierDetails> {
+        let id = request.correlation_id;
+        let mut connection = self.lock_connection(CAPABILITY, id)?;
+        let transaction = map_sql(connection.transaction(), CAPABILITY, id)?;
+        let access =
+            authorize_application_transaction(&transaction, CAPABILITY, &request.access, id)?;
+        let mapping = fasti_application::provider_identity_mapping_for_grain(
+            request.provider.as_str(),
+            request.grain,
+        )
+        .ok_or_else(|| failure(ProblemCode::ValidationFailed, id))?;
+        mapping
+            .identifier(request.provider_record_id.clone())
+            .map_err(|_| failure(ProblemCode::ValidationFailed, id))?;
+        let (provider_state, provider_authority_fingerprint) = provider_snapshot(
+            &transaction,
+            access.workspace_id(),
+            request.provider.as_str(),
+            "metadata.read",
+            &request.outbound_policy,
+            id,
+        )?;
+        map_sql(transaction.commit(), CAPABILITY, id)?;
+        Ok(fasti_application::PreparedProviderIdentifierDetails {
+            authorized_access: access,
+            provider_state,
+            provider_authority_fingerprint,
+        })
+    }
+
     fn authorize_search_page_request(
         &self,
         id: RequestCorrelationId,
@@ -805,6 +838,7 @@ fn read_candidates(
 
 #[cfg(test)]
 pub(crate) mod tests {
+    include!("provider_identifier_details_tests.rs");
     include!("search_response_policy_tests.rs");
     include!("search_authorization_tests.rs");
     include!("search_details_tests.rs");

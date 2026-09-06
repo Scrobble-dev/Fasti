@@ -2,6 +2,7 @@
 mod search_http_tests {
     include!("local_search_http_tests.rs");
     include!("provider_inventory_http_tests.rs");
+    include!("provider_identifier_details_http_tests.rs");
     use super::*;
     use fasti_application::{
         provider_metadata_response_locale, ApplicationAccessContext, BrowserSessionAccessContext,

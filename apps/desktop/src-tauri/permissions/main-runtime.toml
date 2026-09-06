@@ -21,6 +21,7 @@ commands.allow = [
   "search_provider",
   "search_provider_page",
   "read_search_candidate",
+  "read_provider_identifier_details",
   "save_search_candidate",
   "save_provider_identifier",
   "track_provider_candidate",

@@ -13,6 +13,7 @@ fn packaged_search_commands_are_allowed_by_the_generated_runtime_permission() {
         "search_records",
         "search_provider_page",
         "read_search_candidate",
+        "read_provider_identifier_details",
         "save_search_candidate",
         "save_provider_identifier",
     ] {

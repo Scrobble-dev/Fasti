@@ -2893,6 +2893,105 @@
           }
         ]
       },
+      "ProviderIdentifierDetailsQueryParameters": {
+        "additionalProperties": false,
+        "properties": {
+          "locale": {
+            "maxLength": 16,
+            "minLength": 2,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "offline": {
+            "type": "boolean"
+          },
+          "provider_record_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider_record_id",
+          "offline"
+        ],
+        "type": "object"
+      },
+      "ProviderIdentifierDetailsResponse": {
+        "description": "Transient detail projection. No receipt, snapshot or reusable lifetime exists.",
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "details": {
+                "$ref": "#/components/schemas/SearchCandidateDto"
+              },
+              "grain": {
+                "type": "string"
+              },
+              "locale": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "outcome": {
+                "enum": [
+                  "details"
+                ],
+                "type": "string"
+              },
+              "provider_id": {
+                "type": "string"
+              },
+              "provider_record_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "provider_id",
+              "grain",
+              "provider_record_id",
+              "details",
+              "outcome"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "grain": {
+                "type": "string"
+              },
+              "outcome": {
+                "enum": [
+                  "unavailable"
+                ],
+                "type": "string"
+              },
+              "problem_code": {
+                "type": "string"
+              },
+              "provider_id": {
+                "type": "string"
+              },
+              "provider_record_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "provider_id",
+              "grain",
+              "provider_record_id",
+              "problem_code",
+              "outcome"
+            ],
+            "type": "object"
+          }
+        ]
+      },
       "ProviderKindDto": {
         "enum": [
           "metadata",
@@ -11761,6 +11860,215 @@
         ],
         "x-fasti-required-scopes": [
           "identity_write"
+        ],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/v1/search/providers/{provider_id}/{grain}/details": {
+      "get": {
+        "operationId": "read_provider_identifier_details",
+        "parameters": [
+          {
+            "description": "Registered provider identity",
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Canonical media grain",
+            "in": "path",
+            "name": "grain",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider_record_id",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offline",
+            "required": true,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "locale",
+            "required": false,
+            "schema": {
+              "maxLength": 16,
+              "minLength": 2,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderIdentifierDetailsResponse"
+                }
+              }
+            },
+            "description": "Transient exact-coordinate details or source failure; never a receipt or persisted snapshot"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Malformed request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Authentication is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Search authority or browser boundary denied"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Current session authority changed"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Request exceeds the body limit"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unsupported request media type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Invalid provider coordinate or locale"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Provider state failed integrity checks"
+          },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Provider capability is unavailable"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Storage is unavailable"
+          },
+          "507": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Governed Search capacity exceeded"
+          }
+        },
+        "security": [
+          {
+            "credential_bearer": []
+          },
+          {
+            "browser_session_cookie": []
+          }
+        ],
+        "tags": [
+          "search"
+        ],
+        "x-fasti-authorization": "scoped_or_browser_session",
+        "x-fasti-capability-id": "metadata.search",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "browser_session_expired",
+          "browser_session_revoked",
+          "capability_unavailable",
+          "capacity_exceeded",
+          "forbidden",
+          "idempotency_conflict",
+          "integrity_failed",
+          "malformed_json",
+          "payload_too_large",
+          "session_policy_changed",
+          "storage_unavailable",
+          "unsupported_media_type",
+          "validation_failed"
+        ],
+        "x-fasti-required-scopes": [
+          "metadata_search"
         ],
         "x-fasti-runtime-availability": "implemented"
       }

@@ -6,8 +6,9 @@ use crate::{
 use fasti_application::{
     ApplicationResult, CapabilityKey, ProblemCode, ProviderCapabilityState,
     ProviderIdentifierActionCommand, ProviderIdentifierActionOutcome,
-    ProviderIdentifierActionPreparation, ProviderOperationLease, ReadSearchCandidateRequest,
-    SearchPageRequest, SearchPersistencePort, StoredSearchPage,
+    ProviderIdentifierActionPreparation, ProviderIdentifierDetailsOutcome, ProviderOperationLease,
+    ReadProviderIdentifierDetailsRequest, ReadSearchCandidateRequest, SearchPageRequest,
+    SearchPersistencePort, StoredSearchPage,
 };
 use std::{future::Future, sync::Arc};
 
@@ -30,6 +31,124 @@ impl ProviderSearchService {
             runtime,
             persistence,
         }
+    }
+
+    pub async fn provider_identifier_details(
+        &self,
+        request: ReadProviderIdentifierDetailsRequest,
+        offline: bool,
+        lease: ProviderOperationLease,
+    ) -> ApplicationResult<ProviderIdentifierDetailsOutcome> {
+        let runtime = Arc::clone(&self.runtime);
+        let policy = request.outbound_policy.clone();
+        self.provider_identifier_details_with(
+            request,
+            offline,
+            lease,
+            move |selection, state| async move {
+                runtime.fetch_selection(selection, &policy, &state).await
+            },
+        )
+        .await
+    }
+
+    async fn provider_identifier_details_with<F, Fut>(
+        &self,
+        request: ReadProviderIdentifierDetailsRequest,
+        offline: bool,
+        lease: ProviderOperationLease,
+        fetch: F,
+    ) -> ApplicationResult<ProviderIdentifierDetailsOutcome>
+    where
+        F: FnOnce(ProviderSelectionInput, ProviderCapabilityState) -> Fut,
+        Fut: Future<Output = Result<ProviderCandidate, ProviderRuntimeError>>,
+    {
+        let capability = CapabilityKey::SearchMetadata;
+        let id = request.correlation_id;
+        let mapping = fasti_application::provider_identity_mapping_for_grain(
+            request.provider.as_str(),
+            request.grain,
+        )
+        .ok_or_else(|| {
+            Box::new(fasti_application::FastiProblem::from_code(
+                ProblemCode::ValidationFailed,
+                capability,
+                id,
+            ))
+        })?;
+        let expected = mapping
+            .identifier(request.provider_record_id.clone())
+            .map_err(|_| {
+                Box::new(fasti_application::FastiProblem::from_code(
+                    ProblemCode::ValidationFailed,
+                    capability,
+                    id,
+                ))
+            })?;
+        let persistence = Arc::clone(&self.persistence);
+        let read = request.clone();
+        if offline {
+            // A live coordinate has no authorized cached payload to disclose.
+            // Recheck Search authority without provider state, DNS or vault access.
+            run_blocking(&lease, capability, id, move || {
+                persistence.authorize_search_candidate_read_request(id, &read.access)
+            })
+            .await?;
+            return Ok(ProviderIdentifierDetailsOutcome::Unavailable {
+                problem: ProblemCode::ProviderUnavailable,
+            });
+        }
+        let prepared = run_blocking(&lease, capability, id, move || {
+            persistence.prepare_provider_identifier_details(&read)
+        })
+        .await?;
+        let locale = provider_response_locale(
+            request.provider.as_str(),
+            request.locale.as_ref(),
+            capability,
+            id,
+        )?;
+        let selection = ProviderSelectionInput {
+            provider: request.provider.as_str().to_owned(),
+            provider_id: request.provider_record_id.clone(),
+            kind: mapping.kind().to_owned(),
+            locale: locale.as_ref().map(|locale| locale.as_str().to_owned()),
+            region: None,
+        };
+        let fetched = fetch(selection, prepared.provider_state.clone()).await;
+        let persistence = Arc::clone(&self.persistence);
+        let current = run_blocking(&lease, capability, id, move || {
+            persistence.prepare_provider_identifier_details(&request)
+        })
+        .await?;
+        if current.authorized_access != prepared.authorized_access
+            || current.provider_authority_fingerprint != prepared.provider_authority_fingerprint
+            || current.provider_state != prepared.provider_state
+        {
+            return Err(Box::new(fasti_application::FastiProblem::forbidden(
+                capability, id,
+            )));
+        }
+        // Validate and disclose success or failure only after current authority.
+        Ok(
+            match fetched.and_then(|candidate| {
+                let details = candidate.search_evidence()?;
+                if details.identifier() != &expected {
+                    return Err(ProviderRuntimeError::response_invalid(
+                        "The provider detail identity does not match the selected identifier.",
+                    ));
+                }
+                Ok(details)
+            }) {
+                Ok(details) => ProviderIdentifierDetailsOutcome::Details {
+                    details: Box::new(details),
+                    locale,
+                },
+                Err(error) => ProviderIdentifierDetailsOutcome::Unavailable {
+                    problem: error.problem_code(),
+                },
+            },
+        )
     }
 
     pub async fn save_candidate(
@@ -783,6 +902,12 @@ mod tests {
     }
 
     impl SearchPersistencePort for Persistence {
+        fn prepare_provider_identifier_details(
+            &self,
+            _: &ReadProviderIdentifierDetailsRequest,
+        ) -> ApplicationResult<fasti_application::PreparedProviderIdentifierDetails> {
+            panic!("page orchestration must not prepare live details")
+        }
         fn authorize_search_candidate_read_request(
             &self,
             _: RequestCorrelationId,

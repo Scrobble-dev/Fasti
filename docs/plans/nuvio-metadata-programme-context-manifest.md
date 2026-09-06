@@ -4223,3 +4223,85 @@ PR128 remains open; all ten domain filters, retained/live continuation, live
 details, cancellation, public-provider acceptance and remaining M stages stay in
 scope. M4 retains schema17/archive7/shared surfaces; no migration18 or ownership
 handoff is made. The permanent tooling exclusion at the top remains controlling.
+
+### M4 transient coordinate details integration — 2026-09-06
+
+This is implementation progress after the user reaffirmed the permanent tooling
+exclusion. Base is published `7b26b9ce8123fdcd80c0e206fd726e1e65fb20b8`, tree
+`1802db4177cbd38a891dc127d6d7fde3c5e6e223`. Its exact-head receipts do not certify
+this later increment.
+
+True live candidates now have a separate typed coordinate read through the
+existing Search application/persistence/runtime owners, authenticated HTTP and
+generated OpenAPI/SDK, browser and Tauri hosts, and Workbench. The fixed live
+route ends in literal `candidate`; it decodes once, bounds bytes/controls and
+normalizes optional locale. The provider mapping remains the identity grammar
+owner. Details neither admit a Search receipt nor write a snapshot, Record,
+metadata claim or action. Offline performs current Search authorization only,
+without provider state, DNS, vault or fetch. Online compares exact authorized
+actor/profile/grant plus provider state and authority fingerprint after either
+success or failure before disclosing anything.
+
+Create/Attach still use the existing explicit provider-identifier action.
+Retained details and live details are discriminated routes; a retained result
+without a reusable snapshot must not silently acquire the live action owner.
+The SDK captures primitive request coordinates before asynchronous transport and
+checks both envelope and returned identity. HTTP uses `private, no-store`.
+The generated runtime durability label is not a promise to persist read payloads.
+
+Verified before the exact-head delivery gate:
+
+- Store library: 477 passed, six existing explicitly ignored checks. Four new
+  store tests verify complete content-row invariance and current authority.
+- API library: 108 passed. Five new real-router tests exercise browser/bearer,
+  offline without provider state, missing read capability, malformed coordinates,
+  authorization-before-validation, Host/mixed-auth/listener boundaries and
+  current revocation. They assert no-store headers and unchanged content rows.
+- Runtime Search default-feature suite: 46 passed; this is the exact invocation
+  count, not a claim about a different feature-unified suite.
+- JavaScript: 376 passed, two existing skips; 19 new SDK cases pass. Generated
+  contract validation and UI/web typechecks pass with no errors or warnings.
+- Twenty-four Chromium browser regressions pass, including ten new live route,
+  reload, Create/Attach, invalid-coordinate, offline and late-navigation cases.
+  These use the established test-only host boundary, not a public provider.
+- Strict all-target clippy for application/contracts/store/runtime/API passes.
+  Full desktop-runtime compilation and the generated packaged Search ACL test
+  pass; this is not packaged-device or assistive-technology acceptance.
+- Independent native source review is clear after correcting actor continuity,
+  route-level OpenAPI parameter bounds and retained/live action separation.
+
+Failed attempts remain visible: browser-revocation test expectations initially
+used the bearer problem; current typed browser failures are retained. API/SDK
+inventory counts needed the actual new route/method. Strict clippy required a
+boxed detail DTO variant. A mutable caller query initially changed response
+binding; primitive capture fixed it. The initial browser project name did not
+exist, and one new locator matched hidden retained Search content as well as
+visible details; the actual Chrome project and scoped detail locator pass.
+
+The real-process harness now adds a separate no-store query/ID lane after its
+unchanged retained journey. It checks details-only SQLite/WAL invariance before
+allowing explicit Create/Attach, exact upstream request counts, retained cache
+absence, and restart with the same Record/identifiers. Create produces a new
+identity-only Record; Attach targets the explicitly selected existing retained
+Record, without inventing title claims to make the new Record title-searchable.
+This extension is not yet
+claimed passing here; execute it on the clean committed head and record the
+receipt. The TLS upstream is a disposable pinned fixture, not public TMDB
+acceptance. Native review/test agents owned only isolated test leaves or these
+harness scripts; commander remained sole shared production writer.
+
+M4 still owns schema17/archive7; no migration, dependency or capability ID was
+added and no migration18/shared-file handoff is made. Retained/live pagination,
+all ten domains, active cancellation, public-provider acceptance and all later
+programme stages remain required. The exact merged PR132 handoff is recorded as
+pending normal integration after this work is committed: dev
+`0a43bd276f3bc4ab2c6ac4c527edb34c75df4859`, tree
+`7a244bf97c9f548ecadee01c6ba483a5f455c493`. PR133 remains unmerged in the last
+material handoff. Do not treat either report as permission to overwrite work.
+
+Read-only next-slice preparation reconfirms that upstream page numbers are not
+stable retained keyset cursors. Before changing continuation, freeze retained
+ordering/expiry, bounded live accumulation and exact-coordinate duplicate
+precedence. An independently bounded SDK correction can enforce the server's
+existing strictly-forward next-page invariant without inventing a new contract.
+No speculative migration or alternate orchestration framework is authorized.

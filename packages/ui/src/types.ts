@@ -20,6 +20,8 @@ import type {
   RefreshMetadataClaimsResponse,
   ProviderIdentifierActionRequest,
   ProviderIdentifierActionResponse,
+  ProviderIdentifierDetailsQueryParameters,
+  ProviderIdentifierDetailsResponse,
   SearchCandidateActionRequest,
   SearchCandidateActionResponse,
   SearchCandidateDetailsResponse,
@@ -60,6 +62,8 @@ export type {
   RefreshMetadataClaimsResponse,
   ProviderIdentifierActionRequest,
   ProviderIdentifierActionResponse,
+  ProviderIdentifierDetailsQueryParameters,
+  ProviderIdentifierDetailsResponse,
   SearchCandidateActionRequest,
   SearchCandidateActionResponse,
   SearchCandidateDto,
@@ -416,6 +420,11 @@ export interface WorkbenchHost {
     candidateReceiptId: string,
     offline: boolean,
   ): Promise<SearchCandidateDetailsResponse>;
+  readProviderIdentifierDetails?(
+    provider: string,
+    grain: string,
+    query: ProviderIdentifierDetailsQueryParameters,
+  ): Promise<ProviderIdentifierDetailsResponse>;
   saveSearchCandidate?(
     provider: string,
     grain: string,
