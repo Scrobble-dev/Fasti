@@ -4336,3 +4336,40 @@ handoff commit/tree were verified locally and used exactly. Do not describe that
 failed fetch as a fresh remote observation. The isolated KDF qualification and
 its separate measurement provenance remain unchanged. Final combined-head
 canonical and real-process receipts must be regenerated before publishing.
+
+## M4 details cancellation continuation — 2026-09-06
+
+The combined-head run completed successfully at
+`f670a5b8f7c15b692f1cc5ede9291f18ca5c8853`, tree
+`78c6e7c8d6050a7d43fd0b807a2f3bf40cd1e14a`, with a clean source receipt:
+canonical contract verification 27 gates, portable 11 gates, all exit zero,
+followed by the real retained and no-store browser/restart journey. All three
+receipts bind that same exact commit/tree. The managed ports were released.
+This is concrete verification progress, not a waiting process or public-provider
+acceptance claim. PR128 remains in progress; no merge or migration18 release.
+
+Current bounded change propagates the existing optional AbortSignal through the
+retained/live detail host methods, Workbench readers and Discover lifetimes.
+Route-effect cleanup cancels its own controller; inline completion only clears
+the controller it owns, so an old completion cannot clear a newer read. Existing
+authority and generation fences remain. No HTTP contract, generated schema,
+capability, dependency, migration or archive format changes are required.
+
+The commander owns all production files. The browser-test agent owns only
+`tests/e2e/search-attach-browser.regression-1.spec.ts`; the native-test agent owns
+only `crates/fasti-provider-runtime/src/search_details_tests.rs`; the third agent
+is read-only on cancellation flow. Both test leaves are released. Two native
+coordinate cancellation tests pass, and the full coordinate group passes eight
+tests. UI and web typechecks pass with zero errors/warnings. Browser cancellation
+and authority tests are pending the clean-checkpoint run. The browser fixture
+does not issue an authenticated opaque session and is not API authentication
+evidence; the actual browser request failure is its abort oracle.
+
+Read-only preparation keeps three proven gaps explicit: identity-only Records
+are reachable by canonical Record route but absent from title-only local Search;
+retained provider page numbers do not yet provide frozen keyset continuation;
+M5 must not infer saved or plan-to-watch state from Record existence. Reuse the
+existing owners to close these gaps. Full ten-domain Search, bounded identifier
+lookup, continuation, active cancellation, public-provider acceptance and all
+later stages remain required. No production migration number beyond the current
+explicit allocation is assumed. Codex Security remains permanently excluded.

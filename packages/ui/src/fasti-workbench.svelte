@@ -1348,6 +1348,7 @@
   async function readSearchCandidate(
     receipt: SearchCandidateReceiptDto,
     offline: boolean,
+    signal?: AbortSignal,
   ): Promise<SearchCandidateDetailsResponse> {
     return readSearchCandidateRoute(
       {
@@ -1358,12 +1359,14 @@
         slug: routeSlug(receipt.candidate.title),
       },
       offline,
+      signal,
     );
   }
 
   async function readSearchCandidateRoute(
     route: RetainedSearchCandidateRoute,
     offline: boolean,
+    signal?: AbortSignal,
   ): Promise<SearchCandidateDetailsResponse> {
     if (!canAccessProfileData || !host.readSearchCandidate) {
       throw new Error("Sign in before reading provider details.");
@@ -1374,6 +1377,7 @@
       route.grain,
       route.candidateReceiptId,
       offline,
+      signal,
     );
     if (authorityIdentity !== profileAuthorityIdentity) {
       throw new Error("Account access changed before details completed.");
@@ -1384,11 +1388,12 @@
   async function readCandidateRoute(
     route: SearchCandidateRoute,
     offline: boolean,
+    signal?: AbortSignal,
   ): Promise<
     SearchCandidateDetailsResponse | ProviderIdentifierDetailsResponse
   > {
     if (route.kind === "retained")
-      return readSearchCandidateRoute(route, offline);
+      return readSearchCandidateRoute(route, offline, signal);
     if (!canAccessProfileData || !host.readProviderIdentifierDetails)
       throw new Error("Sign in before reading provider details.");
     const authorityIdentity = profileAuthorityIdentity;
@@ -1400,6 +1405,7 @@
         offline,
         locale: route.locale ?? null,
       },
+      signal,
     );
     if (authorityIdentity !== profileAuthorityIdentity)
       throw new Error("Account access changed before details completed.");

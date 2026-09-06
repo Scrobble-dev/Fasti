@@ -78,6 +78,17 @@ interface BrowserAttachFixture {
   actionResponded: number;
   postSaveRecordsStarted: number;
   postSaveRecordsResponded: number;
+  detailRequests: Array<{
+    method: string;
+    authorization?: string;
+    csrf?: string;
+    providerRecordId: string;
+    offline: string | null;
+    locale: string | null;
+  }>;
+  holdDetails: boolean;
+  detailRequestFailures: number;
+  releaseDetails: Array<(() => void) | undefined>;
   releaseTargetSearch?: () => void;
   releaseAction?: () => void;
   releasePostSaveRecords?: () => void;
@@ -123,7 +134,18 @@ async function installBrowserAttachHost(
     actionResponded: 0,
     postSaveRecordsStarted: 0,
     postSaveRecordsResponded: 0,
+    detailRequests: [],
+    holdDetails: false,
+    detailRequestFailures: 0,
+    releaseDetails: [],
   };
+
+  page.on("requestfailed", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname === "/api/v1/search/providers/tmdb/film/details") {
+      fixture.detailRequestFailures += 1;
+    }
+  });
 
   await page.route("**/api/v1/providers", (route) =>
     fulfillJson(route, {
@@ -177,6 +199,52 @@ async function installBrowserAttachHost(
       lifetime,
       upstream_problem: null,
     }),
+  );
+  await page.route(
+    /\/api\/v1\/search\/providers\/tmdb\/film\/details\?.*$/,
+    async (route) => {
+      const request = route.request();
+      const url = new URL(request.url());
+      const index = fixture.detailRequests.length;
+      const providerRecordId = url.searchParams.get("provider_record_id") ?? "";
+      fixture.detailRequests.push({
+        method: request.method(),
+        authorization: request.headers().authorization,
+        csrf: request.headers()["x-csrf-token"],
+        providerRecordId,
+        offline: url.searchParams.get("offline"),
+        locale: url.searchParams.get("locale"),
+      });
+      if (fixture.holdDetails) {
+        await new Promise<void>((resolve) => {
+          fixture.releaseDetails[index] = resolve;
+        });
+      }
+      try {
+        await fulfillJson(route, {
+          outcome: "details",
+          provider_id: "tmdb",
+          grain: "film",
+          provider_record_id: providerRecordId,
+          details: {
+            ...candidate,
+            provider_id: providerRecordId,
+            title:
+              index === 0
+                ? "Old authority live detail"
+                : "Current authority live detail",
+            overview:
+              index === 0
+                ? "This response belongs only to the original authority."
+                : "This response was read again under the current authority.",
+          },
+          locale: null,
+        });
+      } catch {
+        // The expected result after AbortSignal cancellation is a failed
+        // intercepted route, not a response that the UI merely ignores.
+      }
+    },
   );
   await page.route("**/api/v1/search/records", async (route) => {
     const request = route.request().postDataJSON() as {
@@ -363,6 +431,105 @@ async function settleBrowserWork(page: Page): Promise<void> {
       ),
   );
 }
+
+async function openHeldLiveDetails(
+  page: Page,
+  fixture: BrowserAttachFixture,
+): Promise<void> {
+  fixture.holdDetails = true;
+  await page.goto("/explore/live/tmdb/film/693134/candidate");
+  await expect.poll(() => fixture.detailRequests.length).toBe(1);
+  expect(fixture.detailRequests[0]).toMatchObject({
+    method: "GET",
+    authorization: undefined,
+    csrf: undefined,
+    providerRecordId: "693134",
+    offline: "false",
+    locale: null,
+  });
+}
+
+test("a profile switch aborts old live details and reads them under current authority", async ({
+  page,
+}) => {
+  const fixture = await installBrowserAttachHost(page);
+  await openHeldLiveDetails(page, fixture);
+
+  await revalidateAuthority(page, "profile");
+  await expect.poll(() => fixture.detailRequests.length).toBe(2);
+  fixture.releaseDetails[0]?.();
+  await expect.poll(() => fixture.detailRequestFailures).toBe(1);
+  fixture.releaseDetails[1]?.();
+
+  await expect(
+    page.getByRole("heading", {
+      level: 1,
+      name: "Current authority live detail",
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("This response was read again under the current authority."),
+  ).toBeVisible();
+  await expect(
+    page.getByText("This response belongs only to the original authority."),
+  ).toHaveCount(0);
+  expect(fixture.detailRequests[1]).toMatchObject({
+    method: "GET",
+    authorization: undefined,
+    csrf: undefined,
+    providerRecordId: "693134",
+    offline: "false",
+  });
+});
+
+test("sign-out aborts delayed live details without exposing old authority data", async ({
+  page,
+}) => {
+  const fixture = await installBrowserAttachHost(page);
+  await openHeldLiveDetails(page, fixture);
+
+  await revalidateAuthority(page, "signed_out");
+  await expect(page.getByRole("alert")).toContainText(
+    "Sign in to read this provider candidate",
+  );
+  fixture.releaseDetails[0]?.();
+  await expect.poll(() => fixture.detailRequestFailures).toBe(1);
+  await settleBrowserWork(page);
+
+  expect(fixture.detailRequests).toHaveLength(1);
+  await expect(
+    page.getByText("This response belongs only to the original authority."),
+  ).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Create Record" })).toHaveCount(
+    0,
+  );
+  await expect(
+    page.getByRole("button", { name: "Attach to existing Record" }),
+  ).toHaveCount(0);
+});
+
+test("leaving live details aborts the actual browser request", async ({
+  page,
+}) => {
+  const fixture = await installBrowserAttachHost(page);
+  await openHeldLiveDetails(page, fixture);
+
+  await page.evaluate(() => {
+    history.pushState({}, "", "/library");
+    dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Library" }),
+  ).toBeVisible();
+  fixture.releaseDetails[0]?.();
+  await expect.poll(() => fixture.detailRequestFailures).toBe(1);
+  await settleBrowserWork(page);
+
+  await expect(page).toHaveURL("/library");
+  await expect(
+    page.getByText("This response belongs only to the original authority."),
+  ).toHaveCount(0);
+});
 
 test("a browser session attaches one explicit target and opens its canonical Record", async ({
   page,

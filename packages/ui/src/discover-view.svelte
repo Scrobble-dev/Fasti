@@ -61,6 +61,7 @@
     onReadCandidate?: (
       receipt: SearchCandidateReceiptDto,
       offline: boolean,
+      signal?: AbortSignal,
     ) => Promise<SearchCandidateDetailsResponse>;
     embedded?: boolean;
     actionLabel?: string;
@@ -79,6 +80,7 @@
     onReadCandidateRoute?: (
       route: SearchCandidateRoute,
       offline: boolean,
+      signal?: AbortSignal,
     ) => Promise<
       SearchCandidateDetailsResponse | ProviderIdentifierDetailsResponse
     >;
@@ -167,6 +169,7 @@
   let routeLoading = $state(false);
   let routeProblem = $state("");
   let routeGeneration = 0;
+  let detailController: AbortController | undefined;
   let attachDialog = $state<HTMLDialogElement>();
   let attachResult = $state<{ result: ProviderResult; index: number }>();
   let attachQuery = $state("");
@@ -209,6 +212,7 @@
     route: SearchCandidateRoute,
     generation: number,
     offline: boolean,
+    signal: AbortSignal,
   ): Promise<void> {
     if (!onReadCandidateRoute) {
       routeProblem = "Sign in to read this provider candidate.";
@@ -217,7 +221,7 @@
     routeLoading = true;
     routeProblem = "";
     try {
-      const response = await onReadCandidateRoute(route, offline);
+      const response = await onReadCandidateRoute(route, offline, signal);
       if (generation !== routeGeneration) return;
       routeCandidate = routeDetails(response);
       routeReceipt = routeSnapshot(response);
@@ -263,21 +267,26 @@
     const route = candidateRoute;
     const offline = providerOffline();
     const generation = ++routeGeneration;
+    const controller = new AbortController();
+    detailController?.abort();
+    detailKey = "";
     untrack(closeAttachPicker);
     routeCandidate = undefined;
     routeReceipt = undefined;
     routeLoading = false;
     routeProblem = candidateRouteProblem ?? "";
     if (route && !candidateRouteProblem)
-      void loadCandidateRoute(route, generation, offline);
+      void loadCandidateRoute(route, generation, offline, controller.signal);
     return () => {
       routeGeneration += 1;
+      controller.abort();
     };
   });
 
   onDestroy(() => {
     searchRevision += 1;
     attachGeneration += 1;
+    detailController?.abort();
   });
 
   function closeAttachPicker(): void {
@@ -463,11 +472,18 @@
       return;
     const key = candidateKey(result, index);
     const revision = searchRevision;
+    detailController?.abort();
+    const controller = new AbortController();
+    detailController = controller;
     detailKey = key;
     candidateDetailProblems = { ...candidateDetailProblems, [key]: "" };
     try {
-      const response = await onReadCandidate(result.receipt, providerOffline());
-      if (revision !== searchRevision) return;
+      const response = await onReadCandidate(
+        result.receipt,
+        providerOffline(),
+        controller.signal,
+      );
+      if (controller.signal.aborted || revision !== searchRevision) return;
       const details =
         response.outcome === "refetched" ||
         response.outcome === "refetched_without_snapshot"
@@ -496,7 +512,7 @@
         };
       }
     } catch (error) {
-      if (revision !== searchRevision) return;
+      if (controller.signal.aborted || revision !== searchRevision) return;
       candidateDetailProblems = {
         ...candidateDetailProblems,
         [key]: hostProblemText(
@@ -505,7 +521,10 @@
         ),
       };
     } finally {
-      if (revision === searchRevision && detailKey === key) detailKey = "";
+      if (detailController === controller) {
+        detailController = undefined;
+        if (revision === searchRevision && detailKey === key) detailKey = "";
+      }
     }
   }
   const supportedProviders = $derived(
@@ -595,6 +614,7 @@
     if (providerId === searchProviderId) return;
     searchProviderId = providerId;
     searchRevision += 1;
+    detailController?.abort();
     searching = false;
     results = [];
     providerNextPages = {};

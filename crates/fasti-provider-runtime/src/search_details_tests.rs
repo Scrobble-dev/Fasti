@@ -23,6 +23,16 @@ mod candidate_details_tests {
     }
 
     impl DetailsPersistence {
+        fn pause_if_armed(&self) {
+            let pause = self.pause_prepare.lock().unwrap().take();
+            if let Some((entered, release)) = pause {
+                let _ = entered.send(());
+                release
+                    .recv_timeout(std::time::Duration::from_secs(10))
+                    .expect("blocked preparation must be released within the test bound");
+            }
+        }
+
         fn check_request(&self, request: &ReadSearchCandidateRequest) {
             assert_eq!(request.terms_revision, "fasti.public-metadata-cache.v1");
             assert_eq!(
@@ -236,13 +246,7 @@ mod candidate_details_tests {
             request: &ReadSearchCandidateRequest,
         ) -> ApplicationResult<Option<PreparedSearchCandidateDetails>> {
             self.calls.lock().unwrap().push("prepare-details");
-            let pause = self.pause_prepare.lock().unwrap().take();
-            if let Some((entered, release)) = pause {
-                let _ = entered.send(());
-                release
-                    .recv_timeout(std::time::Duration::from_secs(10))
-                    .expect("blocked preparation must be released within the test bound");
-            }
+            self.pause_if_armed();
             self.current(request)
         }
 
@@ -254,6 +258,7 @@ mod candidate_details_tests {
                 .lock()
                 .unwrap()
                 .push("prepare-identifier-details");
+            self.pause_if_armed();
             self.current_identifier_details(request)
         }
     }
@@ -601,6 +606,93 @@ mod candidate_details_tests {
                     problem: ProblemCode::ProviderResponseInvalid
                 }
             );
+            assert_eq!(
+                *persistence.calls.lock().unwrap(),
+                ["prepare-identifier-details", "prepare-identifier-details"]
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn cancelling_coordinate_details_network_releases_lease_without_recheck() {
+        let (service, persistence, request) = identifier_details_fixture();
+        let gate = Arc::new(tokio::sync::Mutex::new(()));
+        let lease = ProviderOperationLease::new(Arc::clone(&gate).lock_owned().await);
+        let (entered, started) = tokio::sync::oneshot::channel();
+        let caller = tokio::spawn(async move {
+            service
+                .provider_identifier_details_with(request, false, lease, |_, _| async move {
+                    let _ = entered.send(());
+                    std::future::pending::<Result<ProviderCandidate, ProviderRuntimeError>>().await
+                })
+                .await
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(5), started)
+            .await
+            .unwrap()
+            .unwrap();
+        let held_during_network = gate.try_lock().is_err();
+        caller.abort();
+        let cancelled = caller.await.unwrap_err().is_cancelled();
+        let _released = tokio::time::timeout(std::time::Duration::from_secs(5), gate.lock())
+            .await
+            .unwrap();
+        assert!(
+            held_during_network,
+            "network fetch must retain its provider lease"
+        );
+        assert!(cancelled);
+        assert_eq!(
+            *persistence.calls.lock().unwrap(),
+            ["prepare-identifier-details"]
+        );
+    }
+
+    #[tokio::test]
+    async fn cancelling_coordinate_details_recheck_retains_lease_until_success_or_error_finishes() {
+        for success in [false, true] {
+            let (service, persistence, request) = identifier_details_fixture();
+            let gate = Arc::new(tokio::sync::Mutex::new(()));
+            let lease = ProviderOperationLease::new(Arc::clone(&gate).lock_owned().await);
+            let (entered, started) = tokio::sync::oneshot::channel();
+            let (release, finish) = std::sync::mpsc::channel();
+            let during_fetch = Arc::clone(&persistence);
+            let caller = tokio::spawn(async move {
+                service
+                    .provider_identifier_details_with(
+                        request,
+                        false,
+                        lease,
+                        move |_, _| async move {
+                            // Arm only after the initial preparation. Cancellation
+                            // then targets the blocking authority recheck after I/O.
+                            *during_fetch.pause_prepare.lock().unwrap() = Some((entered, finish));
+                            if success {
+                                Ok(candidate())
+                            } else {
+                                Err(ProviderRuntimeError::provider("fixture outage"))
+                            }
+                        },
+                    )
+                    .await
+            });
+            tokio::time::timeout(std::time::Duration::from_secs(5), started)
+                .await
+                .unwrap()
+                .unwrap();
+            caller.abort();
+            let cancelled = caller.await.unwrap_err().is_cancelled();
+            let held_during_recheck = gate.try_lock().is_err();
+            let released_worker = release.send(()).is_ok();
+            let _completed = tokio::time::timeout(std::time::Duration::from_secs(5), gate.lock())
+                .await
+                .unwrap();
+            assert!(cancelled);
+            assert!(
+                held_during_recheck,
+                "cancelled coordinate details must retain the running recheck's lease"
+            );
+            assert!(released_worker, "blocking recheck must still be running");
             assert_eq!(
                 *persistence.calls.lock().unwrap(),
                 ["prepare-identifier-details", "prepare-identifier-details"]

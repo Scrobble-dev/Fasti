@@ -392,18 +392,26 @@ export function createWebHost(
         provider,
         request,
       ),
-    readSearchCandidate: (provider, grain, candidateReceiptId, offline) =>
+    readSearchCandidate: (
+      provider,
+      grain,
+      candidateReceiptId,
+      offline,
+      signal,
+    ) =>
       (credential ? client : accessClient).readSearchCandidate(
         provider,
         grain,
         candidateReceiptId,
         { offline },
+        { signal },
       ),
-    readProviderIdentifierDetails: (provider, grain, query) =>
+    readProviderIdentifierDetails: (provider, grain, query, signal) =>
       (credential ? client : accessClient).readProviderIdentifierDetails(
         provider,
         grain,
         query,
+        { signal },
       ),
     saveSearchCandidate: (provider, grain, candidateReceiptId, request) =>
       (credential ? client : accessClient).saveSearchCandidate(

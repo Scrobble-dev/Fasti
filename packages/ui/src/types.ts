@@ -419,11 +419,13 @@ export interface WorkbenchHost {
     grain: string,
     candidateReceiptId: string,
     offline: boolean,
+    signal?: AbortSignal,
   ): Promise<SearchCandidateDetailsResponse>;
   readProviderIdentifierDetails?(
     provider: string,
     grain: string,
     query: ProviderIdentifierDetailsQueryParameters,
+    signal?: AbortSignal,
   ): Promise<ProviderIdentifierDetailsResponse>;
   saveSearchCandidate?(
     provider: string,

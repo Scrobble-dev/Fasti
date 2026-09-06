@@ -754,6 +754,15 @@ API, SDK and hosts. The programme checkpoint records native and browser negative
 checks plus the real-process no-store/restart proof. This does not mark M4 or
 public-provider acceptance complete; exact-head delivery evidence remains required.
 
+Routed retained/live details and the inline retained reader pass the existing
+optional cancellation signal through Workbench and the browser host to the SDK.
+Route exit, coordinate/locale replacement, profile change and sign-out abort the
+old browser read; generation and authority checks still reject late completions.
+The packaged invoke adapter currently suppresses late delivery but does not
+cancel native I/O. Neither browser request abort nor a manually cancelled runtime
+task alone proves that a disconnected HTTP client's upstream request is cancelled.
+Keep these acceptance boundaries separate until exact runtime evidence exists.
+
 `candidate_receipt_id` is opaque and resolves to a durable, bounded provider-candidate receipt containing the exact governed re-fetch route and provenance. A receipt expires after 24 hours, carries at most 64 KiB of normalized candidate data plus bounded identifiers, and records the query digest, safe provider-configuration digest, grant digest, response digest, provider terms revision, and creating actor/profile. Replay re-authorizes the current actor, profile, provider capability, grant, and configuration; a digest or authorization mismatch fails closed and offers a fresh Search. Expired and unreferenced receipts are garbage-collected in bounded keyset pages; receipts attached to an operation or Record retain only the minimal provenance required by that durable owner. No credential, raw secret-bearing request, or unrestricted provider body enters a receipt. The slug is presentation-only. On Record creation or attachment, the stable route becomes:
 
 ```text
