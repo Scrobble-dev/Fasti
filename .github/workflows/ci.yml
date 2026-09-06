@@ -186,7 +186,14 @@ jobs:
           version: 11.22.0
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
-      - run: pnpm test:ui
+      # Lighthouse's INP audit needs the trace event restored in Chrome 152.
+      # Refresh only this ephemeral runner's Chrome; ordinary tests use Chromium.
+      - run: pnpm exec playwright install --force chrome
+      - run: pnpm test:ui --grep-invert @performance
+      - name: Lighthouse Access interaction sentinel
+        run: pnpm test:ui --grep @performance --workers=1 --retries=0 --output=test-results-performance
+        env:
+          PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report-performance
       - name: Retain browser evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -195,6 +202,8 @@ jobs:
           path: |
             playwright-report
             test-results
+            playwright-report-performance
+            test-results-performance
           if-no-files-found: error
           retention-days: 30
 

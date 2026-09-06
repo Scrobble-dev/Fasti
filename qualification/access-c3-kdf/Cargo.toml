@@ -1,0 +1,15 @@
+[package]
+name = "fasti-c3-rustcrypto-kdf"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "AGPL-3.0-or-later"
+
+[workspace]
+
+[dependencies]
+argon2 = { version = "=0.5.3", features = ["zeroize"] }
+zeroize = { version = "=1.9.0", features = ["alloc"] }
+alkali = { version = "=0.3.0", default-features = false, features = ["std"] }
+libsodium-sys-stable = { version = "=1.24.0", default-features = false }
+libc = "=0.2.189"

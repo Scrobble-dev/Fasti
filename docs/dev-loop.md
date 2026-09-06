@@ -144,7 +144,9 @@ delivery receipt. Its locked desktop tests cover the trusted-host source
 boundary only. They do not prove packaged Tauri authentication. That WebView,
 cross-platform, and packaged assistive-technology work is deferred to
 `C1-TAURI-AUTH`; no packaged desktop authentication support is claimed.
-Review, exact-head CI, merge, and merged-tree evidence remain required.
+C1 ordinary-browser delivery merged in [PR #119](https://github.com/Scrobble-dev/Fasti/pull/119).
+Review, exact-head CI, and merged-tree evidence remain required for subsequent
+changes; see the [canonical checkpoint](plans/trailbase-authentication-remediation.md#24-c1-delivery-and-c2-foundation-checkpoint).
 
 ## Desktop QA
 
