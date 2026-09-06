@@ -165,6 +165,45 @@ fn exact_expiry_and_monotonic_use_and_revocation_preserve_terminal_state() {
 }
 
 #[test]
+fn unused_token_revocation_accepts_creation_time_and_preserves_terminal_state() {
+    let (subject, installation) = authority();
+    let mut token = issue(&subject, &installation, at(0));
+    let original = token.clone();
+    let tick = TimeDelta::nanoseconds(1);
+    assert_eq!(
+        token.revoke(at(0) - tick),
+        Err(AccessCredentialInvariantError::InvalidCredentialTimestampOrder)
+    );
+    assert_eq!(token, original);
+
+    assert_eq!(token.revoke(at(0)), Ok(true));
+    let terminal = restore(
+        &original,
+        [
+            original.auth_epoch(),
+            original.authorization_epoch(),
+            original.activation_generation(),
+        ],
+        original.created_at(),
+        original.expires_at(),
+        None,
+        Some(at(0)),
+        None,
+    )
+    .unwrap();
+    assert_eq!(token, terminal);
+    assert_eq!(token.revoke(at(0)), Ok(false));
+    assert_eq!(token, terminal);
+    assert_eq!(
+        token.record_use(at(0)),
+        Err(AccessCredentialInvariantError::PersonalAccessTokenUnavailable)
+    );
+    assert!(!token.is_current_for(&subject, &installation, at(0)));
+    assert!(!token.is_current_for(&subject, &installation, at(0) + tick));
+    assert_eq!(token, terminal);
+}
+
+#[test]
 fn persistence_rejects_epoch_overflow_and_inconsistent_timestamps_or_replacement() {
     let (subject, installation) = authority();
     let token = issue(&subject, &installation, at(0));
@@ -496,6 +535,53 @@ fn replacement_rejects_wrong_binding_reused_identity_or_digest_and_nonfresh_stat
     let before = revoked.clone();
     assert!(revoked.replace_with(&successor, at(10)).is_err());
     assert_eq!(revoked, before);
+}
+
+#[test]
+fn replacement_accepts_exact_last_use_time_and_preserves_both_models() {
+    let (subject, installation) = authority();
+    let mut predecessor = issue(&subject, &installation, at(0));
+    assert_eq!(predecessor.record_use(at(10)), Ok(true));
+    let original = predecessor.clone();
+    let successor = PersonalAccessToken::issue(
+        PersonalAccessTokenId::new_v7(),
+        original.workspace_id(),
+        original.profile_grant_id(),
+        original.name().clone(),
+        Sha256Digest::from_bytes(&[4; 32]),
+        &subject,
+        &installation,
+        at(10),
+        at(10) + TimeDelta::days(1),
+    )
+    .unwrap();
+    let successor_before = successor.clone();
+
+    assert_eq!(predecessor.replace_with(&successor, at(10)), Ok(()));
+    let terminal = restore(
+        &original,
+        [
+            original.auth_epoch(),
+            original.authorization_epoch(),
+            original.activation_generation(),
+        ],
+        original.created_at(),
+        original.expires_at(),
+        Some(at(10)),
+        Some(at(10)),
+        Some(successor.id()),
+    )
+    .unwrap();
+    assert_eq!(predecessor, terminal);
+    assert_eq!(successor, successor_before);
+    assert!(!predecessor.is_current_for(&subject, &installation, at(10)));
+    assert!(successor.is_current_for(&subject, &installation, at(10)));
+    assert_eq!(
+        predecessor.replace_with(&successor, at(10)),
+        Err(AccessCredentialInvariantError::InvalidPersonalAccessTokenReplacement)
+    );
+    assert_eq!(predecessor, terminal);
+    assert_eq!(successor, successor_before);
 }
 
 #[test]

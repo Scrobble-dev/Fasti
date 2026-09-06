@@ -232,7 +232,6 @@
     const failedCallback = callbackMarker === "failed";
     if (callbackMarker !== undefined) onCallbackConsumed?.();
     viewState = { kind: "loading" };
-    notice = initialNotice ?? "";
     if (resumeFromCallback) {
       const continuationOutcome = await loadContinuation(
         currentRead.generation,
@@ -576,6 +575,7 @@
   }
 
   onMount(() => {
+    notice = initialNotice ?? "";
     void load().then(async () => {
       if (!initialNotice) return;
       await new Promise<void>((resolve) =>
@@ -620,6 +620,7 @@
       <button
         type="button"
         class="btn btn-outline-secondary"
+        disabled={Boolean(busy)}
         onclick={onOpenAccountSecurity}
       >
         Manage existing access
@@ -627,16 +628,18 @@
     {/if}
   </header>
 
-  {#if notice}
-    <p
-      id="access-notice"
-      class="alert alert-success"
-      role="status"
-      tabindex="-1"
-    >
-      {notice}
-    </p>
-  {/if}
+  <div
+    class="access-notice-region"
+    role={notice ? "status" : undefined}
+    aria-live="polite"
+    aria-atomic="true"
+  >
+    {#if notice}
+      <p id="access-notice" class="alert alert-success mb-0" tabindex="-1">
+        {notice}
+      </p>
+    {/if}
+  </div>
 
   {#if viewState.kind === "ready" && viewState.projection.profile_grants_truncated}
     <p class="alert alert-info mb-0" role="status">
@@ -1220,6 +1223,16 @@
     min-width: 0;
   }
 
+  .access-notice-region {
+    min-block-size: calc(2lh + 1.5rem + 2px);
+  }
+
+  @media (max-width: 47.99rem) {
+    .access-notice-region {
+      min-block-size: calc(3lh + 1.5rem + 2px);
+    }
+  }
+
   .access-surface :global(.text-secondary) {
     color: var(--fasti-text-muted) !important;
   }
@@ -1355,6 +1368,11 @@
     cursor: pointer;
   }
 
+  .continuation-choice > span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
   .remember-browser-check {
     min-height: 2.75rem;
   }
@@ -1434,6 +1452,11 @@
     .first-run-steps :global(.list-group-item) {
       align-items: stretch;
       flex-direction: column;
+    }
+
+    .access-heading > div,
+    .task-copy {
+      flex-basis: auto;
     }
 
     .task-row .btn,
