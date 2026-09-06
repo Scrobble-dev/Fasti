@@ -4450,3 +4450,62 @@ serialization or error mapping changes are authorized, and diagnostic
 instrumentation must not be committed/pushed or integrated without review.
 This is not a release of M4 integration ownership. The old failure remains
 evidence; the inferred one-second export step timeout is not yet a proven cause.
+
+### 2026-09-06 — Browser-session origin and mutation transport correction
+
+The previous goal turn only acknowledged the permanent tool exclusion and made
+no programme progress. This continuation revalidated clean committed head
+`36f4bfecf2dd1cc5cfdfde56d9495f18461c5d62` before production edits; the only
+pre-existing untracked file was the explicitly allocated origin regression leaf.
+The combined cancellation checks at that head passed all 27 contract and 11
+portable gates, 27 focused Chrome regressions, and the real retained/no-store
+Search/Create/Attach/restart journey. Its receipts describe a disposable upstream
+fixture, not public-provider acceptance.
+
+Current hosted-review triage proved that browser-session Record and profile
+operations incorrectly used the saved service origin. The same caller trace
+found six SDK Record/profile mutations missing existing CSRF handling; independent
+review identified the seventh hybrid mutation, observation submission. Reuse the
+existing dynamic client selection and SDK cookie parser. Cookie-mode application
+calls stay on the browser origin; bearer-mode calls follow the saved service
+configuration. Scoped provider credentials, health and metadata methods keep their
+existing client and authority. Observation submission remains an SDK operation;
+this correction does not add a Workbench capability.
+
+The native protocol regression failed before the fix on wrong origin and missing
+CSRF rejection. It covers dynamic configuration, request bodies and projections,
+cookie/bearer separation, and rejection before fetch. Browser regression work
+replaces the old wrong-origin success fixture with a remote-request trap and
+exercises Search-to-Record navigation. Final exact-head canonical, browser and
+real-process evidence must be regenerated before publishing this increment.
+
+Root remains the sole production writer. One agent reviews the exact shared diff
+and owns only the SDK/browser-origin test leaf; another owns only the existing
+provider-inventory browser test leaf; the third prepares stable pagination
+read-only. No migration, archive change, capability ID, dependency, shared-file
+release or M4 completion is implied. Offline contention, exact identifier Search,
+stable continuation, ten-domain coverage, native/upstream cancellation and public
+provider acceptance remain active work. Codex Security is permanently excluded.
+
+All seven mutation transport corrections now pass the focused 15-check protocol
+suite. Observation submission first failed independently on absent CSRF and all
+three invalid-cookie cases (missing, malformed, duplicate); its one-line SDK
+change makes those checks pass without changing the server policy. The six
+Workbench mutation checks also prove missing-cookie rejection before fetch.
+Scoped provider/metadata boundaries and dynamic service settings pass. These
+are protocol fixtures, not durable action or production-provider evidence.
+
+Read-only pagination preparation identifies three next corrections: validate
+strictly advancing continuations and page-local identity uniqueness in the SDK;
+deduplicate appended pages by provider coordinates while keeping the first
+receipt and order; retain truthful cache labels across mixed-age pages. Existing
+local Search already uses scope-bound RecordId keysets for stable rows. Upstream
+TMDB/Books page/offset APIs do not supply snapshot consistency; do not invent a
+snapshot table or claim that ranking cannot change across requests. This lane
+now prepares M5 Library read-only while root verifies the transport correction.
+
+The focused browser fixture now passes 3/3, including Search-to-canonical-Record
+navigation, exact Record selection and tracking reads on the browser origin,
+with zero requests to the separately saved service. SDK and web typechecks pass
+with zero diagnostics. Both allocated test leaves are released before the
+clean-source gate; no browser/build process is intentionally overlapped.

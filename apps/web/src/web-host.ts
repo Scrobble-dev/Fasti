@@ -218,6 +218,7 @@ export function createWebHost(
     baseUrl:
       typeof window === "undefined" ? defaultApiUrl : window.location.origin,
   });
+  const currentApplicationClient = () => (credential ? client : accessClient);
 
   const metadataHost: Partial<WorkbenchHost> = credential
     ? {
@@ -261,15 +262,11 @@ export function createWebHost(
     revokeOtherBrowserSessions: () => accessClient.revokeOtherBrowserSessions(),
     rotateBrowserSession: () => accessClient.rotateBrowserSession(),
     readAnimeGroupingPolicy: (query) =>
-      (credential ? client : accessClient).readAnimeGroupingPolicy(query),
+      currentApplicationClient().readAnimeGroupingPolicy(query),
     previewAnimeGroupingPolicyChange: (request) =>
-      (credential ? client : accessClient).previewAnimeGroupingPolicyChange(
-        request,
-      ),
+      currentApplicationClient().previewAnimeGroupingPolicyChange(request),
     applyAnimeGroupingPolicyChange: (request) =>
-      (credential ? client : accessClient).applyAnimeGroupingPolicyChange(
-        request,
-      ),
+      currentApplicationClient().applyAnimeGroupingPolicyChange(request),
     async loadNetworkConfiguration(): Promise<NetworkConfiguration> {
       return network;
     },
@@ -333,7 +330,7 @@ export function createWebHost(
       return parseIntegrationStatusResponse(response.integrations);
     },
     async providerCredentialStatus(): Promise<ProviderCredentialStatus[]> {
-      return loadProviderRows(credential ? client : accessClient);
+      return loadProviderRows(currentApplicationClient());
     },
     async saveProviderCredential(
       provider: string,
@@ -377,10 +374,9 @@ export function createWebHost(
       request: LocalSearchRequestDto,
       signal?: AbortSignal,
     ): Promise<LocalSearchResponseDto> {
-      const response = await (credential ? client : accessClient).searchRecords(
-        request,
-        { signal },
-      );
+      const response = await currentApplicationClient().searchRecords(request, {
+        signal,
+      });
       return {
         ...response,
         records: response.records.map((record) => ({
@@ -390,11 +386,9 @@ export function createWebHost(
       };
     },
     searchProviderPage: (provider, request, signal) =>
-      (credential ? client : accessClient).searchProviderPage(
-        provider,
-        request,
-        { signal },
-      ),
+      currentApplicationClient().searchProviderPage(provider, request, {
+        signal,
+      }),
     readSearchCandidate: (
       provider,
       grain,
@@ -402,7 +396,7 @@ export function createWebHost(
       offline,
       signal,
     ) =>
-      (credential ? client : accessClient).readSearchCandidate(
+      currentApplicationClient().readSearchCandidate(
         provider,
         grain,
         candidateReceiptId,
@@ -410,21 +404,21 @@ export function createWebHost(
         { signal },
       ),
     readProviderIdentifierDetails: (provider, grain, query, signal) =>
-      (credential ? client : accessClient).readProviderIdentifierDetails(
+      currentApplicationClient().readProviderIdentifierDetails(
         provider,
         grain,
         query,
         { signal },
       ),
     saveSearchCandidate: (provider, grain, candidateReceiptId, request) =>
-      (credential ? client : accessClient).saveSearchCandidate(
+      currentApplicationClient().saveSearchCandidate(
         provider,
         grain,
         candidateReceiptId,
         request,
       ),
     saveProviderIdentifier: (provider, grain, request) =>
-      (credential ? client : accessClient).saveProviderIdentifier(
+      currentApplicationClient().saveProviderIdentifier(
         provider,
         grain,
         request,
@@ -434,7 +428,7 @@ export function createWebHost(
       return 0;
     },
     async listRecords(query?: ListRecordsQueryParameters): Promise<RecordPage> {
-      const response = await client.listRecords({}, query);
+      const response = await currentApplicationClient().listRecords({}, query);
       return {
         truncated: response.truncated,
         records: response.records.map((record) => ({
@@ -445,23 +439,24 @@ export function createWebHost(
     },
 
     async createRecord(grain: string): Promise<CreateRecordResult> {
-      return client.createRecord({ grain });
+      return currentApplicationClient().createRecord({ grain });
     },
 
     async attachIdentifier(
       input: AttachIdentifierInput,
     ): Promise<AttachIdentifierResult> {
-      return client.attachIdentifier(input);
+      return currentApplicationClient().attachIdentifier(input);
     },
 
     async registerNamespace(
       input: RegisterNamespaceInput,
     ): Promise<RegisterNamespaceResult> {
-      return client.registerNamespace(input);
+      return currentApplicationClient().registerNamespace(input);
     },
 
     async listTrackingDispositions(): Promise<TrackingDispositionList> {
-      const response = await client.listTrackingDispositions();
+      const response =
+        await currentApplicationClient().listTrackingDispositions();
       return {
         states: response.states as TrackingDispositionState[],
         truncated: response.truncated,
@@ -472,23 +467,23 @@ export function createWebHost(
       recordId: string,
       disposition: TrackingDispositionUpdate,
     ): Promise<TrackingDispositionState> {
-      return client.setTrackingDisposition(recordId, {
+      return currentApplicationClient().setTrackingDisposition(recordId, {
         disposition,
       }) as Promise<TrackingDispositionState>;
     },
 
     async getNuvioCollections(): Promise<NuvioCollectionsState> {
-      return client.getNuvioCollections();
+      return currentApplicationClient().getNuvioCollections();
     },
 
     async replaceNuvioCollections(
       document: NuvioCollectionsDocument,
     ): Promise<NuvioCollectionsState> {
-      return client.replaceNuvioCollections(document);
+      return currentApplicationClient().replaceNuvioCollections(document);
     },
 
     async clearNuvioCollections(): Promise<NuvioCollectionsState> {
-      return client.clearNuvioCollections();
+      return currentApplicationClient().clearNuvioCollections();
     },
 
     ...metadataHost,

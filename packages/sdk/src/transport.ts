@@ -586,6 +586,7 @@ export class FastiClient {
       retryMode: "stable-idempotency",
       body,
       responseParser: parseSubmitObservationResponse,
+      browserMutation: true,
       responseLabel: "Submit-observation response",
       options,
     });
@@ -609,6 +610,7 @@ export class FastiClient {
       retryMode: "never",
       body,
       responseParser: parseCreateRecordResponse,
+      browserMutation: true,
       responseLabel: "Create-record response",
       options,
     });
@@ -674,6 +676,7 @@ export class FastiClient {
       retryMode: "safe",
       body,
       responseParser: parseAttachIdentifierResponse,
+      browserMutation: true,
       responseLabel: "Attach-identifier response",
       options,
     });
@@ -697,6 +700,7 @@ export class FastiClient {
       retryMode: "safe",
       body,
       responseParser: parseRegisterNamespaceResponse,
+      browserMutation: true,
       responseLabel: "Register-namespace response",
       options,
     });
@@ -754,6 +758,7 @@ export class FastiClient {
         return response;
       },
       responseLabel: "Set tracking disposition response",
+      browserMutation: true,
       options,
     });
   }
@@ -793,6 +798,7 @@ export class FastiClient {
       retryMode: "safe",
       body,
       responseParser: parseNuvioCollectionsStateDto,
+      browserMutation: true,
       responseLabel: "Nuvio Collections response",
       maxResponseBytes: MAX_NUVIO_COLLECTIONS_RESPONSE_BYTES,
       options,
@@ -807,6 +813,7 @@ export class FastiClient {
       method: operation.method,
       path: operation.path,
       authenticated: operation.authenticated,
+      browserMutation: true,
       problemContract: operation,
       retryMode: "safe",
       responseParser: parseNuvioCollectionsStateDto,

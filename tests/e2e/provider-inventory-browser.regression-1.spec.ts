@@ -94,6 +94,8 @@ async function fulfillJson(route: Route, body: unknown, status = 200) {
 async function installSavedServiceReads(
   page: Page,
   remoteRequests: string[],
+  recordRequests: string[] = [],
+  trackingRequests: string[] = [],
 ): Promise<void> {
   await page.addInitScript((serviceUrl) => {
     localStorage.setItem(
@@ -102,18 +104,33 @@ async function installSavedServiceReads(
     );
   }, savedServiceOrigin);
   await page.route(`${savedServiceOrigin}/**`, async (route) => {
-    const request = route.request();
-    remoteRequests.push(request.url());
-    expect(request.headers().authorization).toBeUndefined();
-    const path = new URL(request.url()).pathname;
-    if (path === "/api/v1/records") {
-      return fulfillJson(route, { records: [], truncated: false });
-    }
-    if (path === "/api/v1/profile/record-tracking-dispositions") {
-      return fulfillJson(route, { states: [], truncated: false });
-    }
-    return fulfillJson(route, { title: "Unexpected remote request" }, 404);
+    remoteRequests.push(route.request().url());
+    await route.abort("blockedbyclient");
   });
+  await page.route(`${browserOrigin}/api/v1/records**`, async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    recordRequests.push(request.url());
+    expect(request.headers().authorization).toBeUndefined();
+    expect(request.method()).toBe("GET");
+    const selectedRecordId = url.searchParams.get("record_id");
+    if (selectedRecordId !== null)
+      expect(selectedRecordId).toBe(localRecord.record_id);
+    await fulfillJson(route, { records: [localRecord], truncated: false });
+  });
+  await page.route(
+    `${browserOrigin}/api/v1/profile/record-tracking-dispositions`,
+    async (route) => {
+      const request = route.request();
+      trackingRequests.push(request.url());
+      expect(request.headers().authorization).toBeUndefined();
+      expect(request.method()).toBe("GET");
+      await fulfillJson(route, {
+        states: [{ record_id: localRecord.record_id, disposition: "watching" }],
+        truncated: false,
+      });
+    },
+  );
 }
 
 async function installLocalSearch(
@@ -151,6 +168,8 @@ test("browser provider inventory and Search stay on the browser-session origin",
   const providerSearchRequests: string[] = [];
   const localSearchRequests: string[] = [];
   const remoteRequests: string[] = [];
+  const recordRequests: string[] = [];
+  const trackingRequests: string[] = [];
   await mockAuthenticatedAccess(page);
   const csrf = "a".repeat(64);
   await page.context().addCookies([
@@ -162,7 +181,12 @@ test("browser provider inventory and Search stay on the browser-session origin",
       sameSite: "Strict",
     },
   ]);
-  await installSavedServiceReads(page, remoteRequests);
+  await installSavedServiceReads(
+    page,
+    remoteRequests,
+    recordRequests,
+    trackingRequests,
+  );
   await installLocalSearch(page, localSearchRequests);
   await page.route(`${browserOrigin}/api/v1/providers`, async (route) => {
     inventoryRequests.push(route.request().url());
@@ -216,6 +240,13 @@ test("browser provider inventory and Search stay on the browser-session origin",
   await expect(
     page.getByRole("heading", { name: "Provider result" }),
   ).toBeVisible();
+  await page.getByRole("button", { name: "Open Record" }).click();
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Local retained result" }),
+  ).toBeVisible();
+  await expect(page).toHaveURL(
+    `/records/film/${localRecord.record_id}/local-retained-result`,
+  );
   expect(inventoryRequests).toEqual([`${browserOrigin}/api/v1/providers`]);
   expect(localSearchRequests).toEqual([
     `${browserOrigin}/api/v1/search/records`,
@@ -223,11 +254,13 @@ test("browser provider inventory and Search stay on the browser-session origin",
   expect(providerSearchRequests).toEqual([
     `${browserOrigin}/api/v1/search/providers/tmdb`,
   ]);
-  expect(
-    remoteRequests.filter((url) =>
-      /\/api\/v1\/(?:providers|search\/)/u.test(new URL(url).pathname),
-    ),
-  ).toEqual([]);
+  expect(recordRequests).toContain(
+    `${browserOrigin}/api/v1/records?record_id=${localRecord.record_id}`,
+  );
+  expect(trackingRequests).toContain(
+    `${browserOrigin}/api/v1/profile/record-tracking-dispositions`,
+  );
+  expect(remoteRequests).toEqual([]);
   expect(await page.evaluate(() => "__TAURI_INTERNALS__" in window)).toBe(
     false,
   );
@@ -286,6 +319,7 @@ test("a missing browser provider credential preserves truthful local Search", as
   ).toBeVisible();
   expect(localSearchRequests).toHaveLength(1);
   expect(providerSearchRequests).toEqual([]);
+  expect(remoteRequests).toEqual([]);
 });
 
 test("an expired browser inventory does not erase local Search", async ({
@@ -326,4 +360,5 @@ test("an expired browser inventory does not erase local Search", async ({
   );
   expect(localSearchRequests).toHaveLength(1);
   expect(providerSearchRequests).toEqual([]);
+  expect(remoteRequests).toEqual([]);
 });
