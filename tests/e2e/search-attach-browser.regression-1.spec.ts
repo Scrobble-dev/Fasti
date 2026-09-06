@@ -120,7 +120,7 @@ async function setCsrfCookie(page: Page): Promise<void> {
     {
       name: "__Host-fasti_csrf",
       value: csrf,
-      url: "https://127.0.0.1:4173",
+      url: "https://127.0.0.1:4174",
       secure: true,
       httpOnly: false,
       sameSite: "Strict",

@@ -1,10 +1,14 @@
 import { cssVariables } from "@fasti/tokens";
+import basicSsl from "@vitejs/plugin-basic-ssl";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { defineConfig } from "vite";
 import { themeBootstrapScript } from "./src/theme.js";
 
+const qaHttps = process.env.FASTI_QA_HTTPS === "true";
+
 export default defineConfig({
   plugins: [
+    ...(qaHttps ? [basicSsl()] : []),
     {
       name: "fasti-theme-bootstrap",
       transformIndexHtml: {
@@ -30,6 +34,7 @@ export default defineConfig({
     host: "127.0.0.1",
     port: 5173,
     strictPort: true,
+    https: qaHttps,
     proxy: {
       "/api": {
         // Local QA default only. Runtime endpoint settings have a separate owner.

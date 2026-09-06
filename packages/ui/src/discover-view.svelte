@@ -398,6 +398,7 @@
     )
       return;
     const generation = attachGeneration;
+    const key = candidateKey(selection.result, selection.index);
     const outcome = await runCandidateAction(
       selection.result,
       selection.index,
@@ -407,10 +408,11 @@
       },
     );
     if (generation !== attachGeneration) return;
-    if (outcome) {
+    if (completedKeys.has(key)) {
+      const recordId = outcome?.record_id ?? attachRecordId;
       closeAttachPicker();
-      onOpenRecord?.(outcome.record_id);
-    } else {
+      onOpenRecord?.(recordId);
+    } else if (actionProblemKey === key) {
       attachProblem = actionProblem;
     }
   }

@@ -32,6 +32,32 @@ export default defineConfig({
         FASTI_QA_PROXY_TARGET: "http://127.0.0.1:18422",
       },
     },
+    {
+      command:
+        "pnpm --filter @fasti/tokens build && pnpm --filter @fasti/sdk build && pnpm --filter @fasti/ui build && FASTI_QA_HTTPS=true pnpm --filter @fasti/web exec vite --port 4174",
+      url: "https://127.0.0.1:4174",
+      ignoreHTTPSErrors: true,
+      reuseExistingServer: false,
+      timeout: 120_000,
+      env: {
+        FASTI_QA_PROXY_TARGET: "http://127.0.0.1:18422",
+      },
+    },
   ],
-  projects: [{ name: "chrome", use: { browserName: "chromium" } }],
+  projects: [
+    {
+      name: "chrome",
+      testIgnore: "**/search-attach-browser.regression-1.spec.ts",
+      use: { browserName: "chromium" },
+    },
+    {
+      name: "https-chrome",
+      testMatch: "**/search-attach-browser.regression-1.spec.ts",
+      use: {
+        browserName: "chromium",
+        baseURL: "https://127.0.0.1:4174",
+        ignoreHTTPSErrors: true,
+      },
+    },
+  ],
 });
