@@ -69,11 +69,20 @@ interface BrowserAttachFixture {
     };
   }>;
   holdTargetSearch: boolean;
+  holdMainSearch: boolean;
+  holdProviderSearch: boolean;
   holdAction: boolean;
   holdPostSaveRecords: boolean;
   malformedTarget: boolean;
   targetSearchStarted: number;
   targetSearchResponded: number;
+  targetSearchFailures: number;
+  mainSearchStarted: number;
+  mainSearchResponded: number;
+  mainSearchFailures: number;
+  providerSearchStarted: number;
+  providerSearchResponded: number;
+  providerSearchFailures: number;
   actionStarted: number;
   actionResponded: number;
   postSaveRecordsStarted: number;
@@ -90,6 +99,8 @@ interface BrowserAttachFixture {
   detailRequestFailures: number;
   releaseDetails: Array<(() => void) | undefined>;
   releaseTargetSearch?: () => void;
+  releaseMainSearch?: () => void;
+  releaseProviderSearch?: () => void;
   releaseAction?: () => void;
   releasePostSaveRecords?: () => void;
 }
@@ -125,11 +136,20 @@ async function installBrowserAttachHost(
   const fixture: BrowserAttachFixture = {
     actionRequests: [],
     holdTargetSearch: false,
+    holdMainSearch: false,
+    holdProviderSearch: false,
     holdAction: false,
     holdPostSaveRecords: false,
     malformedTarget: false,
     targetSearchStarted: 0,
     targetSearchResponded: 0,
+    targetSearchFailures: 0,
+    mainSearchStarted: 0,
+    mainSearchResponded: 0,
+    mainSearchFailures: 0,
+    providerSearchStarted: 0,
+    providerSearchResponded: 0,
+    providerSearchFailures: 0,
     actionStarted: 0,
     actionResponded: 0,
     postSaveRecordsStarted: 0,
@@ -144,6 +164,12 @@ async function installBrowserAttachHost(
     const url = new URL(request.url());
     if (url.pathname === "/api/v1/search/providers/tmdb/film/details") {
       fixture.detailRequestFailures += 1;
+    } else if (url.pathname === "/api/v1/search/providers/tmdb") {
+      fixture.providerSearchFailures += 1;
+    } else if (url.pathname === "/api/v1/search/records") {
+      const body = request.postDataJSON() as { grains?: string[] } | null;
+      if (body?.grains?.includes("film")) fixture.targetSearchFailures += 1;
+      else fixture.mainSearchFailures += 1;
     }
   });
 
@@ -188,18 +214,30 @@ async function installBrowserAttachHost(
       ],
     }),
   );
-  await page.route("**/api/v1/search/providers/tmdb", (route) =>
-    fulfillJson(route, {
-      outcome: "page",
-      provider_id: "tmdb",
-      page: 1,
-      candidates: [receipt],
-      next_page: null,
-      cache_state: "observed",
-      lifetime,
-      upstream_problem: null,
-    }),
-  );
+  await page.route("**/api/v1/search/providers/tmdb", async (route) => {
+    fixture.providerSearchStarted += 1;
+    if (fixture.holdProviderSearch) {
+      await new Promise<void>((resolve) => {
+        fixture.releaseProviderSearch = resolve;
+      });
+    }
+    try {
+      await fulfillJson(route, {
+        outcome: "page",
+        provider_id: "tmdb",
+        page: 1,
+        candidates: [receipt],
+        next_page: null,
+        cache_state: "observed",
+        lifetime,
+        upstream_problem: null,
+      });
+      fixture.providerSearchResponded += 1;
+    } catch {
+      // An aborted browser Search must fail at the request boundary rather
+      // than complete and rely only on stale-result suppression.
+    }
+  });
   await page.route(
     /\/api\/v1\/search\/providers\/tmdb\/film\/details\?.*$/,
     async (route) => {
@@ -250,8 +288,21 @@ async function installBrowserAttachHost(
     const request = route.request().postDataJSON() as {
       grains?: string[];
     };
-    if (!request.grains?.includes("film")) {
-      return fulfillJson(route, { records: [], next: null });
+    const isAttachSearch = request.grains?.includes("film") ?? false;
+    if (!isAttachSearch) {
+      fixture.mainSearchStarted += 1;
+      if (fixture.holdMainSearch) {
+        await new Promise<void>((resolve) => {
+          fixture.releaseMainSearch = resolve;
+        });
+      }
+      try {
+        await fulfillJson(route, { records: [], next: null });
+        fixture.mainSearchResponded += 1;
+      } catch {
+        // See the requestfailed assertion in the cancellation regressions.
+      }
+      return;
     }
     fixture.targetSearchStarted += 1;
     if (fixture.holdTargetSearch) {
@@ -259,8 +310,12 @@ async function installBrowserAttachHost(
         fixture.releaseTargetSearch = resolve;
       });
     }
-    await fulfillJson(route, { records: [localRecord], next: null });
-    fixture.targetSearchResponded += 1;
+    try {
+      await fulfillJson(route, { records: [localRecord], next: null });
+      fixture.targetSearchResponded += 1;
+    } catch {
+      // See the requestfailed assertion in the cancellation regressions.
+    }
   });
   await page.route(
     `**/api/v1/search/candidates/tmdb/film/${receiptId}/actions`,
@@ -449,6 +504,46 @@ async function openHeldLiveDetails(
   });
 }
 
+async function openHeldSearch(
+  page: Page,
+  fixture: BrowserAttachFixture,
+): Promise<{ releaseLocal: () => void; releaseProvider: () => void }> {
+  fixture.holdMainSearch = true;
+  fixture.holdProviderSearch = true;
+  await page.goto("/discover");
+  await page.getByRole("searchbox", { name: "Search TMDB" }).fill("Dune");
+  await page.getByRole("button", { name: "Search", exact: true }).click();
+  await expect.poll(() => fixture.mainSearchStarted).toBe(1);
+  await expect.poll(() => fixture.providerSearchStarted).toBe(1);
+  const releaseLocal = fixture.releaseMainSearch;
+  const releaseProvider = fixture.releaseProviderSearch;
+  expect(releaseLocal).toBeDefined();
+  expect(releaseProvider).toBeDefined();
+  return {
+    releaseLocal: releaseLocal!,
+    releaseProvider: releaseProvider!,
+  };
+}
+
+async function completeNewSearch(
+  page: Page,
+  fixture: BrowserAttachFixture,
+): Promise<void> {
+  fixture.holdMainSearch = false;
+  fixture.holdProviderSearch = false;
+  const searchbox = page.getByRole("searchbox");
+  await expect(searchbox).toBeEnabled();
+  await searchbox.fill("Current Dune");
+  await page.getByRole("button", { name: "Search", exact: true }).click();
+  await expect.poll(() => fixture.mainSearchStarted).toBe(2);
+  await expect.poll(() => fixture.providerSearchStarted).toBe(2);
+  await expect.poll(() => fixture.mainSearchResponded).toBe(1);
+  await expect.poll(() => fixture.providerSearchResponded).toBe(1);
+  await expect(
+    page.getByRole("heading", { name: "Dune: Part Two" }),
+  ).toBeVisible();
+}
+
 test("a profile switch aborts old live details and reads them under current authority", async ({
   page,
 }) => {
@@ -531,6 +626,58 @@ test("leaving live details aborts the actual browser request", async ({
   ).toHaveCount(0);
 });
 
+test("switching provider aborts both main Search reads without breaking the next Search", async ({
+  page,
+}) => {
+  const fixture = await installBrowserAttachHost(page);
+  const held = await openHeldSearch(page, fixture);
+
+  await page.getByLabel("Metadata provider").selectOption("all");
+  await expect(page.getByRole("searchbox")).toBeEnabled();
+  await completeNewSearch(page, fixture);
+
+  held.releaseLocal();
+  held.releaseProvider();
+  await expect.poll(() => fixture.mainSearchFailures).toBe(1);
+  await expect.poll(() => fixture.providerSearchFailures).toBe(1);
+  expect(fixture.mainSearchResponded).toBe(1);
+  expect(fixture.providerSearchResponded).toBe(1);
+  await expect(
+    page.getByRole("heading", { name: "Dune: Part Two" }),
+  ).toBeVisible();
+});
+
+test("leaving Discover aborts both main Search reads without breaking a later Search", async ({
+  page,
+}) => {
+  const fixture = await installBrowserAttachHost(page);
+  const held = await openHeldSearch(page, fixture);
+
+  await page.evaluate(() => {
+    history.pushState({}, "", "/library");
+    dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Library" }),
+  ).toBeVisible();
+  await page.evaluate(() => {
+    history.pushState({}, "", "/discover");
+    dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await completeNewSearch(page, fixture);
+
+  held.releaseLocal();
+  held.releaseProvider();
+  await expect.poll(() => fixture.mainSearchFailures).toBe(1);
+  await expect.poll(() => fixture.providerSearchFailures).toBe(1);
+  expect(fixture.mainSearchResponded).toBe(1);
+  expect(fixture.providerSearchResponded).toBe(1);
+  await expect(page).toHaveURL("/discover");
+  await expect(
+    page.getByRole("heading", { name: "Dune: Part Two" }),
+  ).toBeVisible();
+});
+
 test("a browser session attaches one explicit target and opens its canonical Record", async ({
   page,
 }) => {
@@ -549,7 +696,7 @@ test("a browser session attaches one explicit target and opens its canonical Rec
   });
 });
 
-test("a profile change closes a picker and rejects its late Record search", async ({
+test("Attach Cancel aborts its local Search without breaking a reopened picker", async ({
   page,
 }) => {
   const fixture = await installBrowserAttachHost(page);
@@ -557,15 +704,64 @@ test("a profile change closes a picker and rejects its late Record search", asyn
   fixture.holdTargetSearch = true;
   await dialog.getByRole("button", { name: "Find Records" }).click();
   await expect.poll(() => fixture.targetSearchStarted).toBe(1);
+  const releaseOldSearch = fixture.releaseTargetSearch;
+  expect(releaseOldSearch).toBeDefined();
+
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).not.toBeVisible();
+  fixture.holdTargetSearch = false;
+  await page
+    .getByRole("button", { name: "Attach to existing Record", exact: true })
+    .click();
+  const reopened = page.getByRole("dialog", {
+    name: "Attach to existing Record",
+  });
+  await expect(reopened).toBeVisible();
+  await reopened.getByRole("button", { name: "Find Records" }).click();
+  await expect.poll(() => fixture.targetSearchStarted).toBe(2);
+  await expect.poll(() => fixture.targetSearchResponded).toBe(1);
+  await expect(
+    reopened.getByRole("radio", { name: /Dune local/ }),
+  ).toBeVisible();
+
+  releaseOldSearch!();
+  await expect.poll(() => fixture.targetSearchFailures).toBe(1);
+  expect(fixture.targetSearchResponded).toBe(1);
+  await expect(
+    reopened.getByRole("radio", { name: /Dune local/ }),
+  ).toBeVisible();
+});
+
+test("a profile change aborts a picker Search without breaking the new profile picker", async ({
+  page,
+}) => {
+  const fixture = await installBrowserAttachHost(page);
+  const dialog = await openAttachPicker(page);
+  fixture.holdTargetSearch = true;
+  await dialog.getByRole("button", { name: "Find Records" }).click();
+  await expect.poll(() => fixture.targetSearchStarted).toBe(1);
+  const releaseOldSearch = fixture.releaseTargetSearch;
+  expect(releaseOldSearch).toBeDefined();
 
   await revalidateAuthority(page, "profile");
   await expect(dialog).not.toBeVisible();
-  fixture.releaseTargetSearch?.();
+  fixture.holdTargetSearch = false;
+  const currentDialog = await openAttachPicker(page);
+  await currentDialog.getByRole("button", { name: "Find Records" }).click();
+  await expect.poll(() => fixture.targetSearchStarted).toBe(2);
   await expect.poll(() => fixture.targetSearchResponded).toBe(1);
-  await settleBrowserWork(page);
+  await expect(
+    currentDialog.getByRole("radio", { name: /Dune local/ }),
+  ).toBeVisible();
+
+  releaseOldSearch!();
+  await expect.poll(() => fixture.targetSearchFailures).toBe(1);
+  expect(fixture.targetSearchResponded).toBe(1);
 
   await expect(page).toHaveURL("/discover");
-  await expect(page.getByRole("radio", { name: /Dune local/ })).toHaveCount(0);
+  await expect(
+    currentDialog.getByRole("radio", { name: /Dune local/ }),
+  ).toBeVisible();
   expect(fixture.actionRequests).toEqual([]);
 });
 

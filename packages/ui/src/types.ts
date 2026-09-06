@@ -406,13 +406,16 @@ export interface WorkbenchHost {
   searchProvider(
     provider: string,
     query: string,
+    signal?: AbortSignal,
   ): Promise<ProviderSearchCandidate[]>;
   searchRecords?(
     request: LocalSearchRequestDto,
+    signal?: AbortSignal,
   ): Promise<LocalSearchResponseDto>;
   searchProviderPage?(
     provider: string,
     request: SearchProviderPageRequest,
+    signal?: AbortSignal,
   ): Promise<SearchProviderPageResponse>;
   readSearchCandidate?(
     provider: string,

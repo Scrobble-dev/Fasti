@@ -375,9 +375,11 @@ export function createWebHost(
     },
     async searchRecords(
       request: LocalSearchRequestDto,
+      signal?: AbortSignal,
     ): Promise<LocalSearchResponseDto> {
       const response = await (credential ? client : accessClient).searchRecords(
         request,
+        { signal },
       );
       return {
         ...response,
@@ -387,10 +389,11 @@ export function createWebHost(
         })),
       };
     },
-    searchProviderPage: (provider, request) =>
+    searchProviderPage: (provider, request, signal) =>
       (credential ? client : accessClient).searchProviderPage(
         provider,
         request,
+        { signal },
       ),
     readSearchCandidate: (
       provider,

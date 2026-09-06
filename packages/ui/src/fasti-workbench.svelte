@@ -1234,12 +1234,13 @@
   async function searchProvider(
     provider: string,
     query: string,
+    signal?: AbortSignal,
   ): Promise<ProviderSearchCandidate[]> {
     if (!canAccessProfileData) {
       throw new Error("Sign in before searching configured providers.");
     }
     const authorityIdentity = profileAuthorityIdentity;
-    const results = await host.searchProvider(provider, query);
+    const results = await host.searchProvider(provider, query, signal);
     if (authorityIdentity !== profileAuthorityIdentity) {
       throw new Error("Account access changed before search completed.");
     }
@@ -1250,16 +1251,16 @@
     query: string,
     after?: LocalSearchCursorDto,
     grains: string[] = [],
+    signal?: AbortSignal,
   ): Promise<LocalSearchResponseDto> {
     if (!canAccessProfileData || !host.searchRecords) {
       throw new Error("Sign in before searching local Records.");
     }
     const authorityIdentity = profileAuthorityIdentity;
-    const results = await host.searchRecords({
-      query,
-      grains,
-      after: after ?? null,
-    });
+    const results = await host.searchRecords(
+      { query, grains, after: after ?? null },
+      signal,
+    );
     if (authorityIdentity !== profileAuthorityIdentity) {
       throw new Error("Account access changed before search completed.");
     }
@@ -1271,19 +1272,24 @@
     query: string,
     page: number,
     offline: boolean,
+    signal?: AbortSignal,
   ): Promise<SearchProviderPageResponse> {
     if (!canAccessProfileData || !host.searchProviderPage) {
       throw new Error("Sign in before searching configured providers.");
     }
     const authorityIdentity = profileAuthorityIdentity;
-    const results = await host.searchProviderPage(provider, {
-      query,
-      page,
-      locale: null,
-      region: null,
-      grains: [],
-      offline,
-    });
+    const results = await host.searchProviderPage(
+      provider,
+      {
+        query,
+        page,
+        locale: null,
+        region: null,
+        grains: [],
+        offline,
+      },
+      signal,
+    );
     if (authorityIdentity !== profileAuthorityIdentity) {
       throw new Error("Account access changed before search completed.");
     }
@@ -1963,10 +1969,12 @@
             bind:selectionExplicit={discoverSelectionExplicit}
             onSearch={searchProvider}
             onSearchLocal={canAccessProfileData && host.searchRecords
-              ? searchRecords
+              ? (query, after, signal) =>
+                  searchRecords(query, after, [], signal)
               : undefined}
             onSearchAttachTargets={canAccessProfileData && host.searchRecords
-              ? (query, grain, after) => searchRecords(query, after, [grain])
+              ? (query, grain, after, signal) =>
+                  searchRecords(query, after, [grain], signal)
               : undefined}
             onSearchProviderPage={canAccessProfileData &&
             host.searchProviderPage

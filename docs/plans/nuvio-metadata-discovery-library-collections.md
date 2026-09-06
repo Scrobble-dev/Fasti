@@ -762,6 +762,10 @@ The packaged invoke adapter currently suppresses late delivery but does not
 cancel native I/O. Neither browser request abort nor a manually cancelled runtime
 task alone proves that a disconnected HTTP client's upstream request is cancelled.
 Keep these acceptance boundaries separate until exact runtime evidence exists.
+Main local/provider Search and continuation use one generation-owned browser
+signal across the selected-source fan-out. Attach-target Search has its own signal
+and aborts when the picker closes. These reads keep the same authority fences;
+closing UI never cancels a confirmed Record mutation.
 
 `candidate_receipt_id` is opaque and resolves to a durable, bounded provider-candidate receipt containing the exact governed re-fetch route and provenance. A receipt expires after 24 hours, carries at most 64 KiB of normalized candidate data plus bounded identifiers, and records the query digest, safe provider-configuration digest, grant digest, response digest, provider terms revision, and creating actor/profile. Replay re-authorizes the current actor, profile, provider capability, grant, and configuration; a digest or authorization mismatch fails closed and offers a fresh Search. Expired and unreferenced receipts are garbage-collected in bounded keyset pages; receipts attached to an operation or Record retain only the minimal provenance required by that durable owner. No credential, raw secret-bearing request, or unrestricted provider body enters a receipt. The slug is presentation-only. On Record creation or attachment, the stable route becomes:
 

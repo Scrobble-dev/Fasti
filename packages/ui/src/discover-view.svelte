@@ -30,21 +30,25 @@
     onSearch: (
       provider: string,
       query: string,
+      signal?: AbortSignal,
     ) => Promise<ProviderSearchCandidate[]>;
     onSearchLocal?: (
       query: string,
       after?: LocalSearchCursorDto,
+      signal?: AbortSignal,
     ) => Promise<LocalSearchResponseDto>;
     onSearchAttachTargets?: (
       query: string,
       grain: string,
       after?: LocalSearchCursorDto,
+      signal?: AbortSignal,
     ) => Promise<LocalSearchResponseDto>;
     onSearchProviderPage?: (
       provider: string,
       query: string,
       page: number,
       offline: boolean,
+      signal?: AbortSignal,
     ) => Promise<SearchProviderPageResponse>;
     onOpenSettings: () => void;
     onRetry: () => void;
@@ -163,6 +167,7 @@
   let actionProblem = $state("");
   let actionProblemKey = $state("");
   let searchRevision = 0;
+  let searchController: AbortController | undefined;
   let searchProviderId = "";
   let routeCandidate = $state<ProviderSearchCandidate>();
   let routeReceipt = $state<SearchCandidateReceiptDto>();
@@ -181,6 +186,7 @@
   let attachSearched = $state(false);
   let attachProblem = $state("");
   let attachGeneration = 0;
+  let attachController: AbortController | undefined;
   const ALL_PROVIDERS = "all";
 
   function canonicalCandidatePath(
@@ -268,6 +274,7 @@
     const offline = providerOffline();
     const generation = ++routeGeneration;
     const controller = new AbortController();
+    if (route || candidateRouteProblem) untrack(cancelSearchRead);
     detailController?.abort();
     detailKey = "";
     untrack(closeAttachPicker);
@@ -284,13 +291,23 @@
   });
 
   onDestroy(() => {
-    searchRevision += 1;
+    cancelSearchRead();
     attachGeneration += 1;
+    attachController?.abort();
     detailController?.abort();
   });
 
+  function cancelSearchRead(): void {
+    searchRevision += 1;
+    searchController?.abort();
+    searchController = undefined;
+    searching = false;
+  }
+
   function closeAttachPicker(): void {
     attachGeneration += 1;
+    attachController?.abort();
+    attachController = undefined;
     attachDialog?.close();
     attachResult = undefined;
     attachRecords = [];
@@ -327,6 +344,9 @@
     )
       return;
     const generation = ++attachGeneration;
+    attachController?.abort();
+    const controller = new AbortController();
+    attachController = controller;
     attachLoading = true;
     attachProblem = "";
     if (!after) {
@@ -340,6 +360,7 @@
         value,
         selection.result.candidate.grain,
         after,
+        controller.signal,
       );
       if (generation !== attachGeneration) return;
       if (
@@ -363,6 +384,7 @@
           "Fasti could not search local Records.",
         );
     } finally {
+      if (attachController === controller) attachController = undefined;
       if (generation === attachGeneration) attachLoading = false;
     }
   }
@@ -613,9 +635,8 @@
     const providerId = selectedProviderId;
     if (providerId === searchProviderId) return;
     searchProviderId = providerId;
-    searchRevision += 1;
+    cancelSearchRead();
     detailController?.abort();
-    searching = false;
     results = [];
     providerNextPages = {};
     providerCacheState = undefined;
@@ -661,11 +682,12 @@
     provider: ProviderCredentialStatus,
     value: string,
     page: number,
+    signal: AbortSignal,
   ): Promise<ProviderPage> {
     if (!onSearchProviderPage) {
       return {
         providerId: provider.provider,
-        results: (await onSearch(provider.provider, value)).map(
+        results: (await onSearch(provider.provider, value, signal)).map(
           (candidate) => ({
             candidate,
           }),
@@ -677,6 +699,7 @@
       value,
       page,
       providerOffline(),
+      signal,
     );
     if (response.outcome === "unavailable") {
       throw new Error(
@@ -708,10 +731,16 @@
     providers: ProviderCredentialStatus[],
     value: string,
     pages: Record<string, number>,
+    signal: AbortSignal,
   ): Promise<ProviderPages> {
     const settled = await Promise.allSettled(
       providers.map((provider) =>
-        searchProviderResults(provider, value, pages[provider.provider] ?? 1),
+        searchProviderResults(
+          provider,
+          value,
+          pages[provider.provider] ?? 1,
+          signal,
+        ),
       ),
     );
     const completed = settled.flatMap((outcome) =>
@@ -770,7 +799,10 @@
       return;
     }
     const providers = [...selectedProviders];
-    const revision = ++searchRevision;
+    cancelSearchRead();
+    const controller = new AbortController();
+    searchController = controller;
+    const revision = searchRevision;
     searching = true;
     problem = "";
     localProblem = "";
@@ -782,9 +814,9 @@
     searched = false;
     try {
       const [localOutcome, providerOutcome] = await Promise.allSettled([
-        onSearchLocal?.(value),
+        onSearchLocal?.(value, undefined, controller.signal),
         providers.length > 0
-          ? searchProviders(providers, value, {})
+          ? searchProviders(providers, value, {}, controller.signal)
           : undefined,
       ]);
       if (revision !== searchRevision) return;
@@ -819,6 +851,7 @@
       completedProviderCount = providers.length;
       searched = true;
     } finally {
+      if (searchController === controller) searchController = undefined;
       if (revision === searchRevision) searching = false;
     }
   }
@@ -835,7 +868,10 @@
       detailKey
     )
       return;
-    const revision = ++searchRevision;
+    cancelSearchRead();
+    const controller = new AbortController();
+    searchController = controller;
+    const revision = searchRevision;
     searching = true;
     problem = "";
     try {
@@ -843,6 +879,7 @@
         providers,
         completedQuery,
         providerNextPages,
+        controller.signal,
       );
       if (revision !== searchRevision) return;
       results = [...results, ...page.results];
@@ -856,6 +893,7 @@
         "Fasti could not load the next provider Search page.",
       );
     } finally {
+      if (searchController === controller) searchController = undefined;
       if (revision === searchRevision) searching = false;
     }
   }
@@ -863,11 +901,18 @@
   async function loadMoreLocal(): Promise<void> {
     if (!onSearchLocal || !localNext || searching || actionKey || detailKey)
       return;
-    const revision = ++searchRevision;
+    cancelSearchRead();
+    const controller = new AbortController();
+    searchController = controller;
+    const revision = searchRevision;
     searching = true;
     localProblem = "";
     try {
-      const page = await onSearchLocal(completedQuery, localNext);
+      const page = await onSearchLocal(
+        completedQuery,
+        localNext,
+        controller.signal,
+      );
       if (revision !== searchRevision) return;
       localResults = [...localResults, ...page.records];
       localNext = page.next ?? undefined;
@@ -878,6 +923,7 @@
         "Fasti could not load the next local Search page.",
       );
     } finally {
+      if (searchController === controller) searchController = undefined;
       if (revision === searchRevision) searching = false;
     }
   }

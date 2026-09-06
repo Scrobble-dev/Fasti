@@ -4373,3 +4373,45 @@ existing owners to close these gaps. Full ten-domain Search, bounded identifier
 lookup, continuation, active cancellation, public-provider acceptance and all
 later stages remain required. No production migration number beyond the current
 explicit allocation is assumed. Codex Security remains permanently excluded.
+
+The details cancellation increment is committed at
+`09f9495462b95c104033f468e1576e5d439e4afa`, tree
+`b43e72330be98af96595a8cf3ea68194e2d04231`. Its 23 focused Chrome regressions
+pass, including actual browser request failure on route exit, profile switch
+and sign-out, plus retained/live route and Attach controls. The exact clean-head
+canonical gate also passes (27 contract and 11 portable gates). Independent
+review of the four production files is CLEAR. The canonical store suite includes
+477 passes and six existing explicit ignores; the historical-v13/archive-v4
+restore test passes locally at this head. This does not explain another task's
+hosted failure of that test; do not change shared restore code by inference.
+
+The next focused increment extends that same optional signal path to main
+local/provider Search, its continuation reads, and Attach-target Search. One
+controller belongs to each main Search generation and its provider fan-out;
+a separate controller belongs to the Attach lookup. Provider switch, route exit,
+profile-key remount and picker dismissal abort the appropriate reads. Existing
+confirmed actions remain non-cancellable, with late UI delivery fenced as before.
+UI/web typechecks pass; its browser regression run remains pending. Root keeps
+all shared production ownership; the existing browser test leaf is the only
+parallel writer, with separate read-only current-diff review and next-slice prep.
+
+Read-only runtime preparation found a concrete offline gap: the existing
+`search_http_cancelled_gate_waiter_never_reads_cached_receipts_or_vault` uses
+`offline: true` and proves the request waits behind an online provider mutex.
+Retained/live details share that unconditional lock order. Offline persistence
+already validates current authority/cache partitions inside its own transaction;
+the next runtime increment must reuse those read owners without waiting for
+network serialization, while preserving a real provider lease for online work.
+Do not fabricate a no-op lease or weaken current drift checks. HTTP/1 socket
+disconnect propagation and packaged invoke cancellation remain separate evidence
+gaps, not solved by browser `requestfailed` or a Tokio task-abort test.
+
+Exact RecordId Search preparation identified an independent no-migration path:
+reuse Identity's existing active/workspace selector and v15 index, then existing
+bounded Search field/identifier hydration. Authorization, grain-count and cursor
+context checks must precede typed-ID interpretation. Canonical RecordId input is
+exact intent, with no title-collision fallback; noncanonical typed-looking text
+remains an ordinary title query. Preserve keyset position, complete identifiers
+and the 4 MiB budget. Extend existing selector/query-count/10,000-Record evidence,
+not duplicated SQL. Raw provider-value lookup remains separately owned and must
+not invent an unallocated migration.
