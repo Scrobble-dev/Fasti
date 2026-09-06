@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - B8b non-publishing release-readiness evidence: per-architecture checksums, CycloneDX SBOM (Rust and npm), an in-toto/SLSA-shaped provenance statement, a `cargo-deny` final security review, a manual rollback runbook, and mechanical release-notes extraction, gated behind a fail-closed `cargo xtask test milestone --body B8b`.
 - `cargo-deny` (`deny.toml`) license, advisory, and source policy for the main workspace and the isolated Tauri benchmark shell.
 - Exact TrailBase `v0.33.5` native and OCI development packaging, private lifecycle operations, full-depot backup and restore, hermetic account/social/TOTP conformance, combined resource enforcement, and a test-only `v0.33.4` adjacent upgrade and rollback fixture.
+- Checked domain/application models for named clients, personal access tokens, consent revisions, bounded inventories, and one-time issuance results. These are an internal [C2 foundation](docs/plans/fasti-access-c2-foundation.md), not callable token or client-administration operations.
+- Contributor-only [C3 signing qualification](qualification/access-c3-signing/README.md) with a separate locked test package and dedicated CI, so its checks can run from a checkout without the prior temporary probe. This does not approve production signing or recovery.
+- Contributors can reproduce the retained [C3 framing qualification](qualification/access-c3-framing/README.md) from a separate locked package and CI matrix, including malformed-input and interrupted-I/O checks. This does not approve production encryption or recovery.
 
 ### Changed
 
@@ -42,14 +45,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Replaced hypothetical physical-device B1 qualification with same-attempt x86_64 and aarch64 cgroup-v2 envelope evidence while preserving the governed memory, CPU, and timing budgets.
 - Made unavailable workbench actions fail closed and removed sample media state from product surfaces.
 - Kept TrailBase account and OAuth routes loopback-only because the pinned release accepts unsafe protocol-relative redirects; the exact limitation and recovery action are part of Access B conformance evidence.
+- Recorded merged ordinary-browser C1 delivery across the status guides while keeping packaged Tauri authentication and public-release support unclaimed.
+- Retained the exact licence text and a version-specific licence exception for the already-locked `webpki-root-certs 1.0.9` dependency; no dependency version changed.
 
 ### Fixed
 
+- Preserved the contributor-only [C3 KDF runner](qualification/access-c3-kdf/README.md), with bounded pipe handling, owned-child cleanup and strict cold-sample validation. Its isolated CI checks and recorded local measurement do not enable runtime cryptography or recovery.
+- Released data-root locks when their final kernel owner drops, even while a child temporarily retains an inherited descriptor. Failed identity initialization also releases its acquired lock without hiding the original error.
+- Kept Account and security confirmations visible during retries, protected pending first-run actions, and corrected mobile notice and choice layout. A dedicated browser CI check guards the delayed-confirmation layout and fixture interaction-latency limits; see the [Access verification guide](docs/plans/fasti-access-parallel-regressions.md).
 - Prevented consumed enrollment proofs from panicking when the kernel returns `bootstrap_closed`.
 - Prevented ambiguous or cross-workspace credential grants from panicking when authentication fails closed.
 - Recovered the capability policy source after a malformed formatting-only write; the recovery changed no behavior.
 - Made the local developer launcher track and stop only the process groups it starts.
 - Canonicalized unknown web routes to the workbench root.
+- Rejected wrong-kind identifiers during typed deserialization and used the existing zeroization dependency for owned secret cleanup.
+- Resolved two Nuvio application-reference links so warning-denied Rust documentation builds pass.
+- Updated the existing schema URI resolver and documentation query parser to patched versions, with regression checks through their actual consumers. The existing image-parser patch and audit policy remain unchanged.
+- Kept documentation builds working with symlinked output directories and made loading-state tests wait for intercepted requests before continuing them.
 
 ### Removed
 

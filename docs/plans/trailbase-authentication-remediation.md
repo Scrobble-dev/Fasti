@@ -187,7 +187,28 @@ not share the administrator password across installations or create a new
 Fasti secret store for it. Tests use generated disposable credentials and keep
 their values out of output and evidence receipts.
 
-### 2.4 Primary source registry
+### 2.4 C1 delivery and C2 foundation checkpoint
+
+Recorded: 2026-09-05. This checkpoint supersedes the earlier current-state
+tables and delivery-pending statements above; retain those as history.
+
+| Item | Exact evidence | State |
+| --- | --- | --- |
+| C1 delivery | PR #119 merged as `171f1953e1ea552e044ea7e6e027353746d89156`; tree `8d7ca18af7e2d6033e87f0c3e14f741fa53ae526` equals tested head `c4fe51de0424ebae05c83758bc2bd8dd813a57d6` | `MERGED`; ordinary-browser boundary only |
+| C1 gates | Eight C1 receipt gates and canonical PR, contracts, UI, OCI, security and both hardware checks passed. Codacy remained advisory `action_required`, not green | `VERIFIED_AT_MERGE` |
+| Packaged authentication | `C1-TAURI-AUTH` retains the WebView failure evidence; no local TLS, certificate, weaker-cookie or alternate native-session work is added | `DEFERRED_AND_UNCLAIMED` |
+| M3 | PR #120 merged as `df09101028a988a92f4546313c5eed6dd20d238a`; tree `5552947a30b82497c7fa279a6932fe7877ed612b`, schema v15/archive v5 | `MERGED` |
+| C2 foundation | Pinned source `5eb3def007f712f62038f4f1bd8c64f76c47098e`; isolated domain/application source and shared ID/secret prerequisites only | `DELIVERY_GATES_PENDING` |
+| Shared integration | M4 retains v16, schema/store, registry/generators, scopes/capabilities, API/SDK/host/Workbench and portability | `OWNED_BY_METADATA_M4` |
+
+The [C2 implementation plan](fasti-access-c2.md) remains binding in full.
+The separate [foundation delivery gate](fasti-access-c2-foundation.md) defines
+one dependency-aligned PR. It does not complete C2.1 or C2, create a working
+PAT or client-administration path, allocate a migration, or release M4-owned
+files. Fresh exact-head tests and review must replace historical source
+counts before delivery. No later C3/D0 research is imported by this PR.
+
+### 2.5 Primary source registry
 
 Use exact versions and current primary sources:
 
@@ -1167,7 +1188,7 @@ The planning reviews run sequentially. Evidence research can run in parallel. Im
 | 8 Security and Ponytail  | Threats, negative controls, licence, minimum complete design, no duplicate systems                    | `COMPLETE_WITH_EVIDENCE` — CSO 9/10 and Ponytail clear 2026-08-29                                                                   |
 | 9 Final plan             | Review findings reconciled; unresolved items explicit                                                 | `APPROVED` — current user update 2026-08-29; Authentik correction integrated                                                        |
 | 10 Design execution      | Tabler-first mockups and design review pass                                                           | `APPROVED` — named user approval `Gate 10 A+C` on 2026-08-29; A is steady state, C is first run, and B is a reusable detail pattern |
-| 11 Implementation        | PR A through H independently green and merged                                                         | `IN_PROGRESS`; PR A local exact-head review and delivery remain open                                                                |
+| 11 Implementation        | PR A through H independently green and merged                                                         | `IN_PROGRESS`; A, B, C1 and metadata M3 are merged. C2 foundation delivery is pending; shared C2 activation awaits M4 handoff. |
 
 ## 15. Dependency-ordered multi-PR programme
 
@@ -1787,4 +1808,4 @@ Branch-bound implementation ledgers: `tasks-ceo-review-20260829-183940.jsonl`, `
 
 VERDICT: `PLAN AND GATE 10 APPROVED`
 
-UNRESOLVED IMPLEMENTATION GATES: C1 source and migration v14 are implemented locally. C1 still requires its in-scope delivery receipt, final reviews, exact-head CI, pull-request, merge, and merged-tree proof. Packaged Tauri authentication, cross-platform WebView behavior, and packaged assistive-technology proof are deferred to the separate `C1-TAURI-AUTH` follow-up and are not claimed. The M2 shared-file handoff is complete. C3 requires `C3-CRYPTO`. E2 requires E0 and E-HOST. E3/E4 require the exact Authentik tuple, tag-bound generated API, and section 12 conformance. These gates do not reopen TrailBase selection or the approved final plan.
+UNRESOLVED IMPLEMENTATION GATES: C1 is merged with exact tested-tree evidence at `171f1953e1ea552e044ea7e6e027353746d89156`. Packaged Tauri authentication, cross-platform WebView behavior, and packaged assistive-technology proof remain deferred to the separate `C1-TAURI-AUTH` follow-up and are not claimed. M3 is merged at `df09101028a988a92f4546313c5eed6dd20d238a`, schema v15/archive v5. The C2 pure foundation has its own pending delivery gate; it is not C2 completion. Remaining C2 shared integration awaits M4's exact merged handoff and next migration allocation, not M3. M4 retains v16 and shared-file ownership until release. C3 requires `C3-CRYPTO`. E2 requires E0 and E-HOST. E3/E4 require the exact Authentik tuple, tag-bound generated API, and section 12 conformance. These gates do not reopen TrailBase selection or the approved final plan.

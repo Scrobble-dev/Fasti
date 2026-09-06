@@ -57,7 +57,7 @@ test(
   "built search and status pages keep usable loading and failure states",
   { skip: !process.env.FASTI_DOCS_BASE_URL },
   async () => {
-    const { chromium } = await import("@playwright/test");
+    const { chromium, expect } = await import("@playwright/test");
     const browser = await chromium.launch({ headless: true });
     try {
       const search = await browser.newPage();
@@ -80,8 +80,10 @@ test(
         await fallback.getAttribute("aria-describedby"),
         "fasti-search-loading",
       );
-      assert.ok(scriptRoute);
-      assert.ok(stylesheetRoute);
+      // SSR visibility does not prove that hydration has issued both requests.
+      await expect
+        .poll(() => Boolean(scriptRoute && stylesheetRoute), { timeout: 5_000 })
+        .toBe(true);
       await Promise.all([scriptRoute.continue(), stylesheetRoute.continue()]);
       await search
         .getByRole("searchbox", { name: "Search documentation" })
@@ -121,7 +123,9 @@ test(
         await table.locator("tbody tr td:last-child").allTextContents(),
         ["—", "—", "—"],
       );
-      assert.ok(capabilityRoute);
+      await expect
+        .poll(() => Boolean(capabilityRoute), { timeout: 5_000 })
+        .toBe(true);
       await capabilityRoute.abort();
       await status
         .getByRole("alert")

@@ -21,8 +21,8 @@
 //!    `nuvio:session:<session_id>:complete`). Network retries replay the
 //!    existing receipt without creating false rewatches.
 //! 3. **Canonical Contract:** Nuvio uses the standard
-//!    [`AcceptObservationCommand`], [`CapabilityKey::AcceptObservation`], and
-//!    [`ScopeKey::ObservationAccept`]. No privileged bypass exists.
+//!    [`AcceptObservationCommand`], [`crate::CapabilityKey::AcceptObservation`], and
+//!    [`crate::ScopeKey::ObservationAccept`]. No privileged bypass exists.
 
 use crate::{
     derive_deterministic_evidence_digest, derive_deterministic_operation_id,

@@ -10,11 +10,11 @@ not a production identity, WCAG 2.2 Level AA, or EN 301 549 conformance claim.
 
 | Capability                                               | Current local source state                                                | Remaining evidence                                                                                                                           |
 | -------------------------------------------------------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| Human sign-in                                            | C1 fixed-origin ordinary-browser source implemented; the canonical gate requires a real Chromium TrailBase-to-Fasti session bound to the exact clean source | Final exact-head execution, review, and delivery. Packaged Tauri authentication is a separate follow-up.                                    |
-| Fasti browser session                                    | C1 issuance, projection, inventory, rotation, profile selection, and revocation source implemented | Browser accessibility evidence, final review, exact-head CI, and merged-tree proof.                                                          |
+| Human sign-in                                            | C1 fixed-origin ordinary-browser delivery merged in PR #119, including its exact-source Chromium TrailBase-to-Fasti session proof | Full accessibility conformance remains unclaimed. Packaged Tauri authentication is a separate follow-up.                                    |
+| Fasti browser session                                    | C1 issuance, projection, inventory, rotation, profile selection, and revocation merged in PR #119 | Manual browser accessibility and full conformance evidence remain open.                                                                      |
 | Session location and device                              | Not recorded                                                              | The product must say `Not recorded` until a governed collection contract exists.                                                             |
-| Profile switching                                        | Implemented through the current session and one Access projection         | Browser and final authorization evidence.                                                                                                   |
-| TrailBase password and supported social OIDC/PKCE        | C1 direct exchange source implemented; vendor tokens are revoked and discarded | Prepared native integration, outage, browser, and delivery evidence. Packaged Tauri transport remains unclaimed.                            |
+| Profile switching                                        | Merged C1 uses the current session and one Access projection              | Manual browser accessibility and full conformance evidence remain open.                                                                      |
+| TrailBase password and supported social OIDC/PKCE        | C1 direct exchange merged; vendor tokens are revoked and discarded       | No broader provider compatibility claim; packaged Tauri transport remains unclaimed.                                                         |
 | TrailBase password plus TOTP                             | Unavailable in C1 because v0.33.5 loses the original PKCE ceremony        | A pinned official release that preserves and verifies the full ceremony.                                                                     |
 | Passkeys and recovery codes                              | Unavailable until PR D                                                    | Server-owned credential lifecycle and recovery evidence.                                                                                     |
 | Generic OIDC, Authentik, OAuth, and device authorization | Unavailable until the relevant PR E package                               | Protocol, management, consent, token, device, and revocation evidence for each named capability.                                             |
@@ -33,8 +33,9 @@ Workbench suite passed 32 tests. Type checking, the Tabler policy check, the
 Impeccable detector, and the automated Axe/theme/reflow matrix also passed at
 that checkpoint.
 
-These are fixture and source checks. Browser manual keyboard,
-assistive-technology, and final exact-head evidence remain pending. Packaged
+These are historical fixture and source checks. The later merged C1 delivery
+evidence is recorded in the [canonical checkpoint](../plans/trailbase-authentication-remediation.md#24-c1-delivery-and-c2-foundation-checkpoint).
+Browser manual keyboard and assistive-technology conformance remain pending. Packaged
 WebView, Linux/Windows/macOS desktop, and packaged assistive-technology proof
 are deferred to `C1-TAURI-AUTH` and are not C1 delivery claims.
 
