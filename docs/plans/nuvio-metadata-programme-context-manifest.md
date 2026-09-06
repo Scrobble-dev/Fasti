@@ -4509,3 +4509,20 @@ navigation, exact Record selection and tracking reads on the browser origin,
 with zero requests to the separately saved service. SDK and web typechecks pass
 with zero diagnostics. Both allocated test leaves are released before the
 clean-source gate; no browser/build process is intentionally overlapped.
+
+The exact correction commit is `54b357f0e001929e6f4f99bb7025de588060f851`,
+tree `712fb5d6f67691dc01f761eeec1bc6203a5808d8`. Its canonical gate passed;
+independent exact-diff review is CLEAR. The following test-runner registration
+adds the new origin/CSRF leaf to the existing explicit SDK gate so it cannot be
+omitted by ordinary PR validation. This is the sixth affected file across the
+logical fix, justified by executable regression coverage, not a production
+expansion. Run exact clean-head gates again after committing registration.
+
+M5 preparation confirms that saved intent, progress, watched/completed, personal
+rating and notes need independent profile-state owners; existing tracking
+dispositions and provider rating claims cannot substitute for them. The current
+Library's two 500-row reads and activity-derived status are not the target
+contract. Freeze inclusion/progress/completion/rating/sort semantics before its
+writer starts. Preserve the existing M5 core -> bounded M7 membership -> M5
+Collection-filter sequence and do not interpret raw Nuvio JSON as native
+membership. M4 retains migration17/archive7 and all shared-file ownership.

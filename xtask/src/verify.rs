@@ -461,6 +461,7 @@ fn command_gates(locked: bool) -> Vec<CommandGate> {
                 "tests/js/local-search-transport.test.mjs",
                 "tests/js/search-candidate-details-transport.test.mjs",
                 "tests/js/search-candidate-action-transport.test.mjs",
+                "tests/js/web-host-record-origin.test.mjs",
             ],
             "fix the failing mutation sentinel, dependency patch, or black-box SDK behavior",
         ),
