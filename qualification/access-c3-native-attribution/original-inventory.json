@@ -1,0 +1,227 @@
+[
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/LICENSE",
+    "sha256": "508a76d186356c0dd807a670ef510964f8724557024796a2c426c6c0e19ab683",
+    "bytes": 823
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/AUTHORS",
+    "sha256": "ecd364ba590239cbd29d051e73a0a8b4bbd719137a0a64a41409e21f3e7a3035",
+    "bytes": 4844
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/src/libsodium/Makefile.in",
+    "sha256": "51086a221a9650112e526ecb612f1d4aa4472259bf6f59678bc63cc1fbdd3f69",
+    "bytes": 408448
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/src/libsodium/crypto_generichash/blake2b/ref/blake2.h",
+    "sha256": "f38e811f02636e9d61e4388c97683400e0058aff514bf57375408e548bff8cb4",
+    "bytes": 3864
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/src/libsodium/crypto_pwhash/argon2/argon2-core.c",
+    "sha256": "1821a3a5e8a2c40fd048ef5588c53b7519a96e53842eb8c5015c15a244aa08d2",
+    "bytes": 16428
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/src/libsodium/crypto_generichash/blake2b/ref/blake2b-load-sse2.h",
+    "sha256": "daa18d55dfaf3c9a29e7bf390ea0f92aaf291aa0d315d912ae0082fd61e0fe3f",
+    "bytes": 5594
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/src/libsodium/crypto_pwhash/argon2/argon2-core.h",
+    "sha256": "5598c4415862857dd63267009445575b4ff0a7008443595885de75bdb75fcde9",
+    "bytes": 9605
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/src/libsodium/crypto_generichash/blake2b/ref/blake2b-load-sse41.h",
+    "sha256": "89a96cf99ea570e450f608c509c52f11cb9775de17d201ab0cc57805202a3ac2",
+    "bytes": 10060
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/src/libsodium/crypto_pwhash/argon2/argon2-encoding.c",
+    "sha256": "ef492300c33774283bce336e74dd051bc81a34694a3018f51026bdf22d0ddcf9",
+    "bytes": 10499
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/src/libsodium/crypto_stream/chacha20/ref/chacha20_ref.c",
+    "sha256": "a93ebb4cc15c590798cb095d48ed39eb5d8929fda7904ce148908485e38914c3",
+    "bytes": 8466
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/src/libsodium/crypto_generichash/blake2b/ref/blake2b-ref.c",
+    "sha256": "c2ae4720bc9bb277bc9963067ef552a36ee5bc0406a362d20f38dd2900674a49",
+    "bytes": 12277
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/src/libsodium/crypto_pwhash/argon2/argon2-fill-block-avx2.c",
+    "sha256": "57c29c603f97fcd367b60cf45ee9ea35fb5c231a5ea4598442fd540f8ecf80ba",
+    "bytes": 8154
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/src/libsodium/crypto_pwhash/argon2/argon2-fill-block-avx512f.c",
+    "sha256": "ec700ab401f16fad94086ec14dbbceb1ba7f5645ad9647bb8a2c828fecd14bb5",
+    "bytes": 8513
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/src/libsodium/crypto_stream/salsa20/ref/salsa20_ref.c",
+    "sha256": "e47d9a29430d6ee4d2f7789e309984bf98997b3e5e7665f4efb006b705d50fc2",
+    "bytes": 2665
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/src/libsodium/crypto_pwhash/argon2/argon2-fill-block-neon.c",
+    "sha256": "3a91beb65d3bc5e4ecad9a22cab1b08280add860c29e5c58634cc03ac7317f30",
+    "bytes": 7027
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/src/libsodium/crypto_hash/sha256/cp/hash_sha256_cp.c",
+    "sha256": "6bf28c4633eea0ad9c6cf7aafb078fab63d52199a718b5b2311ff5935bfad1fb",
+    "bytes": 7977
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/src/libsodium/crypto_pwhash/argon2/argon2-fill-block-ref.c",
+    "sha256": "fad82b77d79de84a63fbea63bd3a6d747e2968bec3fba90e4bd395f834003b64",
+    "bytes": 8609
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/src/libsodium/crypto_pwhash/scryptsalsa208sha256/crypto_scrypt-common.c",
+    "sha256": "15f6fe415af39a8ff1b797396d6217748bf8e8c92beb8aa5c3c6798f855e62cf",
+    "bytes": 7177
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/src/libsodium/crypto_pwhash/argon2/argon2-fill-block-ssse3.c",
+    "sha256": "8e539874a0e9a9337ffbb83b2ef2e9e6ee3ff40f47f44080859edcf220342d50",
+    "bytes": 8106
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/src/libsodium/crypto_pwhash/scryptsalsa208sha256/crypto_scrypt.h",
+    "sha256": "1a2d03934df168a95673f480172db001e8467320c5857853873a04da2d6ff2a9",
+    "bytes": 3914
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/src/libsodium/crypto_pwhash/argon2/argon2.c",
+    "sha256": "6a88e2bd810b41988bae0727162d8efd029edef0272b00767cb8e283c3ed6a85",
+    "bytes": 8658
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/src/libsodium/crypto_pwhash/argon2/argon2-fill-block-wasm32.c",
+    "sha256": "bcd2a0d55a022d71193b859a5eca65df78b1ff713d0e2474ac79cbf53ab8b800",
+    "bytes": 6963
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/src/libsodium/crypto_pwhash/argon2/argon2.h",
+    "sha256": "21e275c64fa57b134e635fb1b96619733bf0bfbc6d2c3d1e6553f56d8bb8e52d",
+    "bytes": 11107
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/src/libsodium/crypto_hash/sha512/cp/hash_sha512_cp.c",
+    "sha256": "5b796efeaf882feda2e79c62d060d36208f2a469b52df9649c23b39253ca408b",
+    "bytes": 9445
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/src/libsodium/crypto_pwhash/scryptsalsa208sha256/nosse/pwhash_scryptsalsa208sha256_nosse.c",
+    "sha256": "f2e166798ff84ec78a2b2107db62e4f50ec383686fbeb3a81ed94e566d01748d",
+    "bytes": 8988
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/src/libsodium/crypto_pwhash/scryptsalsa208sha256/pbkdf2-sha256.c",
+    "sha256": "dffd4251272caaeb23f686e871e8698345eb83b7ae2ad35c0e408d47e8a1b963",
+    "bytes": 3580
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/src/libsodium/include/Makefile.in",
+    "sha256": "bcc72856999bc6265941b71d4eb423989d922d0201b1119f6fb21950ccc8a81b",
+    "bytes": 23114
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/src/libsodium/crypto_pwhash/scryptsalsa208sha256/pbkdf2-sha256.h",
+    "sha256": "78122132391a6e259bad457c376a5d87ac862dd9b3d9c79fe32fef02e57117aa",
+    "bytes": 1894
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/src/libsodium/crypto_core/hsalsa20/ref2/core_hsalsa20_ref2.c",
+    "sha256": "d9fdd18eeaaf6964ecb30eee30314a32abd10360c660af253cdab83826026a13",
+    "bytes": 2571
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/src/libsodium/crypto_stream/salsa2012/ref/stream_salsa2012_ref.c",
+    "sha256": "20cc0512f97f70bcf65561e9bef9f0b042ab49640c443d7e9d454d2401ca166a",
+    "bytes": 2370
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/src/libsodium/crypto_pwhash/scryptsalsa208sha256/scrypt_platform.c",
+    "sha256": "fe6d0717f2a8034698bd76ffbd679e6a27584040bfb32ce759c6a1798d21f872",
+    "bytes": 2955
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/src/libsodium/crypto_stream/salsa208/ref/stream_salsa208_ref.c",
+    "sha256": "752f3518f8facd2dd73052e41db1af2dc23a68d887720d6b055daa4f5d76e21d",
+    "bytes": 2404
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/src/libsodium/crypto_pwhash/scryptsalsa208sha256/sse/pwhash_scryptsalsa208sha256_sse.c",
+    "sha256": "6bad56dac13d2b4b15fbc2a3973283c8a39b4c7dea6e23e9fe303fbbcdfb5739",
+    "bytes": 12562
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/build-aux/compile",
+    "sha256": "92ed7feeda61ad958dc3c4cc4efd724e1414482f1cad60b74b09e0633a93dfd6",
+    "bytes": 8064
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/build-aux/config.guess",
+    "sha256": "e3d148130e9151735f8b9a8e69a70d06890ece51468a9762eb7ac0feddddcc2f",
+    "bytes": 50743
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/build-aux/config.sub",
+    "sha256": "26b852f75a637448360a956931439f7e818bf63150eaadb9b85484347628d1fd",
+    "bytes": 39943
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/build-aux/depcomp",
+    "sha256": "ac3ae010382a83144ff6ec1a4c368a3f16a14ea2b12751aa73ddfb548d931574",
+    "bytes": 23700
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/build-aux/ltmain.sh",
+    "sha256": "30712e3401deb6e6d5255c71f7bd57f374429d220cfc199ba1f2376ab42c2e35",
+    "bytes": 337554
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/build-aux/missing",
+    "sha256": "4f17c4a66ec5b8000d44573a576f6b5d9c0c84848e8fd1286f84a52f439db4e9",
+    "bytes": 7733
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/build-aux/test-driver",
+    "sha256": "f5031431dfc824ee2f012950aef35530e5acf3eb412421c8050662b616deaded",
+    "bytes": 5220
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/m4/ax_check_link_flag.m4",
+    "sha256": "21995c3ebbadfbd8b6843e09ebfeea507b06f026c8c0f2fcc1f38a7cc346621e",
+    "bytes": 3265
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/m4/libtool.m4",
+    "sha256": "fe3baac94510d4b563ed7562035bdff366e37f9e0ac274bf10e4f22d08e8664e",
+    "bytes": 310981
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/m4/ax_pthread.m4",
+    "sha256": "4fa6c352f1fb33147947ead61f9b12537f3d146ce068c003552d3b9582a7a406",
+    "bytes": 22556
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/m4/ax_tls.m4",
+    "sha256": "f64374f5c06bda8a1210c85a53201d256da8beb7e62fdc588a05e765a77a2f77",
+    "bytes": 2981
+  },
+  {
+    "path": "/tmp/fasti-c3-license-evidence-AwiTuW/native-source/libsodium-stable/configure",
+    "sha256": "9b8a3b7e17cb0629b1b193bc4a6df4bfa5e453ed7134ec4ea2986212105cfcf9",
+    "bytes": 715415
+  }
+]
