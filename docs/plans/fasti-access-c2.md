@@ -1,6 +1,6 @@
 # Fasti Access C2 implementation gate
 
-Status: `C2_1_DOMAIN_IN_PROGRESS_SHARED_INTEGRATION_WAITING_FOR_METADATA`
+Status: `FOUNDATION_MERGED_C2_RUNTIME_INTEGRATION_OPEN`
 
 Delivery sequencing amendment (2026-09-05): the completed pure source may
 land through the separate [foundation delivery gate](fasti-access-c2-foundation.md).
@@ -20,12 +20,65 @@ Verified implementation base (2026-09-04): merged M3 `dev`
 `df09101028a988a92f4546313c5eed6dd20d238a`, tree
 `5552947a30b82497c7fa279a6932fe7877ed612b`; schema v15, archive v5.
 
-Migration allocation: metadata retains v16. C2 must use the next released
+Migration allocation (current coordination, 2026-09-05): M4 retains migration
+v17 and archive v7. Neither is released to C2. C2 must use the next released
 migration after metadata's verified handoff. References to v16 below are the
 original reviewed migration proposal, not a current allocation. Reconcile all
 migration examples and historical archive fingerprints before C2 storage work.
 
 Owner: Commander / Mothership
+
+## Current completion boundary — 2026-09-05
+
+The pure domain/application foundation merged in [PR #125](https://github.com/Scrobble-dev/Fasti/pull/125)
+at `62e10d2e9bd738ed5da425c008eb839f89cdbea5`. Its tree exactly matches the
+reviewed head `90374622ec5bad52beabf9405835bba51b56dda5`:
+`d6fcea1563b673f83cb4cabe1ef50d1c6dc5c087`. The foundation modules and C2
+integration-test files remain unchanged through observed merged dev
+`3d775bf7af2dd52fffafeaba24ceea22da1cfcc1`. This is source/merge readback,
+not a fresh test execution or proof of complete C2 runtime support.
+
+Independent completion audit found no additional foundation implementation
+gap. PAT actors, C2 capability classification, transactional inventory,
+PAT/consent persistence, caller cutover, contracts and the A+C UI remain
+explicit C2.1–C2.7 work. The foundation merge does not satisfy those gates.
+Do not rerun foundation implementation or infer a new migration allocation.
+Before shared edits, obtain M4's exact merged commit/tree, migration allocation,
+archive disposition and ownership release. Prepare source-backed transaction
+and contract checks independently; do not invent a temporary authority model.
+
+This checkpoint supersedes earlier current-state and pending-delivery wording
+below. Historical test results, migration proposals and failed gates remain
+preserved. C3 qualification does not complete C2; packaged Tauri authentication
+remains deferred. No shared production file changes in this reconciliation.
+
+### Parallel pure-test follow-up — 2026-09-05
+
+Independent PAT/consent review identified two missing direct boundary checks,
+not product defects: unused-token revocation exactly at creation (and one
+nanosecond before), and replacement exactly at the predecessor's last-use time.
+The bounded writer owns only `crates/fasti-domain/tests/c2_personal_tokens.rs`.
+Reuse existing public methods and fixture helpers; preserve all model fields
+except the expected terminal transition. Add no production method, mock store,
+dependency or runtime authority. Run the focused PAT/consent domain and
+application suites, formatting and strict Clippy; independently review the
+test-only diff before committing it. M4 ownership and C2 runtime gates remain
+unchanged. No failing-before-fix claim follows from new tests of existing code.
+
+Completed locally: both tests passed on first execution. The focused domain
+and application suites passed 33 tests with zero failed, ignored or filtered
+cases. Workspace formatting and strict all-target/all-feature domain and
+application Clippy passed. Independent source review found no concrete defect
+in the two-test delta. These checks do not implement persistence or runtime
+authority; those gates and the shared-file handoff remain open.
+
+Historical foundation checkpoint (2026-09-05): implementation commit `5eb3def0` passes 319
+all-feature domain/application tests and strict all-target Clippy. Independent
+reconciliation confirms that sections 5.4 and 9 cover all 22 merged-M3 scopes
+and its four new capabilities. M4's reserved `metadata_search` stays denied.
+No usable C2 inventory store can be added against v15 alone: client ownership
+and issuance fields, the real capability/port, and persistence must land
+together after the shared-file handoff. No temporary authority model is added.
 
 ## 1. Result
 
@@ -959,8 +1012,13 @@ routes remain separate.
 PAT bearer authentication is accepted only by data/integration operations whose
 authored capability explicitly allows a PAT actor. Every browser administration
 route under `/api/access/` rejects PAT and client bearer credentials before
-handler execution and still requires the C1 cookie, CSRF, Host, Origin, session,
-membership, and recent-authentication boundary.
+handler execution. Read-only inventory uses the existing C1-validated browser
+read boundary and rechecks the cookie session, current membership and resource
+ownership inside the transaction. Mutations additionally use the C1 mutation
+boundary, including CSRF and Origin checks, and require recent authentication
+for sensitive operations. Inventory reads do not require the mutation/recent-auth
+envelope; this preserves the read-only delivery disposition in section 2 and
+the existing `AccessInventoryQuery` contract. No browser trust check is bypassed.
 
 Add one governed `AcceptedActorKind` set with exactly
 `registered_client_credential`, `browser_session`, and
@@ -1703,3 +1761,43 @@ reconciliation. Runtime, accessibility, and TTHW claims remain unverified until 
 implemented and the exact delivery gates pass.
 
 NO UNRESOLVED DECISIONS
+
+## Independent boundary-test delivery amendment — 2026-09-05
+
+Deliver only the reviewed C2 test and factual plan corrections from current
+dev `ee0d537d7bc8b7ed7ff7fdc90fad8613fe1b4ab0`, tree
+`e2a3180bed0748863cb3e829a06a677a0561a6b8`. Preserve this research worktree.
+Use a separate `codex/fasti-access-c2-boundary-tests` delivery branch, without
+merging this branch's older C3/D0 research or already-merged foundation history.
+
+Reuse these reviewed deltas in order:
+
+1. `0e20611c34a8e3d1f97036408a22535d86aaf406`: merged foundation/current
+   runtime boundary and M4 reservation.
+2. `c831ca401ec73f8b716a5bc983526171f3fbc6ac`: inventory read and sensitive
+   mutation distinction.
+3. `479c87862d37b1312516d0323ddde3659e4f8d5f`: two PAT timestamp-boundary
+   tests and their scoped historical evidence.
+
+One named integration writer may edit only this plan,
+`docs/plans/fasti-access-c2-foundation.md` and
+`crates/fasti-domain/tests/c2_personal_tokens.rs`. Carry this amendment too.
+Independent preflight found one expected plan conflict: retain dev's delivery
+sequencing, section 8/M4/T1 corrections and all merged foundation evidence;
+insert the new completion boundary without restoring unpublished C3 links or
+candidate-selection prose. Keep useful earlier test evidence explicitly
+historical. Review actual resulting deltas, never replace whole plan files.
+
+Run the 33 focused PAT/consent domain/application tests plus five inventory
+tests, formatting, strict domain/application Clippy and changed-plan links.
+Then run the unchanged canonical PR gate on the clean delivery source with
+resource coordination. Independent exact-diff review, one PR to dev, hosted
+checks/reconciliation, merge and exact merged-tree readback remain required.
+Earlier test results are not fresh delivery receipts. Add no dependency or
+production change to force a pass, and claim no before-fix failing execution.
+
+This amendment authorizes isolated source preparation in parallel with KDF
+hosted checks. It does not release M4 migration 17, archive 7, persistence,
+registry/generator, API/SDK, host or Workbench paths. Allocate no next migration.
+After delivery, tell Metadata the exact merged identity and unchanged ownership.
+The full C2 runtime gates and deferred packaged Tauri authentication remain open.

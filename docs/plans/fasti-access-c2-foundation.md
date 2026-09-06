@@ -1,8 +1,25 @@
 # C2 domain/application foundation delivery gate
 
-Status: `PREPARATION_AUTHORIZED_DELIVERY_GATES_PENDING`
+Status: `MERGED_FOUNDATION_ONLY_C2_RUNTIME_GATES_REMAIN_OPEN`
 
 Recorded: 2026-09-05. Owner: Commander, sole integration writer.
+
+## Verified delivery checkpoint — 2026-09-05
+
+[PR #125](https://github.com/Scrobble-dev/Fasti/pull/125) merged at
+`62e10d2e9bd738ed5da425c008eb839f89cdbea5` on 2026-09-05 at 03:29:11 UTC.
+The merged tree and reviewed head `90374622ec5bad52beabf9405835bba51b56dda5`
+have identical tree `d6fcea1563b673f83cb4cabe1ef50d1c6dc5c087`.
+The foundation modules and C2 integration-test files remain unchanged through
+observed merged dev `3d775bf7af2dd52fffafeaba24ceea22da1cfcc1`.
+
+This readback closes the stale pending-delivery record, not the remaining C2
+runtime gates. It does not claim new test execution. The original C2 and
+foundation worktrees remain preserved. M4 currently owns migration v17,
+archive v7 and shared integration; C2 has no next migration allocation until
+M4 sends its exact merged handoff. No production source or ownership changes
+are made by this checkpoint. Earlier preparation statements below are
+historical, not a reason to repeat the merged foundation work.
 
 ## Purpose and unchanged programme
 
