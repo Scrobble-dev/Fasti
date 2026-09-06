@@ -4305,3 +4305,12 @@ ordering/expiry, bounded live accumulation and exact-coordinate duplicate
 precedence. An independently bounded SDK correction can enforce the server's
 existing strictly-forward next-page invariant without inventing a new contract.
 No speculative migration or alternate orchestration framework is authorized.
+
+First clean real-process attempt at `2d8247100519dcb388ad129ee5c9bf73b23eab25`
+completed the retained journey and the new live details/action browser sequence,
+then failed the new receipt oracle: it expected the Rust enum variant spelling
+instead of the existing `#[serde(rename_all = "snake_case")]` stored origin.
+Only that harness expectation is corrected to
+`user_selected_provider_identifier`; no product receipt format changes. The
+attempt is not passing acceptance. Its managed processes exited and ports were
+verified released before the corrected exact-head rerun.

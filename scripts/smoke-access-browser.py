@@ -740,7 +740,7 @@ def _no_store_database_evidence(
             {"attached", "already_attached"}
             or any(row["provider"] != "tmdb" or row["grain"] != "film"
                    or row["record_id"] not in {record_id, attach_record_id}
-                   or row["origin"] != "UserSelectedProviderIdentifier"
+                   or row["origin"] != "user_selected_provider_identifier"
                    or row["provider_record_id"] not in expected_ids
                    or "candidate_receipt_id" in row or "snapshot" in row
                    for row in receipts)):
