@@ -4314,3 +4314,25 @@ Only that harness expectation is corrected to
 `user_selected_provider_identifier`; no product receipt format changes. The
 attempt is not passing acceptance. Its managed processes exited and ports were
 verified released before the corrected exact-head rerun.
+
+Corrected clean-head real-process evidence passes at
+`73f4761ced8574852386cd2dae0df35b77e61084`, tree
+`642f42f2ebba56f7e6d9327bdabf319af44f0c22`. The receipt includes the unchanged
+retained journey, transient details-only database/WAL invariance, zero retained
+candidate routes in the live lane, three live details HTTP reads, two explicit
+provider-identifier actions, no cached-only upstream call and both exact Records'
+identifiers after restart. Upstream live counts are one Search, three reads of
+843001 (two detail reads and Create re-fetch), and two reads of 843002 (details
+and Attach re-fetch). No-store metadata and Search rows stay unchanged. This is
+the real Fasti/TrailBase/browser stack with a pinned disposable TLS upstream,
+not public TMDB or packaged desktop acceptance.
+
+The exact PR132 handoff is normally merged in
+`b6cab1ccf46e4106a43fb6fd369d24ca395e590a`; its tree
+`c8e200ae368d264b719756066f636bb48efe08f9` equals the pre-merge preview. Existing
+M4 work and the permanent tooling exclusion are preserved. A network fetch
+attempt failed with `Could not resolve host: github.com`; the already-present
+handoff commit/tree were verified locally and used exactly. Do not describe that
+failed fetch as a fresh remote observation. The isolated KDF qualification and
+its separate measurement provenance remain unchanged. Final combined-head
+canonical and real-process receipts must be regenerated before publishing.

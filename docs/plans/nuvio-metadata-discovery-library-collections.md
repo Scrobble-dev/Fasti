@@ -749,8 +749,10 @@ route from the retained route by its shape, including when a provider is named
 `live`. Reload re-authorizes and re-fetches through the existing governed provider
 owner. Details are transient: no snapshot, receipt, Record, claim or action write.
 Create/Attach remains a separate explicit action through its existing owner.
-This decision preserves canonical live details in M4 scope; implementation and
-negative navigation/authority tests remain required, not already complete.
+The coordinate read is implemented through the application, governed runtime,
+API, SDK and hosts. The programme checkpoint records native and browser negative
+checks plus the real-process no-store/restart proof. This does not mark M4 or
+public-provider acceptance complete; exact-head delivery evidence remains required.
 
 `candidate_receipt_id` is opaque and resolves to a durable, bounded provider-candidate receipt containing the exact governed re-fetch route and provenance. A receipt expires after 24 hours, carries at most 64 KiB of normalized candidate data plus bounded identifiers, and records the query digest, safe provider-configuration digest, grant digest, response digest, provider terms revision, and creating actor/profile. Replay re-authorizes the current actor, profile, provider capability, grant, and configuration; a digest or authorization mismatch fails closed and offers a fresh Search. Expired and unreferenced receipts are garbage-collected in bounded keyset pages; receipts attached to an operation or Record retain only the minimal provenance required by that durable owner. No credential, raw secret-bearing request, or unrestricted provider body enters a receipt. The slug is presentation-only. On Record creation or attachment, the stable route becomes:
 
