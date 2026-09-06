@@ -1,6 +1,6 @@
 # E1 OIDC candidate qualification
 
-Status: **19 library checks pass; E1-Q1/Q2 remain partial. No runtime adoption.**
+Status: **20 library checks pass; E1-Q1/Q2 remain partial. No runtime adoption.**
 
 This separate Cargo workspace tests `openidconnect =4.0.1` through its public
 APIs. It starts no listener and creates no Fasti account, session or database.
@@ -29,7 +29,7 @@ are offline. On Linux with unprivileged network namespaces, also run:
 unshare --user --map-root-user --net cargo +1.97.1 test --offline --locked --manifest-path qualification/access-e1/Cargo.toml
 ```
 
-Expected full-suite result: **19 passed, 0 failed, 0 ignored, 0 filtered out**.
+Expected full-suite result: **20 passed, 0 failed, 0 ignored, 0 filtered out**.
 If an offline check reports a missing package, run the locked fetch with network
 access, then retry the offline check. Do not remove `--locked` or regenerate the
 lock to bypass that error. If this host forbids network namespaces, the ordinary
@@ -73,6 +73,41 @@ Rust `1.96.0 (ac68faa20 2026-05-25)`; Cargo `1.96.0 (30a34c682 2026-05-25)`.
 | `token_rejection.rs` | `45bb6bde0d75ba2215d7b55748a326ebe12b2dd38e5bb7d983f07fb603dbb48c` |
 | `synthetic-test-key.pem` | `20a63565470ef8c42e48675edd8478c3d2c9c3e9cb727702a64adc48c98660f4` |
 | `synthetic-rotation-key.pem` | `d2604c19f88ee96466dce9e6f702516d21a303d78a1f9c7920d69a9b72f00774` |
+
+## Confidential-client evidence recorded 2026-09-06
+
+One parameterized check now covers Basic and request-body client authentication,
+each with a successful JSON token response, a JSON provider error and a lost
+transport response. It uses only the existing in-memory seam and public
+synthetic client ID/secret values containing reserved and non-ASCII characters.
+No dependency, lockfile, key fixture or production code changed.
+
+The exact locked `oauth2` 5.0.0 `src/endpoint.rs:114–143` separately form-encodes
+the client ID and secret before Basic encoding, or puts them in the form body.
+`openidconnect` 4.0.1 exposes this choice through `set_auth_type` and the existing
+client-secret constructor. Literal expected wire bytes check these behaviors,
+the POST endpoint, content type, redirect, code and RFC 7636 verifier. Each
+credential appears exactly once in its selected location, with no duplicate
+Authorization header or credential form fields. All six cases dispatch once.
+
+Observed boundaries remain explicit: the Basic header is not marked sensitive;
+the parsed provider error retains the synthetic encoded-secret echo, including
+in its `Display` output. The test inspects that public fixture text in memory,
+not a real secret. Request-body credentials remain in the outbound byte buffer.
+No safe logging or zeroization claim follows. A successful OAuth response still
+need not contain an ID token; this is not a Fasti sign-in result.
+
+The combined 20 tests passed both offline and in a fresh Linux network namespace
+on Rust 1.97.1. Strict Clippy and formatting passed. Qualification source SHA-256:
+`fd5f692465d01c11d97c2a06dc016a871797d1ba32f8e5c90c19c402feae854b`.
+These are file-bound dirty-worktree results, not clean-head delivery receipts.
+The earlier 19-check records above remain historical evidence.
+
+The advisory audit was repeated with `--no-fetch` against the existing database
+commit `5a0ebedfe8bdd2e295b171f4162f8c977bcad9a5`. It again exited 1 for
+`rsa 0.9.10` / `RUSTSEC-2023-0071`, with no ignored advisory. This is a cached
+database result, not a claim that current advisory data was fetched. The
+workflow's unsuppressed advisory job is unchanged and remains a delivery gate.
 
 ## Dependency and delivery checks
 
@@ -138,7 +173,7 @@ On another host, use its prepared physical temporary directory and repository
 prerequisites; do not create this machine-specific path. Inspect
 `target/fasti-receipts/b1-contract-verification.json` and `b1-portable.json` for
 the exact commit, tree, clean-source status and individual results. These
-canonical receipts do not run the separate E1 workspace; the explicit 19-check
+canonical receipts do not run the separate E1 workspace; the explicit 20-check
 command above is also required. No PR, merge or production support follows from
 this record. Packaged Tauri authentication is not covered by these checks.
 

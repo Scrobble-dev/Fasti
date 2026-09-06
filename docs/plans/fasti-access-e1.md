@@ -262,6 +262,46 @@ be represented as a green delivery. Validate workflow syntax and execute the
 same local commands before commit. This adds no runtime integration or shared
 file release and leaves existing workflows unchanged.
 
+## Confidential-client qualification segment — 2026-09-06
+
+Proceed independently of M4 with the existing in-memory HTTP seam. The current
+19-check harness exercises public-client token exchange but does not establish
+confidential-client credential placement. This bounded segment adds one
+parameterized library-behavior check for Basic and request-body authentication,
+including reserved/non-ASCII synthetic credential characters, successful
+responses, provider errors and a lost transport response.
+
+One assigned writer owns only `qualification/access-e1/qualification.rs`, its
+README and `.github/workflows/access-e1-qualification.yml` for the expected
+20-check count. The commander owns this plan and integration. No root manifest,
+dependency/lock, signing fixture, production or M4-owned change. Read the exact
+locked OAuth2/OIDC source before choosing constructors or expected wire bytes;
+do not invent a client-authentication API or duplicate the protocol engine.
+
+Use existing helpers and inspect the actual library-produced request. Verify
+exact endpoint/method, content type, redirect, code and PKCE binding; exact
+credential placement/encoding with no duplicates; and one dispatch on each
+error case. Record actual header sensitivity and vendor error retention rather
+than assuming redaction or complete memory erasure. All credentials are public
+synthetic fixtures, not installation or person passwords.
+
+Gate before commit: all 20 unfiltered checks, formatting and strict Clippy;
+repeat the same suite in the documented fresh network namespace; preserve the
+unsuppressed RSA advisory and distinguish it from successful behavior tests.
+Review the exact diff independently and keep README/workflow counts consistent.
+No real callback, governed POST transport, identity link, recent authentication,
+logout receiver, runtime support or final E1 qualification follows from this
+test. The advisory/delivery and shared integration gates remain open.
+
+The writer and independent reviewer both passed all 20 checks offline and in
+a fresh network namespace, plus formatting and strict Clippy. Exact source
+SHA-256 is `fd5f692465d01c11d97c2a06dc016a871797d1ba32f8e5c90c19c402feae854b`.
+The independent four-path review found no actionable issue. Preserve the
+file-bound preparation logs at `/tmp/fasti-e1-confidential-C1gegn/`; they are
+not a clean-head canonical receipt. The cached, unsuppressed RSA advisory still
+fails. This segment may be committed as qualified preparation, not delivered
+or adopted as a runtime dependency.
+
 ## GSTACK REVIEW REPORT
 
 2026-09-05 developer-experience audit covers the isolated qualification package,

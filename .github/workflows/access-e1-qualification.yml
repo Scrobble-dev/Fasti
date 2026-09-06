@@ -32,7 +32,12 @@ jobs:
       - name: Check formatting
         run: cargo fmt --manifest-path qualification/access-e1/Cargo.toml -- --check
       - name: Run the complete offline library suite
-        run: cargo test --offline --locked --manifest-path qualification/access-e1/Cargo.toml
+        run: |
+          set -euo pipefail
+          qualification_log="$(mktemp)"
+          cargo test --offline --locked --manifest-path qualification/access-e1/Cargo.toml 2>&1 | tee "$qualification_log"
+          test "$(grep -c '^test result:' "$qualification_log")" -eq 1
+          grep -Eq '^test result: ok\. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out;' "$qualification_log"
       - name: Deny compiler warnings
         run: cargo clippy --offline --locked --manifest-path qualification/access-e1/Cargo.toml --all-targets -- -D warnings
 
