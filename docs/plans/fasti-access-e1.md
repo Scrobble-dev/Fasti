@@ -302,6 +302,31 @@ not a clean-head canonical receipt. The cached, unsuppressed RSA advisory still
 fails. This segment may be committed as qualified preparation, not delivered
 or adopted as a runtime dependency.
 
+## Upstream dependency checkpoint — 2026-09-06
+
+Independent primary-source review found no supported drop-in remediation for
+the unchanged unsuppressed advisory gate. The released
+[`openidconnect` 4.0.1 manifest](https://github.com/ramosbugs/openidconnect-rs/blob/b639b5d39eac6903238867aeb2b29326502e6b26/Cargo.toml)
+requires `rsa = "0.9.2"` unconditionally. Disabling default features or deleting
+our synthetic signing tests would not remove that dependency from the graph.
+
+Upstream [PR244](https://github.com/ramosbugs/openidconnect-rs/pull/244), observed
+open and unmerged at `2f77ee73bc4554e1cb6279adb386005429fb4e41`, proposes RSA
+`0.10.0-rc.18` and six other crypto upgrades. It is not an accepted release or
+a compatible patch to the current lock. The current
+[RustSec advisory](https://rustsec.org/advisories/RUSTSEC-2023-0071.html) still
+lists no patched version and points to the remaining
+[RSA timing issue](https://github.com/RustCrypto/RSA/issues/626). Neither an
+unmerged dependency bump nor a closed bigint-migration issue clears this gate.
+This is dependency-policy evidence, not proof of an exploitable Fasti path.
+
+Next intake requires an official supported OIDC release with an unaffected
+dependency or supported feature/backend that removes the affected graph while
+preserving required signature verification. Pin and review that exact source,
+features and lock; rerun qualification and the unsuppressed audit. No fork,
+prerelease adoption, suppression, protocol replacement or production integration
+is authorized by this checkpoint. E1 remains qualified preparation, not delivery.
+
 ## GSTACK REVIEW REPORT
 
 2026-09-05 developer-experience audit covers the isolated qualification package,
