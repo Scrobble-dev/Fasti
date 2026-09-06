@@ -39,6 +39,7 @@ class CustodyError(ValueError):
 
 
 def sha256(data: bytes) -> str:
+    """Compute SHA-256 hexdigest of the given bytes."""
     return hashlib.sha256(data).hexdigest()
 
 
@@ -61,6 +62,7 @@ def read_regular(path: Path, limit: int) -> bytes:
 
 
 def strict_json(data: bytes):
+    """Parse JSON with strict validation: no duplicate keys or numeric constants."""
     def unique(pairs):
         result = {}
         for key, value in pairs:
@@ -84,6 +86,7 @@ def safe_path(name: str) -> bool:
 
 
 def load_selection():
+    """Load and validate frozen selection and original inventory with integrity checks."""
     selection = read_regular(ROOT / "selection.json", 64 * 1024)
     original = read_regular(ROOT / "original-inventory.json", 32 * 1024)
     if sha256(selection) != SELECTION_SHA256 or sha256(original) != ORIGINAL_SHA256:
@@ -171,6 +174,7 @@ def deterministic_tar(payloads: dict[str, bytes]) -> bytes:
 
 
 def expected_members(entries: list[dict], metadata: dict[str, bytes]):
+    """Build expected member mapping from selection entries and metadata."""
     expected = {SOURCE_PREFIX + entry["path"]: (entry["bytes"], entry["sha256"])
                 for entry in entries}
     expected.update({name: (len(data), sha256(data)) for name, data in metadata.items()})
@@ -207,6 +211,7 @@ def verify_bytes(data: bytes, expected: dict[str, tuple[int, str]]) -> None:
 
 
 def verify(path: Path) -> dict:
+    """Verify bundle integrity against frozen selection and return verification result."""
     entries, metadata = load_selection()
     data = read_regular(path, MAX_BUNDLE_BYTES)
     verify_bytes(data, expected_members(entries, metadata))
@@ -215,6 +220,7 @@ def verify(path: Path) -> dict:
 
 
 def build(archive_path: Path, output: Path) -> dict:
+    """Build verified bundle from pinned archive; extract selected members and write to output."""
     entries, metadata = load_selection()
     source = read_regular(archive_path, ARCHIVE_BYTES)
     if len(source) != ARCHIVE_BYTES or sha256(source) != ARCHIVE_SHA256:
@@ -233,6 +239,7 @@ def build(archive_path: Path, output: Path) -> dict:
 
 
 def main() -> int:
+    """Parse arguments and execute build or verify command, returning exit code."""
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     create = commands.add_parser("build")
