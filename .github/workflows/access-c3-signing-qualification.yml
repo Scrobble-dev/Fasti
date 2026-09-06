@@ -36,6 +36,8 @@ permissions:
 jobs:
   native-attribution:
     name: Source-notice structural qualification (not runtime)
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
