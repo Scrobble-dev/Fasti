@@ -333,6 +333,65 @@ const HEALTH_PROBLEM_CONTRACT = {
   problemCodes: [],
 } as const satisfies ProblemContractBinding;
 
+/** Bind a generated provider page to the request in HTTP and native hosts. */
+export function parseSearchProviderPageForRequest(
+  value: unknown,
+  providerId: string,
+  request: Pick<SearchProviderPageRequest, "page" | "offline" | "grains">,
+): SearchProviderPageResponse {
+  const requestedGrains = new Set(request.grains);
+  const response = parseSearchProviderPageResponse(value);
+  if (
+    response.provider_id !== providerId ||
+    (response.outcome === "live" &&
+      (request.offline ||
+        response.page !== request.page ||
+        response.candidates.some(
+          (candidate) =>
+            candidate.provider !== providerId ||
+            (requestedGrains.size > 0 && !requestedGrains.has(candidate.grain)),
+        ))) ||
+    (response.outcome === "page" &&
+      (response.page !== request.page ||
+        (response.cache_state === "observed" &&
+          (request.offline || response.upstream_problem != null)) ||
+        response.candidates.some(
+          (receipt) =>
+            receipt.candidate.provider !== providerId ||
+            receipt.candidate.grain !== receipt.grain ||
+            (requestedGrains.size > 0 && !requestedGrains.has(receipt.grain)),
+        )))
+  ) {
+    throw new FastiContractParseError(
+      "Provider Search response does not match the requested provider and page",
+    );
+  }
+  if (response.outcome === "live" || response.outcome === "page") {
+    const candidates =
+      response.outcome === "page"
+        ? response.candidates.map((receipt) => receipt.candidate)
+        : response.candidates;
+    const coordinates = new Set(
+      candidates.map((candidate) =>
+        JSON.stringify([candidate.kind, candidate.provider_id]),
+      ),
+    );
+    if (
+      (response.next_page != null && response.next_page <= request.page) ||
+      coordinates.size !== candidates.length ||
+      (response.outcome === "page" &&
+        new Set(
+          response.candidates.map((receipt) => receipt.candidate_receipt_id),
+        ).size !== candidates.length)
+    ) {
+      throw new FastiContractParseError(
+        "Provider Search continuation or candidate identity is invalid",
+      );
+    }
+  }
+  return response;
+}
+
 export class FastiClient {
   readonly #baseUrl: URL;
   readonly #credential?: CredentialProvider;
@@ -997,9 +1056,11 @@ export class FastiClient {
       request,
       "Provider Search request",
     );
-    const requestedPage = body.page;
-    const offline = body.offline;
-    const requestedGrains = new Set(body.grains);
+    const pageRequest = {
+      page: body.page,
+      offline: body.offline,
+      grains: [...body.grains],
+    };
     return this.#jsonOperation({
       method: operation.method,
       path: providerOperationPath(operation.path, identifiers),
@@ -1011,63 +1072,12 @@ export class FastiClient {
       // 100 receipts, each with at most 64 KiB of admitted candidate JSON,
       // plus bounded receipt IDs and page metadata. No global limit increase.
       maxResponseBytes: 100 * (64 * 1024 + 1024) + 8 * 1024,
-      responseParser: (value) => {
-        const response = parseSearchProviderPageResponse(value);
-        if (
-          response.provider_id !== identifiers.providerId ||
-          (response.outcome === "live" &&
-            (offline ||
-              response.page !== requestedPage ||
-              response.candidates.some(
-                (candidate) =>
-                  candidate.provider !== identifiers.providerId ||
-                  (requestedGrains.size > 0 &&
-                    !requestedGrains.has(candidate.grain)),
-              ))) ||
-          (response.outcome === "page" &&
-            (response.page !== requestedPage ||
-              (response.cache_state === "observed" &&
-                (offline || response.upstream_problem != null)) ||
-              response.candidates.some(
-                (receipt) =>
-                  receipt.candidate.provider !== identifiers.providerId ||
-                  receipt.candidate.grain !== receipt.grain ||
-                  (requestedGrains.size > 0 &&
-                    !requestedGrains.has(receipt.grain)),
-              )))
-        ) {
-          throw new FastiContractParseError(
-            "Provider Search response does not match the requested provider and page",
-          );
-        }
-        if (response.outcome === "live" || response.outcome === "page") {
-          const candidates =
-            response.outcome === "page"
-              ? response.candidates.map((receipt) => receipt.candidate)
-              : response.candidates;
-          const coordinates = new Set(
-            candidates.map((candidate) =>
-              JSON.stringify([candidate.kind, candidate.provider_id]),
-            ),
-          );
-          if (
-            (response.next_page != null &&
-              response.next_page <= requestedPage) ||
-            coordinates.size !== candidates.length ||
-            (response.outcome === "page" &&
-              new Set(
-                response.candidates.map(
-                  (receipt) => receipt.candidate_receipt_id,
-                ),
-              ).size !== candidates.length)
-          ) {
-            throw new FastiContractParseError(
-              "Provider Search continuation or candidate identity is invalid",
-            );
-          }
-        }
-        return response;
-      },
+      responseParser: (value) =>
+        parseSearchProviderPageForRequest(
+          value,
+          identifiers.providerId,
+          pageRequest,
+        ),
       responseLabel: "Provider Search response",
       options,
     });

@@ -1,13 +1,11 @@
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { mockAuthenticatedAccess } from "./test-helpers";
 
 // Regression: ISSUE-001 and ISSUE-002 — M4 Search lost provider context and stable selection.
 // Found by /qa on 2026-09-05.
 // Report: .gstack/qa-reports/qa-report-fasti-local-2026-09-05.md
-test("local and receipt-backed provider Search survive a partial source failure", async ({
-  page,
-}) => {
+async function mockNativeSearch(page: Page) {
   await mockAuthenticatedAccess(page);
   await page.addInitScript(() => {
     const receiptId = "scr_01991f588e0070008000000000000001";
@@ -189,6 +187,120 @@ test("local and receipt-backed provider Search survive a partial source failure"
             browserWindow.__SEARCH_PAGE_INPUTS__?.push(input);
             const request = input?.request as
               { query?: string; page?: number } | undefined;
+            if (
+              [
+                "Repeated coordinate",
+                "Mixed evidence",
+                "Non-forward continuation",
+                "Receipt collision",
+              ].includes(request?.query ?? "")
+            ) {
+              const secondPage = request?.page === 2;
+              const repeated = request?.query === "Repeated coordinate";
+              const collision = request?.query === "Receipt collision";
+              return {
+                outcome: "page",
+                provider_id: "tmdb",
+                page: request?.page,
+                candidates: [
+                  {
+                    candidate_receipt_id:
+                      secondPage && !collision ? duplicateReceiptId : receiptId,
+                    grain: "film",
+                    candidate: secondPage
+                      ? {
+                          ...candidate,
+                          provider_id: repeated
+                            ? candidate.provider_id
+                            : "693135",
+                          title: repeated
+                            ? "Repeated coordinate title"
+                            : "Second-page candidate",
+                        }
+                      : candidate,
+                  },
+                ],
+                next_page:
+                  !secondPage || request?.query === "Non-forward continuation"
+                    ? 2
+                    : repeated
+                      ? 3
+                      : null,
+                cache_state: secondPage ? "observed" : "fresh",
+                lifetime: {
+                  created_at: "2026-09-05T12:00:00Z",
+                  fresh_until: "2026-09-05T12:02:00Z",
+                  stale_until: "2026-09-05T12:10:00Z",
+                  expires_at: "2026-09-06T12:00:00Z",
+                },
+                upstream_problem: null,
+              };
+            }
+            if (request?.query === "Provider batch collision") {
+              const book = {
+                ...candidate,
+                provider: "google-books",
+                grain: "book",
+                kind: "volume",
+              };
+              return {
+                outcome: "page",
+                provider_id: input?.provider_id,
+                page: request.page,
+                candidates:
+                  input?.provider_id === "google-books"
+                    ? [
+                        {
+                          candidate_receipt_id: differentYearReceiptId,
+                          grain: "book",
+                          candidate: {
+                            ...book,
+                            provider_id: "valid-book",
+                            title: "Rejected provider first row",
+                          },
+                        },
+                        {
+                          candidate_receipt_id: receiptId,
+                          grain: "book",
+                          candidate: {
+                            ...book,
+                            provider_id: "collision-book",
+                            title: "Colliding provider row",
+                          },
+                        },
+                      ]
+                    : [
+                        {
+                          candidate_receipt_id:
+                            input?.provider_id === "tmdb"
+                              ? receiptId
+                              : duplicateReceiptId,
+                          grain: "film",
+                          candidate: {
+                            ...candidate,
+                            provider: input?.provider_id,
+                            provider_id:
+                              input?.provider_id === "tmdb"
+                                ? candidate.provider_id
+                                : "movies/341029",
+                            title:
+                              input?.provider_id === "tmdb"
+                                ? "Batch TMDB result"
+                                : "Batch TVDB result",
+                          },
+                        },
+                      ],
+                next_page: null,
+                cache_state: "fresh",
+                lifetime: {
+                  created_at: "2026-09-05T12:00:00Z",
+                  fresh_until: "2026-09-05T12:02:00Z",
+                  stale_until: "2026-09-05T12:10:00Z",
+                  expires_at: "2026-09-06T12:00:00Z",
+                },
+                upstream_problem: null,
+              };
+            }
             if (request?.query === "Continuation") {
               return request.page === 2
                 ? {
@@ -348,7 +460,12 @@ test("local and receipt-backed provider Search survive a partial source failure"
       },
     };
   });
+}
 
+test("local and receipt-backed provider Search survive a partial source failure", async ({
+  page,
+}) => {
+  await mockNativeSearch(page);
   await page.goto("/discover");
   const provider = page.getByLabel("Metadata provider");
   await expect(provider).toHaveValue("tmdb");
@@ -507,4 +624,163 @@ test("local and receipt-backed provider Search survive a partial source failure"
   await expect(page.getByRole("alert")).toContainText(
     "This candidate link is invalid.",
   );
+});
+
+for (const scenario of [
+  "Repeated coordinate",
+  "Mixed evidence",
+  "Non-forward continuation",
+  "Receipt collision",
+]) {
+  test(`native provider pagination preserves prior evidence: ${scenario}`, async ({
+    page,
+  }) => {
+    await mockNativeSearch(page);
+    await page.goto("/discover");
+    await page.getByRole("searchbox", { name: "Search TMDB" }).fill(scenario);
+    await page.getByRole("button", { name: "Search", exact: true }).click();
+    const results = page.getByRole("region", { name: "Search results" });
+    const first = results.getByRole("listitem").filter({
+      has: page.getByRole("heading", { name: "Dune: Part Two", exact: true }),
+    });
+    const firstHref =
+      "/explore/tmdb/film/scr_01991f588e0070008000000000000001/dune-part-two";
+    await expect(first).toBeVisible();
+    await expect(
+      first.getByRole("link", { name: "View details" }),
+    ).toHaveAttribute("href", firstHref);
+    await page
+      .getByRole("button", { name: "Retry or load more provider results" })
+      .click();
+    await expect
+      .poll(() => page.evaluate(() => window.__SEARCH_PAGE_INPUTS__?.length))
+      .toBe(2);
+    await expect(
+      page.getByRole("button", { name: "Search", exact: true }),
+    ).toBeEnabled();
+
+    if (scenario === "Mixed evidence") {
+      await expect(results.getByRole("listitem")).toHaveCount(2);
+      await expect(
+        first.getByText("Fresh cache evidence", { exact: true }),
+      ).toBeVisible();
+      const second = results.getByRole("listitem").filter({
+        has: page.getByRole("heading", {
+          name: "Second-page candidate",
+          exact: true,
+        }),
+      });
+      await expect(
+        second.getByText("Observed from provider", { exact: true }),
+      ).toBeVisible();
+      await expect(results.getByRole("status")).not.toContainText(
+        "These results came from fresh cache evidence.",
+      );
+      await expect(results.getByRole("status")).not.toContainText(
+        "These results were observed from the provider now.",
+      );
+      for (const width of [1440, 320]) {
+        await page.setViewportSize({ width, height: 1000 });
+        await expect(
+          first.getByText("Fresh cache evidence", { exact: true }),
+        ).toBeVisible();
+        await expect(
+          second.getByText("Observed from provider", { exact: true }),
+        ).toBeVisible();
+        expect((await new AxeBuilder({ page }).analyze()).violations).toEqual(
+          [],
+        );
+        await page.evaluate(() => window.scrollTo(0, 0));
+        await page.screenshot({
+          path: `.gstack/qa-reports/screenshots/discover-search-mixed-evidence-${width}.png`,
+          fullPage: true,
+        });
+      }
+    } else {
+      await expect(results.getByRole("listitem")).toHaveCount(1);
+      await expect(
+        results.getByRole("heading", {
+          name: "Second-page candidate",
+          exact: true,
+        }),
+      ).toHaveCount(0);
+      await expect(
+        results.getByRole("heading", {
+          name: "Repeated coordinate title",
+          exact: true,
+        }),
+      ).toHaveCount(0);
+      if (scenario !== "Repeated coordinate") {
+        await expect(page.getByRole("alert")).toContainText(
+          /provider|page|receipt|Search/i,
+        );
+      } else {
+        await expect(
+          page.getByRole("button", {
+            name: "Retry or load more provider results",
+          }),
+        ).toBeEnabled();
+        await expect(page.getByRole("alert")).toHaveCount(0);
+      }
+    }
+    await expect(
+      first.getByRole("link", { name: "View details" }),
+    ).toHaveAttribute("href", firstHref);
+  });
+}
+
+test("native all-provider Search rejects only the colliding provider page and preserves source order", async ({
+  page,
+}) => {
+  await mockNativeSearch(page);
+  await page.goto("/discover");
+  await page.getByLabel("Metadata provider").selectOption("all");
+  await page
+    .getByRole("searchbox", { name: "Search local Records and providers" })
+    .fill("Provider batch collision");
+  await page.getByRole("button", { name: "Search", exact: true }).click();
+  const results = page.getByRole("region", { name: "Search results" });
+  await expect(results.getByRole("listitem").getByRole("heading")).toHaveText([
+    "Batch TMDB result",
+    "Batch TVDB result",
+  ]);
+  await expect(results.getByRole("listitem")).toHaveCount(2);
+  await expect(page.getByRole("heading", { name: "Local Dune" })).toBeVisible();
+  await expect(
+    page.getByText("Rejected provider first row", { exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByText("Colliding provider row", { exact: true }),
+  ).toHaveCount(0);
+  await expect(page.getByRole("alert")).toContainText(/receipt/i);
+  const retry = page.getByRole("button", {
+    name: "Retry or load more provider results",
+  });
+  await expect(retry).toBeEnabled();
+  await retry.click();
+  await expect
+    .poll(() => page.evaluate(() => window.__SEARCH_PAGE_INPUTS__?.length))
+    .toBe(4);
+  await expect(retry).toBeEnabled();
+  const submitted = await page.evaluate(
+    () =>
+      window.__SEARCH_PAGE_INPUTS__ as Array<{
+        provider_id: string;
+        request: { page: number };
+      }>,
+  );
+  expect(
+    submitted.map((input) => [input.provider_id, input.request.page]),
+  ).toEqual([
+    ["tmdb", 1],
+    ["google-books", 1],
+    ["tvdb", 1],
+    ["google-books", 1],
+  ]);
+  await expect(results.getByRole("listitem").getByRole("heading")).toHaveText([
+    "Batch TMDB result",
+    "Batch TVDB result",
+  ]);
+  await expect(results.getByRole("listitem")).toHaveCount(2);
+  await expect(page.getByRole("alert")).toContainText(/receipt/i);
 });

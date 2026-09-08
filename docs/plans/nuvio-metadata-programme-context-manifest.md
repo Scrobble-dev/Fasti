@@ -4902,3 +4902,52 @@ M4 retains schema17/archive7 and all shared integration ownership. PR128 remains
 unmerged; migration18 is not allocated, no shared files are released, and no
 remaining programme scope is removed. Codex Security remains permanently
 excluded, including every delegate and fallback.
+
+### 2026-09-08 — Admit native Search pages through the existing SDK parser
+
+The shared admission slice is now locally verified. Tauri invokes Search
+without `FastiClient`, so native provider pages previously bypassed its generated
+shape and request-binding checks. The existing parser logic is extracted once
+and reused by both HTTP SDK and Discover. Submitted provider/page/offline/grains
+are captured before awaiting the response. Generated bounds, provider/grain
+binding, forward continuation and within-page uniqueness remain unchanged;
+no wire contract, capability ID or dependency is added. Native bridge byte-size
+qualification remains distinct from this parsed-shape check.
+
+Discover admits each provider page atomically against retained candidate
+coordinates and receipt IDs. Duplicate coordinates preserve the first row and
+its details link; a receipt reused for a different coordinate rejects only that
+provider's whole page. Prior rows, later valid providers, source order, local
+Records and failed-provider retry remain available. Duplicate-only pages still
+advance continuation. Per-row evidence uses the existing native definition-list
+layout, with no CSS or custom component. The list-wide cache summary derives
+from all retained rows and cannot incorrectly describe mixed evidence as one
+fresh or observed batch. Existing title/year possible-match grouping preserves
+distinct provider identities; it is not used for identity deduplication.
+
+The original native fixture reproduced four defects before the change, with
+the existing baseline passing. Preserved RED artifacts are at
+`/tmp/fasti-m4-native-page-admission-red-ce106c6c`. The expanded six-case leaf now
+passes with CI Chromium, one worker and zero retries (15.6 seconds):
+`/tmp/fasti-m4-native-six-case-970079-sep8.log`. It covers cross-page coordinate
+deduplication, receipt collision, non-forward continuation, mixed evidence,
+partial-provider page rejection/source order/targeted retry, and existing
+local/details/action routes. The mixed-evidence case also passes Axe at 1440
+and 320 pixels. A screenshot-only correction scrolls to the top before capture;
+that case passed again in 8.7 seconds, log
+`/tmp/fasti-m4-mixed-evidence-top-970079-sep8.log`. Root inspected both screenshots
+under `.gstack/qa-reports/screenshots/discover-search-mixed-evidence-*.png`:
+the evidence labels wrap visibly at 320 pixels. This is bounded fixture evidence,
+not packaged WebView, whole-application or full accessibility conformance.
+
+The shared-parser working diff passed the existing 67 SDK transport checks and
+full JavaScript validation (445 passed, two existing live-docs skips, recorded
+above). Independent current-slice source review is clear. Formatting and diff
+checks pass. No accepted review was restarted. Rollback is an ordinary revert
+of this slice, preserving data and prior domain/provider owners. Accumulated
+result memory bounds, exact local RecordId Search, media-domain/query-plan
+evidence, remaining interruption/focus cases, clean-head gates, hosted ARM
+qualification and merge remain open. A read-only agent is preparing only the
+exact local RecordId gap while root retains all production/shared ownership.
+Schema17/archive7, the permanent tool exclusion, and all later programme scope
+remain unchanged; no migration18 or shared-file handoff is allocated.

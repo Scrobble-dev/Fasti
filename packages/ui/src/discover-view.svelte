@@ -13,6 +13,7 @@
     SearchRecordActionDto,
   } from "./types.js";
   import { onDestroy, untrack } from "svelte";
+  import { parseSearchProviderPageForRequest } from "@fasti/sdk";
   import { dialogFocus } from "./dialog-focus.js";
   import {
     routeSlug,
@@ -130,12 +131,10 @@
     providerId: string;
     results: ProviderResult[];
     nextPage?: number;
-    cacheState?: "observed" | "fresh" | "stale_on_error";
   }
   interface ProviderPages {
     results: ProviderResult[];
     nextPages: Record<string, number>;
-    cacheState?: ProviderPage["cacheState"];
     problem?: string;
   }
   interface GroupedProviderResult {
@@ -148,7 +147,12 @@
   }
   let results: ProviderResult[] = $state([]);
   let providerNextPages = $state<Record<string, number>>({});
-  let providerCacheState: ProviderPage["cacheState"] = $state();
+  const providerCacheState = $derived(
+    results.length > 0 &&
+      results.every((result) => result.cacheState === results[0].cacheState)
+      ? results[0].cacheState
+      : undefined,
+  );
   let cachedOnly = $state(false);
   let detailKey = $state("");
   let candidateDetails = $state<Record<string, ProviderSearchCandidate>>({});
@@ -642,7 +646,6 @@
     detailController?.abort();
     results = [];
     providerNextPages = {};
-    providerCacheState = undefined;
     localResults = [];
     localNext = undefined;
     localProblem = "";
@@ -697,12 +700,18 @@
         ),
       };
     }
-    const response = await onSearchProviderPage(
-      provider.provider,
-      value,
-      page,
-      providerOffline(),
-      signal,
+    const providerId = provider.provider;
+    const request = { page, offline: providerOffline(), grains: [] };
+    const response = parseSearchProviderPageForRequest(
+      await onSearchProviderPage(
+        providerId,
+        value,
+        page,
+        request.offline,
+        signal,
+      ),
+      providerId,
+      request,
     );
     if (response.outcome === "unavailable") {
       throw new Error(
@@ -726,7 +735,6 @@
         cacheState: response.cache_state,
       })),
       nextPage: response.next_page ?? undefined,
-      cacheState: response.cache_state,
     };
   }
 
@@ -735,17 +743,71 @@
     value: string,
     pages: Record<string, number>,
     signal: AbortSignal,
+    previousResults: ProviderResult[] = [],
   ): Promise<ProviderPages> {
-    const settled = await Promise.allSettled(
-      providers.map((provider) =>
-        searchProviderResults(
-          provider,
-          value,
-          pages[provider.provider] ?? 1,
-          signal,
+    let admitted = previousResults;
+    const settled: PromiseSettledResult<ProviderPage>[] = (
+      await Promise.allSettled(
+        providers.map((provider) =>
+          searchProviderResults(
+            provider,
+            value,
+            pages[provider.provider] ?? 1,
+            signal,
+          ),
         ),
-      ),
-    );
+      )
+    ).map((outcome) => {
+      if (outcome.status === "rejected") return outcome;
+      try {
+        const coordinate = (result: ProviderResult) =>
+          JSON.stringify([
+            result.candidate.provider,
+            result.candidate.kind,
+            result.candidate.provider_id,
+          ]);
+        const coordinates = new Set(admitted.map(coordinate));
+        const receipts = new Map(
+          admitted.flatMap((result) =>
+            result.receipt
+              ? [
+                  [
+                    result.receipt.candidate_receipt_id,
+                    coordinate(result),
+                  ] as const,
+                ]
+              : [],
+          ),
+        );
+        const additions: ProviderResult[] = [];
+        for (const result of outcome.value.results) {
+          const key = coordinate(result);
+          const receiptId = result.receipt?.candidate_receipt_id;
+          if (
+            receiptId &&
+            receipts.has(receiptId) &&
+            receipts.get(receiptId) !== key
+          ) {
+            throw new Error(
+              "Provider Search reused a receipt for a different candidate.",
+            );
+          }
+          if (!coordinates.has(key)) {
+            additions.push(result);
+            coordinates.add(key);
+            if (receiptId) receipts.set(receiptId, key);
+          }
+        }
+        admitted = [...admitted, ...additions];
+        return {
+          status: "fulfilled",
+          value: { ...outcome.value, results: additions },
+        };
+      } catch (reason) {
+        // Reject only this provider's page; prior and other provider rows remain.
+        return { status: "rejected", reason };
+      }
+    });
     const completed = settled.flatMap((outcome) =>
       outcome.status === "fulfilled" ? [outcome.value] : [],
     );
@@ -768,18 +830,9 @@
             : [],
       ),
     );
-    const states = completed
-      .map((page) => page.cacheState)
-      .filter((state): state is NonNullable<typeof state> => Boolean(state));
     return {
       results: completed.flatMap((page) => page.results),
       nextPages,
-      cacheState:
-        states.length === completed.length &&
-        states.length > 0 &&
-        states.every((state) => state === states[0])
-          ? states[0]
-          : undefined,
       problem: problems.length > 0 ? problems.join(" ") : undefined,
     };
   }
@@ -795,7 +848,6 @@
       problem = "Use 1 to 256 UTF-8 bytes and no control characters.";
       results = [];
       providerNextPages = {};
-      providerCacheState = undefined;
       localResults = [];
       localNext = undefined;
       searched = false;
@@ -839,12 +891,10 @@
       if (providerOutcome.status === "fulfilled") {
         results = providerOutcome.value?.results ?? [];
         providerNextPages = providerOutcome.value?.nextPages ?? {};
-        providerCacheState = providerOutcome.value?.cacheState;
         problem = providerOutcome.value?.problem ?? "";
       } else {
         results = [];
         providerNextPages = {};
-        providerCacheState = undefined;
         problem = hostProblemText(
           providerOutcome.reason,
           "Provider Search failed. Local results are still available.",
@@ -883,11 +933,11 @@
         completedQuery,
         providerNextPages,
         controller.signal,
+        results,
       );
       if (revision !== searchRevision) return;
       results = [...results, ...page.results];
       providerNextPages = page.nextPages;
-      providerCacheState = page.cacheState;
       problem = page.problem ?? "";
     } catch (error) {
       if (revision !== searchRevision) return;
@@ -1310,6 +1360,18 @@
                   <div>
                     <dt>Provider ID</dt>
                     <dd><code>{candidate.provider_id}</code></dd>
+                  </div>
+                  <div>
+                    <dt>Evidence</dt>
+                    <dd>
+                      {result.cacheState === "fresh"
+                        ? "Fresh cache evidence"
+                        : result.cacheState === "observed"
+                          ? "Observed from provider"
+                          : result.cacheState === "stale_on_error"
+                            ? "Retained cache evidence"
+                            : "Live provider result"}
+                    </dd>
                   </div>
                 </dl>
                 {#if result.receipt && onOpenCandidate}
