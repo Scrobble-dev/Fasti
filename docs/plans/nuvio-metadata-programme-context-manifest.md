@@ -4804,3 +4804,52 @@ Rollback is an ordinary revert of this isolated repair, restoring prior locking
 without data conversion. M4 retains schema17/archive7 and shared ownership;
 PR128 remains unmerged, migration18 is not allocated, and remaining programme
 scope is unchanged. Codex Security remains permanently excluded for every lane.
+
+### 2026-09-08 — Publish offline repair; strengthen SDK page admission
+
+The normal fast-forward push published
+`0aa0cde2f2301d7f3805b320a9d124d132a7e8af`, tree
+`756ff6cebd29bb6ee1bc5ad93cce571b6fe1f178`, to PR128. Before publication, fresh
+ordinary CI Chromium passed all 212 cases with two workers and zero retries;
+the real-process Search journey then passed sequentially. Canonical, portable
+and runtime receipts all bind that exact clean source. The PR body was updated
+and read back without altering the title, history or remaining programme scope.
+Hosted CI run34214023467 targets that source. CodeQL and JavaScript/Rust advisory
+checks passed; other jobs were still running at this checkpoint. Codacy
+check102021803624 is ACTION_REQUIRED with exactly the same 23 annotations as
+the preceding head, not a new result requiring duplicate source fixes.
+
+The push's four Dependabot alerts predate this PR. The two image-size alerts
+remain version-matched with the existing tracked patch and actual-consumer
+regression; the two glib alerts retain the existing Desktop-maintainer exception
+and unresolved transitive risk. No dependency update, new waiver or dismissal
+was made. Existing Access qualification evidence is preserved.
+
+The next SDK-only admission slice reuses `FastiClient.searchProviderPage` and
+the already captured immutable submitted page. Both live and retained responses
+now reject non-forward continuation and duplicate `(kind, provider_id)` entries;
+retained responses also reject reused receipt IDs across different coordinates.
+JSON tuple keys avoid delimiter collisions. The existing 100-candidate bound
+caps the local sets; no new parser owner, dependency, API or schema was added.
+Distinct movie/TV identities with the same source ID remain distinct.
+
+The test-only RED ran against the unchanged built SDK and reproduced nine
+failing leaf cases (11 reported failures including parent rollups). Valid
+forward/null continuation and distinct-kind identities already passed. After
+the minimal parser fix, all 67 focused transport tests pass; independent
+read-only review found no concrete issue. Formatting follows the existing
+formatter. Full `pnpm test` passes (442 passed, two existing live-docs skips)
+including build, authored/generated contracts, examples, OKF and UI policy;
+log `/tmp/fasti-m4-sdk-admission-full-js-sep8.log`. This new SDK slice is local
+and not covered by the published 0aa hosted runs; its clean-head gates precede
+any later publication.
+
+This does not close native Discover admission, cross-page duplicate accumulation
+or mixed per-row cache labels: Tauri bypasses the SDK, and those changes still
+belong in the existing shared UI admission/accumulation owner. Local exact-Record
+lookup, all media-domain filters and their query-plan evidence, remaining
+interruption/focus coverage, full acceptance and merge gates also remain open.
+Root alone writes SDK/shared production; the test worker owns only the transport
+test leaf, with separate read-only review and advisory triage. Rollback is a
+normal revert of this admission slice, with no data conversion. Schema17/archive7
+and shared ownership stay with M4; no migration18 allocation or merge occurred.

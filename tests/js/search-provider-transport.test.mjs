@@ -642,6 +642,81 @@ test("provider Search response binding uses the submitted page despite caller mu
   }
 });
 
+test("provider Search continuation advances beyond the immutable submitted page", async (context) => {
+  for (const factory of [liveResponse, pageResponse]) {
+    for (const nextPage of [1, 2, 3, 4, null]) {
+      await context.test(`${factory.name} next page ${nextPage}`, async () => {
+        const body = { ...request(), page: 3 };
+        const expected = { ...factory(), page: 3, next_page: nextPage };
+        const valid = nextPage === null || nextPage > 3;
+        let sentPage;
+        const client = clientWith(async (_url, init) => {
+          sentPage = JSON.parse(init.body).page;
+          return json(expected);
+        });
+        const pending = client.searchProviderPage("tmdb", body);
+        body.page = valid ? 9 : 1;
+        if (valid) {
+          assert.deepEqual(await pending, expected);
+        } else {
+          await assert.rejects(pending, FastiProtocolError);
+        }
+        assert.equal(sentPage, 3);
+      });
+    }
+  }
+});
+
+test("provider Search candidate coordinates are unique by kind and provider ID", async (context) => {
+  for (const factory of [liveResponse, pageResponse]) {
+    for (const distinctKind of [false, true]) {
+      await context.test(
+        `${factory.name} distinct kind ${distinctKind}`,
+        async () => {
+          const entries = [candidate(1), candidate(2)];
+          entries[1].candidate.provider_id = entries[0].candidate.provider_id;
+          entries[1].candidate.title =
+            "A different title for the same coordinate";
+          if (distinctKind) {
+            entries[1].grain = "series";
+            entries[1].candidate.grain = "series";
+            entries[1].candidate.kind = "tv";
+          }
+          const expected = factory();
+          expected.candidates =
+            expected.outcome === "live"
+              ? entries.map((entry) => entry.candidate)
+              : entries;
+          const client = clientWith(async () => json(expected));
+          const pending = client.searchProviderPage("tmdb", {
+            ...request(),
+            grains: [],
+          });
+          if (distinctKind) {
+            assert.deepEqual(await pending, expected);
+          } else {
+            await assert.rejects(pending, FastiProtocolError);
+          }
+        },
+      );
+    }
+  }
+});
+
+test("provider Search retained pages reject repeated receipts across distinct coordinates", async () => {
+  const expected = {
+    ...pageResponse(),
+    candidates: [candidate(1), candidate(2)],
+  };
+  expected.candidates[1].candidate_receipt_id =
+    expected.candidates[0].candidate_receipt_id;
+  const client = clientWith(async () => json(expected));
+  await assert.rejects(
+    client.searchProviderPage("tmdb", request()),
+    FastiProtocolError,
+  );
+});
+
 test("provider Search response union rejects ambiguous, extra and malformed evidence", () => {
   for (const mutate of [
     (value) => {

@@ -1040,6 +1040,32 @@ export class FastiClient {
             "Provider Search response does not match the requested provider and page",
           );
         }
+        if (response.outcome === "live" || response.outcome === "page") {
+          const candidates =
+            response.outcome === "page"
+              ? response.candidates.map((receipt) => receipt.candidate)
+              : response.candidates;
+          const coordinates = new Set(
+            candidates.map((candidate) =>
+              JSON.stringify([candidate.kind, candidate.provider_id]),
+            ),
+          );
+          if (
+            (response.next_page != null &&
+              response.next_page <= requestedPage) ||
+            coordinates.size !== candidates.length ||
+            (response.outcome === "page" &&
+              new Set(
+                response.candidates.map(
+                  (receipt) => receipt.candidate_receipt_id,
+                ),
+              ).size !== candidates.length)
+          ) {
+            throw new FastiContractParseError(
+              "Provider Search continuation or candidate identity is invalid",
+            );
+          }
+        }
         return response;
       },
       responseLabel: "Provider Search response",
