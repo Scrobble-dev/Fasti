@@ -5794,3 +5794,40 @@ production overlap), then run the existing one-pass landing checklist. No M4b
 provider expansion, migration allocation or shared release is authorized by this
 checkpoint. Schema17/archive7 remain M4-owned; accepted dev15/5 does not permit
 C2 to reuse v16. Codex Security remains permanently excluded.
+
+### M4a clean delivery qualification — 2026-09-08
+
+The original M4 worktree retains both M4b identity-reader edits unchanged.
+Delivery moved to `/home/ryan/code/fasti-nuvio-metadata-programme-m4a-delivery`,
+branch `codex/nuvio-metadata-programme-m4a-delivery`. Rebase onto accepted dev
+`416843b40f6112e8498e9da976d48041b54886d5` completed without conflicts.
+Candidate `b622b7c533343e13d5c88a91cd4ddab2d0242f4a`, tree
+`94edfe35530d5b9d1aa008c956da3593cf844c65`, exactly matched Git's combined
+original-M4a-plus-dev tree. No committed M4 result was lost.
+
+Canonical handle1026 passed and emitted clean exact-source contract/portable
+receipts for that candidate. Complete JS handle85734 passed445 tests with2
+explicit skips. The first canonical attempt failed because an external Cargo
+cache lacked the checkout-local SDK helper path; local ignored debug/release
+mappings corrected it without a product change. Both logs remain in `/tmp/`.
+The developer checklist now explains that prerequisite.
+
+Uncovered Desktop formatting found drift in two Search files. Only rustfmt
+changes were applied; strict Desktop Clippy and tests then passed (handle38389).
+These formatting/docs changes require a new final commit and requalification;
+the b622b7c5 receipts are not relabelled as proof of that new tree. Browser,
+real-process, performance, hosted exact-head and merged-tree gates remain open.
+
+Read-only ARM triage found the published0aa0cde2 failure happened in synthetic
+cgroup discovery before daemon measurement. Current code adds bounded diagnostics,
+not a proven cause fix; use normal exact-head CI after publication. Codacy still
+reports23 unchanged annotations against that old published head. The two remaining
+bare-node/openssl questions were traced to fixed local harness commands on a
+trusted developer/CI toolchain, without provider-controlled executable selection.
+Accept that existing runner/PATH assumption; resolving PATH names would not add
+hostile-runner protection. Retain the other21 fixture-specific dispositions and
+inspect the next exact-head result, without a blanket scanner-clear claim.
+
+No M4b scope was removed. No shared release or migration/archive allocation has
+occurred. C2 received the material rebase checkpoint and remains coordinated on
+the single build/browser slot. Codex Security remains permanently excluded.

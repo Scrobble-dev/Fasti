@@ -5,13 +5,13 @@ use crate::{
 };
 use fasti_application::{
     CapabilityKey, FastiProblem, LocalSearchRequest, OutboundAccessPolicy, ProviderId,
-    ProviderOperationLease, ReadSearchCandidateRequest, RequestAccessContext,
-    ProviderIdentifierActionCommand, SearchCandidateActionCommand, SearchPageRequest,
-    SearchPersistencePort, SearchProviderQuery, SearchRecordAction,
+    ProviderIdentifierActionCommand, ProviderOperationLease, ReadSearchCandidateRequest,
+    RequestAccessContext, SearchCandidateActionCommand, SearchPageRequest, SearchPersistencePort,
+    SearchProviderQuery, SearchRecordAction,
 };
 use fasti_contracts::{
-    LocalSearchCursorDto, LocalSearchRequestDto, RecordSummaryDto,
-    ProviderIdentifierActionRequest, ProviderIdentifierActionResponse, SearchCandidateActionRequest,
+    LocalSearchCursorDto, LocalSearchRequestDto, ProviderIdentifierActionRequest,
+    ProviderIdentifierActionResponse, RecordSummaryDto, SearchCandidateActionRequest,
     SearchCandidateActionResponse, SearchCandidateDetailsResponse, SearchProviderPageRequest,
     SearchProviderPageResponse, SearchRecordActionDto,
 };
@@ -95,7 +95,9 @@ fn provider_query(
         .transpose()
         .map_err(|_| DesktopProblem::invalid_input("The Search region is invalid."))?;
     if request.grains.len() > 32 {
-        return Err(DesktopProblem::invalid_input("Too many provider Search grains."));
+        return Err(DesktopProblem::invalid_input(
+            "Too many provider Search grains.",
+        ));
     }
     let grains = request
         .grains
@@ -103,15 +105,8 @@ fn provider_query(
         .map(|grain| grain.parse::<Grain>())
         .collect::<Result<Vec<_>, _>>()
         .map_err(|_| DesktopProblem::invalid_input("A provider Search grain is invalid."))?;
-    let query = SearchProviderQuery::try_new(
-        query,
-        provider,
-        request.page,
-        locale,
-        region,
-        grains,
-    )
-    .map_err(|_| DesktopProblem::invalid_input("The provider Search page is invalid."))?;
+    let query = SearchProviderQuery::try_new(query, provider, request.page, locale, region, grains)
+        .map_err(|_| DesktopProblem::invalid_input("The provider Search page is invalid."))?;
     Ok((query, offline))
 }
 
@@ -137,7 +132,8 @@ pub(crate) async fn provider_page(
     } else {
         let lease = ProviderOperationLease::new(gate.lock_owned().await);
         service.search_page(request, false, lease).await
-    }.map_err(|problem| DesktopProblem::application(&problem))?;
+    }
+    .map_err(|problem| DesktopProblem::application(&problem))?;
     Ok(SearchProviderPageResponse::from_outcome(&query, outcome))
 }
 
@@ -185,7 +181,8 @@ pub(crate) async fn candidate_details(
     } else {
         let lease = ProviderOperationLease::new(gate.lock_owned().await);
         service.candidate_details(request, false, lease).await
-    }.map_err(|problem| DesktopProblem::application(&problem))?;
+    }
+    .map_err(|problem| DesktopProblem::application(&problem))?;
     Ok(SearchCandidateDetailsResponse::from(outcome))
 }
 
@@ -202,21 +199,34 @@ pub(crate) async fn provider_identifier_details(
         access: access.into(),
         provider: ProviderId::try_new(input.provider_id)
             .map_err(|_| DesktopProblem::invalid_input("The Search provider is invalid."))?,
-        grain: input.grain.parse()
+        grain: input
+            .grain
+            .parse()
             .map_err(|_| DesktopProblem::invalid_input("The Search grain is invalid."))?,
         provider_record_id: input.query.provider_record_id,
-        locale: input.query.locale.map(MetadataLocale::try_new).transpose()
+        locale: input
+            .query
+            .locale
+            .map(MetadataLocale::try_new)
+            .transpose()
             .map_err(|_| DesktopProblem::invalid_input("The Search locale is invalid."))?,
         outbound_policy: policy,
     };
     let service = ProviderSearchService::new(runtime, kernel);
     let outcome = if input.query.offline {
-        service.provider_identifier_details_offline(request.clone()).await
+        service
+            .provider_identifier_details_offline(request.clone())
+            .await
     } else {
         let lease = ProviderOperationLease::new(gate.lock_owned().await);
-        service.provider_identifier_details(request.clone(), false, lease).await
-    }.map_err(|problem| DesktopProblem::application(&problem))?;
-    Ok(fasti_contracts::ProviderIdentifierDetailsResponse::from((&request, outcome)))
+        service
+            .provider_identifier_details(request.clone(), false, lease)
+            .await
+    }
+    .map_err(|problem| DesktopProblem::application(&problem))?;
+    Ok(fasti_contracts::ProviderIdentifierDetailsResponse::from((
+        &request, outcome,
+    )))
 }
 
 pub(crate) async fn save_candidate(
@@ -362,12 +372,7 @@ pub(crate) fn local_records(
                     .and_then(|provenance| provenance.claim_provenance().provider_id())
                     .zip(summary.poster().value())
                     .and_then(|(provider, url)| {
-                        artwork.cached_locator(
-                            provider.as_str(),
-                            url,
-                            access,
-                            summary.record_id(),
-                        )
+                        artwork.cached_locator(provider.as_str(), url, access, summary.record_id())
                     });
                 LocalRecordSummary {
                     record: summary.into(),
@@ -468,10 +473,19 @@ mod tests {
         .unwrap();
         assert_eq!(page["records"][0]["record_id"], record.to_string());
         assert_eq!(page["records"][0]["title"]["value"], "Native Search title");
-        assert_eq!(page["records"][0]["original_title"]["value"], "Original title");
-        assert_eq!(page["records"][0]["overview"]["value"], "Complete local summary");
+        assert_eq!(
+            page["records"][0]["original_title"]["value"],
+            "Original title"
+        );
+        assert_eq!(
+            page["records"][0]["overview"]["value"],
+            "Complete local summary"
+        );
         assert_eq!(page["records"][0]["release_year"]["value"], "2026");
-        assert_eq!(page["records"][0]["poster_asset_path"], serde_json::Value::Null);
+        assert_eq!(
+            page["records"][0]["poster_asset_path"],
+            serde_json::Value::Null
+        );
     }
 
     #[test]
@@ -531,9 +545,9 @@ mod tests {
     #[tokio::test]
     async fn native_offline_search_reads_bypass_held_provider_gate_while_online_reads_wait() {
         use fasti_application::{
-            ConfigurationDigest, CredentialReference, CredentialRequirement,
-            ProviderCapabilityId, ProviderCapabilityState, ProviderCapabilityStatus,
-            ProviderCheckMetadata, ProviderCredentialStatus, ProviderStatePort,
+            ConfigurationDigest, CredentialReference, CredentialRequirement, ProviderCapabilityId,
+            ProviderCapabilityState, ProviderCapabilityStatus, ProviderCheckMetadata,
+            ProviderCredentialStatus, ProviderStatePort,
         };
         use fasti_provider_runtime::{PlatformCredentialVault, PLATFORM_CREDENTIAL_SERVICE};
         use std::time::Duration;
@@ -543,25 +557,27 @@ mod tests {
         let store = MemoryStore::default();
         complete_setup(&kernel, &store).unwrap();
         let access = records::require_access(&kernel, &store).unwrap();
-        kernel.put_provider_capability_state(
-            access.workspace_id(),
-            ProviderCapabilityState::try_new(
-                ProviderId::try_new("tmdb").unwrap(),
-                ProviderCapabilityId::try_new("metadata.search").unwrap(),
-                ProviderCapabilityStatus::Available,
-                1,
-                CredentialRequirement::BearerToken,
-                Some(CredentialReference::try_new("secret:native-search-test").unwrap()),
-                ProviderCredentialStatus::StoredUnverified,
-                ConfigurationDigest::parse("a".repeat(64)).unwrap(),
-                ProviderCheckMetadata::never_run(),
-                ProviderCheckMetadata::never_run(),
-            ).unwrap(),
-        ).unwrap();
-        let runtime = Arc::new(ProviderRuntime::new(Arc::new(PlatformCredentialVault::new(
-            PLATFORM_CREDENTIAL_SERVICE,
-            "native-search-offline-test",
-        ))));
+        kernel
+            .put_provider_capability_state(
+                access.workspace_id(),
+                ProviderCapabilityState::try_new(
+                    ProviderId::try_new("tmdb").unwrap(),
+                    ProviderCapabilityId::try_new("metadata.search").unwrap(),
+                    ProviderCapabilityStatus::Available,
+                    1,
+                    CredentialRequirement::BearerToken,
+                    Some(CredentialReference::try_new("secret:native-search-test").unwrap()),
+                    ProviderCredentialStatus::StoredUnverified,
+                    ConfigurationDigest::parse("a".repeat(64)).unwrap(),
+                    ProviderCheckMetadata::never_run(),
+                    ProviderCheckMetadata::never_run(),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let runtime = Arc::new(ProviderRuntime::new(Arc::new(
+            PlatformCredentialVault::new(PLATFORM_CREDENTIAL_SERVICE, "native-search-offline-test"),
+        )));
         let gate = Arc::new(tokio::sync::Mutex::new(()));
         let _held = gate.clone().lock_owned().await;
         let receipt = fasti_domain::SearchCandidateReceiptId::new_v7().to_string();
@@ -569,46 +585,74 @@ mod tests {
         for offline in [true, false] {
             for route in 0..3 {
                 let response = tokio::time::timeout(
-                    if offline { Duration::from_secs(1) } else { Duration::from_millis(25) },
+                    if offline {
+                        Duration::from_secs(1)
+                    } else {
+                        Duration::from_millis(25)
+                    },
                     async {
                         match route {
                             0 => provider_page(
-                                runtime.clone(), kernel.clone(), access,
+                                runtime.clone(),
+                                kernel.clone(),
+                                access,
                                 OutboundAccessPolicy::default(),
                                 ProviderPageInput {
                                     provider_id: "tmdb".into(),
                                     request: SearchProviderPageRequest {
-                                        query: "Not cached".into(), page: 1,
-                                        locale: None, region: None, grains: Vec::new(), offline,
+                                        query: "Not cached".into(),
+                                        page: 1,
+                                        locale: None,
+                                        region: None,
+                                        grains: Vec::new(),
+                                        offline,
                                     },
                                 },
                                 gate.clone(),
-                            ).await.map(|value| serde_json::to_value(value).unwrap()),
+                            )
+                            .await
+                            .map(|value| serde_json::to_value(value).unwrap()),
                             1 => candidate_details(
-                                runtime.clone(), kernel.clone(), access,
+                                runtime.clone(),
+                                kernel.clone(),
+                                access,
                                 OutboundAccessPolicy::default(),
                                 CandidateDetailsInput {
-                                    provider_id: "tmdb".into(), grain: "film".into(),
-                                    candidate_receipt_id: receipt.clone(), offline,
+                                    provider_id: "tmdb".into(),
+                                    grain: "film".into(),
+                                    candidate_receipt_id: receipt.clone(),
+                                    offline,
                                 },
                                 gate.clone(),
-                            ).await.map(|value| serde_json::to_value(value).unwrap()),
+                            )
+                            .await
+                            .map(|value| serde_json::to_value(value).unwrap()),
                             _ => provider_identifier_details(
-                                runtime.clone(), kernel.clone(), access,
+                                runtime.clone(),
+                                kernel.clone(),
+                                access,
                                 OutboundAccessPolicy::default(),
                                 ProviderIdentifierDetailsInput {
-                                    provider_id: "tmdb".into(), grain: "film".into(),
-                                    query: fasti_contracts::ProviderIdentifierDetailsQueryParameters {
-                                        provider_record_id: "438631".into(), locale: None, offline,
-                                    },
+                                    provider_id: "tmdb".into(),
+                                    grain: "film".into(),
+                                    query:
+                                        fasti_contracts::ProviderIdentifierDetailsQueryParameters {
+                                            provider_record_id: "438631".into(),
+                                            locale: None,
+                                            offline,
+                                        },
                                 },
                                 gate.clone(),
-                            ).await.map(|value| serde_json::to_value(value).unwrap()),
+                            )
+                            .await
+                            .map(|value| serde_json::to_value(value).unwrap()),
                         }
                     },
-                ).await;
+                )
+                .await;
                 if offline {
-                    let actual = response.expect("offline native read waited for provider gate")
+                    let actual = response
+                        .expect("offline native read waited for provider gate")
                         .unwrap();
                     let expected = match route {
                         0 => serde_json::json!({"outcome":"unavailable", "provider_id":"tmdb",
@@ -620,7 +664,10 @@ mod tests {
                     };
                     assert_eq!(actual, expected, "native route {route}");
                 } else {
-                    assert!(response.is_err(), "online native route {route} bypassed provider gate");
+                    assert!(
+                        response.is_err(),
+                        "online native route {route} bypassed provider gate"
+                    );
                 }
             }
         }

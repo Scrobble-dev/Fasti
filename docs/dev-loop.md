@@ -175,6 +175,13 @@ increment; it does not close remaining M4 or packaged-release acceptance.
    export TMPDIR=/tmp
    ```
 
+   Prefer the default Cargo target directory. If reusing an external
+   `CARGO_TARGET_DIR`, the SDK and runtime harnesses still launch binaries at
+   this checkout's literal `target/debug` path. Map that ignored directory
+   (and `target/release`) to the corresponding cache directories before the
+   run, or unset the override. Keep `target/fasti-receipts` local to this
+   checkout, and do not run a second writer against the shared build cache.
+
 2. Run the canonical gate once:
 
    ```bash

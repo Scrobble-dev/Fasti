@@ -589,7 +589,8 @@ async fn read_provider_identifier_details(
         configuration.outbound_policy().clone(),
         input,
         Arc::clone(&state.provider_operation_gate),
-    ).await
+    )
+    .await
 }
 
 #[cfg(feature = "desktop-runtime")]
