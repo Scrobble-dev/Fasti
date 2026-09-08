@@ -52,6 +52,19 @@ data roots or claim older binaries can read new candidate receipts. Forward
 correction remains the default; a downgrade needs an explicit verified cache
 disposition and exact target schema/archive compatibility.
 
+Native publication reads now choose the latest observation for each exact
+provider/source/locale/region variant before interpreting its value. Newer
+unknown, denied or terminal evidence cannot expose an older positive claim.
+Conflicting intrinsic facts across variants suppress the projection without
+deleting the observations. Eligible stale evidence still follows the existing
+profile last-known-good policy; ordinary title and artwork fallback is unchanged.
+The reader ranks narrow keys across complete history for exact selected Record
+IDs, then hydrates at most 256 latest variants per Record. This is not a cap on
+the history inspected. An authorized fresh refresh can show its new claim once
+before cache reuse is allowed, but cannot bypass conflicts or lifecycle checks.
+The shared ten-domain classifier, filter contracts and UI integration still
+remain required; this selector alone does not complete them.
+
 ## 1. Decision
 
 Build one source-neutral media surface inside Fasti.

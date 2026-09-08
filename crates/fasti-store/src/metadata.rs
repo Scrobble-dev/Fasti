@@ -2342,6 +2342,9 @@ struct MetadataReadEvidence<'a> {
 type MetadataVariant<'a> = (&'a str, &'a str, &'a str, Option<&'a str>, Option<&'a str>);
 type PolicyBoundFieldClaim = (FieldClaim, Option<ProviderResponseCachePolicy>);
 
+#[path = "metadata_native.rs"]
+mod native;
+
 fn metadata_variant(provenance: &FieldClaimProvenance) -> Option<MetadataVariant<'_>> {
     provenance
         .provider_id()
@@ -2685,6 +2688,7 @@ fn reusable_field_claims(
     read_at: chrono::DateTime<chrono::Utc>,
     key: (RecordId, &str),
     known: &mut std::iter::Peekable<impl Iterator<Item = ApplicationResult<KnownMetadataPolicy>>>,
+    live_claim: Option<MetadataClaimId>,
 ) -> ApplicationResult<Vec<FieldClaim>> {
     let evidence: Vec<_> = claims
         .iter()
@@ -2697,6 +2701,14 @@ fn reusable_field_claims(
         .collect();
     let mut allowed = reusable_metadata_evidence(&evidence, read_at);
     restrict_unknown_metadata(&evidence, &mut allowed, key, known, read_at)?;
+    if key.1 == fasti_application::GOOGLE_BOOKS_PRINT_TYPE_FIELD_KEY {
+        for ((claim, _), allowed) in claims.iter().zip(allowed.iter_mut()) {
+            if Some(claim.claim_id()) == live_claim {
+                *allowed = true;
+            }
+        }
+        native::restrict_to_latest_observations(claims, &mut allowed, read_at);
+    }
     Ok(claims
         .drain(..)
         .zip(allowed)
@@ -2713,6 +2725,19 @@ pub(crate) fn load_field_claims(
     correlation_id: RequestCorrelationId,
     read_at: chrono::DateTime<chrono::Utc>,
 ) -> ApplicationResult<Vec<FieldClaim>> {
+    if field_key.as_str() == fasti_application::GOOGLE_BOOKS_PRINT_TYPE_FIELD_KEY {
+        return Ok(native::load_publication_observations(
+            connection,
+            workspace_id,
+            &[record_id],
+            capability,
+            correlation_id,
+            read_at,
+            None,
+        )?
+        .remove(&record_id)
+        .unwrap_or_default());
+    }
     let mut statement = map_sql(
         connection.prepare(
             r#"
@@ -2801,6 +2826,7 @@ pub(crate) fn load_field_claims(
         read_at,
         (record_id, field_key.as_str()),
         &mut known,
+        None,
     )
 }
 
@@ -3163,6 +3189,7 @@ pub(crate) fn load_record_metadata_batch(
                     resolved_at,
                     (key.0, key.1.as_str()),
                     &mut known,
+                    None,
                 )?;
                 let value = resolve_profile_field(
                     overrides.remove(&key).as_ref(),
@@ -4873,20 +4900,37 @@ impl MetadataRefreshPersistencePort for SqliteKernel {
                 observed_claim.clone(),
                 field.claim().status_at(write_at),
             ));
-            let mut claims = load_field_claims(
-                &transaction,
-                workspace_id,
-                current.record_id(),
-                field.field_key(),
-                capability,
-                correlation_id,
-                write_at,
-            )?;
+            let native_field =
+                field.field_key().as_str() == fasti_application::GOOGLE_BOOKS_PRINT_TYPE_FIELD_KEY;
+            let mut claims = if native_field {
+                native::load_publication_observations(
+                    &transaction,
+                    workspace_id,
+                    &[current.record_id()],
+                    capability,
+                    correlation_id,
+                    write_at,
+                    Some(observed_claim.claim_id()),
+                )?
+                .remove(&current.record_id())
+                .unwrap_or_default()
+            } else {
+                load_field_claims(
+                    &transaction,
+                    workspace_id,
+                    current.record_id(),
+                    field.field_key(),
+                    capability,
+                    correlation_id,
+                    write_at,
+                )?
+            };
             // A response just received from the governed provider may be shown
             // once even when its policy forbids subsequent cached reuse.
-            if !claims
-                .iter()
-                .any(|claim| claim.claim_id() == observed_claim.claim_id())
+            if !native_field
+                && !claims
+                    .iter()
+                    .any(|claim| claim.claim_id() == observed_claim.claim_id())
             {
                 claims.push(observed_claim);
             }
@@ -5376,6 +5420,9 @@ mod tests {
     include!("metadata_response_policy_tests.rs");
     include!("metadata_reuse_tests.rs");
     include!("google_print_type_refresh_tests.rs");
+    include!("metadata_native_selection_tests.rs");
+    include!("metadata_native_query_tests.rs");
+    include!("metadata_native_refresh_tests.rs");
     use crate::test_support::TestNode;
     use fasti_application::{
         provider_identity_mapping, ApplyProviderMetadataCommand, CommitMetadataRefreshCommand,

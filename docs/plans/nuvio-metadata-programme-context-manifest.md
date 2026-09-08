@@ -5399,3 +5399,81 @@ release for its canonical gate. This does not release any shared source file.
 PR128 remains open at published head `0aa0cde2f2301d7f3805b320a9d124d132a7e8af`.
 Canonical and real-process receipts remain bound to their earlier exact heads;
 they are not relabeled by this local commit.
+
+### 2026-09-08: latest native observations before type interpretation
+
+The preceding reminder-only turn was no progress. This continuation revalidated
+HEAD `578e217e6243fda0be8cee83528a9a0913c07a78`, its five owned dirty source/test
+files, and PR128's unchanged open published head before integration. Access's
+canonical session55876 was terminal exit0 and Access explicitly confirmed no
+new local workload before M4 took the build slot. No shared source was released.
+
+The existing metadata owner now specializes only `google_books.print_type`:
+rank complete observation history for exact selected IDs, retain every latest
+provider/source/locale/region observation, then apply reuse and lifecycle
+admission before interpretation. The narrow-key coroutine precedes payload
+hydration; the effective lifecycle and known-policy stream reuse existing
+owners. A known restriction remains visible even when a newer NULL-policy row
+is the only hydrated observation. The 256 latest-claim payload bound is not a
+256-row history cutoff. The generic 500-ID metadata input limit is unchanged;
+Search still inspects at most 100 candidates per page.
+
+Newer unknown, negative, invalid, revoked or denied observations cannot revive
+an older BOOK claim. Equal-time and cross-variant intrinsic conflicts suppress
+the derived projection without deleting evidence. Eligible stale observations
+remain governed by the existing profile last-known-good choice. Ordinary
+title/artwork resolution is unchanged. Refresh may admit its exact server-owned
+new claim once before reuse, but that allowance runs before conflict, lifecycle
+and future-time checks. Native refresh no longer blindly re-appends a rejected
+claim. Cached reads and receipt replay receive no live allowance.
+
+Root retained the only production/shared writer. Three agents wrote distinct
+selection/query/refresh test leaves and returned ownership. Independent native
+read-only review found no further issue after the live-append fix. The initial
+focused failure was a lifecycle test missing mandatory evidence; supplying its
+fixture digest preserved the domain guard. All twelve initial focused cases
+passed, followed by full store499 unit plus3 integration tests and strict
+all-target store Clippy. Four consumer packages passed469 tests: application
+173+30, API110+7, runtime112 and contracts37. Six existing store unit ignores
+and one archive doctest ignore remain explicit. The added 10,000-Record test
+also passed: the actual native reader returns exactly100 sparse selected
+Records; the production observation query stays below1,000 full-scan steps.
+This is selector evidence, not whole-programme latency or memory qualification.
+
+Logs: `/tmp/fasti-m4-native-selection-focused-sep8.log`,
+`/tmp/fasti-m4-native-selection-store-sep8.log`,
+`/tmp/fasti-m4-native-selection-consumers-sep8.log`,
+`/tmp/fasti-m4-native-selection-clippy-sep8.log`, and
+`/tmp/fasti-m4-native-selection-10k-sep8.log`. The final full-store rerun after
+the 10k test addition is tracked separately; prior results are not relabeled.
+
+Parallel next-slice preparation identified four range-based identity-preview
+queries needing exact-ID scoping before reuse for sparse Search: lifecycle
+preflight, direct identifiers, lifecycle rows and assertions. Reuse the complete
+byte-budgeted Search identifier reader, not preview's32-ID cap. Preserve full
+assertion/lifecycle materialization and explicit Exact membership; accepted
+preview output does not define precedence among contradictory independent
+assertions. Empty domain filters must preserve existing digest bytes; Grain's
+UI fallback to Custom is not domain authority. Manga native admission and
+Game/Comic provider paths receive bounded read-only preparation. No speculative
+API, table, migration, capability or second roadmap is introduced.
+
+Full ten-domain classification/filtering, bounded action-state retention and
+remaining M4/later acceptance remain required. Schema17/archive7 and sole root
+shared ownership are unchanged. These headless changes make no new UI/a11y or
+release-performance claim. Forward correction preserves stored observations;
+native candidate downgrade limits documented above remain in force. No push,
+merge, migration18 allocation or shared-file handoff occurred. Codex Security
+remains permanently excluded, including every delegated agent and fallback.
+
+The final full-store session19142 is terminal exit0 with500 unit and3 integration
+passes, retaining six unit ignores and one doctest ignore. Together with the
+four consumer packages this is972 passes. Final store all-target strict Clippy
+session85161 is terminal exit0. Logs:
+`/tmp/fasti-m4-native-selection-store-final-sep8.log` and
+`/tmp/fasti-m4-native-selection-clippy-final-sep8.log`.
+Formatting and diff checks pass. No production code changed between the initial
+green full-store run and this final run; the additional change was the10k test.
+All M4 build/test handles are terminal; the resource slot is released to Access.
+This is not a shared-file release. No new canonical or real-browser receipt is
+claimed. The next writer must retain all thirteen native selection regressions.
