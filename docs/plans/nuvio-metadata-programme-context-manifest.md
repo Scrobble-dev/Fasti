@@ -4526,3 +4526,44 @@ contract. Freeze inclusion/progress/completion/rating/sort semantics before its
 writer starts. Preserve the existing M5 core -> bounded M7 membership -> M5
 Collection-filter sequence and do not interpret raw Nuvio JSON as native
 membership. M4 retains migration17/archive7 and all shared-file ownership.
+
+### 2026-09-08 — Resume preserved fixture corrections and reconcile bot heads
+
+The interrupted full Chrome run at `0eff52be730845036922c9a97e92ccbea2f0f70d`
+ended with 201 passes and two failures. Its canonical receipts were clean and
+passing, including 319 registered JavaScript checks; the chained real-process
+journey never started. Preserve the failed browser traces at
+`/tmp/fasti-m4-origin-first-browser-0eff52be/`, not as passing evidence.
+
+The first failed fixture omitted the CSRF cookie required by its tracking PUT.
+The second explicitly expected browser-session Records at a saved remote origin,
+contrary to the corrected session boundary. Two isolated test owners supplied
+corrections before the capacity interruption; no production changes were lost.
+On resume, root corrected one unverified test assertion to the actual HTTP 4173
+Origin while preserving the Secure cookie fixture. Independent review is CLEAR.
+The five focused Chrome cases now pass, including retained global tracking
+incompleteness after one Record mutation, browser-origin Records before/after
+reload, and saved-service health before/after reload. No production assertion was
+weakened and no HTTPS claim follows from these loopback protocol fixtures.
+
+Live PR128 diverged by bot-authored commit
+`a65154bdbf1e3e2d1761e4795e555b32bc659977`, whose parent is the previously
+published `7b26b9ce8123fdcd80c0e206fd726e1e65fb20b8`. Its additional TLS test
+dependency/server and Attach completion change require current-source review
+before normal integration. Do not reset, force-push or discard either history.
+PR134's bot child `d12310e41bb2b022af7864b7ab76577da17260b4` is Access-owned;
+root reported its provenance and did not edit that worktree. Access used and
+released a temporary validation resource slot; this was not a shared-file or
+migration handoff. Root may now rerun M4 gates sequentially.
+
+Read-only workfront preparation is retained: M6 needs M5's authoritative Library
+query before local smart rails; its catalog cache/status cannot reuse Search
+receipts. M8 reuses existing claims, overrides, cache and attribution but must
+complete nine not-yet-executable field groups, Find/alias execution, fallback
+acquisition and related-route fixtures. M9a rating normalization can be isolated
+after M4, but account/purpose partition and current credential/terms evidence must
+freeze before activation; catalogs bind M6/M7 owners. M11a's state machine can be
+isolated after M4, while durable schema/archive and lifecycle integration require
+one explicit writer. Existing process-local Nuvio state/outbox is not durable
+sync evidence. These preparations do not activate capabilities, allocate a
+migration or reduce any programme scope. Codex Security remains prohibited.

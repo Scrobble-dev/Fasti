@@ -207,6 +207,7 @@ test("global search and configured record actions use durable tracking state", a
   page,
 }) => {
   const recordId = "rec_01991f588e0070008000000000000002";
+  const csrf = "a".repeat(64);
   let updatedDisposition: string | null = null;
 
   await page.addInitScript(() => {
@@ -219,6 +220,15 @@ test("global search and configured record actions use durable tracking state", a
       }),
     );
   });
+  await page.context().addCookies([
+    {
+      name: "__Host-fasti_csrf",
+      value: csrf,
+      url: "https://127.0.0.1:4173",
+      secure: true,
+      sameSite: "Strict",
+    },
+  ]);
   await page.route(/\/api\/v1\/records(?:\?record_id=[^&]+)?$/, (route) =>
     route.fulfill({
       contentType: "application/json",
@@ -259,6 +269,10 @@ test("global search and configured record actions use durable tracking state", a
         return;
       }
       expect(request.method()).toBe("PUT");
+      expect(request.headers()["x-csrf-token"]).toBe(csrf);
+      expect(request.headers().authorization).toBeUndefined();
+      expect(new URL(request.url()).origin).toBe("http://127.0.0.1:4173");
+      expect(request.headers().origin).toBe("http://127.0.0.1:4173");
       updatedDisposition = request.postDataJSON().disposition;
       await route.fulfill({
         contentType: "application/json",
@@ -314,6 +328,17 @@ test("global search and configured record actions use durable tracking state", a
   );
   await expect(page.getByText("on hold", { exact: true })).toBeVisible();
   expect(updatedDisposition).toBe("on_hold");
+
+  await page.keyboard.press("Control+K");
+  await search.fill("Alpha");
+  await search.press("Enter");
+  await expect(
+    page.getByRole("combobox", { name: "Profile tracking state" }),
+  ).toHaveValue("on_hold");
+  await page.getByRole("button", { name: "Back to Library" }).click();
+  await expect(page.getByRole("status")).toContainText(
+    "Records still use their activity fallback.",
+  );
 
   await page.keyboard.press("Control+K");
   await expect(search).toBeFocused();

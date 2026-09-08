@@ -157,11 +157,12 @@ test("an invalid service URL cannot overwrite the last valid endpoint", async ({
   await expect(page.getByLabel("Service URL")).toHaveValue(validEndpoint);
 });
 
-test("a saved service URL owns browser record and status requests after reload", async ({
+test("browser records stay same-origin while saved service status survives reload", async ({
   page,
 }) => {
   const savedOrigin = `https://${"a".repeat(63)}.fasti.test`;
-  const recordUrls: string[] = [];
+  const browserRecordUrls: string[] = [];
+  const remoteRecordUrls: string[] = [];
   const healthUrls: string[] = [];
   await page.addInitScript((serviceUrl) => {
     localStorage.setItem(
@@ -170,29 +171,20 @@ test("a saved service URL owns browser record and status requests after reload",
     );
   }, savedOrigin);
   await page.route(`${savedOrigin}/api/v1/records`, async (route) => {
-    const request = route.request();
-    if (request.method() === "OPTIONS") {
-      await route.fulfill({
-        status: 204,
-        headers: {
-          "access-control-allow-origin": browserOrigin,
-          "access-control-allow-methods": "GET",
-          "access-control-allow-credentials": "true",
-        },
-      });
-      return;
-    }
-    recordUrls.push(request.url());
-    expect(request.headers().authorization).toBeUndefined();
+    remoteRecordUrls.push(route.request().url());
     await route.fulfill({
-      status: 200,
+      status: 418,
       contentType: "application/json",
       headers: {
         "access-control-allow-origin": browserOrigin,
         "access-control-allow-credentials": "true",
       },
-      body: JSON.stringify(recordResponse("Saved endpoint record")),
+      body: JSON.stringify({ error: "saved service must not receive records" }),
     });
+  });
+  await page.route(`${browserOrigin}/api/v1/records`, async (route) => {
+    browserRecordUrls.push(route.request().url());
+    await fulfillRecords(route, "Browser session record");
   });
   await page.route(`${savedOrigin}/api/v1/health`, async (route) => {
     healthUrls.push(route.request().url());
@@ -209,9 +201,20 @@ test("a saved service URL owns browser record and status requests after reload",
   await page.setViewportSize({ width: 320, height: 720 });
   await page.goto("/");
   await expect(
-    page.getByRole("heading", { name: "Saved endpoint record" }).first(),
+    page.getByRole("heading", { name: "Browser session record" }).first(),
   ).toBeVisible();
-  expect(recordUrls).toEqual([`${savedOrigin}/api/v1/records`]);
+  expect(browserRecordUrls).toEqual([`${browserOrigin}/api/v1/records`]);
+  expect(remoteRecordUrls).toEqual([]);
+
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "Browser session record" }).first(),
+  ).toBeVisible();
+  expect(browserRecordUrls).toEqual([
+    `${browserOrigin}/api/v1/records`,
+    `${browserOrigin}/api/v1/records`,
+  ]);
+  expect(remoteRecordUrls).toEqual([]);
 
   await page.getByRole("link", { name: "Service status" }).click();
   await expect(
@@ -219,6 +222,18 @@ test("a saved service URL owns browser record and status requests after reload",
   ).toBeVisible();
   expect(healthUrls).toEqual([`${savedOrigin}/api/v1/health`]);
   await expect(page.getByText(savedOrigin, { exact: true })).toBeVisible();
+
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "Local service available" }),
+  ).toBeVisible();
+  expect(healthUrls).toEqual([
+    `${savedOrigin}/api/v1/health`,
+    `${savedOrigin}/api/v1/health`,
+  ]);
+  expect(remoteRecordUrls).toEqual([]);
+  await expect(page.getByText(savedOrigin, { exact: true })).toBeVisible();
+  await expectNoHorizontalOverflow(page);
 });
 
 test("changing the browser service URL keeps Access on the browser origin", async ({
