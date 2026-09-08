@@ -4598,3 +4598,47 @@ and do not overwrite RED traces. UI typecheck also passes. These are behavioral
 checks, not visual, accessibility, public-provider or whole-programme acceptance.
 Clean-head canonical, full ordinary-browser and real-process gates remain due.
 M4 retains schema17/archive7 ownership; no migration18 or shared-file release.
+
+### 2026-09-08 — Exact-head gates and deterministic route-focus repair
+
+Clean commit `171f5cb813d5c0b507bc46f32cd736588ddeca5d`, tree
+`666ceabe7ef63d43b15dd01b9080c73e0e40fce0`, passed the canonical PR gate and
+the real-process ordinary-browser Search/Create/Attach/restart journey. The
+contract, portable and runtime receipts all bind that exact clean source. The
+runtime uses the existing disposable pinned TMDB TLS fixture, not public-provider
+acceptance. The full ordinary Chrome suite was **208 passed, one failed**;
+all six new Attach cases passed. Logs are
+`/tmp/fasti-m4-attach-final-{canonical,browser,runtime}-sep8.log`. Preserve failed
+browser evidence under `/tmp/fasti-m4-attach-full-browser-171f5cb8-sep8/`.
+
+The remaining full-browser failure was Search losing keyboard focus after Back
+to Library, not the corrected CSRF assertion. Source review found six route
+callbacks that unconditionally focused content in a later animation frame. A
+deterministic browser test held those callbacks, successfully invoked Ctrl+K,
+then released them and reproduced focus loss. The shared local route-focus
+helper now uses the existing Svelte post-render tick, latest-request fencing and
+an active-element guard. A removed prior control may fall back from body; newer
+focus intent is preserved. First-run navigation and teardown invalidate pending
+work. This retains normal route focus and specific Account/candidate targets.
+
+Independent current-diff review is CLEAR. UI typecheck passes; three focused
+Chrome checks pass without retries: the original journey, held-callback Search
+focus, and ordinary main-content focus. RED and GREEN logs/artifacts are at
+`/tmp/fasti-route-focus-red-171f5cb8*` and
+`/tmp/fasti-m4-route-focus-green*`. A fresh clean-head full gate is still due for
+this follow-up; do not relabel the 208/209 run as passing.
+
+A separate proven Account-dialog issue remains: its navigation callback
+duplicates settings selection instead of the specific Account target owner, and
+the native dialog's asynchronous close event restores opener focus. No dialog
+lifecycle change is bundled into this route-focus fix. Keep that work in scope.
+
+Next Search preparation is source-verified and read-only. Offline API dispatch
+must retain authenticated input and registered-provider lookup before branching,
+skip only mutex acquisition, and retain Store authorization, receipt partition,
+expiry and coordinate checks. Online work continues to require a real lease.
+Pagination must mirror existing native continuation/coordinate rules in the SDK,
+preserve first-admitted cross-page identity/order, reject conflicting reused
+receipts, and derive cumulative cache labels from admitted rows. Existing M1–M3
+owners remain authoritative; no public API, table, capability or next migration
+is allocated by these maps. M4 and all later programme scope remain active.

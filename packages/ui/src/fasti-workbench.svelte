@@ -538,7 +538,28 @@
     };
   }
 
+  let routeFocusGeneration = 0;
+
+  async function focusRouteTarget(id: string): Promise<void> {
+    const generation = ++routeFocusGeneration;
+    const previousFocus = document.activeElement;
+    await tick();
+    if (generation !== routeFocusGeneration) return;
+    // Rendering may remove the old control, but must not replace newer focus.
+    if (
+      document.activeElement !== previousFocus &&
+      !(
+        previousFocus &&
+        !previousFocus.isConnected &&
+        document.activeElement === document.body
+      )
+    )
+      return;
+    document.getElementById(id)?.focus();
+  }
+
   function select(section: Section): void {
+    routeFocusGeneration += 1;
     mobileNavigationOpen = false;
     if (section === "discover") {
       candidateRoute = undefined;
@@ -552,18 +573,14 @@
       window.history.pushState({}, "", path);
     }
     if (section !== "first_run") {
-      window.requestAnimationFrame(() =>
-        document.getElementById("main-content")?.focus(),
-      );
+      void focusRouteTarget("main-content");
     }
   }
 
   function openAccountSecurity(): void {
     settingsTab = "account";
     select("settings");
-    window.requestAnimationFrame(() =>
-      document.getElementById("account-security-title")?.focus(),
-    );
+    void focusRouteTarget("account-security-title");
   }
 
   function acceptAccessProjection(projection?: AccessProjectionResponse): void {
@@ -895,9 +912,7 @@
         "",
         path,
       );
-    window.requestAnimationFrame(() =>
-      document.getElementById("candidate-detail-title")?.focus(),
-    );
+    void focusRouteTarget("candidate-detail-title");
   }
 
   function openLiveSearchCandidate(candidate: ProviderSearchCandidate): void {
@@ -920,9 +935,7 @@
         "",
         path,
       );
-    window.requestAnimationFrame(() =>
-      document.getElementById("candidate-detail-title")?.focus(),
-    );
+    void focusRouteTarget("candidate-detail-title");
   }
 
   function closeSearchCandidate(): void {
@@ -934,9 +947,7 @@
     candidateRouteProblem = undefined;
     activeSection = "discover";
     window.history.replaceState(window.history.state ?? {}, "", "/discover");
-    window.requestAnimationFrame(() =>
-      document.getElementById("discover-title")?.focus(),
-    );
+    void focusRouteTarget("discover-title");
   }
 
   function clearDetailState(): void {
@@ -1691,9 +1702,7 @@
       void refreshAccessProjection();
     const sync = () => {
       activeSection = sectionFromPath();
-      window.requestAnimationFrame(() =>
-        document.getElementById("main-content")?.focus(),
-      );
+      void focusRouteTarget("main-content");
     };
     const revalidateAccess = () => {
       if (host.profileDataAuthority === "browser_session" && accessProjection)
@@ -1720,6 +1729,7 @@
     media.addEventListener("change", syncViewport);
     document.addEventListener("keydown", closeNavigationOnEscape);
     return () => {
+      routeFocusGeneration += 1;
       accessReadController?.abort();
       window.removeEventListener("popstate", sync);
       window.removeEventListener("focus", revalidateAccess);
