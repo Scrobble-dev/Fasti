@@ -229,6 +229,52 @@ async function pageCalls(page: Page): Promise<WindowPageCall[]> {
   return page.evaluate(() => window.__DISCOVER_WINDOWS__.calls);
 }
 
+test("replacement restores heading focus after its connected Continue button loses focus while disabled", async ({
+  page,
+}) => {
+  await installWindowHost(page);
+  await page.goto("/discover");
+  await submitSearch(page, "Windows");
+  const results = page.getByRole("region", { name: "Search results" });
+  const rows = results.getByRole("listitem");
+  await expect(rows).toHaveCount(100);
+  await page.getByRole("button", { name: moreLabel }).click();
+  await expect(rows).toHaveCount(200);
+  await page.evaluate(() => {
+    window.__DISCOVER_WINDOWS__.holdPage = 3;
+  });
+  const continuation = page.getByRole("button", { name: continueLabel });
+  await continuation.focus();
+  await expect(continuation).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect
+    .poll(() =>
+      page.evaluate(() => Boolean(window.__DISCOVER_WINDOWS__.release)),
+    )
+    .toBe(true);
+  await expect(continuation).toBeDisabled();
+  expect(
+    await continuation.evaluate((element: HTMLButtonElement) => ({
+      connected: element.isConnected,
+      disabled: element.disabled,
+    })),
+  ).toEqual({ connected: true, disabled: true });
+  // Model browsers that reset focus when a still-connected control is disabled.
+  await continuation.evaluate((element: HTMLButtonElement) => element.blur());
+  expect(
+    await page.evaluate(() => document.activeElement === document.body),
+  ).toBe(true);
+  await page.evaluate(() => window.__DISCOVER_WINDOWS__.release?.());
+  await expect(rows).toHaveCount(100);
+  await expect(
+    results.getByRole("heading", { name: "Search results", exact: true }),
+  ).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(
+    rows.first().getByRole("link", { name: "View details" }),
+  ).toBeFocused();
+});
+
 test("three provider result sets stay bounded and preserve one-step history without refetch", async ({
   page,
 }, testInfo) => {

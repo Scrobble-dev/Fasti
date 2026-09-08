@@ -5842,3 +5842,30 @@ the retained original TMDB intent, error and usable retry. The expanded recovery
 panel also passes Axe. All6 cases in that corrected leaf passed (handle37121).
 Only test/documentation changed after39ebbdbd; no new product defect was found.
 Final exact-tree qualification remains required for the resulting commit.
+
+### M4a hosted Chromium focus correction — 2026-09-08
+
+Published PR128 head `d54e3df2b45631871574aae3a8dcdf2d3f8b9d69`, tree
+`f63ce33ba1e19daa074f210eb5727ac6ae06b03b`, passed local canonical, complete JS
+(445 passed,2 explicit skips), Desktop strict lint/tests (90 passed,2 explicit
+ignores), ordinary Chrome (238 passed), real-process Search and both browser
+performance cases. The release 10,000-Record workload retained its p95 bound.
+Those are historical exact-source results, not proof of the following fix.
+
+Hosted CI34265471960 Browser job102193698742 failed the provider replacement
+heading-focus assertion on both attempts. Local CI-mode Chromium reproduced it.
+Disabling a still-connected Continue button can reset focus to the document body;
+the existing guard only allowed that recovery when the old control was removed.
+The shared Search replacement helper now also recognizes native disabled controls.
+Provider focus delegates to that existing helper after its unchanged revision and
+route guards. Newer user focus is still preserved; no new abstraction or API.
+
+The deterministic regression first failed on unchanged production (handle18068),
+after proving the button remained connected/disabled and focus was on body.
+With the fix, all11 provider/local-window tests passed in CI mode (handle26259),
+including newer-focus and keyboard-continuation checks. Independent read-only
+review found no concrete defect. The existing landing checklist now uses CI-mode
+Chromium for the final ordinary browser pass. Freeze and requalify the new commit;
+do not merge the failed d54 head or relabel its receipts. M4b remains incomplete,
+its dirty identity work is preserved, and schema17/archive7 stay M4-owned. No
+shared release or next migration allocation. Codex Security remains excluded.

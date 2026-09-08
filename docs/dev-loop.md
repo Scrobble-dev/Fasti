@@ -200,12 +200,14 @@ increment; it does not close remaining M4 or packaged-release acceptance.
    cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check
    cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --locked --offline --all-targets -- -D warnings
    cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --locked --offline
-   pnpm test:ui --grep-invert @performance --workers=1 --retries=0
+   CI=true pnpm test:ui --grep-invert @performance --workers=2 --retries=0
    ```
 
    `pnpm test` adds the complete JS regression suite and UI-policy checks.
    Keep the canonical Playwright configuration: it builds its prerequisites and
    requires free ports 4173 and 18422. Do not create an alternate startup path.
+   Use CI mode for hosted Chromium parity: local default Chrome alone did not
+   expose disabled-control focus loss. Keep zero retries for this final pass.
 
 4. Verify the actual prepared TrailBase input, then run the real-process Search
    journey. Replace the example path below with that installation; do not reuse

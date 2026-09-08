@@ -462,7 +462,7 @@
     if (
       document.activeElement === previous ||
       (previous &&
-        !previous.isConnected &&
+        (!previous.isConnected || previous.matches(":disabled")) &&
         document.activeElement === document.body)
     )
       heading?.focus();
@@ -1020,16 +1020,10 @@
       revision !== searchRevision ||
       route !== routeGeneration ||
       candidateRoute ||
-      candidateRouteProblem ||
-      (document.activeElement !== previousFocus &&
-        !(
-          previousFocus &&
-          !previousFocus.isConnected &&
-          document.activeElement === document.body
-        ))
+      candidateRouteProblem
     )
       return;
-    providerResultsHeading?.focus();
+    focusReplacedResults(providerResultsHeading, previousFocus);
   }
 
   async function search(event: SubmitEvent): Promise<void> {
