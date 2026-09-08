@@ -3,7 +3,13 @@ import {
   type AccessProjectionResponse,
   type ProblemDetails,
 } from "@fasti/sdk";
-import { expect, test, type Page, type Route } from "@playwright/test";
+import {
+  expect,
+  test,
+  type Page,
+  type Request,
+  type Route,
+} from "@playwright/test";
 import { mockAuthenticatedAccess } from "./test-helpers";
 
 const csrf = "a".repeat(64);
@@ -160,7 +166,12 @@ async function installBrowserAttachHost(
     releaseDetails: [],
   };
 
+  const heldRequests = new WeakSet<Request>();
   page.on("requestfailed", (request) => {
+    // Completed and replacement reads can also emit requestfailed. Only the
+    // deliberately held request proves this test's cancellation boundary.
+    if (!heldRequests.has(request)) return;
+    expect(request.failure()?.errorText).toBe("net::ERR_ABORTED");
     const url = new URL(request.url());
     if (url.pathname === "/api/v1/search/providers/tmdb/film/details") {
       fixture.detailRequestFailures += 1;
@@ -217,6 +228,7 @@ async function installBrowserAttachHost(
   await page.route("**/api/v1/search/providers/tmdb", async (route) => {
     fixture.providerSearchStarted += 1;
     if (fixture.holdProviderSearch) {
+      heldRequests.add(route.request());
       await new Promise<void>((resolve) => {
         fixture.releaseProviderSearch = resolve;
       });
@@ -254,6 +266,7 @@ async function installBrowserAttachHost(
         locale: url.searchParams.get("locale"),
       });
       if (fixture.holdDetails) {
+        heldRequests.add(request);
         await new Promise<void>((resolve) => {
           fixture.releaseDetails[index] = resolve;
         });
@@ -292,6 +305,7 @@ async function installBrowserAttachHost(
     if (!isAttachSearch) {
       fixture.mainSearchStarted += 1;
       if (fixture.holdMainSearch) {
+        heldRequests.add(route.request());
         await new Promise<void>((resolve) => {
           fixture.releaseMainSearch = resolve;
         });
@@ -306,6 +320,7 @@ async function installBrowserAttachHost(
     }
     fixture.targetSearchStarted += 1;
     if (fixture.holdTargetSearch) {
+      heldRequests.add(route.request());
       await new Promise<void>((resolve) => {
         fixture.releaseTargetSearch = resolve;
       });
@@ -730,6 +745,47 @@ test("Attach Cancel aborts its local Search without breaking a reopened picker",
   await expect(
     reopened.getByRole("radio", { name: /Dune local/ }),
   ).toBeVisible();
+});
+
+test("Attach cancellation ignores an unrelated failed Search request", async ({
+  page,
+}) => {
+  const fixture = await installBrowserAttachHost(page);
+  const dialog = await openAttachPicker(page);
+  fixture.holdTargetSearch = true;
+  await dialog.getByRole("button", { name: "Find Records" }).click();
+  await expect.poll(() => fixture.targetSearchStarted).toBe(1);
+
+  await page.route("**/api/v1/search/records", (route) =>
+    route.request().postDataJSON()?.query === "Unrelated Search"
+      ? route.abort("aborted")
+      : route.fallback(),
+  );
+  const unrelatedFailure = page.waitForEvent("requestfailed", {
+    predicate: (request) =>
+      request.url().endsWith("/api/v1/search/records") &&
+      request.postDataJSON()?.query === "Unrelated Search",
+  });
+  await page.evaluate(async () => {
+    await fetch("/api/v1/search/records", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ query: "Unrelated Search", grains: ["film"] }),
+    }).catch(() => undefined);
+  });
+  expect((await unrelatedFailure).failure()?.errorText).toBe(
+    "net::ERR_ABORTED",
+  );
+  expect(fixture.targetSearchFailures).toBe(0);
+  await expect(dialog).toBeVisible();
+
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).not.toBeVisible();
+  fixture.releaseTargetSearch?.();
+  await expect.poll(() => fixture.targetSearchFailures).toBe(1);
+  expect(fixture.targetSearchStarted).toBe(1);
+  await expect(dialog).not.toBeVisible();
+  expect(fixture.actionRequests).toEqual([]);
 });
 
 test("a profile change aborts a picker Search without breaking the new profile picker", async ({

@@ -4714,3 +4714,41 @@ The earlier 2231e919 canonical/211-browser/runtime results remain valid for that
 head only. These repairs change no schema, archive, public wire type, dependency
 or capability ID. M4 retains schema17/archive7 and shared-file ownership; no
 migration18 is allocated and all remaining M4/programme scope stays active.
+
+### 2026-09-08 — Publish repaired head and isolate hosted cancellation evidence
+
+Normal PR128 publication advanced a65154bd to
+`9f854966d61cc88f8dd4f798dc850206c49828d6`, tree
+`ceb94156d94292a6d238f8e10dabe2aefde6b53b`, preserving all commits. Canonical,
+211 ordinary Chrome cases and the real-process journey passed sequentially on
+that exact clean source. The three source receipts bind it. The PR remains WIP;
+no merge, migration18 allocation or shared-file release occurred.
+
+Hosted Browser UI quality then failed on that same source in run34193040907,
+job101954883260: 207 passed, three flaky and one failed cancellation case. The
+hosted result is not superseded by the local pass. Its uploaded trace contains
+the intended held request with ERR_ABORTED and distinct completed/replacement
+requests on the same endpoint with failure events. The fixture counted all
+failures by pathname/grain rather than identifying the deliberately held request.
+The reason Chromium reports those other failures is not established; no
+production retry or cancellation change is justified by this evidence.
+
+The test-only repair registers held Request identities before awaiting each
+hold, counts only their failure events, and requires ERR_ABORTED. Exact-one
+failure counts and replacement request/result assertions remain. A new negative
+browser case produces an actual unrelated failed request on the same endpoint
+and grain while the intended request stays held: it must not count as that
+request's cancellation. Before the fix it failed with expected0/received1;
+after the fix the entire 12-case leaf passed three repetitions with CI Chromium,
+two workers and zero retries (36 passed). Independent native review is clear.
+
+An initial new assertion incorrectly treated route.fulfill completion as proof
+of browser response delivery. The browser had already reported ERR_ABORTED;
+the assertion was replaced with exact request count, closed dialog and no action
+checks. Existing replacement assertions were not relaxed. Logs are
+`/tmp/fasti-m4-9f-hosted-browser-job101954883260.log`,
+`/tmp/fasti-m4-cancel-oracle-red.log`, and
+`/tmp/fasti-m4-cancel-oracle-green-final.log`. Fresh whole-head gates and hosted
+confirmation remain required after this checkpoint. Only the test leaf and this
+checkpoint change; production, contracts, schema17/archive7 and ownership remain
+unchanged. The permanent tool exclusion continues to apply.
