@@ -5831,3 +5831,14 @@ inspect the next exact-head result, without a blanket scanner-clear claim.
 No M4b scope was removed. No shared release or migration/archive allocation has
 occurred. C2 received the material rebase checkpoint and remains coordinated on
 the single build/browser slot. Codex Security remains permanently excluded.
+
+The next frozen candidate39ebbdbd/tree27d2a540 passed canonical, complete JS
+(445 passed,2 skipped), Desktop strict lint and tests (90 passed,2 explicit
+fixture/live-artwork ignores). Ordinary browser qualification finished237 passed
+and1 failure: a legacy assertion required an uncertain action error to disappear
+globally after navigation, conflicting with the approved persistent recovery UI.
+It now checks absence from the current route's alert while positively asserting
+the retained original TMDB intent, error and usable retry. The expanded recovery
+panel also passes Axe. All6 cases in that corrected leaf passed (handle37121).
+Only test/documentation changed after39ebbdbd; no new product defect was found.
+Final exact-tree qualification remains required for the resulting commit.

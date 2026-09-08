@@ -542,8 +542,28 @@ test("local and receipt-backed provider Search survive a partial source failure"
     page.getByRole("heading", { name: "Dune: Part Two", level: 1 }),
   ).toBeVisible();
   await expect(
-    page.getByText("The action response was interrupted."),
+    page
+      .getByRole("alert")
+      .filter({ hasText: "The action response was interrupted." }),
   ).toHaveCount(0);
+  const recovery = page.locator("#unconfirmed-record-actions");
+  await expect(recovery.locator("summary")).toHaveText(
+    "Unconfirmed Record actions (1)",
+  );
+  await recovery.locator("summary").click();
+  await expect(recovery).toContainText("tmdb");
+  await expect(recovery).toContainText("scr_01991f588e0070008000000000000001");
+  await expect(recovery.getByRole("status")).toHaveText(
+    "The action response was interrupted.",
+  );
+  await expect(
+    recovery.getByRole("button", {
+      name: "Retry original action",
+      exact: true,
+    }),
+  ).toBeEnabled();
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await recovery.locator("summary").click();
   await page.evaluate(() => {
     window.history.pushState(
       {},
