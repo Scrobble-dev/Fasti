@@ -139,7 +139,6 @@
   }
   interface GroupedProviderResult {
     result: ProviderResult;
-    index: number;
     groupIndex: number;
     groupPosition: number;
     groupSize: number;
@@ -180,7 +179,7 @@
   let routeGeneration = 0;
   let detailController: AbortController | undefined;
   let attachDialog = $state<HTMLDialogElement>();
-  let attachResult = $state<{ result: ProviderResult; index: number }>();
+  let attachResult = $state<{ result: ProviderResult }>();
   let attachQuery = $state("");
   let attachCompletedQuery = "";
   let attachRecords = $state<LocalSearchResponseDto["records"]>([]);
@@ -322,11 +321,11 @@
     attachSearched = false;
   }
 
-  function openAttachPicker(result: ProviderResult, index: number): void {
+  function openAttachPicker(result: ProviderResult): void {
     if (!onSearchAttachTargets || searching || actionKey || detailKey) return;
     closeAttachPicker();
     attachQuery = result.candidate.title;
-    attachResult = { result, index };
+    attachResult = { result };
   }
 
   $effect(() => {
@@ -403,14 +402,10 @@
       return;
     const generation = attachGeneration;
     const targetRecordId = attachRecordId;
-    const outcome = await runCandidateAction(
-      selection.result,
-      selection.index,
-      {
-        kind: "attach",
-        record_id: targetRecordId,
-      },
-    );
+    const outcome = await runCandidateAction(selection.result, {
+      kind: "attach",
+      record_id: targetRecordId,
+    });
     if (generation !== attachGeneration) return;
     if (outcome !== undefined) {
       closeAttachPicker();
@@ -420,19 +415,23 @@
     }
   }
 
-  function candidateKey(result: ProviderResult, index: number): string {
-    return (
-      result.receipt?.candidate_receipt_id ??
-      `${result.candidate.provider}:${result.candidate.kind}:${result.candidate.provider_id}:${index}`
-    );
+  function candidateCoordinate(result: ProviderResult): string {
+    return JSON.stringify([
+      result.candidate.provider,
+      result.candidate.kind,
+      result.candidate.provider_id,
+    ]);
+  }
+
+  function candidateKey(result: ProviderResult): string {
+    return result.receipt?.candidate_receipt_id ?? candidateCoordinate(result);
   }
 
   async function runCandidateAction(
     result: ProviderResult,
-    index: number,
     recordAction: SearchRecordActionDto = { kind: "create" },
   ): Promise<CreateRecordResult | null | undefined> {
-    const key = candidateKey(result, index);
+    const key = candidateKey(result);
     const action = result.receipt
       ? onCandidateReceiptAction
         ? () =>
@@ -483,14 +482,11 @@
     const candidate = routeCandidate;
     const receipt = routeReceipt;
     if (!candidate || (candidateRoute?.kind !== "live" && !receipt)) return;
-    const outcome = await runCandidateAction({ candidate, receipt }, 0);
+    const outcome = await runCandidateAction({ candidate, receipt });
     if (outcome) onOpenRecord?.(outcome.record_id);
   }
 
-  async function readCandidateDetails(
-    result: ProviderResult,
-    index: number,
-  ): Promise<void> {
+  async function readCandidateDetails(result: ProviderResult): Promise<void> {
     if (
       !result.receipt ||
       !onReadCandidate ||
@@ -499,7 +495,7 @@
       detailKey
     )
       return;
-    const key = candidateKey(result, index);
+    const key = candidateKey(result);
     const revision = searchRevision;
     detailController?.abort();
     const controller = new AbortController();
@@ -585,11 +581,8 @@
     Boolean(onSearchLocal) || selectedProviders.length > 0,
   );
   const groupedProviderResults = $derived.by(() => {
-    const groups = new Map<
-      string,
-      Array<{ result: ProviderResult; index: number }>
-    >();
-    results.forEach((result, index) => {
+    const groups = new Map<string, Array<{ result: ProviderResult }>>();
+    results.forEach((result) => {
       const title = result.candidate.title
         .normalize("NFKC")
         .toLowerCase()
@@ -599,25 +592,22 @@
       const key =
         title && result.candidate.release_year
           ? `${grain}\u001f${result.candidate.release_year}\u001f${title}`
-          : `unique\u001f${candidateKey(result, index)}`;
+          : `unique\u001f${candidateKey(result)}`;
       const group = groups.get(key) ?? [];
-      group.push({ result, index });
+      group.push({ result });
       groups.set(key, group);
     });
     return Array.from(groups.values()).flatMap((group, groupIndex) => {
       const providers = Array.from(
         new Set(group.map(({ result }) => result.candidate.provider)),
       );
-      return group.map(
-        ({ result, index }, groupPosition): GroupedProviderResult => ({
-          result,
-          index,
-          groupIndex,
-          groupPosition,
-          groupSize: group.length,
-          providers,
-        }),
-      );
+      return group.map(({ result }, groupPosition): GroupedProviderResult => ({
+        result,
+        groupIndex,
+        groupPosition,
+        groupSize: group.length,
+        providers,
+      }));
     });
   });
 
@@ -760,12 +750,7 @@
     ).map((outcome) => {
       if (outcome.status === "rejected") return outcome;
       try {
-        const coordinate = (result: ProviderResult) =>
-          JSON.stringify([
-            result.candidate.provider,
-            result.candidate.kind,
-            result.candidate.provider_id,
-          ]);
+        const coordinate = candidateCoordinate;
         const coordinates = new Set(admitted.map(coordinate));
         const receipts = new Map(
           admitted.flatMap((result) =>
@@ -1006,6 +991,11 @@
         <p class="problem" role="alert">{routeProblem}</p>
       {/if}
       {#if routeCandidate}
+        {@const routeKey = candidateKey({
+          candidate: routeCandidate,
+          receipt: routeReceipt,
+        })}
+        {@const routeCompleted = completedKeys.has(routeKey)}
         {#if routeCandidate.original_title}
           <p>Original title: {routeCandidate.original_title}</p>
         {/if}
@@ -1039,31 +1029,28 @@
           <button
             type="button"
             class="btn btn-primary"
-            aria-disabled={Boolean(actionKey) || routeLoading}
+            aria-disabled={Boolean(actionKey) || routeLoading || routeCompleted}
             onclick={runRoutedCandidateAction}
-            >{actionKey ? pendingLabel : actionLabel}</button
+            >{routeCompleted
+              ? completedLabel
+              : actionKey
+                ? pendingLabel
+                : actionLabel}</button
           >
           {#if onSearchAttachTargets}
             <button
               type="button"
               class="btn btn-outline-secondary"
-              disabled={Boolean(actionKey) ||
-                routeLoading ||
-                completedKeys.has(
-                  candidateKey(
-                    { candidate: routeCandidate, receipt: routeReceipt },
-                    0,
-                  ),
-                )}
+              disabled={Boolean(actionKey) || routeLoading || routeCompleted}
               onclick={() =>
-                openAttachPicker(
-                  { candidate: routeCandidate!, receipt: routeReceipt },
-                  0,
-                )}>Attach to existing Record</button
+                openAttachPicker({
+                  candidate: routeCandidate!,
+                  receipt: routeReceipt,
+                })}>Attach to existing Record</button
             >
           {/if}
         {/if}
-        {#if !attachResult && actionProblem && actionProblemKey === candidateKey({ candidate: routeCandidate, receipt: routeReceipt }, 0)}
+        {#if !attachResult && actionProblem && actionProblemKey === routeKey}
           <p class="problem" role="alert">{actionProblem}</p>
         {/if}
       {:else if !routeLoading && !routeProblem}
@@ -1305,10 +1292,10 @@
             </p>
           {/if}
           <ol>
-            {#each groupedProviderResults as grouped (candidateKey(grouped.result, grouped.index))}
-              {@const { result, index } = grouped}
+            {#each groupedProviderResults as grouped (candidateKey(grouped.result))}
+              {@const { result } = grouped}
               {@const candidate = result.candidate}
-              {@const resultKey = candidateKey(result, index)}
+              {@const resultKey = candidateKey(result)}
               <li
                 class:possible-duplicate={grouped.groupSize > 1}
                 aria-describedby={grouped.groupSize > 1
@@ -1408,7 +1395,7 @@
                     disabled={searching ||
                       Boolean(actionKey) ||
                       Boolean(detailKey)}
-                    onclick={() => readCandidateDetails(result, index)}
+                    onclick={() => readCandidateDetails(result)}
                   >
                     {detailKey === resultKey
                       ? "Loading details…"
@@ -1441,7 +1428,7 @@
                       Boolean(actionKey) ||
                       Boolean(detailKey) ||
                       completedKeys.has(resultKey)}
-                    onclick={() => runCandidateAction(result, index)}
+                    onclick={() => runCandidateAction(result)}
                   >
                     {#if completedKeys.has(resultKey)}
                       {completedLabel}
@@ -1459,7 +1446,7 @@
                         Boolean(actionKey) ||
                         Boolean(detailKey) ||
                         completedKeys.has(resultKey)}
-                      onclick={() => openAttachPicker(result, index)}
+                      onclick={() => openAttachPicker(result)}
                       >Attach to existing Record</button
                     >
                   {/if}

@@ -5123,3 +5123,35 @@ searchable with their real freshness/provenance. Contradictory intrinsic type
 observations across admitted locale/region variants require explicit conflict
 handling, not a fabricated multi-domain overlap. Separate legitimate Exact
 identity overlap remains governed by its own complete assertion lifecycle.
+
+### 2026-09-08: stable live candidate action identity
+
+The bounded retention review found an existing correctness defect before any
+window implementation: a live candidate in row two completed under an index-one
+key, while its canonical details route used index zero. Completion protection
+therefore missed the same coordinate and could dispatch another action with a
+new operation ID. This is evidence of repeat dispatch, not a claim that the
+fixture proved duplicate durable Records.
+
+The shared Discover owner now uses one JSON tuple of provider, kind and provider
+ID for live identity and existing coordinate deduplication. Retained candidates
+keep their exact receipt IDs. Positional identity plumbing was removed from
+grouping, details and Attach; routing, query order and all generation/authority
+guards remain unchanged. The routed primary action now shows the same completed
+label and aria-disabled state as its list row, and its handler still refuses
+replay. Operation-ID custody in Workbench is unchanged.
+
+The test-only worker extended the existing live-details fixture with an opt-in
+second candidate; other cases retain their original fixture. RED reproduced
+the missing completed route state. GREEN passes, including explicit click
+dispatch against the completed control and a second distinct candidate that
+remains actionable. Logs/artifacts use `/tmp/fasti-m4-live-key-{red,green,a11y}-sep8`
+(logs append `.log`). Scoped Axe, keyboard/back navigation, zero document
+horizontal overflow and 320/1440px completed-state screenshots pass; root
+visually inspected both. Existing Tabler classes/focus treatment were reused,
+with no CSS or dependency addition. This is not full accessibility conformance.
+UI typecheck reports zero errors/warnings; log
+`/tmp/fasti-m4-live-key-typecheck-sep8.log`. Independent exact-diff review is clear.
+Full JavaScript and browser regression gates are next. Rollback is an isolated
+revert with no data conversion. Aggregate retention and full domain integration
+remain open; no schema/archive allocation, publication or shared release occurred.
