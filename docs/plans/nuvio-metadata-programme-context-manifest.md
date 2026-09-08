@@ -5572,3 +5572,10 @@ format, changed Desktop file format and diff checks passed. All root workloads
 are terminal; the build slot can return to Access without releasing source.
 Canonical PR and real-process Search receipts remain bound to their older
 heads, not this new slice. No migration18 allocation or shared handoff occurred.
+
+The Kitsu implementation and verification record are committed locally at
+`64787ac48cc471589d4769786073c10cc4ed5289`, tree
+`0b3584eab3146c391bc08591a9dae928b9137533`. Clean status was verified after that
+commit. Access received the terminal resource-slot release with that exact
+identity. This final checkpoint annotation changes documentation only; no
+verification receipt is relabeled and no source ownership is released.
