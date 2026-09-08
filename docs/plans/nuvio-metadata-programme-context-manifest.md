@@ -5389,3 +5389,13 @@ Media-domain classification/filtering, bounded action-state retention and all
 remaining M4/later programme acceptance remain open. Schema17/archive7 and root
 shared ownership are unchanged; no migration18, push, merge or shared release.
 Codex Security remains permanently excluded from every agent and stage.
+
+The native publication-evidence slice is committed locally at
+`bad61543a25ed7ca7e5b92a0e4605acfcef38e05`, tree
+`e70cd7c8399fba89f29fac833112097f1d8d925f`, with clean status verified afterward.
+Final combined test session11984 and strict Clippy session4681 are terminal
+exit0. No M4 service/build remains active; Access received the resource-slot
+release for its canonical gate. This does not release any shared source file.
+PR128 remains open at published head `0aa0cde2f2301d7f3805b320a9d124d132a7e8af`.
+Canonical and real-process receipts remain bound to their earlier exact heads;
+they are not relabeled by this local commit.
