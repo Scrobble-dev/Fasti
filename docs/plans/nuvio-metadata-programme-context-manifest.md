@@ -5314,3 +5314,19 @@ embedded receipt is a different change requiring version review. Required next
 tests include absent-byte equality, malformed fact rejection, saved-fact v7
 round-trip/re-export and candidate-cache absence after restore. No such native
 fact implementation or compatibility test is claimed by this window slice.
+
+Remaining action-state retention is now traced: Discover's completed-key and
+created-Record maps survive query/provider/window changes until remount;
+Workbench retains uncertain operation keys until success or authority/endpoint
+reset. Arbitrary eviction would reopen completed-action dispatch or lose exact
+retry identity. A cap that disables ordinary actions after enough use is not
+accepted as completion. Existing `search_action_receipts` owns immutable durable
+receipts keyed by workspace/operation; `replay` and `replay_provider_identifier`
+already validate current authority, actor/profile and semantic digest. There is
+no read-only Search-action status capability yet; generic observation replay is
+a different owner. Bounded authoritative status lookup plus a session-scoped
+derivable operation identity is the next candidate design, not implemented or
+approved as a new production contract by this preparation. A missing receipt
+only means no committed receipt was observed, never proof of failed or absent
+in-flight work. Preserve this distinction and the full action capability when
+freezing the next implementation slice.
