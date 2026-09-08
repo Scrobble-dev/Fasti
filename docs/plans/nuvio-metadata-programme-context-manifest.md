@@ -5264,3 +5264,53 @@ The separate Access task released the resource slot, then was notified before
 these workloads; its C3 files remain untouched. Full M4/later programme scope,
 schema 17/archive 7 ownership and the permanent Codex Security exclusion remain
 unchanged. No push, merge, migration allocation or shared release occurred.
+
+The result-window production/test slice is committed at
+`4449a5d0ada28a7a1c3f2ab5f289a9c61b18a6f1`, tree
+`d331f3ae8ed7d708a9580734e3c09305bcf3a33c`. Full JavaScript verification passed
+445 tests with two existing live-documentation skips
+(`/tmp/fasti-m4-windows-full-js-sep8.log`). All 222 ordinary browser cases passed
+on the clean commit in 5.1 minutes
+(`/tmp/fasti-m4-browser-4449a5d0-sep8.log`). The 320/768/1440px navigation captures
+under that run's `discover-result-windows.re-0bc6b-tep-history-without-refetch-chrome`
+directory were visually inspected. Labels fit and remain readable. The 1440px
+capture includes the existing sidebar during its breakpoint transition; it is
+not a stable full-shell visual baseline or proof of zero layout shift.
+Scoped QA report: `.gstack/qa-reports/qa-report-search-windows-2026-09-08.md`.
+The separate unconfigured-browser visit correctly exposed the harness's 405
+for local Search rather than inventing results; it does not validate a real
+provider or durable local Search operation. All workload handles are terminal,
+fixture listeners are absent, and Access received the resource-slot release.
+Canonical and real-process receipts remain bound to their older exact commits.
+
+The discriminator preparation qualifies the earlier stale-selection closure.
+`reusable_metadata_evidence` in `crates/fasti-store/src/metadata.rs` governs reuse
+permission and deliberately preserves historical NULL-policy compatibility.
+The test `all_unknown_complete_claims_preserve_fresh_over_newer_stale_resolution`
+in `metadata_response_policy_tests.rs` proves ordinary display resolution can
+select older fresh text over a newer stale observation. Older NULL-policy
+evidence can also survive alongside a newer known-permissive policy. Do not
+change this display behavior globally. A discriminator must additionally select
+the applicable observation/lifecycle before interpreting BOOK/MANGA/etc., so
+newer negative, unknown, invalid or revoked evidence cannot resurrect an older
+positive. Reuse policy/provenance decoding and bounded history owners, with a
+minimally distinct semantic selector. Same-response compound facts must not join
+different digests/timestamps. Exact selected-ID assertion retrieval remains
+needed: the existing preview range reader is not safe unchanged for sparse
+Search selections; require effective Accepted and Exact evidence, complete
+lifecycle and bounded payload hydration.
+
+Archive preparation corrects the candidate ownership map: archive v7 exports
+durable Search action receipts, not `search_pages` or `search_candidate_receipts`.
+Restore explicitly requires those cache tables to remain empty. An optional
+bounded native fact in `SearchCandidateData` therefore does not itself require
+archive v8. New readers must preserve absent-field canonical bytes with omitted
+absent serialization; absent historical evidence is not an affirmative unknown
+observation. Old readers use `deny_unknown_fields` and reject populated new
+candidate fields, so local-cache rollback handling still needs explicit proof.
+Saved facts in existing generic FieldClaim/provenance streams can use archive7
+without new row properties. Adding properties to a frozen archive row or
+embedded receipt is a different change requiring version review. Required next
+tests include absent-byte equality, malformed fact rejection, saved-fact v7
+round-trip/re-export and candidate-cache absence after restore. No such native
+fact implementation or compatibility test is claimed by this window slice.
