@@ -5208,3 +5208,59 @@ Required M5 negatives include saved+completed coexistence, unsaved Search Record
 excluded from saved Library, independent clear operations, profile isolation,
 selection beyond row 500, and missing state not matching Plan to Watch. All
 shared integration remains M4-owned until its explicit merged handoff.
+
+### 2026-09-08: bounded provider result windows
+
+Continuation revalidated the dirty worktree at `105a1c19c83dbe4438e7e02338e374a22ab75678`.
+The prior user-correction turn was no progress on implementation; this slice
+resumes the preserved in-progress Search change. PR #128 remains open against
+`dev`, published head `0aa0cde2f2301d7f3805b320a9d124d132a7e8af`.
+No published or committed M3/M4 work was replaced.
+
+The existing Discover component now limits each retained provider result set
+to 200 rows and 16 MiB of normalized UTF-8 JSON, retaining one adjacent set.
+Previous/Next swaps exact rows, receipts, cache labels, inline details and retry
+positions without provider I/O. Continue is explicit; atomic page admission
+preserves a capacity-blocked source's submitted page, and blocked sources get
+priority on replacement. All-source failure preserves current/history; partial
+replacement retains old rows through Previous and failed positions for retry.
+Receipt collisions and coordinate deduplication cover both retained sets before
+eviction. New query/provider selection clears history. Open Attach, details and
+actions guard replacement/navigation; existing completion and operation-ID
+owners are unchanged. No new dependency, API, migration, archive or browser
+storage is introduced. This is a retained-provider-payload bound, not a whole
+heap, transient-fan-out, local-row or action-history qualification.
+
+Independent read-only review found a slow replacement could override newer
+keyboard focus. Both navigation paths now reuse the Workbench focus-ownership
+pattern with query/route generations. The first browser run also reproduced
+34px horizontal overflow at 320px. Tabler `text-wrap mw-100` on the two provider
+navigation controls fixes the label width without hiding content or adding CSS.
+The failed screenshot was inspected at
+`/tmp/fasti-m4-windows-sep8/discover-result-windows.re-0bc6b-tep-history-without-refetch-chrome/test-failed-1.png`.
+
+Four focused native-host browser regressions pass (38.6 seconds), log
+`/tmp/fasti-m4-windows-green-sep8.log`. Coverage includes three result sets,
+no-refetch navigation, provider fairness, exact retries, all/partial failures,
+duplicate-only continuation, stale response rejection, delayed-response focus,
+101-row rejection, scoped Axe and 320px reflow. The separate byte test proves
+a shape-valid 100-row multibyte response can fit below 16 MiB on the wire while
+normalized retained rows exceed it because receipt candidates are duplicated;
+rejection leaves 200 prior rows and the exact retry position intact. These are
+presentation fixtures, not public provider or packaged-host acceptance.
+UI typecheck passes with zero errors/warnings. Full JavaScript, final screenshot
+and ordinary browser gates are in progress; no exact final gate claim yet.
+Rollback is an isolated source revert with no data conversion.
+
+Parallel allocation remains root-only production/shared integration writing.
+Two agents owned distinct new regression leaves and returned ownership; one
+reviewed the exact implementation read-only and cleared the focus fix. The
+other slots now prepare Google native-type retention and shared domain
+projection read-only. Google `printType` retention is same-response work, not
+blocked by joined-response support: its existing parser, metadata admission,
+retained candidate and cached/refetched action owners must all preserve the
+native fact. A transient parser field alone cannot satisfy offline Search.
+The separate Access task released the resource slot, then was notified before
+these workloads; its C3 files remain untouched. Full M4/later programme scope,
+schema 17/archive 7 ownership and the permanent Codex Security exclusion remain
+unchanged. No push, merge, migration allocation or shared release occurred.

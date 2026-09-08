@@ -12,7 +12,7 @@
     SearchProviderPageResponse,
     SearchRecordActionDto,
   } from "./types.js";
-  import { onDestroy, untrack } from "svelte";
+  import { onDestroy, tick, untrack } from "svelte";
   import { parseSearchProviderPageForRequest } from "@fasti/sdk";
   import { dialogFocus } from "./dialog-focus.js";
   import {
@@ -136,6 +136,18 @@
     results: ProviderResult[];
     nextPages: Record<string, number>;
     problem?: string;
+    accepted: boolean;
+    full: boolean;
+    blockedProviders: string[];
+  }
+  interface ProviderWindow {
+    results: ProviderResult[];
+    nextPages: Record<string, number>;
+    problem: string;
+    full: boolean;
+    blockedProviders: string[];
+    details: Record<string, ProviderSearchCandidate>;
+    detailProblems: Record<string, string>;
   }
   interface GroupedProviderResult {
     result: ProviderResult;
@@ -146,6 +158,15 @@
   }
   let results: ProviderResult[] = $state([]);
   let providerNextPages = $state<Record<string, number>>({});
+  let providerWindowFull = $state(false);
+  let blockedProviders = $state<string[]>([]);
+  let otherProviderWindow = $state<{
+    direction: "previous" | "next";
+    window: ProviderWindow;
+  }>();
+  let providerResultsHeading = $state<HTMLElement>();
+  const MAX_PROVIDER_WINDOW_ROWS = 200;
+  const MAX_PROVIDER_WINDOW_BYTES = 16 * 1024 * 1024;
   const providerCacheState = $derived(
     results.length > 0 &&
       results.every((result) => result.cacheState === results[0].cacheState)
@@ -636,6 +657,9 @@
     detailController?.abort();
     results = [];
     providerNextPages = {};
+    providerWindowFull = false;
+    blockedProviders = [];
+    otherProviderWindow = undefined;
     localResults = [];
     localNext = undefined;
     localProblem = "";
@@ -734,8 +758,13 @@
     pages: Record<string, number>,
     signal: AbortSignal,
     previousResults: ProviderResult[] = [],
+    retainedResults: ProviderResult[] = [],
   ): Promise<ProviderPages> {
     let admitted = previousResults;
+    const rowBytes = (rows: ProviderResult[]) =>
+      new TextEncoder().encode(JSON.stringify(rows)).byteLength;
+    let admittedBytes = rowBytes(previousResults);
+    const capacityBlocked = new Set<number>();
     const settled: PromiseSettledResult<ProviderPage>[] = (
       await Promise.allSettled(
         providers.map((provider) =>
@@ -747,13 +776,22 @@
           ),
         ),
       )
-    ).map((outcome) => {
+    ).map((outcome, index) => {
       if (outcome.status === "rejected") return outcome;
       try {
+        if (
+          outcome.value.results.length > 100 ||
+          rowBytes(outcome.value.results) > MAX_PROVIDER_WINDOW_BYTES
+        ) {
+          throw new Error(
+            "Provider Search returned a page that exceeds the result limits.",
+          );
+        }
         const coordinate = candidateCoordinate;
-        const coordinates = new Set(admitted.map(coordinate));
+        const evidence = [...retainedResults, ...admitted];
+        const coordinates = new Set(evidence.map(coordinate));
         const receipts = new Map(
-          admitted.flatMap((result) =>
+          evidence.flatMap((result) =>
             result.receipt
               ? [
                   [
@@ -783,7 +821,21 @@
             if (receiptId) receipts.set(receiptId, key);
           }
         }
+        // Both arrays include brackets; combining nonempty arrays adds one comma.
+        const combinedBytes =
+          admittedBytes +
+          rowBytes(additions) -
+          2 +
+          (admitted.length > 0 && additions.length > 0 ? 1 : 0);
+        if (
+          admitted.length + additions.length > MAX_PROVIDER_WINDOW_ROWS ||
+          combinedBytes > MAX_PROVIDER_WINDOW_BYTES
+        ) {
+          capacityBlocked.add(index);
+          throw new Error("Provider result set is full.");
+        }
         admitted = [...admitted, ...additions];
+        admittedBytes = combinedBytes;
         return {
           status: "fulfilled",
           value: { ...outcome.value, results: additions },
@@ -797,7 +849,7 @@
       outcome.status === "fulfilled" ? [outcome.value] : [],
     );
     const problems = settled.flatMap((outcome, index) =>
-      outcome.status === "rejected"
+      outcome.status === "rejected" && !capacityBlocked.has(index)
         ? [
             hostProblemText(
               outcome.reason,
@@ -819,7 +871,69 @@
       results: completed.flatMap((page) => page.results),
       nextPages,
       problem: problems.length > 0 ? problems.join(" ") : undefined,
+      accepted: completed.length > 0,
+      full:
+        capacityBlocked.size > 0 ||
+        admitted.length >= MAX_PROVIDER_WINDOW_ROWS ||
+        admittedBytes >= MAX_PROVIDER_WINDOW_BYTES,
+      blockedProviders: [...capacityBlocked].map(
+        (index) => providers[index].provider,
+      ),
     };
+  }
+
+  function currentProviderWindow(): ProviderWindow {
+    return {
+      results,
+      nextPages: providerNextPages,
+      problem,
+      full: providerWindowFull,
+      blockedProviders,
+      details: candidateDetails,
+      detailProblems: candidateDetailProblems,
+    };
+  }
+
+  async function switchProviderWindow(): Promise<void> {
+    const other = otherProviderWindow;
+    if (!other || searching || actionKey || detailKey || attachResult) return;
+    const previousFocus = document.activeElement;
+    const revision = searchRevision;
+    const route = routeGeneration;
+    otherProviderWindow = {
+      direction: other.direction === "previous" ? "next" : "previous",
+      window: currentProviderWindow(),
+    };
+    results = other.window.results;
+    providerNextPages = other.window.nextPages;
+    problem = other.window.problem;
+    providerWindowFull = other.window.full;
+    blockedProviders = other.window.blockedProviders;
+    candidateDetails = other.window.details;
+    candidateDetailProblems = other.window.detailProblems;
+    await focusProviderResults(previousFocus, revision, route);
+  }
+
+  async function focusProviderResults(
+    previousFocus: Element | null,
+    revision: number,
+    route: number,
+  ): Promise<void> {
+    await tick();
+    if (
+      revision !== searchRevision ||
+      route !== routeGeneration ||
+      candidateRoute ||
+      candidateRouteProblem ||
+      (document.activeElement !== previousFocus &&
+        !(
+          previousFocus &&
+          !previousFocus.isConnected &&
+          document.activeElement === document.body
+        ))
+    )
+      return;
+    providerResultsHeading?.focus();
   }
 
   async function search(event: SubmitEvent): Promise<void> {
@@ -833,12 +947,18 @@
       problem = "Use 1 to 256 UTF-8 bytes and no control characters.";
       results = [];
       providerNextPages = {};
+      providerWindowFull = false;
+      blockedProviders = [];
+      otherProviderWindow = undefined;
       localResults = [];
       localNext = undefined;
       searched = false;
       return;
     }
     const providers = [...selectedProviders];
+    providerWindowFull = false;
+    blockedProviders = [];
+    otherProviderWindow = undefined;
     cancelSearchRead();
     const controller = new AbortController();
     searchController = controller;
@@ -876,6 +996,8 @@
       if (providerOutcome.status === "fulfilled") {
         results = providerOutcome.value?.results ?? [];
         providerNextPages = providerOutcome.value?.nextPages ?? {};
+        providerWindowFull = providerOutcome.value?.full ?? false;
+        blockedProviders = providerOutcome.value?.blockedProviders ?? [];
         problem = providerOutcome.value?.problem ?? "";
       } else {
         results = [];
@@ -903,9 +1025,22 @@
       !onSearchProviderPage ||
       searching ||
       actionKey ||
-      detailKey
+      detailKey ||
+      attachResult ||
+      otherProviderWindow?.direction === "next"
     )
       return;
+    const replace = providerWindowFull;
+    if (replace) {
+      providers.sort(
+        (left, right) =>
+          Number(blockedProviders.includes(right.provider)) -
+          Number(blockedProviders.includes(left.provider)),
+      );
+    }
+    const previous = currentProviderWindow();
+    const previousFocus = document.activeElement;
+    const route = routeGeneration;
     cancelSearchRead();
     const controller = new AbortController();
     searchController = controller;
@@ -918,12 +1053,30 @@
         completedQuery,
         providerNextPages,
         controller.signal,
-        results,
+        replace ? [] : results,
+        [
+          ...(otherProviderWindow?.window.results ?? []),
+          ...(replace ? results : []),
+        ],
       );
       if (revision !== searchRevision) return;
-      results = [...results, ...page.results];
+      if (replace && !page.accepted) {
+        problem = page.problem ?? "Fasti could not load the next result set.";
+        return;
+      }
+      if (replace) {
+        otherProviderWindow = { direction: "previous", window: previous };
+        candidateDetails = {};
+        candidateDetailProblems = {};
+      }
+      results = [...(replace ? [] : results), ...page.results];
       providerNextPages = page.nextPages;
       problem = page.problem ?? "";
+      providerWindowFull = page.full;
+      blockedProviders = page.blockedProviders;
+      if (replace) {
+        await focusProviderResults(previousFocus, revision, route);
+      }
     } catch (error) {
       if (revision !== searchRevision) return;
       problem = hostProblemText(
@@ -1249,7 +1402,12 @@
         aria-labelledby="search-results-title"
         aria-busy={searching}
       >
-        <svelte:element this={embedded ? "h4" : "h2"} id="search-results-title">
+        <svelte:element
+          this={embedded ? "h4" : "h2"}
+          id="search-results-title"
+          tabindex="-1"
+          bind:this={providerResultsHeading}
+        >
           Search results
         </svelte:element>
         {#if searching}
@@ -1477,13 +1635,39 @@
             Provider results appear here when a configured source is available.
           </p>
         {/if}
-        {#if Object.keys(providerNextPages).length > 0 && onSearchProviderPage}
+        {#if otherProviderWindow}
           <button
             type="button"
-            class="btn btn-outline-secondary"
-            disabled={searching || Boolean(actionKey) || Boolean(detailKey)}
+            class="btn btn-outline-secondary text-wrap mw-100"
+            disabled={searching ||
+              Boolean(actionKey) ||
+              Boolean(detailKey) ||
+              Boolean(attachResult)}
+            onclick={switchProviderWindow}
+            >{otherProviderWindow.direction === "previous"
+              ? "Previous provider result set"
+              : "Next provider result set"}</button
+          >
+        {/if}
+        {#if Object.keys(providerNextPages).length > 0 && onSearchProviderPage && otherProviderWindow?.direction !== "next"}
+          {#if providerWindowFull}
+            <p role="status">
+              This result set is full. Continuing keeps it as the previous set
+              and replaces any older set. Restart this search to revisit older
+              results.
+            </p>
+          {/if}
+          <button
+            type="button"
+            class="btn btn-outline-secondary text-wrap mw-100"
+            disabled={searching ||
+              Boolean(actionKey) ||
+              Boolean(detailKey) ||
+              Boolean(attachResult)}
             onclick={loadMoreProvider}
-            >Retry or load more provider results</button
+            >{providerWindowFull
+              ? "Continue in a new result set"
+              : "Retry or load more provider results"}</button
           >
         {/if}
       </section>

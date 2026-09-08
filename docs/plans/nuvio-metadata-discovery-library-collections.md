@@ -727,6 +727,24 @@ Search must:
 - let one governed action create or attach a Record;
 - expose unresolved and partial identity.
 
+Provider result-window disposition (2026-09-08): the existing Discover owner
+retains at most 200 normalized provider rows and 16 MiB of their UTF-8 JSON per
+result set, with exactly one previous/next set available without refetching.
+Per-provider pages are admitted atomically, with at most 100 rows per page. A page that exceeds the remaining
+set capacity keeps its exact retry position; the user explicitly continues in
+a new set. Previously blocked providers go first on rollover to prevent
+starvation. A page exceeding an empty set's limits is an invalid response, not
+a rollover loop. New query/provider selection clears set history. All-source
+replacement failure preserves both sets; partial success keeps old rows through
+Previous and retains failed providers' retry positions. Navigation/replacement
+cannot discard open Attach, detail or action work. Deduplication and receipt
+collision checks cover retained sets, not arbitrarily old discarded history.
+Existing action completion and retry-operation IDs retain their separate owners.
+This bounds retained row payloads, not the whole JavaScript heap, local Search
+rows, pending fan-out responses or all action state; their resource gates remain
+required. No total-results cutoff, browser storage, API, migration or archive
+change is introduced by this view policy.
+
 Each result opens a real details route without first creating a Record. Retained candidates use:
 
 ```text
