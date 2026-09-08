@@ -3,11 +3,11 @@ type: Fasti Contract Lifecycle
 title: Contract and runtime lifecycle
 description: Meanings for body ownership, contract state, and runtime availability.
 resource: https://fasti.scrobble.dev/ns/knowledge/v1/lifecycle
-tags: [fasti, b1, m3, contracts, lifecycle]
+tags: [fasti, b1, m3, m4, contracts, lifecycle]
 status: draft
 contract_states: [finalized, reserved]
 runtime_availabilities: [fixture_only, guarded, implemented, later_body]
-body_ids: [b0, b1, b2, b3, c1, m1, m2, m3]
+body_ids: [b0, b1, b2, b3, c1, m1, m2, m3, m4]
 sources:
   - id: fasti-capability-registry
     resource: ../../registry/v1/capabilities.yaml
@@ -46,5 +46,9 @@ the provider registry, governed credential state, and provider health surface.
 `m2` owns immutable metadata claims, profile projection policy, provenance,
 freshness, and attribution. `m3` owns purpose-specific identity routing and
 profile or application-client anime grouping policy with preview and receipts.
+`m4` owns local-first multi-source Search and bounded candidate receipts. Its
+finalized Search contracts have durable application, transport, SDK, host and
+Workbench implementations. Exact-head delivery and merge evidence remain
+separate from this runtime classification.
 Consult [capabilities](capabilities.md), [problems](problems.md), and [scopes](scopes.md)
 as one linked contract catalogue.

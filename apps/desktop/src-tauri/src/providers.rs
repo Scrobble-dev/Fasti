@@ -1,11 +1,11 @@
 use crate::setup::DesktopProblem;
 use chrono::Utc;
 use fasti_application::{
-    credential_status_after_successful_check, CredentialRequirement, CredentialSecret,
-    CredentialVaultSource, OutboundAccessPolicy, ProblemCode, ProviderCapabilityId,
-    ProviderCapabilityState, ProviderCapabilityStatus, ProviderCheckKind, ProviderCheckMetadata,
-    ProviderCheckStatus, ProviderCredentialStatus, ProviderId, ProviderStatePort,
-    MAX_PROVIDER_CREDENTIAL_BYTES,
+    credential_status_after_failed_check, credential_status_after_successful_check,
+    CredentialRequirement, CredentialSecret, CredentialVaultSource, OutboundAccessPolicy,
+    ProblemCode, ProviderCapabilityId, ProviderCapabilityState, ProviderCapabilityStatus,
+    ProviderCheckKind, ProviderCheckMetadata, ProviderCheckStatus, ProviderCredentialStatus,
+    ProviderId, ProviderStatePort, MAX_PROVIDER_CREDENTIAL_BYTES,
 };
 use fasti_domain::WorkspaceId;
 use fasti_provider_runtime::{ProviderRuntime, ProviderRuntimeError, ProviderSpec};
@@ -31,6 +31,7 @@ pub(crate) struct ProviderCredentialStatusView {
     source: CredentialVaultSourceView,
     writable: bool,
     testable: bool,
+    health_checkable: bool,
     docs_url: &'static str,
 }
 
@@ -123,6 +124,7 @@ fn unavailable_status_view(
         source: CredentialVaultSourceView::None,
         writable: false,
         testable: false,
+        health_checkable: false,
         docs_url: spec.docs_url,
     }
 }
@@ -274,7 +276,9 @@ pub(crate) async fn health(
     input: ProviderInput,
     policy: &OutboundAccessPolicy,
 ) -> Result<Vec<ProviderCredentialStatusView>, DesktopProblem> {
-    let spec = runtime.descriptor(&input.provider).map_err(runtime_problem)?;
+    let spec = runtime
+        .descriptor(&input.provider)
+        .map_err(runtime_problem)?;
     if !spec.runtime_available {
         return Err(DesktopProblem::provider(
             "This provider is not available in this runtime.",
@@ -383,12 +387,20 @@ fn reconcile_state(
     spec: &'static ProviderSpec,
     capability_id: &str,
 ) -> Result<(ProviderCapabilityState, CredentialVaultSource), DesktopProblem> {
-    let reference = runtime
-        .credential_reference(spec.provider)
-        .map_err(runtime_problem)?;
-    let source = runtime
-        .credential_source(&reference)
-        .map_err(runtime_problem)?;
+    let credential_free = spec.capabilities.iter().any(|capability| {
+        capability.capability_id == capability_id
+            && capability.credential_requirement == CredentialRequirement::None
+    });
+    let source = if credential_free {
+        CredentialVaultSource::None
+    } else {
+        let reference = runtime
+            .credential_reference(spec.provider)
+            .map_err(runtime_problem)?;
+        runtime
+            .credential_source(&reference)
+            .map_err(runtime_problem)?
+    };
     let state = reconcile_state_with_source(
         runtime,
         kernel,
@@ -422,18 +434,46 @@ fn reconcile_state_with_source(
     let existing = kernel
         .get_provider_capability_state(workspace_id, &provider_id, &capability_id)
         .map_err(|_| DesktopProblem::storage("Fasti could not read provider capability state."))?;
+    if capability.credential_requirement == CredentialRequirement::None {
+        if let Some(disabled) = existing
+            .as_ref()
+            .filter(|state| state.capability_status() == ProviderCapabilityStatus::Disabled)
+        {
+            return Ok(disabled.clone());
+        }
+    }
     let digest = runtime
         .configuration_digest(spec.provider, capability.capability_id)
         .map_err(runtime_problem)?;
-    let reference = runtime
-        .credential_reference(spec.provider)
-        .map_err(runtime_problem)?;
-    let present = source != CredentialVaultSource::None;
+    let credential_free = capability.credential_requirement == CredentialRequirement::None;
+    let reference = if credential_free {
+        None
+    } else {
+        Some(
+            runtime
+                .credential_reference(spec.provider)
+                .map_err(runtime_problem)?,
+        )
+    };
+    let present = !credential_free && source != CredentialVaultSource::None;
     let unchanged_configuration = !credential_changed
         && existing
-        .as_ref()
-        .is_some_and(|state| state.configuration_digest() == &digest);
-    let credential_status = if present && unchanged_configuration {
+            .as_ref()
+            .is_some_and(|state| state.configuration_digest() == &digest);
+    if credential_free && unchanged_configuration {
+        if let Some(state) = existing.as_ref().filter(|state| {
+            state.credential_requirement() == CredentialRequirement::None
+                && state.credential_status() == ProviderCredentialStatus::NotRequired
+                && state.credential_reference().is_none()
+        }) {
+            // Inventory reads cannot clear a failed health check. Only a new
+            // check or changed configuration can advance this public state.
+            return Ok(state.clone());
+        }
+    }
+    let credential_status = if credential_free {
+        ProviderCredentialStatus::NotRequired
+    } else if present && unchanged_configuration {
         existing
             .as_ref()
             .map(ProviderCapabilityState::credential_status)
@@ -475,7 +515,7 @@ fn reconcile_state_with_source(
         capability_id.clone(),
         version,
         capability.credential_requirement,
-        present.then_some(reference.clone()),
+        reference.clone().filter(|_| present),
         credential_status,
         digest.clone(),
         health.clone(),
@@ -492,7 +532,7 @@ fn reconcile_state_with_source(
         capability_id,
         next_version,
         capability.credential_requirement,
-        present.then_some(reference),
+        reference.filter(|_| present),
         credential_status,
         digest,
         health,
@@ -519,7 +559,10 @@ fn provider_state(
     ProviderCapabilityState::try_new(
         provider_id,
         capability_id,
-        if reference.is_some() {
+        if reference.is_some()
+            || (requirement == CredentialRequirement::None
+                && credential_status == ProviderCredentialStatus::NotRequired)
+        {
             ProviderCapabilityStatus::Available
         } else {
             ProviderCapabilityStatus::Unavailable
@@ -551,11 +594,13 @@ fn record_check_result(
         ),
         Err(error) => {
             let credential_status =
-                credential_status_for_problem(error.problem_code(), state.credential_status());
+                credential_status_after_failed_check(kind, state, error.problem_code());
             (
                 ProviderCheckStatus::Failed,
                 Some(error.problem_code()),
-                if credential_status == ProviderCredentialStatus::Missing {
+                if state.capability_status() == ProviderCapabilityStatus::Disabled {
+                    ProviderCapabilityStatus::Disabled
+                } else if credential_status == ProviderCredentialStatus::Missing {
                     ProviderCapabilityStatus::Unavailable
                 } else {
                     ProviderCapabilityStatus::Degraded
@@ -587,18 +632,6 @@ fn record_check_result(
         .put_provider_capability_state(workspace_id, next)
         .map_err(|_| DesktopProblem::storage("Fasti could not save provider check state."))?;
     Ok(())
-}
-
-fn credential_status_for_problem(
-    code: ProblemCode,
-    current: ProviderCredentialStatus,
-) -> ProviderCredentialStatus {
-    match code {
-        ProblemCode::ProviderCredentialMissing => ProviderCredentialStatus::Missing,
-        ProblemCode::ProviderCredentialInvalid => ProviderCredentialStatus::Invalid,
-        ProblemCode::ProviderCredentialExpired => ProviderCredentialStatus::Expired,
-        _ => current,
-    }
 }
 
 fn capability_spec(
@@ -648,6 +681,7 @@ fn status_view(
             CredentialRequirement::None | CredentialRequirement::UserAgentOnly
         ),
         testable: capability.credential_test,
+        health_checkable: capability.health_test,
         docs_url: spec.docs_url,
     }
 }
@@ -678,8 +712,13 @@ impl From<ProviderRuntimeError> for DesktopProblem {
     }
 }
 
+#[cfg(all(test, feature = "desktop-runtime"))]
+#[path = "provider_cancellation_tests.rs"]
+mod cancellation_tests;
+
 #[cfg(test)]
 mod tests {
+    include!("provider_kitsu_tests.rs");
     use super::*;
     use crate::records::require_access;
     use crate::setup::{complete_setup, test_support::new_kernel, test_support::MemoryStore};
@@ -723,8 +762,14 @@ mod tests {
                 )
                 .expect("read pending state")
                 .expect("stored pending state");
-            assert_eq!(pending_version.get_or_insert(state.capability_version()), &state.capability_version());
-            assert_eq!(state.capability_status(), ProviderCapabilityStatus::Disabled);
+            assert_eq!(
+                pending_version.get_or_insert(state.capability_version()),
+                &state.capability_version()
+            );
+            assert_eq!(
+                state.capability_status(),
+                ProviderCapabilityStatus::Disabled
+            );
         }
         reconcile_provider_with_source(
             &runtime,
@@ -754,6 +799,82 @@ mod tests {
                 state.credential_status(),
                 ProviderCredentialStatus::StoredUnverified
             );
+        }
+    }
+
+    #[test]
+    fn missing_credentials_keep_valid_references_and_health_does_not_verify_them() {
+        for present in [false, true] {
+            for kind in [ProviderCheckKind::Health, ProviderCheckKind::Credential] {
+                let (_root, kernel) = new_kernel();
+                let store = MemoryStore::default();
+                complete_setup(&kernel, &store).expect("complete setup");
+                let workspace_id = require_access(&kernel, &store)
+                    .expect("access")
+                    .workspace_id();
+                let state = ProviderCapabilityState::try_new(
+                    ProviderId::try_new("tmdb").expect("provider"),
+                    ProviderCapabilityId::try_new(READ_CAPABILITY).expect("capability"),
+                    ProviderCapabilityStatus::Available,
+                    1,
+                    CredentialRequirement::BearerToken,
+                    present.then(|| {
+                        fasti_application::CredentialReference::try_new(
+                            "secret:providers/tmdb/api-key",
+                        )
+                        .expect("reference")
+                    }),
+                    if present {
+                        ProviderCredentialStatus::StoredUnverified
+                    } else {
+                        ProviderCredentialStatus::Missing
+                    },
+                    fasti_application::ConfigurationDigest::parse("ab".repeat(32)).expect("digest"),
+                    ProviderCheckMetadata::never_run(),
+                    ProviderCheckMetadata::never_run(),
+                )
+                .expect("valid initial state");
+                kernel
+                    .put_provider_capability_state(workspace_id, state.clone())
+                    .expect("seed state");
+                record_check_result(
+                    &kernel,
+                    workspace_id,
+                    &state,
+                    kind,
+                    &Err(ProviderRuntimeError::credential_missing(
+                        "credential disappeared",
+                    )),
+                )
+                .expect("persist credential failure, not a storage error");
+                let updated = kernel
+                    .get_provider_capability_state(
+                        workspace_id,
+                        state.provider_id(),
+                        state.capability_id(),
+                    )
+                    .expect("read state")
+                    .expect("persisted check");
+                assert_eq!(updated.credential_reference(), state.credential_reference());
+                assert_eq!(
+                    updated.credential_status(),
+                    if present && kind == ProviderCheckKind::Credential {
+                        ProviderCredentialStatus::Unavailable
+                    } else {
+                        state.credential_status()
+                    }
+                );
+                let check = if kind == ProviderCheckKind::Health {
+                    updated.health()
+                } else {
+                    updated.credential_test()
+                };
+                assert_eq!(
+                    check.safe_problem_code(),
+                    Some(ProblemCode::ProviderCredentialMissing)
+                );
+                assert_eq!(check.status(), ProviderCheckStatus::Failed);
+            }
         }
     }
 }

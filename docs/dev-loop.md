@@ -107,6 +107,16 @@ the fallback), `FASTI_PUBLIC_URL` (show a separate reverse-proxy origin), and
 `FASTI_DEV_SCOPE` (name this worktree's container so multiple worktrees can
 run containers side by side).
 
+Search action receipts are immutable replay evidence. New actions accept up to
+10,000 receipts and 163,840,000 bytes of canonical receipt JSON per workspace by
+default. Local operators can raise those admission ceilings with
+`FASTI_SEARCH_ACTION_RECEIPT_MAX_ROWS` and
+`FASTI_SEARCH_ACTION_RECEIPT_MAX_BYTES`; values below the supported defaults,
+zero, non-decimal or oversized values stop Store startup. Replays and reads stay
+available at the ceiling. Only new actions return `capacity_exceeded` (HTTP 507),
+and raising the ceiling then permits them. Fasti does not delete or compact this
+audit history automatically.
+
 ## Browser and daemon QA
 
 Check the daemon by hand, using the URL `./scripts/dev.sh` printed (or
@@ -147,6 +157,87 @@ cross-platform, and packaged assistive-technology work is deferred to
 C1 ordinary-browser delivery merged in [PR #119](https://github.com/Scrobble-dev/Fasti/pull/119).
 Review, exact-head CI, and merged-tree evidence remain required for subsequent
 changes; see the [canonical checkpoint](plans/trailbase-authentication-remediation.md#24-c1-delivery-and-c2-foundation-checkpoint).
+
+### M4a final landing checklist
+
+Use this once the agreed M4a landing scope is complete. This verifies that
+increment; it does not close remaining M4 or packaged-release acceptance.
+
+1. Reconcile the accepted predecessor and commit the intended source, tests and
+   docs. Require a clean worktree and record its commit and tree. Coordinate one
+   build/browser slot; do not edit source during the final pass. Prepare the
+   locked dependency stores and native prerequisites in [AGENTS.md](../AGENTS.md)
+   before starting. On this Linux host, use the physical temporary directory and
+   system package configuration for every gate:
+
+   ```bash
+   export PKG_CONFIG=/usr/bin/pkg-config
+   export TMPDIR=/tmp
+   ```
+
+   Prefer the default Cargo target directory. If reusing an external
+   `CARGO_TARGET_DIR`, the SDK and runtime harnesses still launch binaries at
+   this checkout's literal `target/debug` path. Map that ignored directory
+   (and `target/release`) to the corresponding cache directories before the
+   run, or unset the override. Keep `target/fasti-receipts` local to this
+   checkout, and do not run a second writer against the shared build cache.
+
+2. Run the canonical gate once:
+
+   ```bash
+   cargo xtask test pr
+   ```
+
+   It already covers contract generation/parity, JS build/typecheck and selected
+   JS tests, workspace Rust formatting/lint/tests/build, docs and portable gates.
+   Do not precede it with repeated manual full-package or contract/build loops.
+
+3. Run the uncovered client and Desktop coverage once. Desktop is outside the
+   root Cargo workspace; its tests prove the source host, not a packaged app.
+
+   ```bash
+   pnpm test
+   cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check
+   cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --locked --offline --all-targets -- -D warnings
+   cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --locked --offline
+   CI=true pnpm test:ui --grep-invert @performance --workers=2 --retries=0
+   ```
+
+   `pnpm test` adds the complete JS regression suite and UI-policy checks.
+   Keep the canonical Playwright configuration: it builds its prerequisites and
+   requires free ports 4173 and 18422. Do not create an alternate startup path.
+   Use CI mode for hosted Chromium parity: local default Chrome alone did not
+   expose disabled-control focus loss. Keep zero retries for this final pass.
+
+4. Verify the actual prepared TrailBase input, then run the real-process Search
+   journey. Replace the example path below with that installation; do not reuse
+   a checkpoint's disposable path without verification. The harness requires
+   clean source and free ports 4000, 4001 and 8420, builds the fixture daemon,
+   and creates disposable runtime state. It proves Search/Create/Attach/cache/
+   no-store/restart against real Fasti and SQLite with a loopback provider
+   fixture, not public-provider or packaged-Desktop acceptance.
+
+   ```bash
+   FASTI_M4A_TRAILBASE_INPUT=/absolute/path/to/prepared-trailbase-root
+   python3 -B scripts/trailbase_runtime.py verify-installation "$FASTI_M4A_TRAILBASE_INPUT"
+   python3 -B scripts/smoke-access-browser.py --root "$FASTI_M4A_TRAILBASE_INPUT" --m4-search-journey --receipt target/fasti-receipts/m4-search-ordinary-browser.json
+   ```
+
+5. Run applicable performance acceptance separately; ordinary browser tests do
+   not prove it. Use the existing [performance guide](plans/fasti-access-parallel-regressions.md#persistent-performance-sentinel-gate)
+   and its prerequisites:
+
+   ```bash
+   pnpm test:ui --grep @performance --workers=1 --retries=0 --output=test-results-performance
+   ```
+
+6. Require terminal exit results, explicit ignores/skips and an unchanged clean
+   commit/tree. Check that the canonical receipts in `target/fasti-receipts/`
+   and the Search receipt above bind that source; retain separate Desktop,
+   client, browser and performance logs. If a failure needs a source fix, prove
+   its focused regression first, then restart the final exact-tree pass. Do not
+   relabel older passes. Publish only with authorization; require exact PR-head
+   review/CI and merged-tree evidence before reporting the increment landed.
 
 ## Desktop QA
 

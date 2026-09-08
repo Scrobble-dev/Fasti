@@ -11,7 +11,7 @@
   import ContextMenu, { type ContextMenuItem } from "./context-menu.svelte";
   import PosterCard from "./poster-card.svelte";
   import { recordContextMenuItems } from "./record-actions.js";
-  import { IconChevronRight } from "@tabler/icons-svelte";
+  import IconChevronRight from "@tabler/icons-svelte/icons/chevron-right";
 
   interface Props {
     records: MediaRecord[];

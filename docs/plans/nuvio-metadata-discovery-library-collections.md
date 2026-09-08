@@ -14,6 +14,151 @@
 **CEO review mode:** Hold scope
 **Product boundary:** **Fasti records. Players play.**
 
+## Current execution requirement override — 2026-09-05
+
+- ~~Codex Security~~ — permanently excluded from the entire Fasti programme,
+  including Access and every current or future stage, by explicit user instruction.
+- Do not invoke its plugin, tools, skills or scans, require its approval, or wait
+  for it. This applies to the commander and all delegated agents, and supersedes
+  earlier attached prompts or planning references that request it.
+- Retain ordinary source review, negative tests, QA and the existing security
+  invariants. Removing this tool requirement does not remove product safeguards
+  or scope, and does not reopen completed planning gates.
+
+### M4 native publication evidence — 2026-09-08
+
+The existing Google Books adapter now retains `volumeInfo.printType` through
+Search and selected-volume parsing, internal candidate receipts, cached/refetched
+Create and Attach, metadata refresh, and stored claims. Google's
+[Volume reference](https://developers.google.com/books/docs/v1/reference/volumes)
+defines `BOOK` and `MAGAZINE`. Fasti normalizes a newly observed missing or
+unrecognized value to `UNKNOWN`; this is not an additional Google enum value.
+Historical absence stays absent. The fact retains the original response digest,
+provider coordinates, locale, observation time and reuse lifetime.
+
+The application owns the bounded value and reserved `google_books.print_type`
+field rule. Existing metadata admission and hydrated claim/receipt readers
+validate the value and provider coordinates. No new dependency, table, migration,
+capability, public candidate property or UI projection is added. Schema17 and
+archive7 remain unchanged; generic claim streams preserve saved facts while
+Search caches remain node-local. This is evidence custody, not completion of
+media-domain classification, filtering or the broader M4 acceptance gates.
+
+Rollback is not an unqualified binary replacement: pre-change candidate readers
+reject populated native-fact fields in node-local caches. The existing authorized
+partition-discard port preserves durable Records, claims and action replay, but
+it is not a public cache-clear or automatic downgrade workflow. Do not discard
+data roots or claim older binaries can read new candidate receipts. Forward
+correction remains the default; a downgrade needs an explicit verified cache
+disposition and exact target schema/archive compatibility.
+
+Native publication reads now choose the latest observation for each exact
+provider/source/locale/region variant before interpreting its value. Newer
+unknown, denied or terminal evidence cannot expose an older positive claim.
+Conflicting intrinsic facts across variants suppress the projection without
+deleting the observations. Eligible stale evidence still follows the existing
+profile last-known-good policy; ordinary title and artwork fallback is unchanged.
+The reader ranks narrow keys across complete history for exact selected Record
+IDs, then hydrates at most 256 latest variants per Record. This is not a cap on
+the history inspected. An authorized fresh refresh can show its new claim once
+before cache reuse is allowed, but cannot bypass conflicts or lifecycle checks.
+The shared ten-domain classifier, filter contracts and UI integration still
+remain required; this selector alone does not complete them.
+
+### M4 Kitsu typed Anime and Manga continuation — 2026-09-08
+
+The shared identity evidence reader now uses exact selected-ID sets for direct
+identifiers, assertions, lifecycle preflight and lifecycle hydration. Sparse
+Search selections must never hydrate Records between the first and last ID.
+The existing B1 complete identifier reader is unchanged; the preview reader's
+limits must not replace it. Regression coverage uses 100 selected Records among
+10,000, populated assertions/events and actual production query plans before
+and after `ANALYZE`. This prepares domain filtering but does not implement it.
+
+Music preparation corrects an earlier blanket assumption: the pinned
+[MusicBrainz recording lookup](https://github.com/metabrainz/musicbrainz-server/blob/cff977f0ba8f06d5fa594e7590f6a134b1a5a22c/lib/MusicBrainz/Server/Controller/WS/2/Recording.pm#L34)
+supports `inc=work-rels`; the server loads target work types and includes them
+in the same JSON response. Selected-detail recording/work evidence can therefore
+retain one real digest/time/policy. Search responses still lack that lookup
+evidence. Do not stamp lookup provenance onto Search rows, infer Music from a
+recording ID alone, or conflate Track with Recording. The exact affirmative
+work-type and relationship rules remain under source review before admission.
+
+The follow-on runtime adds `kitsu` / `anime` / `kitsu.anime` as Release,
+reusing the existing identity, selected-detail, receipt and artwork owners.
+Anime responses never supply Manga subtype claims. Numeric IDs remain scoped
+by resource type. Search alternates one Anime or Manga HTTP response per Fasti
+continuation, then drains the remaining source. Each response retains its own
+digest and policy. The legacy detail picker reads the first page of both types;
+that older list-only operation remains all-or-error, not partial-success capable.
+Health checks validate both typed routes before reporting success.
+
+The private positive-u32 continuation encodes source page and remaining sources.
+No public field, table, migration or archive version is added. Kitsu's Fasti
+cache policy revision changes to `fasti.kitsu-mixed-metadata-cache.v2`, so old
+Manga-only page numbers cannot become Anime pages. This is not a vendor licence
+revision or a new offline reuse permission. Committed Record-action replay
+still precedes candidate-cache lookup; uncommitted old receipts must refetch.
+
+Source inspection found an upstream offset discrepancy in the pinned
+[Typesense service](https://github.com/hummingbird-me/kitsu-server/blob/e6575ed9fd73ba8cccb920fe2e3f1ef873a71333/app/services/typesense_search_service.rb#L96):
+it maps offset/limit to a zero-based page, while its locked client forwards
+that value to a one-based backend. On 2026-09-08, anonymous `naruto` requests
+at offsets 0 and 10 returned identical IDs for both resource types; offset 20
+advanced. This does not identify the deployed source revision or feature flag.
+Fasti does not compensate by skipping offsets. It validates supplied next links
+and requests a following-page observation when a full raw page has no link.
+Partial or empty no-link pages terminate. A correct backend can therefore cost
+one extra empty request at an exact page multiple. Limits remain per request;
+no assertion of universal upstream termination or snapshot stability is made.
+
+The governed live traversal observed 11 responses, 100 rows and 80 unique typed
+IDs (37 Anime, 43 Manga), ending in partial no-link responses with zero vault
+reads. This is evidence for that query, not whole-programme or packaged proof.
+The shared ten-domain classifier and remaining M4 acceptance work are unchanged.
+
+### M4 Kitsu Manga adapter and native custody — initial 2026-09-08 slice
+
+The first Kitsu runtime slice uses the public JSON:API Manga search and selected
+resource routes. The shared mapping is `kitsu` / `manga` / `kitsu.manga`, with
+canonical positive decimal IDs and Work grain. This is the aggregate Manga
+resource, not a volume edition. The initial slice did not implement Anime;
+the follow-on section above records that work. Neither completes the ten-domain classifier.
+
+The pinned [Manga schema](https://github.com/hummingbird-me/api-docs/blob/c95e259bec851f4bddf13c7bce3dd2f08eba7d19/api/schemas/resources/manga.yml)
+defines `subtype` and deprecates `mangaType`. The pinned
+[subtype enum](https://github.com/hummingbird-me/api-docs/blob/c95e259bec851f4bddf13c7bce3dd2f08eba7d19/api/schemas/enums/subtype_manga.yml)
+supplies manga, manhwa, manhua, oneshot, doujin, oel and novel. Fasti retains
+novel as negative Manga-family evidence and normalizes absent/unrecognized
+observations to its own unknown value. It never revives deprecated `mangaType`.
+Display overview prefers the bounded `description` field over deprecated
+`synopsis`, with a bounded legacy fallback, as defined by the pinned
+[shared media schema](https://github.com/hummingbird-me/api-docs/blob/c95e259bec851f4bddf13c7bce3dd2f08eba7d19/api/schemas/resources/media.yml).
+The reserved `kitsu.manga_subtype` field reuses the native observation selector,
+receipt/action admission, response-policy custody and archive claim streams.
+No new migration or archive version is needed.
+
+Public Kitsu reads use the existing DNS/address-pinned, proxy-free,
+redirect-free transport and never access the credential vault. Pages contain
+at most ten resources. A next link must equal the expected next request's
+origin, path and complete query tuple; Fasti constructs the request itself.
+Health accepts only a bounded typed Manga response. The existing health
+operation can initialize both public capabilities; API inventory reads do not
+activate them. A browser inventory cannot offer privileged health controls.
+The additive `health_checkable` projection is independent of credential tests
+and defaults false for older responses. Native reconciliation preserves
+unchanged failure and disabled state instead of clearing it on Settings refresh.
+
+The earlier live response had `max-age=0, private, must-revalidate` and `Vary`;
+the existing response-policy owner therefore requires validation before reuse.
+This is not an offline reuse grant. Saved Record claims remain subject to
+their captured policy and lifecycle. The pinned
+[terms source](https://github.com/hummingbird-me/kitsu-web/blob/df0f97cca3bc579002b50660922a81421ec6c3a1/markdown/terms.md)
+references separate API terms. Current deployed terms and redistribution
+permission are not approved by successful public reads or the API-doc licence.
+Preserve attribution and the operator-review requirement. Forward correction
+and the explicit candidate-cache downgrade disposition above still apply.
+
 ## 1. Decision
 
 Build one source-neutral media surface inside Fasti.
@@ -716,11 +861,73 @@ Search must:
 - let one governed action create or attach a Record;
 - expose unresolved and partial identity.
 
-Each result opens a real details route without first creating a Record:
+Provider result-window disposition (2026-09-08): the existing Discover owner
+retains at most 200 normalized provider rows and 16 MiB of their UTF-8 JSON per
+result set, with exactly one previous/next set available without refetching.
+Per-provider pages are admitted atomically, with at most 100 rows per page. A page that exceeds the remaining
+set capacity keeps its exact retry position; the user explicitly continues in
+a new set. Previously blocked providers go first on rollover to prevent
+starvation. A page exceeding an empty set's limits is an invalid response, not
+a rollover loop. New query/provider selection clears set history. All-source
+replacement failure preserves both sets; partial success keeps old rows through
+Previous and retains failed providers' retry positions. Navigation/replacement
+cannot discard open Attach, detail or action work. Deduplication and receipt
+collision checks cover retained sets, not arbitrarily old discarded history.
+Existing action completion and retry-operation IDs retain their separate owners.
+The M4a follow-up bounds both local Search and Attach target results to a current
+page and one adjacent cached page, each admitted through the existing 100-row,
+4 MiB response contract. Next/Previous replaces visible rows rather than growing
+the list. Failed or oversized pages preserve the current page and retry cursor;
+a new query clears adjacent history. Selection belongs to the visible Attach
+page. Completed candidate labels and Record IDs retain only current/adjacent,
+routed and active-action/Attach candidates. Reappearing discarded candidates may
+start a new explicit action, not a replay; existing store transactions reuse the
+exact identified Record, and a new action can append new receipt/claim evidence.
+These are retained-payload bounds, not whole-JavaScript-heap or pending-fan-out
+qualification. Unconfirmed Workbench operation IDs still require bounded
+admission with reachable original-intent retry; they must not be evicted.
+No total-results cutoff, browser storage, API, migration or archive change is
+introduced by these view policies.
+
+Each result opens a real details route without first creating a Record. Retained candidates use:
 
 ```text
 /explore/{source}/{grain}/{candidate_receipt_id}/{slug}
 ```
+
+M4 live-coordinate route decision (2026-09-06): true no-store candidates use a
+separate route, never a fabricated receipt:
+
+```text
+/explore/live/{source}/{grain}/{encoded_provider_record_id}/candidate
+```
+
+The final segment is the literal `candidate`, not a provider-derived title.
+Only the safe source coordinate and optional bounded, normalized request locale
+belong in this URL; provider payload, credentials and profile state do not.
+Decode the coordinate once, enforce generic byte/control bounds, and let the
+existing provider identity mapping validate its exact grammar. Distinguish this
+route from the retained route by its shape, including when a provider is named
+`live`. Reload re-authorizes and re-fetches through the existing governed provider
+owner. Details are transient: no snapshot, receipt, Record, claim or action write.
+Create/Attach remains a separate explicit action through its existing owner.
+The coordinate read is implemented through the application, governed runtime,
+API, SDK and hosts. The programme checkpoint records native and browser negative
+checks plus the real-process no-store/restart proof. This does not mark M4 or
+public-provider acceptance complete; exact-head delivery evidence remains required.
+
+Routed retained/live details and the inline retained reader pass the existing
+optional cancellation signal through Workbench and the browser host to the SDK.
+Route exit, coordinate/locale replacement, profile change and sign-out abort the
+old browser read; generation and authority checks still reject late completions.
+The packaged invoke adapter currently suppresses late delivery but does not
+cancel native I/O. Neither browser request abort nor a manually cancelled runtime
+task alone proves that a disconnected HTTP client's upstream request is cancelled.
+Keep these acceptance boundaries separate until exact runtime evidence exists.
+Main local/provider Search and continuation use one generation-owned browser
+signal across the selected-source fan-out. Attach-target Search has its own signal
+and aborts when the picker closes. These reads keep the same authority fences;
+closing UI never cancels a confirmed Record mutation.
 
 `candidate_receipt_id` is opaque and resolves to a durable, bounded provider-candidate receipt containing the exact governed re-fetch route and provenance. A receipt expires after 24 hours, carries at most 64 KiB of normalized candidate data plus bounded identifiers, and records the query digest, safe provider-configuration digest, grant digest, response digest, provider terms revision, and creating actor/profile. Replay re-authorizes the current actor, profile, provider capability, grant, and configuration; a digest or authorization mismatch fails closed and offers a fresh Search. Expired and unreferenced receipts are garbage-collected in bounded keyset pages; receipts attached to an operation or Record retain only the minimal provenance required by that durable owner. No credential, raw secret-bearing request, or unrestricted provider body enters a receipt. The slug is presentation-only. On Record creation or attachment, the stable route becomes:
 
@@ -729,6 +936,134 @@ Each result opens a real details route without first creating a Record:
 ```
 
 Changing title or slug redirects to the canonical Record route. Record URLs never use a provider ID as the durable key.
+
+### M4 direct Record selection — 2026-09-05
+
+Record details use the existing `identity.record.list` owner with an optional
+typed Record selector. `GET /api/v1/records?record_id={record_id}` returns zero or
+one active Record with the same authorized-profile metadata and activity
+projection. Missing, foreign-workspace and inactive IDs have the same empty,
+non-truncated response. Without the selector, the existing bounded list is
+unchanged. Direct details must not search that first 500-row list or require a
+separate tracking-state permission.
+
+Malformed selectors reach the same authorized transaction before validation is
+reported. This includes query-shape errors, so a revoked browser session or
+missing IdentityRead scope cannot be masked by a 422 response. The existing
+capability's problem policy includes ValidationFailed; no new capability,
+migration or archive change is needed. The SDK retains CallOptions as its first
+argument and accepts the optional query as its second argument; null and omitted
+selectors both mean ordinary listing. Exact-selector responses are checked for
+matching identity, at most one row and no truncation.
+
+Browser and Desktop hosts forward this selector through the existing Record
+read. Workbench details load independently of the bounded Library and tracking
+lists. Both legacy `/records/{record_id}` and canonical routes remain supported.
+Malformed IDs and extra segments do not become exact queries. After an authorized
+exact read, the native Record grain and title replace stale grain/slug segments
+with `history.replaceState`; neither presentation segment selects identity.
+Slugs use bounded ASCII words after Unicode normalization, falling back to
+`record` when no such words exist. This resolves the wrong-grain disposition
+without another route resolver or identity owner.
+
+URL intent survives initial sign-in and profile changes; loaded private details
+and provenance do not. Each route/authority lifetime invalidates prior async
+success, error and cleanup. Missing tracking evidence is explicitly unknown,
+not saved intent or an inferred automatic disposition. A confirmed tracking
+mutation updates the existing profile-state representation. These detail routes
+do not establish browser provider Search or local/remote result composition.
+
+### M4 atomic candidate-action disposition — 2026-09-05
+
+Create and Attach remain explicit actions. Both reuse the existing
+`AttachIdentifier` authorization, matching provider-backed Record creation today:
+current `IdentityWrite` and a real browser mutation proof or credential. A new
+operation also requires current Search authorization and a valid scoped candidate
+receipt. Do not add Search permission to ordinary identifier attachment or
+fabricate credential context from a browser session. Add `IdempotencyConflict`
+to this existing capability when the operation-bearing action is implemented;
+reuse its existing identity-conflict and missing-target problems. Secondary
+Search errors must be explicitly mapped to permitted action problems.
+
+The normal online action retains exact governed refetch and post-I/O authority
+rechecks. An **explicit cached-evidence action** is also permitted for offline
+operation. This refines the original online-only data-flow shorthand; it does
+not replace online refetch or rescue a failed authorization or invalid provider
+response. Cached action evidence keeps the validated exact identifier, original
+Search response digest, original observation time and freshness boundary, and
+effective locale. It never stamps save time or renews freshness. A historical
+zero-freshness snapshot becomes an initially Stale claim without a new expiry;
+it cannot project fresh. Expired, revoked or mismatched candidate receipts cannot
+start an action in either mode. Title similarity never authorizes identity.
+
+One immediate transaction reauthorizes, resolves the exact target, uses the
+existing namespace/identifier/metadata writers, records the durable result and
+commits. Namespace registration, if required, participates in that transaction;
+it cannot commit separately. Create preserves exact-match reuse behavior; Attach
+cannot redirect an identifier already owned by another Record. No Library intent,
+progress, completion, rating, note, override or Collection state changes are
+implicit in either action.
+
+Workbench exposes Attach beside Create for both retained candidate receipts and
+no-store results. Its labelled native dialog uses Tabler controls and the shared
+focus owner. Search for a target through the existing local Search capability,
+filtered by the candidate's exact identity grain; preserve the returned keyset
+continuation. Do not select from the bounded Library projection or infer a target
+from title similarity. Show title, year, grain and stable Record ID, require an
+explicit selection and confirmation, then open the authoritative returned Record
+through the existing exact-read/canonical-route owner. A failed action keeps the
+selection and complete-intent retry ID; changing the target changes the operation.
+Before submission, Cancel/Escape restores opener focus without mutation. During
+submission, keep the selected intent fixed until confirmation; navigation or an
+authority change invalidates private UI without pretending to cancel a committed
+write. Candidate cache labels do not override the server's retained-evidence
+policy. No-store results use only the existing governed identifier-refetch action,
+never a fabricated retained receipt or a fallback from a rejected receipt.
+
+One durable action-receipt family binds workspace operation uniqueness, actor
+kind, stable actor and attribution client, profile, Create/Attach and explicit
+target, candidate receipt/route and selected evidence mode. The immutable result
+retains the actual Record, action outcome and minimal accepted source provenance,
+including snapshot-versus-refetch basis. Random proposed claim IDs are not proof
+that those IDs were inserted: identical existing claims keep their original IDs.
+Changed operation semantics or actor must conflict, not perform another save.
+
+Reauthorize current identity-mutation authority before every replay. A completed
+exact retry returns its historical result without refetching or requiring the
+ephemeral candidate, its Search grant or current provider configuration. It does
+not assert that the Record is still active or the metadata is freshly fetched.
+Same-client credential rotation and same-subject browser-session rotation retain
+stable actor identity. Sharing a client/profile does not let a different browser
+subject replay another actor's operation.
+
+Action receipts are immutable and do not expire, compact or disappear when a
+client is revoked. New actions have one per-workspace admission envelope:
+10,000 rows and 163,840,000 canonical receipt JSON bytes by default, which is
+one worst-case 16 KiB receipt for each Record in the supported 10,000-Record
+workload. The node checks current authority and exact replay before the quota,
+then rechecks row and byte use inside the same immediate commit transaction.
+Existing reads and exact replay remain available at or above the ceiling. Only
+new operations return `capacity_exceeded` without partial Record, identifier,
+metadata or receipt state. A local operator can raise either ceiling and restart;
+configured values cannot reduce the supported floor. No client can set the
+limits, and no automatic sweeper deletes audit history. This admission policy
+changes no schema or archive bytes.
+
+Durable action evidence needs a new versioned archive stream, not an extension
+of published archive v5 or a disguised observation/metadata-refresh receipt.
+M4 introduced archive v6 with 35 streams and schema v16 for that durable owner,
+with strict exporter/importer and historical v1–v5 tests. Archive v7 and schema
+v17 subsequently added response-policy evidence. The current M4 source implements
+v7; this remains unmerged programme work, not a new public export activation.
+Frozen v1–v6 artifacts remain byte-identical, including the published
+v5/schema-v15 pairing and the v6/schema-v16 action-receipt format.
+Ephemeral Search pages and candidates remain excluded. A historical browser
+subject ID is typed audit evidence, with no foreign key to excluded accounts or
+sessions; it never recreates authentication or grants. Profile/client/Record
+references remain validated. Recovery creates a new client and human bootstrap
+creates a new subject: neither inherits an imported actor's replay rights.
+Historical operations remain reserved and readable only through authorized
+history; restore must not claim seamless retry as a newly created actor.
 
 Do not make TMDB the only search path.
 
@@ -1625,6 +1960,18 @@ Use separate reviewable PRs.
 - Record action;
 - Search UI.
 
+Delivery correction approved by the user on 2026-09-08: deliver **M4a Search
+core** through PR #128, then **M4b ten-domain Search completion**. M4 remains
+incomplete until both pass. This is a delivery split, not a scope reduction.
+Preserve all committed native-evidence/Kitsu work and the uncommitted exact-ID
+preparation; do not remove tested code just to manufacture a smaller PR.
+M4a stops adding provider/classification features and closes only the proven
+core retention, integration, review and exact-head delivery gates. M4b retains
+the shared classifier, domain filters, overlap/unknown rules and required
+provider coverage. Do not equate ten media domains with activation of every
+registered provider. Any genuinely unresolved source requirement stays explicit.
+The detailed audit and finite landing sequence are in section 56 below.
+
 ### PR M5 — Library
 
 - server-side Library query;
@@ -1932,7 +2279,7 @@ The user pre-authorized every recommended review answer. Every finding below the
 | `contracts/addons/manifests/google-books.provider.yaml` | Make it the first validated provider-authoring example; add schema-owned deterministic fixtures instead of inventing another manifest shape. |
 | `cargo xtask` | Extend with one focused `integration check` command; retain the existing generation, locked verification, PR, deep, and milestone commands. |
 | Workbench and Tabler shell | Mature in place. Do not replace navigation, settings, or details surfaces with a second UI. |
-| Archive v2 | Advance through immutable incremental versions: v3 projection policy/overrides, v4 Library, v5 Collections/pack receipts, v6 connections/journals/tombstones/acknowledgements, and v7 local-share policy. Preserve every prior prefix and v1/v2 compatibility. |
+| Archive formats | Preserve the implemented immutable sequence: v3 metadata/projection policy/overrides, v4 metadata refresh receipts, v5 identity assertions and anime grouping, v6 Search action receipts, and v7 response policy/current receipt shape. Library, Collections, Nuvio synchronization and sharing receive later append-only allocations when their owners freeze; never reuse v4–v7. Preserve every prior stream prefix and v1/v2 compatibility. |
 
 ## 34. NOT in scope
 
@@ -1964,9 +2311,11 @@ No requested capability is deferred. These items are constitutional non-goals, p
 | Nuvio raw envelope | Profile | Lossless original plus extension bag; normalized state is separate. |
 | Nuvio Cloud cursor/token generation | Connection | Cursor per state lane; token in vault; generation in SQLite. |
 | Fasti synchronization journal/receipt | Profile, connection, lane, and client as applicable | Immutable and idempotent; compactable delta payloads use the 30-day window, while unacknowledged operations, required tombstones, state, and idempotency receipts follow their durable acknowledgement/retention rules. |
-| Local workspace share | Workspace with explicit profile grants | Private by default; archive includes policy and grants without credentials. |
+| Local workspace share | Workspace with explicit profile grants | Private by default; its future allocated archive format includes policy and grants without credentials. Current v7 does not carry sharing state. |
 
-Archive versions are additive and immutable: v3 adds projection policy and profile overrides; v4 adds independent Library state; v5 adds Collections and pack receipts; v6 adds raw Nuvio envelopes, connections without secrets, cursors, tombstones, journals, and acknowledgements; v7 adds local-share policy and grants. Archive v3-v7 and M13e are blocked on the authentication programme's `C3-CRYPTO` gate. Each version preserves the exact stream prefix and order of every preceding version inside one authenticated encrypted joint manifest. Restore and rollback fixtures cover v1, v2, and each new version with missing, extra, reordered, and unknown stream failures. Cursors, receipts, grants, descriptors, journals, and idempotency scopes bind to the global restore generation. Restore reconnects a credential reference only when the destination vault proves the same data-root identity, and restores all connections, publication descriptors, sharing, and dispatchers quarantined and disabled. Reactivation requires recent authentication, a reviewed authority check, a fresh remote snapshot, and conflict reconciliation; no restored operation can execute under an earlier generation.
+Archive versions are additive and immutable. The implemented internal formats are v3/schema12 metadata claims, provenance, ratings, lifecycle, projection policies, profile overrides, migration receipts and attribution (28 streams); v4/schema13–14 adds metadata refresh receipts (29); v5/schema15 adds identity assertions, lifecycle and profile/client anime grouping policies and receipts (34); v6/schema16 adds Search action receipts (35); v7/schema17 retains those 35 streams and carries response policy and the current Search receipt shape. Library, Collections/pack receipts, raw Nuvio envelopes, connections, cursors, tombstones, journals, acknowledgements and local-share policy/grants remain full programme work and require later explicit append-only allocations after their owners freeze. Do not reuse an implemented version for those states.
+
+These internal format and restore implementations do not activate public export. Public authenticated-encrypted archive activation and M13e remain governed by the authentication programme's `C3-CRYPTO` gate; the gate does not undo the implemented v3–v7 formats. Each version preserves the exact stream prefix and order of every preceding version. The public archive design binds them inside one authenticated encrypted joint manifest. Restore and rollback fixtures cover v1, v2, and each new version with missing, extra, reordered, and unknown stream failures. Cursors, receipts, grants, descriptors, journals, and idempotency scopes bind to the global restore generation. Restore reconnects a credential reference only when the destination vault proves the same data-root identity, and restores all connections, publication descriptors, sharing, and dispatchers quarantined and disabled. Reactivation requires recent authentication, a reviewed authority check, a fresh remote snapshot, and conflict reconciliation; no restored operation can execute under an earlier generation.
 
 The legacy `metadata_field_overrides` table has no profile owner. M2 inspects the populated v10 root before changing it. With zero profiles, the value remains in a non-editable migration-review owner. With exactly one unambiguous eligible profile, it migrates to that profile with a receipt. With multiple or ambiguous profiles, it remains losslessly retained in the migration-review state until an authorized owner selects one destination. Fasti never copies an override to every profile and never discards it. Interrupted migration is idempotent and preserves unrelated rows byte-for-byte.
 
@@ -2145,7 +2494,7 @@ There are **0 critical gaps**: no row is unrescued, untested, and silent.
 | Cross-profile credential or state access | Medium | High | Workspace/profile/connection/grant authorization before lookup and again before commit. |
 | Rotating Nuvio token race | High | High | Durable per-connection lease and token-generation transaction. |
 | Malicious pack/add-on response | High | High | Streaming bounds, depth/node/string caps, schemas, inert imported URLs, separate activation authorization. |
-| Candidate title collision attaches wrong identity | Medium | High | Exact route re-fetch; title similarity cannot authorize attach. |
+| Candidate title collision attaches wrong identity | Medium | High | Exact route re-fetch or explicit authorized cached evidence with the original exact identifier; title similarity cannot authorize attach. |
 | Public catalog leaks private Library data | Medium | High | Explicit publication descriptor, field allowlist, cache partition, negative fixtures. |
 | Idempotency-key replay with stale or changed authority | Medium | High | Server-derived workspace/profile/client/credential/grant/capability/object/lane/revision/digest/restore scope; reject without prior receipt disclosure. |
 | Cursor tampering, long-lived stream leakage, or cross-grant reuse | Medium | High | Integrity-bound scope/epoch digest, browser-safe authentication, bounded recheck, close on every invalidation. |
@@ -2213,7 +2562,7 @@ NEW UX FLOWS
 
 NEW DATA FLOWS
   provider -> claims -> projection
-  candidate -> exact re-fetch -> Record transaction
+  candidate -> exact re-fetch or explicit original cached evidence -> atomic Record transaction
   account state -> connection grant -> profile state
   profile state -> journal/delta -> Nuvio client
   profile state -> approved read projection -> Stremio/local share
@@ -2441,6 +2790,7 @@ Use Tabler primitives first: navbar/offcanvas, list groups, tables, forms, alert
 | `calendar` | `/library/calendar` | Library | Secondary Library action | Library action menu | Existing Calendar behavior remains; no new top-level destination. |
 | `detail` / Media Detail | `/records/{grain}/{record_id}/{slug}` | None | Deep-link from Search, Library, Discover, Collections | Same route and content order | M4/M5 own the route. Remove the sidebar item after redirect evidence passes. |
 | New candidate detail | `/explore/{source}/{grain}/{candidate_receipt_id}/{slug}` | None | Deep-link from Search/Discover | Same route in one column | M4 owns it. It never appears as a sidebar item. |
+| Live no-store candidate detail | `/explore/live/{source}/{grain}/{encoded_provider_record_id}/candidate` | None | Deep-link from live Search results | Same route in one column | M4 owns the transient coordinate read. No fabricated receipt or provider-title slug. |
 | `reconciliation` / Review Inbox | `/library?review=needs-review` | Library | Needs review preset | Needs review preset | Keep `/reconciliation` as a redirect/alias during the migration. |
 | New Collections | `/collections`, `/collections/packs`, `/collections/nuvio` | Collections | Top-level destination with local subnavigation | One Collections item and in-page select/tabs | M7 owns Collections. Tabs use real links or correct Tabler tab semantics. |
 | `connections` | `/connections` | Connections | Existing top-level destination | Existing offcanvas item | M9/M11/M13 own capability panels within the current page. |
@@ -3105,7 +3455,7 @@ Full-mode complexity review found no removable implementation layer:
 
 Review output: **Lean already. Ship. Net: -0 lines possible without removing requested scope or a required correctness, security, accessibility, recovery, or evidence control.**
 
-## GSTACK REVIEW REPORT
+### Historical M0 planning review (not current M4 release clearance)
 
 | Review | Trigger | Why | Runs | Status | Findings |
 | --- | --- | --- | ---: | --- | --- |
@@ -3118,5 +3468,175 @@ Review output: **Lean already. Ship. Net: -0 lines possible without removing req
 | Ponytail Review | `/ponytail-review` | Over-engineering and unnecessary-dependency review | 1 | CLEAR | Lean already; 0 removable layers; 0 new frameworks/databases/brokers/runtime dependencies; net -0 lines. |
 
 **VERDICT:** ALL PLANNING GATES CLEARED — M0 APPROVED FOR IMPLEMENTATION.
+
+NO UNRESOLVED DECISIONS
+
+## 56. M4 delivery re-audit and course correction — 2026-09-08
+
+Requested reviews: plan-eng-review, plan-devex-review and Ponytail full.
+Scope: approved M4 plan versus current implementation and delivery evidence;
+not a restart of completed product/design gates or an exhaustive new diff scan.
+Implementation, provider research, builds and publication were paused for this
+audit. Three native agents inspected scope/history, end-to-end Search and the
+verification workflow read-only. No Codex Security operation was performed.
+No tooling upgrade, new framework, dependency, migration or capability was added.
+
+### Exact state and finding disposition
+
+Current committed head is `8b940d63075c0a7cfba2afc6778db01cbd0cb126`, tree
+`e2e0c5d26eac20925ba976a6a759fec30e07401a`. The dirty identity reader and its
+new test leaf are preserved, not certified by that commit. Live PR #128 is open
+at `0aa0cde2f2301d7f3805b320a9d124d132a7e8af`: 17 local commits ahead,
+58 changed files, 9,512 additions and 281 deletions. Six commits are docs-only;
+976 added lines are in the plan/checkpoint. These counts prove delivery batching,
+not that the tests or correctness work should be deleted.
+
+| Finding | Evidence and confidence | Correction |
+| --- | --- | --- |
+| F1 — Delivery scope kept growing before landing | Original M0 `51fe1dc3` section 12 already requires domain/source filters; later native-evidence and Kitsu commits add prerequisites while PR #128 remains behind. Confidence 10/10 for history, not proof every adapter is mandatory. | User approved M4a/M4b split. Preserve all programme scope and stop provider research on M4a's critical path. |
+| F2 — Browser retention is incomplete | `discover-view.svelte:1108`: `localResults = [...localResults, ...page.records];`; lines 485–487 add to completion/Record maps. `fasti-workbench.svelte:773` owns `searchActionOperationIds`; failed intents survive until success or authority reset. Confidence 10/10. No observed out-of-memory claim. | User approved reuse of existing bounded-result handling and durable retry owner. Bound local rows and action state without losing navigation, unresolved actions or safe retry identity. No second cache framework. |
+| F3 — Acceptance evidence trails implementation | Canonical receipt source is `5ecc5649`; real-process browser source is `4222141d`, respectively 13 and 12 commits behind current HEAD. Confidence 10/10. | Freeze one landing head, run the required gates once, then publish/review that head. Historical passes stay historical. |
+| F4 — Landing knowledge is scattered | `docs/dev-loop.md` has the canonical command; special M4 invocation and physical-temp recovery are buried in a 5,693-line checkpoint. `xtask/src/main.rs:277` composes existing broad gates. Confidence 9/10. | Put one short M4 landing checklist in the existing developer guide; reuse current commands and distinguish their coverage. No new runner. |
+| F5 — Coordination was broader than the dependency | Access reported its approved browser-only C2 client inventory need not wait for every M4 provider. Shared registry/SDK/host files still overlap. Confidence 8/10; compatible exact diff remains to be proven. | Offer a file-exact handoff after compatible M4a schema/contracts are verified. Do not allocate a migration or release all shared files during this audit. |
+
+### Engineering review
+
+Architecture: preserve existing domain/application/store/runtime boundaries.
+One shared integration writer remains necessary; a whole-programme ownership
+lock is not the same as a semantic dependency. F1/F5 correct delivery sequencing.
+Code quality: reuse the existing result-window and durable receipt owners for
+F2; no classifier framework, duplicate persistence owner or speculative API.
+Tests: F3 is an evidence gap, not proof the implemented Search flow fails.
+Performance: F2 is a real unbounded-retention pattern; existing 10,000-Record
+query-plan and p95 tests remain the database gate, not whole-browser heap proof.
+
+```text
+Search input -> current authority -> local indexed keyset ------> results
+                               \-> enabled provider/cache ----> results
+                                    | offline / partial / empty
+                                    v
+                      retained receipt OR live coordinate
+                                    v
+                         canonical details (read only)
+                                    v
+                      explicit Create/Attach -> transaction
+                                    v
+                      durable retry receipt -> canonical Record
+```
+
+Existing tests cover scope/cursor rejection, cache-policy denial, expiry,
+partial/empty continuation, late responses, transaction rollback, duplicate
+actions and restart replay. The existing real-process journey crosses the
+browser, daemon and SQLite boundaries. New focused regressions must cover local
+result rollover and bounded completed/uncertain action retention. Retry after a
+lost response must keep the same operation identity; eviction must not create
+duplicate Records. Keyboard/focus/status announcements must remain usable when
+windows change. Final source-bound browser and performance evidence is pending.
+No new security vulnerability or exhaustive branch-coverage percentage is claimed.
+
+### Developer-experience review
+
+Reuse the approved persona: an OSS integration author/contributor using the
+generated TypeScript client and local Workbench, without provider credentials
+for first success. The existing offline `cargo xtask integration check
+contracts/addons/examples/minimal-metadata-source/provider.yaml` is the authoring
+entry point; do not make the whole PR gate their first experiment. The user-visible
+success remains Search -> details -> explicit Record -> offline reload.
+
+Inferred contributor journey, not a timed usability study: discover the existing
+guide -> run the deterministic fixture -> change the existing owner -> run its
+focused regression -> freeze source -> run the landing checklist -> publish.
+The confusing step is choosing sufficient verification from overlapping commands
+and historical receipts. Reuse the prior persona/empathy and benchmark in section
+51; do not invent new customer research, measured onboarding time or a playground.
+
+| DX pass | Current audit assessment | Disposition |
+| --- | --- | --- |
+| 1 Getting started | Existing credential-free fixture guide is present; time to first success was not measured. | Reuse it; no new install flow. |
+| 2 API/SDK | Generated Search/detail/action contracts and separate retained/live semantics exist. | Preserve; domain filters belong to M4b. |
+| 3 Errors/debugging | Expired/no-store offline reads, capacity errors and changed authority have explicit outcomes. Environmental SQLite symlink failure needed a physical temporary directory. | Keep recovery semantics; include physical-temp preflight in landing guide. |
+| 4 Documentation | Extensive evidence exists, but current landing instructions are scattered. | F4; one checklist in the existing guide. |
+| 5 Upgrade | Schema 17/archive 7 and historical formats have existing owners/tests. No new version is justified by this audit. | Preserve append-only migrations and restore gates; no down-migration shortcut. |
+| 6 Environment | Canonical gate covers root Rust/contracts/build/docs/portable checks, not every Desktop/JS/browser path. | F3/F4; one coverage-aware final pass. |
+| 7 Community | Contributor and provider-authoring guides already exist. No new M4-specific gap proven. | No community/platform project. |
+| 8 Measurement | Exact receipts exist but do not cover current source; onboarding time remains unmeasured. | Track source-qualified acceptance and merged delivery, not test/commit volume. |
+
+DX status: **issues open**. No new numeric score or improvement is claimed without
+a fresh usability measurement. The older 9/10 plan score is not current product
+qualification. Three examined recovery paths are: retained evidence unavailable
+offline (do not fabricate a live payload), action capacity exhausted (reads/replay
+remain usable; operator can raise the documented bound), and changed authority
+(reject stale delivery and require current access). Avoid adding a generic error
+framework or leaking provider details in an attempt to improve these messages.
+
+### Finite implementation and landing tasks
+
+- [x] **T1 / F2 — M4a retention.** Commander owns `discover-view.svelte` and
+  `fasti-workbench.svelte`; delegate separate regression leaves. Reuse current
+  windows/receipt replay. Prove continued navigation, bounded retained data,
+  uncertain retry identity, profile isolation and keyboard recovery. Estimate:
+  human 0.5–1 day / agent 1–3 hours, not a completion promise.
+- [x] **T2 / F4 — M4a landing instructions.** Update only the existing
+  `docs/dev-loop.md` checklist with actual prerequisites and command coverage.
+  Keep original failures. Estimate: human 1 hour / agent 15–30 minutes.
+- [ ] **T3 / F1,F3 — M4a exact landing.** Preserve dirty M4b preparation before
+  reconciling the accepted current `dev` base. Retain committed provider/native
+  work; do not cherry-pick an artificial old core that loses fixes. Freeze a
+  clean commit/tree, complete the sequence below, validate actual review findings,
+  deliver PR #128 and verify merged-tree identity. Duration depends on actual
+  failures and hosted gates; not estimated from historic green counts.
+- [ ] **T4 / F1,F5 — M4b and narrow shared handoff.** After M4a's verified
+  boundary, allocate exact files for shared domain classification/filtering and
+  required coverage; retain all ten domains, honest unknown/Custom separation,
+  accepted Exact overlap, offline evidence and stable filtered continuation.
+  Allocate a compatible C2 browser-inventory slice independently where proven.
+  Do not reserve a migration number before checking the exact accepted head.
+
+Final verification sequence, after focused fixes and source freeze:
+
+1. Confirm clean commit/tree, physical temporary directory, system pkg-config,
+   locked dependencies, available ports and exact prepared TrailBase input.
+2. Run `PKG_CONFIG=/usr/bin/pkg-config TMPDIR=/tmp cargo xtask test pr` once.
+3. Run uncovered gates once: complete `pnpm test`; changed Desktop formatting,
+   strict Clippy and tests using its own manifest; ordinary `pnpm test:ui
+   --grep-invert @performance --workers=1 --retries=0`; existing real-process
+   `scripts/smoke-access-browser.py --m4-search-journey` with verified input.
+   Use the existing separate performance lane for applicable performance claims.
+4. Require terminal results and unchanged source. If a source fix is needed,
+   prove its focused regression, then requalify the new final tree. Do not run
+   overlapping broad suites between every preparation edit.
+5. Publish once for exact-head review/CI. Current published ARM failure and
+   Codacy attention must be resolved or dispositioned against the actual final
+   head; old successes do not override them. Preserve distinct fixture, live
+   provider, Desktop, accessibility and hardware claims. Verify merge/tree.
+
+Rollback: preserve every committed result and dirty preparation; no reset,
+destructive extraction, receipt deletion or historical migration rewrite.
+Use existing archive/restore compatibility checks. A failed release check leaves
+the stage open; it does not authorize weakening the check or losing user state.
+
+Parallel allocation: commander integrates shared production surfaces; agent A
+reviews current-slice changes, B owns explicitly allocated regression leaves,
+C checks landing evidence/docs or prepares the next dependency-ready lane read-only.
+After M4a, prove M4b/C2 file ownership before either writes overlapping contracts.
+M5/M8/M9a/M11a stay in the existing programme; no second roadmap is created.
+
+Not in this correction: universal provider activation, new provider research
+without a demonstrated required gap, another review framework, tooling upgrades,
+new migration/API scaffolding, repeated unchanged Access polling, or new optional
+TODO projects. No approved capability is removed. Codex Security remains permanently
+excluded. Native agents supplied independent reads; no cross-model review is claimed.
+
+## GSTACK REVIEW REPORT
+
+| Review | Trigger | Why | Runs in this audit | Status | Findings |
+| --- | --- | --- | ---: | --- | --- |
+| Engineering | `/plan-eng-review` | M4 scope, architecture, tests and performance | 1 | ISSUES OPEN | F1/F2/F3/F5; delivery split and targeted retention approach approved; release proof pending. |
+| Developer experience | `/plan-devex-review` | All eight passes against existing contributor journey | 1 | ISSUES OPEN | F3/F4; no fresh onboarding-time or usability score claimed. |
+| Ponytail | `/ponytail` full | Minimum complete delivery path | 1 | APPLIED | Reuse owners, preserve work, stop new M4a provider expansion; no new framework or speculative surface. |
+
+**VERDICT:** Re-audit complete with concerns. M4a/M4b correction approved; M4
+is not complete and the current tree is not release-qualified. Historical M0
+planning approvals above remain historical approvals, not current clearance.
 
 NO UNRESOLVED DECISIONS

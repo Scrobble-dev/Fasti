@@ -2,6 +2,8 @@ import {
   connectionEndpoint,
   FastiClient,
   type CredentialProvider,
+  type LocalSearchRequestDto,
+  type LocalSearchResponseDto,
 } from "@fasti/sdk";
 import type {
   AttachIdentifierInput,
@@ -12,6 +14,7 @@ import type {
   IntegrationRuntimeStatus,
   IntegrationStatusHost,
   IntegrationStatusResponse,
+  ListRecordsQueryParameters,
   NetworkConfiguration,
   MetadataProjectionConfigurationResponse,
   MetadataProjectionResponse,
@@ -181,6 +184,7 @@ async function loadProviderRows(
       source: capability.credential_source,
       writable: capability.writable,
       testable: capability.testable,
+      health_checkable: capability.health_checkable,
       docs_url: provider.documentation_url,
     })),
   );
@@ -215,8 +219,11 @@ export function createWebHost(
     baseUrl:
       typeof window === "undefined" ? defaultApiUrl : window.location.origin,
   });
+  const usesScopedCredential = credential !== undefined;
+  const currentApplicationClient = () =>
+    usesScopedCredential ? client : accessClient;
 
-  const metadataHost: Partial<WorkbenchHost> = credential
+  const metadataHost: Partial<WorkbenchHost> = usesScopedCredential
     ? {
         async readMetadataProjection(
           recordId: string,
@@ -241,7 +248,7 @@ export function createWebHost(
 
   return {
     networkConfigurationScope: "client",
-    profileDataAuthority: credential ? "scoped" : "browser_session",
+    profileDataAuthority: usesScopedCredential ? "scoped" : "browser_session",
     startTrailBaseSignIn: (request) =>
       accessClient.startTrailBaseSignIn(request),
     readTrailBaseContinuation: (signal) =>
@@ -258,15 +265,11 @@ export function createWebHost(
     revokeOtherBrowserSessions: () => accessClient.revokeOtherBrowserSessions(),
     rotateBrowserSession: () => accessClient.rotateBrowserSession(),
     readAnimeGroupingPolicy: (query) =>
-      (credential ? client : accessClient).readAnimeGroupingPolicy(query),
+      currentApplicationClient().readAnimeGroupingPolicy(query),
     previewAnimeGroupingPolicyChange: (request) =>
-      (credential ? client : accessClient).previewAnimeGroupingPolicyChange(
-        request,
-      ),
+      currentApplicationClient().previewAnimeGroupingPolicyChange(request),
     applyAnimeGroupingPolicyChange: (request) =>
-      (credential ? client : accessClient).applyAnimeGroupingPolicyChange(
-        request,
-      ),
+      currentApplicationClient().applyAnimeGroupingPolicyChange(request),
     async loadNetworkConfiguration(): Promise<NetworkConfiguration> {
       return network;
     },
@@ -330,7 +333,7 @@ export function createWebHost(
       return parseIntegrationStatusResponse(response.integrations);
     },
     async providerCredentialStatus(): Promise<ProviderCredentialStatus[]> {
-      return loadProviderRows(client);
+      return loadProviderRows(currentApplicationClient());
     },
     async saveProviderCredential(
       provider: string,
@@ -370,12 +373,65 @@ export function createWebHost(
         `${provider} search is not active in the browser host. Provider requests must use the governed native or server host.`,
       );
     },
+    async searchRecords(
+      request: LocalSearchRequestDto,
+      signal?: AbortSignal,
+    ): Promise<LocalSearchResponseDto> {
+      const response = await currentApplicationClient().searchRecords(request, {
+        signal,
+      });
+      return {
+        ...response,
+        records: response.records.map((record) => ({
+          ...record,
+          poster: { ...record.poster, value: null },
+        })),
+      };
+    },
+    searchProviderPage: (provider, request, signal) =>
+      currentApplicationClient().searchProviderPage(provider, request, {
+        signal,
+      }),
+    readSearchCandidate: (
+      provider,
+      grain,
+      candidateReceiptId,
+      offline,
+      signal,
+    ) =>
+      currentApplicationClient().readSearchCandidate(
+        provider,
+        grain,
+        candidateReceiptId,
+        { offline },
+        { signal },
+      ),
+    readProviderIdentifierDetails: (provider, grain, query, signal) =>
+      currentApplicationClient().readProviderIdentifierDetails(
+        provider,
+        grain,
+        query,
+        { signal },
+      ),
+    saveSearchCandidate: (provider, grain, candidateReceiptId, request) =>
+      currentApplicationClient().saveSearchCandidate(
+        provider,
+        grain,
+        candidateReceiptId,
+        request,
+      ),
+    saveProviderIdentifier: (provider, grain, request) =>
+      currentApplicationClient().saveProviderIdentifier(
+        provider,
+        grain,
+        request,
+      ),
     clearSearchCache(): void {},
     getSearchCacheSize(): number {
       return 0;
     },
-    async listRecords(): Promise<RecordPage> {
-      const response = await client.listRecords();
+    async listRecords(query?: ListRecordsQueryParameters): Promise<RecordPage> {
+      const response = await currentApplicationClient().listRecords({}, query);
       return {
         truncated: response.truncated,
         records: response.records.map((record) => ({
@@ -386,23 +442,24 @@ export function createWebHost(
     },
 
     async createRecord(grain: string): Promise<CreateRecordResult> {
-      return client.createRecord({ grain });
+      return currentApplicationClient().createRecord({ grain });
     },
 
     async attachIdentifier(
       input: AttachIdentifierInput,
     ): Promise<AttachIdentifierResult> {
-      return client.attachIdentifier(input);
+      return currentApplicationClient().attachIdentifier(input);
     },
 
     async registerNamespace(
       input: RegisterNamespaceInput,
     ): Promise<RegisterNamespaceResult> {
-      return client.registerNamespace(input);
+      return currentApplicationClient().registerNamespace(input);
     },
 
     async listTrackingDispositions(): Promise<TrackingDispositionList> {
-      const response = await client.listTrackingDispositions();
+      const response =
+        await currentApplicationClient().listTrackingDispositions();
       return {
         states: response.states as TrackingDispositionState[],
         truncated: response.truncated,
@@ -413,23 +470,23 @@ export function createWebHost(
       recordId: string,
       disposition: TrackingDispositionUpdate,
     ): Promise<TrackingDispositionState> {
-      return client.setTrackingDisposition(recordId, {
+      return currentApplicationClient().setTrackingDisposition(recordId, {
         disposition,
       }) as Promise<TrackingDispositionState>;
     },
 
     async getNuvioCollections(): Promise<NuvioCollectionsState> {
-      return client.getNuvioCollections();
+      return currentApplicationClient().getNuvioCollections();
     },
 
     async replaceNuvioCollections(
       document: NuvioCollectionsDocument,
     ): Promise<NuvioCollectionsState> {
-      return client.replaceNuvioCollections(document);
+      return currentApplicationClient().replaceNuvioCollections(document);
     },
 
     async clearNuvioCollections(): Promise<NuvioCollectionsState> {
-      return client.clearNuvioCollections();
+      return currentApplicationClient().clearNuvioCollections();
     },
 
     ...metadataHost,

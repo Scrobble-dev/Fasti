@@ -8,8 +8,8 @@ use fasti_application::{
     RequestAccessContext, SetTrackingDispositionCommand,
 };
 use fasti_contracts::{
-    ListTrackingDispositionsResponse, TrackingDispositionDto, TrackingDispositionStateDto,
-    TrackingDispositionUpdateDto,
+    ListRecordsQueryParameters, ListTrackingDispositionsResponse, TrackingDispositionDto,
+    TrackingDispositionStateDto, TrackingDispositionUpdateDto,
 };
 use fasti_domain::{
     ExternalIdentifierClaim, Grain, InterpretationState, NamespaceDefinition,
@@ -88,11 +88,19 @@ pub(crate) fn list_records(
     kernel: &SqliteKernel,
     store: &impl SetupSecretStore,
     artwork: &ArtworkCache,
+    query: Option<ListRecordsQueryParameters>,
 ) -> Result<RecordPage, DesktopProblem> {
     let access = require_access(kernel, store)?;
     let correlation_id = fasti_domain::RequestCorrelationId::new_v7();
+    let selector = query
+        .and_then(|query| query.record_id)
+        .map(|id| {
+            id.parse::<RecordId>()
+                .map_err(|_| fasti_application::InvalidRecordSelector)
+        })
+        .transpose();
     let summaries = kernel
-        .list_records(ListRecordsQuery::new(correlation_id, access))
+        .list_records(ListRecordsQuery::new(correlation_id, access).with_record_selector(selector))
         .map_err(|problem| DesktopProblem::application(&problem))?;
     let truncated = summaries.truncated();
     let records = summaries
@@ -101,9 +109,12 @@ pub(crate) fn list_records(
         .map(|summary| {
             let poster_asset_path = summary
                 .poster()
-                .source()
+                .provenance()
+                .and_then(|provenance| provenance.claim_provenance().provider_id())
                 .zip(summary.poster().value())
-                .and_then(|(source, url)| artwork.local_path(source.as_str(), url));
+                .and_then(|(provider, url)| {
+                    artwork.locator(provider.as_str(), url, access, summary.record_id())
+                });
             RecordSummary {
                 record_id: summary.record_id().to_string(),
                 grain: summary.grain(),
@@ -139,6 +150,38 @@ pub(crate) fn list_records(
 pub(crate) struct CreateRecordView {
     record_id: String,
     grain: Grain,
+}
+
+/// Resolve the current selected poster through the same scoped authority as Record listing.
+pub(crate) fn artwork_selection(
+    kernel: &SqliteKernel,
+    store: &impl SetupSecretStore,
+    artwork: &ArtworkCache,
+    locator: &str,
+) -> Result<(RequestAccessContext, ResolvedField), DesktopProblem> {
+    let access = require_access(kernel, store)?;
+    let record = artwork
+        .locator_record(locator, access)
+        .ok_or_else(|| DesktopProblem::invalid_input("Invalid artwork locator."))?;
+    let page = kernel
+        .list_records(
+            ListRecordsQuery::new(RequestCorrelationId::new_v7(), access).with_record_id(record),
+        )
+        .map_err(|problem| DesktopProblem::application(&problem))?;
+    let poster = page
+        .into_records()
+        .into_iter()
+        .next()
+        .map(|record| record.poster().clone())
+        .filter(|poster| {
+            poster.value().is_some()
+                && poster
+                    .provenance()
+                    .and_then(|p| p.claim_provenance().provider_id())
+                    .is_some()
+        })
+        .ok_or_else(|| DesktopProblem::invalid_input("Artwork is not available."))?;
+    Ok((access, poster))
 }
 
 pub(crate) fn create_record(
@@ -268,12 +311,13 @@ fn register_provider_namespace(
 pub(crate) fn create_provider_record(
     kernel: &SqliteKernel,
     access: RequestAccessContext,
-    candidate: ProviderCandidate,
+    candidate: &ProviderCandidate,
 ) -> Result<CreateRecordView, DesktopProblem> {
-    register_provider_namespace(kernel, access, &candidate)?;
+    let response_policy = *candidate.recorded_response_policy()?;
     let grain = candidate.grain()?;
     let identifier = candidate.identifier()?;
     let fields = candidate.metadata_fields(None, None)?;
+    register_provider_namespace(kernel, access, candidate)?;
     let outcome = kernel
         .create_provider_record(CreateProviderRecordCommand::new(
             RequestCorrelationId::new_v7(),
@@ -281,6 +325,7 @@ pub(crate) fn create_provider_record(
             grain,
             identifier,
             fields,
+            response_policy,
         ))
         .map_err(|problem| DesktopProblem::application(&problem))?;
     Ok(CreateRecordView {
@@ -293,11 +338,12 @@ pub(crate) fn apply_provider_metadata(
     kernel: &SqliteKernel,
     access: RequestAccessContext,
     record_id: RecordId,
-    candidate: ProviderCandidate,
+    candidate: &ProviderCandidate,
 ) -> Result<(), DesktopProblem> {
-    register_provider_namespace(kernel, access, &candidate)?;
+    let response_policy = *candidate.recorded_response_policy()?;
     let identifier = candidate.identifier()?;
     let fields = candidate.metadata_fields(None, None)?;
+    register_provider_namespace(kernel, access, candidate)?;
     kernel
         .apply_provider_metadata(ApplyProviderMetadataCommand::new(
             RequestCorrelationId::new_v7(),
@@ -305,8 +351,20 @@ pub(crate) fn apply_provider_metadata(
             record_id,
             identifier,
             fields,
+            response_policy,
         ))
         .map_err(|problem| DesktopProblem::application(&problem))
+}
+
+/// Artwork is optional, and may run only after the authorized mutation commits.
+/// A cache failure must not report a failed Save or invite a second mutation.
+pub(crate) async fn finish_provider_save<T>(
+    completed: Result<T, DesktopProblem>,
+    artwork: impl std::future::Future<Output = Result<(), DesktopProblem>>,
+) -> Result<T, DesktopProblem> {
+    let outcome = completed?;
+    let _ = artwork.await;
+    Ok(outcome)
 }
 
 fn disposition_dto(disposition: TrackingDisposition) -> TrackingDispositionDto {
@@ -385,14 +443,16 @@ mod tests {
     use crate::setup::complete_setup;
     use crate::setup::test_support::{new_kernel, MemoryStore};
 
+    include!("records_artwork_tests.rs");
+
     #[test]
     fn list_records_refuses_before_setup_completes() {
         let (root, kernel) = new_kernel();
         let store = MemoryStore::default();
-        let artwork = ArtworkCache::new(root.path().join("artwork"));
+        let artwork = ArtworkCache::new(root.path().join("artwork"), kernel.data_root_identity());
 
         assert!(matches!(
-            list_records(&kernel, &store, &artwork),
+            list_records(&kernel, &store, &artwork, None),
             Err(problem) if problem.code() == "not_authenticated"
         ));
     }
@@ -401,12 +461,81 @@ mod tests {
     fn list_records_is_honestly_empty_on_a_fresh_node() {
         let (root, kernel) = new_kernel();
         let store = MemoryStore::default();
-        let artwork = ArtworkCache::new(root.path().join("artwork"));
+        let artwork = ArtworkCache::new(root.path().join("artwork"), kernel.data_root_identity());
         complete_setup(&kernel, &store).expect("complete setup");
 
-        let records = list_records(&kernel, &store, &artwork).expect("list records");
+        let records = list_records(&kernel, &store, &artwork, None).expect("list records");
         assert!(records.records.is_empty());
         assert!(!records.truncated);
+    }
+
+    #[test]
+    fn list_records_exact_selector_preserves_default_and_missing_pages() {
+        let (root, kernel) = new_kernel();
+        let store = MemoryStore::default();
+        let artwork = ArtworkCache::new(root.path().join("artwork"), kernel.data_root_identity());
+        complete_setup(&kernel, &store).expect("complete setup");
+        let first = create_record(&kernel, &store, Grain::Film).expect("first record");
+        let selected = create_record(&kernel, &store, Grain::Work).expect("selected record");
+
+        for query in [None, Some(ListRecordsQueryParameters::default())] {
+            let page = list_records(&kernel, &store, &artwork, query).expect("default list");
+            assert_eq!(page.records.len(), 2);
+            assert!(!page.truncated);
+            assert!(page
+                .records
+                .iter()
+                .any(|record| record.record_id == first.record_id));
+        }
+
+        let page = list_records(
+            &kernel,
+            &store,
+            &artwork,
+            Some(ListRecordsQueryParameters {
+                record_id: Some(selected.record_id.clone()),
+            }),
+        )
+        .expect("exact selection");
+        assert_eq!(page.records.len(), 1);
+        assert_eq!(page.records[0].record_id, selected.record_id);
+        assert_eq!(page.records[0].grain, Grain::Work);
+        assert!(!page.truncated);
+
+        let page = list_records(
+            &kernel,
+            &store,
+            &artwork,
+            Some(ListRecordsQueryParameters {
+                record_id: Some(RecordId::new_v7().to_string()),
+            }),
+        )
+        .expect("unknown selection");
+        assert!(page.records.is_empty());
+        assert!(!page.truncated);
+    }
+
+    #[test]
+    fn list_records_invalid_selector_reaches_existing_authorization_owner() {
+        let (root, kernel) = new_kernel();
+        let store = MemoryStore::default();
+        let artwork = ArtworkCache::new(root.path().join("artwork"), kernel.data_root_identity());
+        let query = ListRecordsQueryParameters {
+            record_id: Some("not-a-record-id".to_owned()),
+        };
+        assert_eq!(
+            list_records(&kernel, &store, &artwork, Some(query.clone()))
+                .expect_err("setup must precede selector validation")
+                .code(),
+            "not_authenticated",
+        );
+        complete_setup(&kernel, &store).expect("complete setup");
+        assert_eq!(
+            list_records(&kernel, &store, &artwork, Some(query))
+                .expect_err("authorized malformed selector")
+                .code(),
+            "validation_failed",
+        );
     }
 
     #[test]
@@ -424,13 +553,13 @@ mod tests {
     fn create_record_makes_the_new_record_listable() {
         let (root, kernel) = new_kernel();
         let store = MemoryStore::default();
-        let artwork = ArtworkCache::new(root.path().join("artwork"));
+        let artwork = ArtworkCache::new(root.path().join("artwork"), kernel.data_root_identity());
         complete_setup(&kernel, &store).expect("complete setup");
 
         let created = create_record(&kernel, &store, Grain::Film).expect("create record");
         assert_eq!(created.grain, Grain::Film);
 
-        let records = list_records(&kernel, &store, &artwork).expect("list records");
+        let records = list_records(&kernel, &store, &artwork, None).expect("list records");
         assert_eq!(records.records.len(), 1);
         assert_eq!(records.records[0].record_id, created.record_id);
         assert!(!records.truncated);

@@ -1,4 +1,16 @@
 import { chromium } from "@playwright/test";
+import AxeBuilder from "@axe-core/playwright";
+import { readFile, rename, writeFile } from "node:fs/promises";
+
+const FASTI_ORIGIN = "http://127.0.0.1:8420";
+const FIXTURE_TITLE = "Fasti Fixture Film";
+const FIXTURE_OVERVIEW =
+  "Deterministic provider detail for the real Search journey.";
+const FIXTURE_PROVIDER_IDS = ["842001", "842002"];
+const NO_STORE_TITLE = "Fasti Transient Fixture Film";
+const NO_STORE_OVERVIEW =
+  "Transient provider payload sentinel 94a8bcd73cdd4ef5b350f838d5ec4dd1.";
+const NO_STORE_PROVIDER_IDS = ["843001", "843002"];
 
 let raw = "";
 for await (const chunk of process.stdin) raw += chunk;
@@ -14,6 +26,628 @@ async function trailBaseLogin() {
   await page.locator("#login-form").evaluate((form) => form.requestSubmit());
 }
 
+async function signInToFasti() {
+  await page.goto(`${FASTI_ORIGIN}/first-run`);
+  await page
+    .getByRole("button", { name: "Sign in to an existing account" })
+    .click();
+  await page.waitForURL((url) => url.origin === "http://127.0.0.1:4000");
+  await trailBaseLogin();
+  await page.waitForURL(
+    (url) =>
+      url.origin === FASTI_ORIGIN &&
+      ["/first-run", "/settings/account"].includes(url.pathname),
+    { timeout: 30_000 },
+  );
+  await page
+    .getByRole("heading", { name: "Choose where to continue" })
+    .waitFor();
+  await page.getByRole("radio").first().check();
+  await page.getByRole("button", { name: "Confirm access" }).click();
+  await page.waitForFunction(() =>
+    document.cookie.includes("__Host-fasti_csrf="),
+  );
+  if (new URL(page.url()).pathname === "/first-run") {
+    await page.getByText("Account confirmed", { exact: true }).waitFor();
+    await page.goto(`${FASTI_ORIGIN}/settings/account`);
+  }
+  await page.getByRole("heading", { name: "Account and security" }).waitFor();
+}
+
+function requireValue(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+async function requireCount(locator, expected, label) {
+  const actual = await locator.count();
+  if (actual !== expected) {
+    throw new Error(
+      `${label} count differs; expected=${expected} actual=${actual}`,
+    );
+  }
+}
+
+async function requireNoAccessibilityViolations(label) {
+  const { violations } = await new AxeBuilder({ page }).analyze();
+  if (violations.length > 0) {
+    throw new Error(
+      `${label} has accessibility violations: ${violations
+        .map(({ id }) => id)
+        .join(",")}`,
+    );
+  }
+}
+
+function providerResult(providerId) {
+  return page
+    .getByRole("region", { name: "Search results" })
+    .getByRole("listitem")
+    .filter({ has: page.getByText(providerId, { exact: true }) });
+}
+
+async function searchFixtureFilm({ cachedOnly = false } = {}) {
+  const provider = page.getByLabel("Metadata provider");
+  await provider.selectOption("tmdb");
+  if (cachedOnly) {
+    await page
+      .getByRole("checkbox", {
+        name: "Use cached provider results only",
+      })
+      .check();
+  }
+  const search = page.getByRole("searchbox", {
+    name: "Search The Movie Database (TMDB)",
+  });
+  await search.fill(FIXTURE_TITLE);
+  await page.getByRole("button", { name: "Search", exact: true }).click();
+  await page
+    .getByRole("region", { name: "Search results" })
+    .getByText(`2 results for ${FIXTURE_TITLE}.`, { exact: false })
+    .waitFor();
+  for (const providerId of FIXTURE_PROVIDER_IDS) {
+    await requireCount(
+      providerResult(providerId),
+      1,
+      `TMDB candidate ${providerId}`,
+    );
+  }
+}
+
+async function searchNoStoreFixture({ cachedOnly = false } = {}) {
+  const provider = page.getByLabel("Metadata provider");
+  await provider.selectOption("tmdb");
+  if (cachedOnly) {
+    await page
+      .getByRole("checkbox", {
+        name: "Use cached provider results only",
+      })
+      .check();
+  }
+  const search = page.getByRole("searchbox", {
+    name: "Search The Movie Database (TMDB)",
+  });
+  await search.fill(NO_STORE_TITLE);
+  await page.getByRole("button", { name: "Search", exact: true }).click();
+  const results = page.getByRole("region", { name: "Search results" });
+  if (cachedOnly) {
+    await results
+      .getByRole("alert")
+      .filter({ hasText: "unavailable" })
+      .waitFor();
+    for (const providerId of NO_STORE_PROVIDER_IDS)
+      await requireCount(
+        providerResult(providerId),
+        0,
+        `cached-only transient TMDB candidate ${providerId}`,
+      );
+    return;
+  }
+  await results
+    .getByText(`2 results for ${NO_STORE_TITLE}.`, { exact: false })
+    .waitFor();
+  for (const providerId of NO_STORE_PROVIDER_IDS) {
+    const result = providerResult(providerId);
+    await requireCount(result, 1, `transient TMDB candidate ${providerId}`);
+    await result
+      .getByRole("link", { name: "View details" })
+      .evaluate((link, expected) => {
+        if (link.getAttribute("href") !== expected)
+          throw new Error("transient candidate route is not canonical");
+      }, `/explore/live/tmdb/film/${providerId}/candidate`);
+  }
+}
+
+async function openNoStoreDetails(providerId) {
+  const pendingResponse = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return (
+      url.origin === FASTI_ORIGIN &&
+      url.pathname === "/api/v1/search/providers/tmdb/film/details" &&
+      url.searchParams.get("provider_record_id") === providerId
+    );
+  });
+  await providerResult(providerId)
+    .getByRole("link", { name: "View details" })
+    .click();
+  const response = await pendingResponse;
+  requireValue(response.status() === 200, "live detail HTTP read failed");
+  requireValue(
+    (await response.headerValue("cache-control")) === "private, no-store",
+    "live detail HTTP response permits retention",
+  );
+  await page.waitForURL(
+    (url) =>
+      url.origin === FASTI_ORIGIN &&
+      url.pathname === `/explore/live/tmdb/film/${providerId}/candidate`,
+  );
+  const details = page.locator("section").filter({
+    has: page.getByRole("heading", { name: NO_STORE_TITLE, level: 1 }),
+  });
+  await details.getByText(NO_STORE_OVERVIEW, { exact: true }).waitFor();
+  await details.getByText(providerId, { exact: true }).waitFor();
+  await details.getByText("2020", { exact: true }).waitFor();
+  return details;
+}
+
+async function releaseNoStoreCheckpoint(record) {
+  const checkpoint = input.noStoreCheckpoint;
+  requireValue(
+    checkpoint &&
+      typeof checkpoint.readyPath === "string" &&
+      typeof checkpoint.continuePath === "string",
+    "no-store durability checkpoint is unavailable",
+  );
+  const temporary = `${checkpoint.readyPath}.tmp`;
+  await writeFile(temporary, `${JSON.stringify(record)}\n`, {
+    encoding: "utf8",
+    flag: "wx",
+    mode: 0o600,
+  });
+  await rename(temporary, checkpoint.readyPath);
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    try {
+      const decision = await readFile(checkpoint.continuePath, "ascii");
+      if (decision.trim() !== "continue")
+        throw new Error("no-store durability checkpoint was rejected");
+      return;
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
+  throw new Error("no-store durability checkpoint timed out");
+}
+
+async function runM4NoStoreJourney() {
+  requireValue(
+    typeof input.attachRecordId === "string" &&
+      /^rec_[0-9a-f]{32}$/.test(input.attachRecordId) &&
+      typeof input.attachRecordPath === "string" &&
+      input.attachRecordPath.startsWith(
+        `/records/film/${input.attachRecordId}/`,
+      ),
+    "no-store Attach target is invalid",
+  );
+  const observed = [];
+  const observeRequest = (request) => {
+    const url = new URL(request.url());
+    if (
+      url.origin === FASTI_ORIGIN &&
+      url.pathname.startsWith("/api/v1/search/")
+    ) {
+      observed.push({
+        method: request.method(),
+        path: url.pathname,
+        providerRecordId: url.searchParams.get("provider_record_id"),
+      });
+    }
+  };
+  page.on("request", observeRequest);
+  try {
+    await signInToFasti();
+    await page.goto(`${FASTI_ORIGIN}/discover`);
+    await page.getByRole("heading", { name: "Discover", level: 1 }).waitFor();
+    await searchNoStoreFixture();
+    await requireNoAccessibilityViolations("live no-store Search results");
+
+    await openNoStoreDetails(NO_STORE_PROVIDER_IDS[0]);
+    await requireNoAccessibilityViolations("live no-store candidate details");
+    await page.reload();
+    const reloaded = page.locator("section").filter({
+      has: page.getByRole("heading", { name: NO_STORE_TITLE, level: 1 }),
+    });
+    await reloaded.getByText(NO_STORE_OVERVIEW, { exact: true }).waitFor();
+    await releaseNoStoreCheckpoint({
+      stage: "details_only",
+      route: new URL(page.url()).pathname,
+      providerRecordId: NO_STORE_PROVIDER_IDS[0],
+    });
+
+    await reloaded.getByRole("button", { name: "Create Record" }).click();
+    await page.waitForURL(
+      (url) =>
+        url.origin === FASTI_ORIGIN &&
+        /^\/records\/film\/rec_[0-9a-f]{32}\//.test(url.pathname),
+    );
+    const recordPath = new URL(page.url()).pathname;
+    const recordId = recordPath.split("/")[3];
+    requireValue(
+      /^rec_[0-9a-f]{32}$/.test(recordId),
+      "no-store Create did not produce a canonical Record ID",
+    );
+    await page.getByText(recordId, { exact: true }).first().waitFor();
+
+    await page.goto(
+      `${FASTI_ORIGIN}/explore/live/tmdb/film/${NO_STORE_PROVIDER_IDS[1]}/candidate`,
+    );
+    const secondDetails = page.locator("section").filter({
+      has: page.getByRole("heading", { name: NO_STORE_TITLE, level: 1 }),
+    });
+    await secondDetails.getByText(NO_STORE_OVERVIEW, { exact: true }).waitFor();
+    await secondDetails
+      .getByRole("button", {
+        name: "Attach to existing Record",
+        exact: true,
+      })
+      .click();
+    const dialog = page.getByRole("dialog", {
+      name: "Attach to existing Record",
+    });
+    const localSearch = dialog.getByRole("searchbox", {
+      name: "Search local Records",
+    });
+    await localSearch.fill(FIXTURE_TITLE);
+    await dialog.getByRole("button", { name: "Find Records" }).click();
+    const target = dialog.getByRole("radio", {
+      name: new RegExp(input.attachRecordId),
+    });
+    await target.waitFor();
+    await requireCount(target, 1, "no-store Attach target");
+    await target.check();
+    await requireNoAccessibilityViolations("no-store Attach Record picker");
+    await dialog.getByRole("button", { name: "Confirm attachment" }).click();
+    await page.waitForURL(
+      (url) =>
+        url.origin === FASTI_ORIGIN && url.pathname === input.attachRecordPath,
+    );
+
+    await page.goto(`${FASTI_ORIGIN}/discover`);
+    await searchNoStoreFixture({ cachedOnly: true });
+    requireValue(
+      await page
+        .getByRole("checkbox", { name: "Use cached provider results only" })
+        .isChecked(),
+      "cached-only no-store Search mode was not retained",
+    );
+
+    const counts = {
+      providerSearch: observed.filter(
+        ({ method, path }) =>
+          method === "POST" && path === "/api/v1/search/providers/tmdb",
+      ).length,
+      liveDetails: Object.fromEntries(
+        NO_STORE_PROVIDER_IDS.map((providerId) => [
+          providerId,
+          observed.filter(
+            ({ method, path, providerRecordId }) =>
+              method === "GET" &&
+              path === "/api/v1/search/providers/tmdb/film/details" &&
+              providerRecordId === providerId,
+          ).length,
+        ]),
+      ),
+      providerActions: observed.filter(
+        ({ method, path }) =>
+          method === "POST" &&
+          path === "/api/v1/search/providers/tmdb/film/actions",
+      ).length,
+      retainedDetails: observed.filter(({ path }) =>
+        path.startsWith("/api/v1/search/candidates/"),
+      ).length,
+    };
+    requireValue(counts.providerSearch === 2, "no-store Search count differs");
+    requireValue(
+      counts.liveDetails[NO_STORE_PROVIDER_IDS[0]] === 2 &&
+        counts.liveDetails[NO_STORE_PROVIDER_IDS[1]] === 1,
+      "no-store live detail count differs",
+    );
+    requireValue(
+      counts.providerActions === 2,
+      "no-store provider action count differs",
+    );
+    requireValue(
+      counts.retainedDetails === 0,
+      "no-store journey used a retained candidate route",
+    );
+    return {
+      recordId,
+      recordPath,
+      attachRecordId: input.attachRecordId,
+      attachRecordPath: input.attachRecordPath,
+      providerIds: [...NO_STORE_PROVIDER_IDS],
+      browserRequests: counts,
+      canonicalLiveRouteReloaded: true,
+      cachedOnlyRejectedUnretainedResults: true,
+      createCanonicalRecordObserved: true,
+      attachCanonicalRecordObserved: true,
+    };
+  } finally {
+    page.off("request", observeRequest);
+  }
+}
+
+async function verifyRestartedNoStoreRecord() {
+  requireValue(
+    typeof input.recordId === "string" &&
+      /^rec_[0-9a-f]{32}$/.test(input.recordId),
+    "restart no-store Record ID is invalid",
+  );
+  await signInToFasti();
+  await page.goto(`${FASTI_ORIGIN}${input.recordPath}`);
+  await page.getByText(input.recordId, { exact: true }).first().waitFor();
+  await page
+    .getByRole("button", { name: "Sources & Identity (1)", exact: true })
+    .click();
+  const identifiers = page.getByRole("region", {
+    name: "External identifiers",
+  });
+  const created = identifiers.getByRole("row").filter({
+    has: page.getByRole("cell", {
+      name: NO_STORE_PROVIDER_IDS[0],
+      exact: true,
+    }),
+  });
+  await requireCount(created, 1, "restarted created no-store TMDB identity");
+  await page.goto(`${FASTI_ORIGIN}${input.attachRecordPath}`);
+  await page
+    .getByRole("button", { name: "Sources & Identity (3)", exact: true })
+    .click();
+  const attached = page
+    .getByRole("region", { name: "External identifiers" })
+    .getByRole("row")
+    .filter({
+      has: page.getByRole("cell", {
+        name: NO_STORE_PROVIDER_IDS[1],
+        exact: true,
+      }),
+    });
+  await requireCount(attached, 1, "restarted attached no-store TMDB identity");
+  await requireNoAccessibilityViolations("restarted no-store Record");
+  return {
+    recordId: input.recordId,
+    recordPath: input.recordPath,
+    attachRecordId: input.attachRecordId,
+    attachRecordPath: input.attachRecordPath,
+    exactExternalIdentifiersObserved: true,
+    providerPayloadNotRequiredAfterRestart: true,
+  };
+}
+
+async function openFixtureDetails(providerId) {
+  const result = providerResult(providerId);
+  await result.getByRole("link", { name: "View details" }).click();
+  await page.waitForURL(
+    (url) =>
+      url.origin === FASTI_ORIGIN &&
+      /^\/explore\/tmdb\/film\/scr_[0-9a-f]{32}\/fasti-fixture-film$/.test(
+        url.pathname,
+      ),
+  );
+  const details = page.locator("section").filter({
+    has: page.getByRole("heading", { name: FIXTURE_TITLE, level: 1 }),
+  });
+  await details.getByText(FIXTURE_OVERVIEW, { exact: true }).waitFor();
+  await details.getByText(providerId, { exact: true }).waitFor();
+  await details.getByText("2020", { exact: true }).waitFor();
+  return details;
+}
+
+async function runM4SearchJourney() {
+  const observed = [];
+  const observeRequest = (request) => {
+    const url = new URL(request.url());
+    if (
+      url.origin === FASTI_ORIGIN &&
+      url.pathname.startsWith("/api/v1/search/")
+    ) {
+      observed.push({ method: request.method(), path: url.pathname });
+    }
+  };
+  page.on("request", observeRequest);
+  try {
+    await page.goto(`${FASTI_ORIGIN}/discover`);
+    await page.getByRole("heading", { name: "Discover", level: 1 }).waitFor();
+    await searchFixtureFilm();
+    // Fresh describes reuse eligibility, including a just-persisted response.
+    // The TLS fixture's exact request count separately proves the upstream call.
+    await page
+      .getByRole("region", { name: "Search results" })
+      .getByRole("status")
+      .filter({
+        hasText: "These results came from fresh cache evidence.",
+      })
+      .waitFor();
+    await requireNoAccessibilityViolations("live provider Search results");
+
+    const firstDetails = await openFixtureDetails(FIXTURE_PROVIDER_IDS[0]);
+    await requireNoAccessibilityViolations("provider candidate details");
+    await firstDetails.getByRole("button", { name: "Create Record" }).click();
+    await page.waitForURL(
+      (url) =>
+        url.origin === FASTI_ORIGIN &&
+        /^\/records\/film\/rec_[0-9a-f]{32}\/fasti-fixture-film$/.test(
+          url.pathname,
+        ),
+    );
+    const recordPath = new URL(page.url()).pathname;
+    const recordId = recordPath.split("/")[3];
+    requireValue(
+      /^rec_[0-9a-f]{32}$/.test(recordId),
+      "created Record ID is not canonical",
+    );
+    await page
+      .getByRole("heading", { name: FIXTURE_TITLE, level: 1 })
+      .waitFor();
+    await page.getByText("Fasti Entity ID:", { exact: true }).waitFor();
+    await page.getByText(recordId, { exact: true }).first().waitFor();
+
+    await page.goto(`${FASTI_ORIGIN}/discover`);
+    await searchFixtureFilm();
+    const secondDetails = await openFixtureDetails(FIXTURE_PROVIDER_IDS[1]);
+    await secondDetails
+      .getByRole("button", {
+        name: "Attach to existing Record",
+        exact: true,
+      })
+      .click();
+    const dialog = page.getByRole("dialog", {
+      name: "Attach to existing Record",
+    });
+    const localSearch = dialog.getByRole("searchbox", {
+      name: "Search local Records",
+    });
+    await localSearch.waitFor();
+    requireValue(
+      await localSearch.evaluate(
+        (element) => element === document.activeElement,
+      ),
+      "Attach Record Search did not receive focus",
+    );
+    await dialog.getByRole("button", { name: "Find Records" }).click();
+    const target = dialog.getByRole("radio", {
+      name: new RegExp(recordId),
+    });
+    await target.waitFor();
+    await requireCount(target, 1, "exact Attach target");
+    await target.check();
+    await requireNoAccessibilityViolations("Attach Record picker");
+    await dialog.getByRole("button", { name: "Confirm attachment" }).click();
+    await page.waitForURL(
+      (url) => url.origin === FASTI_ORIGIN && url.pathname === recordPath,
+    );
+    await page.getByText(recordId, { exact: true }).first().waitFor();
+
+    await page.goto(`${FASTI_ORIGIN}/discover`);
+    await searchFixtureFilm({ cachedOnly: true });
+    await page
+      .getByRole("region", { name: "Search results" })
+      .getByRole("status")
+      .filter({
+        hasText: "These results came from fresh cache evidence.",
+      })
+      .waitFor();
+    const cachedOnly = await page
+      .getByRole("checkbox", {
+        name: "Use cached provider results only",
+      })
+      .isChecked();
+    requireValue(cachedOnly, "cached-only Search mode was not retained");
+
+    const counts = {
+      providerSearch: observed.filter(
+        ({ method, path }) =>
+          method === "POST" && path === "/api/v1/search/providers/tmdb",
+      ).length,
+      candidateDetails: observed.filter(
+        ({ method, path }) =>
+          method === "GET" &&
+          /^\/api\/v1\/search\/candidates\/tmdb\/film\/scr_[0-9a-f]{32}$/.test(
+            path,
+          ),
+      ).length,
+      candidateActions: observed.filter(
+        ({ method, path }) =>
+          method === "POST" &&
+          /^\/api\/v1\/search\/candidates\/tmdb\/film\/scr_[0-9a-f]{32}\/actions$/.test(
+            path,
+          ),
+      ).length,
+      localRecordSearch: observed.filter(
+        ({ method, path }) =>
+          method === "POST" && path === "/api/v1/search/records",
+      ).length,
+    };
+    requireValue(
+      counts.providerSearch === 3,
+      "browser provider Search request count differs",
+    );
+    requireValue(
+      counts.candidateDetails === 2,
+      "browser candidate details request count differs",
+    );
+    requireValue(
+      counts.candidateActions === 2,
+      "browser candidate action request count differs",
+    );
+    requireValue(
+      counts.localRecordSearch >= 4,
+      "browser local Record Search requests are incomplete",
+    );
+
+    return {
+      recordId,
+      recordPath,
+      providerIds: [...FIXTURE_PROVIDER_IDS],
+      cachedOnly,
+      browserRequests: counts,
+      liveProviderDetailsObserved: true,
+      createCanonicalRecordObserved: true,
+      attachCanonicalRecordObserved: true,
+    };
+  } finally {
+    page.off("request", observeRequest);
+  }
+}
+
+async function verifyRestartedRecord() {
+  requireValue(
+    typeof input.recordId === "string" &&
+      /^rec_[0-9a-f]{32}$/.test(input.recordId),
+    "restart Record ID is invalid",
+  );
+  requireValue(
+    typeof input.recordPath === "string" &&
+      input.recordPath === `/records/film/${input.recordId}/fasti-fixture-film`,
+    "restart Record path does not match its canonical identity",
+  );
+  await page.goto(`${FASTI_ORIGIN}${input.recordPath}`);
+  await page.waitForURL(
+    (url) => url.origin === FASTI_ORIGIN && url.pathname === input.recordPath,
+  );
+  await page.getByRole("heading", { name: FIXTURE_TITLE, level: 1 }).waitFor();
+  await page.getByText("Fasti Entity ID:", { exact: true }).waitFor();
+  await page.getByText(input.recordId, { exact: true }).first().waitFor();
+  await page
+    .getByRole("button", { name: "Sources & Identity (2)", exact: true })
+    .click();
+  const identifiers = page.getByRole("region", {
+    name: "External identifiers",
+  });
+  await identifiers.waitFor();
+  for (const providerId of FIXTURE_PROVIDER_IDS) {
+    const row = identifiers.getByRole("row").filter({
+      has: page.getByRole("cell", { name: providerId, exact: true }),
+    });
+    await row.waitFor();
+    await requireCount(row, 1, `persisted TMDB identity ${providerId}`);
+    const cells = row.getByRole("cell");
+    await requireCount(cells, 5, "persisted identifier columns");
+    requireValue(
+      (await cells.nth(0).innerText()).trim() === "tmdb.movie",
+      `persisted TMDB identity ${providerId} has the wrong namespace`,
+    );
+  }
+  await requireNoAccessibilityViolations("restarted canonical Record");
+  return {
+    recordId: input.recordId,
+    recordPath: input.recordPath,
+    providerIds: [...FIXTURE_PROVIDER_IDS],
+    canonicalRecordObservedAfterRestart: true,
+    exactExternalIdentifiersObserved: true,
+  };
+}
+
 try {
   if (input.mode === "bootstrap") {
     await page.goto(input.authorizationUrl);
@@ -27,31 +661,7 @@ try {
     );
     process.stdout.write(JSON.stringify({ callbackUrl: page.url() }));
   } else if (input.mode === "sign-in") {
-    await page.goto("http://127.0.0.1:8420/first-run");
-    await page
-      .getByRole("button", { name: "Sign in to an existing account" })
-      .click();
-    await page.waitForURL((url) => url.origin === "http://127.0.0.1:4000");
-    await trailBaseLogin();
-    await page.waitForURL(
-      (url) =>
-        url.origin === "http://127.0.0.1:8420" &&
-        ["/first-run", "/settings/account"].includes(url.pathname),
-      { timeout: 30_000 },
-    );
-    await page
-      .getByRole("heading", { name: "Choose where to continue" })
-      .waitFor();
-    await page.getByRole("radio").first().check();
-    await page.getByRole("button", { name: "Confirm access" }).click();
-    await page.waitForFunction(() =>
-      document.cookie.includes("__Host-fasti_csrf="),
-    );
-    if (new URL(page.url()).pathname === "/first-run") {
-      await page.getByText("Account confirmed", { exact: true }).waitFor();
-      await page.goto("http://127.0.0.1:8420/settings/account");
-    }
-    await page.getByRole("heading", { name: "Account and security" }).waitFor();
+    await signInToFasti();
 
     const m3AnimeGroupingPolicy = await page.evaluate(async () => {
       const csrf = document.cookie
@@ -243,6 +853,9 @@ try {
     ) {
       throw new Error("vendor credentials reached browser storage");
     }
+    const m4SearchJourney = input.m4SearchJourney
+      ? await runM4SearchJourney()
+      : undefined;
     process.stdout.write(
       JSON.stringify({
         chromium: browser.version(),
@@ -267,7 +880,33 @@ try {
           distinct: true,
         },
         m3AnimeGroupingPolicy,
+        ...(m4SearchJourney ? { m4SearchJourney } : {}),
         fastiOriginVendorCredentialStorageAbsent: true,
+      }),
+    );
+  } else if (input.mode === "restart-record") {
+    await signInToFasti();
+    const m4RestartedRecord = await verifyRestartedRecord();
+    process.stdout.write(
+      JSON.stringify({
+        chromium: browser.version(),
+        m4RestartedRecord,
+      }),
+    );
+  } else if (input.mode === "m4-no-store") {
+    const m4NoStoreJourney = await runM4NoStoreJourney();
+    process.stdout.write(
+      JSON.stringify({
+        chromium: browser.version(),
+        m4NoStoreJourney,
+      }),
+    );
+  } else if (input.mode === "restart-no-store-record") {
+    const m4NoStoreRestart = await verifyRestartedNoStoreRecord();
+    process.stdout.write(
+      JSON.stringify({
+        chromium: browser.version(),
+        m4NoStoreRestart,
       }),
     );
   } else {

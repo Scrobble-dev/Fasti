@@ -157,11 +157,12 @@ test("an invalid service URL cannot overwrite the last valid endpoint", async ({
   await expect(page.getByLabel("Service URL")).toHaveValue(validEndpoint);
 });
 
-test("a saved service URL owns browser record and status requests after reload", async ({
+test("browser records stay same-origin while saved service status survives reload", async ({
   page,
 }) => {
   const savedOrigin = `https://${"a".repeat(63)}.fasti.test`;
-  const recordUrls: string[] = [];
+  const browserRecordUrls: string[] = [];
+  const remoteRecordUrls: string[] = [];
   const healthUrls: string[] = [];
   await page.addInitScript((serviceUrl) => {
     localStorage.setItem(
@@ -170,29 +171,20 @@ test("a saved service URL owns browser record and status requests after reload",
     );
   }, savedOrigin);
   await page.route(`${savedOrigin}/api/v1/records`, async (route) => {
-    const request = route.request();
-    if (request.method() === "OPTIONS") {
-      await route.fulfill({
-        status: 204,
-        headers: {
-          "access-control-allow-origin": browserOrigin,
-          "access-control-allow-methods": "GET",
-          "access-control-allow-credentials": "true",
-        },
-      });
-      return;
-    }
-    recordUrls.push(request.url());
-    expect(request.headers().authorization).toBeUndefined();
+    remoteRecordUrls.push(route.request().url());
     await route.fulfill({
-      status: 200,
+      status: 418,
       contentType: "application/json",
       headers: {
         "access-control-allow-origin": browserOrigin,
         "access-control-allow-credentials": "true",
       },
-      body: JSON.stringify(recordResponse("Saved endpoint record")),
+      body: JSON.stringify({ error: "saved service must not receive records" }),
     });
+  });
+  await page.route(`${browserOrigin}/api/v1/records`, async (route) => {
+    browserRecordUrls.push(route.request().url());
+    await fulfillRecords(route, "Browser session record");
   });
   await page.route(`${savedOrigin}/api/v1/health`, async (route) => {
     healthUrls.push(route.request().url());
@@ -209,9 +201,20 @@ test("a saved service URL owns browser record and status requests after reload",
   await page.setViewportSize({ width: 320, height: 720 });
   await page.goto("/");
   await expect(
-    page.getByRole("heading", { name: "Saved endpoint record" }).first(),
+    page.getByRole("heading", { name: "Browser session record" }).first(),
   ).toBeVisible();
-  expect(recordUrls).toEqual([`${savedOrigin}/api/v1/records`]);
+  expect(browserRecordUrls).toEqual([`${browserOrigin}/api/v1/records`]);
+  expect(remoteRecordUrls).toEqual([]);
+
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "Browser session record" }).first(),
+  ).toBeVisible();
+  expect(browserRecordUrls).toEqual([
+    `${browserOrigin}/api/v1/records`,
+    `${browserOrigin}/api/v1/records`,
+  ]);
+  expect(remoteRecordUrls).toEqual([]);
 
   await page.getByRole("link", { name: "Service status" }).click();
   await expect(
@@ -219,6 +222,18 @@ test("a saved service URL owns browser record and status requests after reload",
   ).toBeVisible();
   expect(healthUrls).toEqual([`${savedOrigin}/api/v1/health`]);
   await expect(page.getByText(savedOrigin, { exact: true })).toBeVisible();
+
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "Local service available" }),
+  ).toBeVisible();
+  expect(healthUrls).toEqual([
+    `${savedOrigin}/api/v1/health`,
+    `${savedOrigin}/api/v1/health`,
+  ]);
+  expect(remoteRecordUrls).toEqual([]);
+  await expect(page.getByText(savedOrigin, { exact: true })).toBeVisible();
+  await expectNoHorizontalOverflow(page);
 });
 
 test("changing the browser service URL keeps Access on the browser origin", async ({
@@ -255,7 +270,7 @@ test("record summaries stay truthful, bounded, and free of poster egress", async
       thirdPartyRequests.push(request.url());
     }
   });
-  await page.route(/\/api\/v1\/records$/, (route) =>
+  await page.route(/\/api\/v1\/records(?:\?.*)?$/, (route) =>
     fulfillRecords(
       route,
       "Summary-only record",
@@ -343,7 +358,7 @@ test("Discover selects available providers and preserves an explicit choice", as
     let googleConfigured = false;
     let tmdbConfigured = true;
     const completedSearches = new Set<string>();
-    const trackedCandidates = new Set<string>();
+    const actionOperationIds = new Map<string, string>();
     const providerStatus = () => [
       {
         provider: "google-books",
@@ -426,13 +441,16 @@ test("Discover selects available providers and preserves an explicit choice", as
             }
             googleConfigured = true;
             return providerStatus();
-          case "search_provider": {
+          case "search_provider_page": {
             const input = (
               arguments_ as {
-                input?: { provider?: string; query?: string };
+                input?: {
+                  provider_id?: string;
+                  request?: { query?: string; page?: number };
+                };
               }
             )?.input;
-            const searchKey = `${input?.provider}:${input?.query}`;
+            const searchKey = `${input?.provider_id}:${input?.request?.query}`;
             if (
               !["tmdb:Breaking Bad", "google-books:Dune"].includes(searchKey) ||
               completedSearches.has(searchKey)
@@ -440,64 +458,110 @@ test("Discover selects available providers and preserves an explicit choice", as
               throw new Error(`Unexpected provider search: ${searchKey}`);
             }
             completedSearches.add(searchKey);
-            if (input?.provider === "google-books") {
-              return [
-                {
-                  provider: "google-books",
-                  provider_id: "dune-volume",
-                  title: "Dune",
-                  kind: "book",
-                  authors: ["Frank Herbert"],
-                  image_url: null,
-                },
-              ];
+            if (input?.provider_id === "google-books") {
+              return {
+                outcome: "live",
+                provider_id: "google-books",
+                page: input.request?.page,
+                candidates: [
+                  {
+                    provider: "google-books",
+                    provider_id: "dune-volume",
+                    grain: "work",
+                    title: "Dune",
+                    original_title: null,
+                    release_year: null,
+                    kind: "book",
+                    authors: ["Frank Herbert"],
+                    image_url: null,
+                    overview: null,
+                  },
+                ],
+                next_page: null,
+              };
             }
-            return [
-              {
-                provider: "tmdb",
-                provider_id: "1396",
-                title: "Breaking Bad",
-                kind: "show",
-                authors: [],
-                image_url: null,
-              },
-              {
-                provider: "tmdb",
-                provider_id: "1396",
-                title: "Breaking Bad: The Movie",
-                kind: "movie",
-                authors: [],
-                image_url: null,
-              },
-            ];
+            return {
+              outcome: "live",
+              provider_id: "tmdb",
+              page: input?.request?.page,
+              candidates: [
+                {
+                  provider: "tmdb",
+                  provider_id: "1396",
+                  grain: "series",
+                  title: "Breaking Bad",
+                  original_title: null,
+                  release_year: null,
+                  kind: "show",
+                  authors: [],
+                  image_url: null,
+                  overview: null,
+                },
+                {
+                  provider: "tmdb",
+                  provider_id: "1396",
+                  grain: "film",
+                  title: "Breaking Bad: The Movie",
+                  original_title: null,
+                  release_year: null,
+                  kind: "movie",
+                  authors: [],
+                  image_url: null,
+                  overview: null,
+                },
+              ],
+              next_page: null,
+            };
           }
-          case "track_provider_candidate": {
+          case "save_provider_identifier": {
             const input = (
               arguments_ as {
                 input?: {
-                  provider?: string;
                   provider_id?: string;
-                  kind?: string;
+                  grain?: string;
+                  request?: {
+                    operation_id?: string;
+                    provider_record_id?: string;
+                    action?: { kind?: string };
+                  };
                 };
               }
             )?.input;
-            const candidateKey = `${input?.provider}:${input?.kind}:${input?.provider_id}`;
+            const candidateKey = `${input?.provider_id}:${input?.grain}:${input?.request?.provider_record_id}`;
             if (
-              !["tmdb:show:1396", "tmdb:movie:1396"].includes(candidateKey) ||
-              trackedCandidates.has(candidateKey)
+              !["tmdb:series:1396", "tmdb:film:1396"].includes(candidateKey)
             ) {
               throw new Error(`Unexpected Record creation: ${candidateKey}`);
             }
-            trackedCandidates.add(candidateKey);
-            if (input?.kind === "movie") {
+            if (input?.request?.action?.kind !== "create") {
+              throw new Error("Unexpected Record action");
+            }
+            const operationId = input?.request?.operation_id;
+            if (!operationId) throw new Error("Missing operation ID");
+            const prior = actionOperationIds.get(candidateKey);
+            if (prior !== undefined && prior !== operationId) {
+              throw new Error("Retry changed the operation ID");
+            }
+            actionOperationIds.set(candidateKey, operationId);
+            if (input?.grain === "film") {
               throw {
                 detail: "TMDB could not return the selected movie.",
                 next_action: "Try the search again.",
               };
             }
             return {
-              record_id: "rec_01991f588e0070008000000000000010",
-              grain: "show",
+              outcome: "saved",
+              receipt: {
+                operation_id: operationId,
+                provider_id: "tmdb",
+                provider_record_id: "1396",
+                grain: "series",
+                action: { kind: "create" },
+                origin: "user_selected_provider_identifier",
+                record_id: "rec_01991f588e0070008000000000000010",
+                disposition: "created",
+                committed_at: "2026-09-05T12:00:00Z",
+              },
             };
           }
           case "list_records":
@@ -597,6 +661,10 @@ test("Discover selects available providers and preserves an explicit choice", as
   await expect(
     movieResult.getByRole("button", { name: "Record ready" }),
   ).toHaveCount(0);
+  await movieResult.getByRole("button", { name: "Create Record" }).click();
+  await expect(movieResult.getByRole("alert")).toHaveText(
+    "TMDB could not return the selected movie. Try the search again.",
+  );
 
   await provider.selectOption("google-books");
   await expect(
@@ -680,5 +748,12 @@ test("browser Discover fails closed when provider credentials are unavailable", 
   await expect(page.getByRole("button", { name: "Create Record" })).toHaveCount(
     0,
   );
-  await expect(page.getByRole("searchbox")).toHaveCount(0);
+  await expect(
+    page.getByRole("searchbox", { name: "Search TMDB" }),
+  ).toBeEnabled();
+  await expect(
+    page.getByText(
+      "Local Records remain searchable without a network connection.",
+    ),
+  ).toBeVisible();
 });

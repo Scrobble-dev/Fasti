@@ -5,7 +5,7 @@
 //! Fasti Record; it never becomes the Record identity.
 
 use crate::{ApplicationResult, RequestAccessContext};
-use crate::{ProviderCapabilityState, ProviderId};
+use crate::{ProviderCapabilityState, ProviderId, ProviderResponseCachePolicy};
 use fasti_domain::{
     AnimeGroupingPreference, EnrichmentPolicy, ExternalIdentifierClaim, ExternalIdentifierError,
     FieldClaim, FieldClaimStatus, FieldKey, Grain, IdentityAssertion,
@@ -23,6 +23,103 @@ use std::{collections::HashMap, future::Future, pin::Pin};
 pub const MAX_PROVIDER_METADATA_FIELDS: usize = 16;
 pub const GOOGLE_BOOKS_PROVIDER_ID: &str = "google-books";
 pub const TMDB_PROVIDER_ID: &str = "tmdb";
+pub const GOOGLE_BOOKS_PRINT_TYPE_FIELD_KEY: &str = "google_books.print_type";
+pub const KITSU_PROVIDER_ID: &str = "kitsu";
+pub const KITSU_MANGA_SUBTYPE_FIELD_KEY: &str = "kitsu.manga_subtype";
+
+/// The subtype of one typed Kitsu manga resource, including negative evidence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KitsuMangaSubtype {
+    Manga,
+    Manhwa,
+    Manhua,
+    Oneshot,
+    Doujin,
+    Oel,
+    Novel,
+    Unknown,
+}
+
+impl KitsuMangaSubtype {
+    pub fn from_source(value: Option<&str>) -> Self {
+        value.and_then(Self::parse_claim).unwrap_or(Self::Unknown)
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Manga => "manga",
+            Self::Manhwa => "manhwa",
+            Self::Manhua => "manhua",
+            Self::Oneshot => "oneshot",
+            Self::Doujin => "doujin",
+            Self::Oel => "oel",
+            Self::Novel => "novel",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    pub fn parse_claim(value: &str) -> Option<Self> {
+        match value {
+            "manga" => Some(Self::Manga),
+            "manhwa" => Some(Self::Manhwa),
+            "manhua" => Some(Self::Manhua),
+            "oneshot" => Some(Self::Oneshot),
+            "doujin" => Some(Self::Doujin),
+            "oel" => Some(Self::Oel),
+            "novel" => Some(Self::Novel),
+            "unknown" => Some(Self::Unknown),
+            _ => None,
+        }
+    }
+}
+
+/// A bounded observation of volumeInfo.printType, not a Fasti media domain.
+/// UNKNOWN records a new response without a recognized publication type;
+/// absence of the optional candidate field means historical evidence is absent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum GoogleBooksPrintType {
+    Book,
+    Magazine,
+    Unknown,
+}
+
+impl GoogleBooksPrintType {
+    pub fn from_source(value: Option<&str>) -> Self {
+        value.and_then(Self::parse_claim).unwrap_or(Self::Unknown)
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Book => "BOOK",
+            Self::Magazine => "MAGAZINE",
+            Self::Unknown => "UNKNOWN",
+        }
+    }
+
+    pub fn parse_claim(value: &str) -> Option<Self> {
+        match value {
+            "BOOK" => Some(Self::Book),
+            "MAGAZINE" => Some(Self::Magazine),
+            "UNKNOWN" => Some(Self::Unknown),
+            _ => None,
+        }
+    }
+}
+
+/// Actual top-level provider response locale, independent of UI preference.
+pub fn provider_metadata_response_locale(
+    provider: &str,
+    requested: Option<&MetadataLocale>,
+) -> Option<MetadataLocale> {
+    match provider {
+        TMDB_PROVIDER_ID => Some(requested.cloned().unwrap_or_else(|| {
+            MetadataLocale::try_new("en-US").expect("fixed TMDB locale is valid")
+        })),
+        _ => None,
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ProviderIdentifierValueKind {
@@ -107,6 +204,22 @@ impl ProviderIdentityMapping {
 }
 
 const PROVIDER_IDENTITY_MAPPINGS: &[ProviderIdentityMapping] = &[
+    ProviderIdentityMapping {
+        provider: KITSU_PROVIDER_ID,
+        kind: "anime",
+        namespace: "kitsu.anime",
+        label: "Kitsu Anime",
+        grain: Grain::Release,
+        value_kind: ProviderIdentifierValueKind::PositiveDecimal,
+    },
+    ProviderIdentityMapping {
+        provider: KITSU_PROVIDER_ID,
+        kind: "manga",
+        namespace: "kitsu.manga",
+        label: "Kitsu Manga",
+        grain: Grain::Work,
+        value_kind: ProviderIdentifierValueKind::PositiveDecimal,
+    },
     ProviderIdentityMapping {
         provider: GOOGLE_BOOKS_PROVIDER_ID,
         kind: "book",
@@ -844,7 +957,10 @@ pub fn preview_anime_grouping_change_for_record_with_evidence(
 
 pub fn metadata_field_group(field_key: &FieldKey) -> Option<MetadataFieldGroup> {
     match field_key.as_str() {
-        TITLE_FIELD_KEY | ORIGINAL_TITLE_FIELD_KEY => Some(MetadataFieldGroup::BasicInfo),
+        TITLE_FIELD_KEY
+        | ORIGINAL_TITLE_FIELD_KEY
+        | GOOGLE_BOOKS_PRINT_TYPE_FIELD_KEY
+        | KITSU_MANGA_SUBTYPE_FIELD_KEY => Some(MetadataFieldGroup::BasicInfo),
         OVERVIEW_FIELD_KEY => Some(MetadataFieldGroup::Details),
         POSTER_FIELD_KEY => Some(MetadataFieldGroup::Artwork),
         RELEASE_YEAR_FIELD_KEY => Some(MetadataFieldGroup::ReleaseDates),
@@ -872,6 +988,97 @@ impl ProviderMetadataField {
     }
 }
 
+/// Validate reserved native facts without restricting extensible display fields.
+/// Observation policy, scope and lifecycle remain the admission owner's checks.
+pub fn valid_provider_native_fact(field_key: &FieldKey, claim: &FieldClaim) -> bool {
+    let (provider, kind, valid) = match field_key.as_str() {
+        GOOGLE_BOOKS_PRINT_TYPE_FIELD_KEY => (
+            GOOGLE_BOOKS_PROVIDER_ID,
+            "book",
+            GoogleBooksPrintType::parse_claim(claim.value()).is_some(),
+        ),
+        KITSU_MANGA_SUBTYPE_FIELD_KEY => (
+            KITSU_PROVIDER_ID,
+            "manga",
+            KitsuMangaSubtype::parse_claim(claim.value()).is_some(),
+        ),
+        _ => return true,
+    };
+    valid
+        && claim.provenance().provider_id().map(|id| id.as_str()) == Some(provider)
+        && provider_identity_mapping(provider, kind).is_some_and(|mapping| {
+            claim.provenance().source_namespace().as_str() == mapping.namespace()
+        })
+}
+
+pub fn is_native_publication_field(field: &str) -> bool {
+    matches!(
+        field,
+        GOOGLE_BOOKS_PRINT_TYPE_FIELD_KEY | KITSU_MANGA_SUBTYPE_FIELD_KEY
+    )
+}
+
+/// Convert bounded provider evidence without choosing a new observation time or
+/// freshness policy. Callers supply the actual response context, not save time.
+pub fn provider_candidate_metadata_fields(
+    candidate: &crate::SearchCandidate,
+    locale: Option<MetadataLocale>,
+    region: Option<MetadataRegion>,
+    evidence_digest: &fasti_domain::Sha256Digest,
+    fetched_at: fasti_domain::ReceivedAt,
+    expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    initial_status: FieldClaimStatus,
+) -> Result<Vec<ProviderMetadataField>, crate::SearchEvidenceError> {
+    let invalid = crate::SearchEvidenceError::InvalidCandidate;
+    let data = candidate.data();
+    let provenance = fasti_domain::FieldClaimProvenance::try_new(
+        MetadataProviderId::try_new(&data.provider).map_err(|_| invalid)?,
+        fasti_domain::NamespaceKey::try_new(candidate.identifier().namespace())
+            .map_err(|_| invalid)?,
+        candidate.identifier().value(),
+        locale,
+        region,
+        None,
+        evidence_digest.clone(),
+    )
+    .map_err(|_| invalid)?;
+    let year = data.release_year.map(|year| year.to_string());
+    [
+        (TITLE_FIELD_KEY, Some(data.title.as_str())),
+        (ORIGINAL_TITLE_FIELD_KEY, data.original_title.as_deref()),
+        (OVERVIEW_FIELD_KEY, data.overview.as_deref()),
+        (POSTER_FIELD_KEY, data.image_url.as_deref()),
+        (RELEASE_YEAR_FIELD_KEY, year.as_deref()),
+        (
+            GOOGLE_BOOKS_PRINT_TYPE_FIELD_KEY,
+            data.google_books_print_type
+                .map(GoogleBooksPrintType::as_str),
+        ),
+        (
+            KITSU_MANGA_SUBTYPE_FIELD_KEY,
+            data.kitsu_manga_subtype.map(KitsuMangaSubtype::as_str),
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(key, value)| value.map(|value| (key, value)))
+    .map(|(key, value)| {
+        let claim = FieldClaim::try_new_unbound_provider(
+            fasti_domain::MetadataClaimId::new_v7(),
+            value,
+            provenance.clone(),
+            fetched_at,
+            expires_at,
+            initial_status,
+        )
+        .map_err(|_| invalid)?;
+        Ok(ProviderMetadataField::new(
+            FieldKey::try_new(key).map_err(|_| invalid)?,
+            claim,
+        ))
+    })
+    .collect()
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct CreateProviderRecordCommand {
     correlation_id: RequestCorrelationId,
@@ -879,6 +1086,7 @@ pub struct CreateProviderRecordCommand {
     grain: Grain,
     identifier: ExternalIdentifierClaim,
     fields: Vec<ProviderMetadataField>,
+    response_policy: ProviderResponseCachePolicy,
 }
 
 impl CreateProviderRecordCommand {
@@ -888,6 +1096,7 @@ impl CreateProviderRecordCommand {
         grain: Grain,
         identifier: ExternalIdentifierClaim,
         fields: Vec<ProviderMetadataField>,
+        response_policy: ProviderResponseCachePolicy,
     ) -> Self {
         Self {
             correlation_id,
@@ -895,6 +1104,7 @@ impl CreateProviderRecordCommand {
             grain,
             identifier,
             fields,
+            response_policy,
         }
     }
 
@@ -917,6 +1127,10 @@ impl CreateProviderRecordCommand {
     pub fn fields(&self) -> &[ProviderMetadataField] {
         &self.fields
     }
+
+    pub const fn response_policy(&self) -> &ProviderResponseCachePolicy {
+        &self.response_policy
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -926,6 +1140,7 @@ pub struct ApplyProviderMetadataCommand {
     record_id: RecordId,
     identifier: ExternalIdentifierClaim,
     fields: Vec<ProviderMetadataField>,
+    response_policy: ProviderResponseCachePolicy,
 }
 
 impl ApplyProviderMetadataCommand {
@@ -935,6 +1150,7 @@ impl ApplyProviderMetadataCommand {
         record_id: RecordId,
         identifier: ExternalIdentifierClaim,
         fields: Vec<ProviderMetadataField>,
+        response_policy: ProviderResponseCachePolicy,
     ) -> Self {
         Self {
             correlation_id,
@@ -942,6 +1158,7 @@ impl ApplyProviderMetadataCommand {
             record_id,
             identifier,
             fields,
+            response_policy,
         }
     }
 
@@ -963,6 +1180,10 @@ impl ApplyProviderMetadataCommand {
 
     pub fn fields(&self) -> &[ProviderMetadataField] {
         &self.fields
+    }
+
+    pub const fn response_policy(&self) -> &ProviderResponseCachePolicy {
+        &self.response_policy
     }
 }
 
@@ -1215,6 +1436,7 @@ pub trait MetadataClaimRefreshService: Send + Sync {
     fn authorize_and_refresh(
         &self,
         command: RefreshMetadataClaimsCommand,
+        lease: crate::ProviderOperationLease,
     ) -> MetadataRefreshFuture<'_>;
 }
 
@@ -1329,6 +1551,7 @@ pub struct CommitMetadataRefreshCommand {
     ratings: Vec<RatingClaim>,
     cache_entries: Vec<MetadataCacheEntry>,
     attribution: MetadataAttribution,
+    response_policy: ProviderResponseCachePolicy,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1524,6 +1747,7 @@ impl CommitMetadataRefreshCommand {
         ratings: Vec<RatingClaim>,
         cache_entries: Vec<MetadataCacheEntry>,
         attribution: MetadataAttribution,
+        response_policy: ProviderResponseCachePolicy,
     ) -> Self {
         Self {
             correlation_id,
@@ -1537,6 +1761,7 @@ impl CommitMetadataRefreshCommand {
             ratings,
             cache_entries,
             attribution,
+            response_policy,
         }
     }
 
@@ -1572,6 +1797,10 @@ impl CommitMetadataRefreshCommand {
     }
     pub const fn attribution(&self) -> &MetadataAttribution {
         &self.attribution
+    }
+
+    pub const fn response_policy(&self) -> &ProviderResponseCachePolicy {
+        &self.response_policy
     }
 }
 

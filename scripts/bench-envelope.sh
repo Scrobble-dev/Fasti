@@ -167,8 +167,10 @@ scope_properties=(
 if systemd-run --user --scope --quiet "${scope_properties[@]}" -- true 2>/dev/null &&
   { [[ "$profile" != "canonical-idle" ]] || unshare --user --map-root-user --net -- true 2>/dev/null; }
 then
+  runner_mode="user"
   runner=(systemd-run --user --scope --quiet "${scope_properties[@]}" --)
 elif sudo -n true 2>/dev/null && sudo systemd-run --scope --quiet "${scope_properties[@]}" -- true 2>/dev/null; then
+  runner_mode="system"
   runner=(sudo systemd-run --scope --quiet "${scope_properties[@]}" --)
 else
   {
@@ -249,6 +251,7 @@ INNER
 
 sampler_status=0
 if [[ "$profile" == "canonical-idle" ]]; then
+  discovery_started=$SECONDS
   set +e
   "${runner[@]}" "${workload_environment[@]}" bash "$inner" "$peak_file" "$events_file" "$limits_file" "$cgroup_file" "$profile" "$@" &
   runner_pid=$!
@@ -262,6 +265,21 @@ if [[ "$profile" == "canonical-idle" ]]; then
   cgroup_path="$(cat "$cgroup_file" 2>/dev/null || true)"
   if [[ -z "$cgroup_path" || ! -d "$cgroup_path" ]]; then
     echo "Canonical idle measurement could not discover the enforced cgroup." >&2
+    # Failure-only evidence: never print workload arguments or the environment.
+    {
+      printf '  discovery: runner=%s elapsed_seconds=%s\n' "$runner_mode" "$(( SECONDS - discovery_started ))"
+      printf '  handshake: bytes=%s path=%q\n' "$(wc -c < "$cgroup_file")" "${cgroup_path:0:4096}"
+      if [[ -d "$cgroup_path" ]]; then
+        echo "  cgroup_directory=present"
+      else
+        echo "  cgroup_directory=absent"
+      fi
+      if kill -0 "$runner_pid" 2>/dev/null; then
+        echo "  runner_at_discovery=alive"
+      else
+        echo "  runner_at_discovery=exited"
+      fi
+    } >&2
     sampler_status=1
   else
     set +e
@@ -357,6 +375,7 @@ else
 fi
 
 if (( sampler_status != 0 )); then
+  printf 'Canonical idle runner exit status: %s\n' "$status" >&2
   echo "Canonical idle sampling failed; no passing measurement is available." >&2
   exit 1
 fi

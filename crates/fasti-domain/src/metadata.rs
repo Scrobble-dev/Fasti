@@ -13,6 +13,7 @@
 use crate::{Grain, MetadataClaimId, NamespaceKey, ProfileId, RecordId, Sha256Digest};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
+use std::collections::HashSet;
 
 pub const MAX_FIELD_KEY_BYTES: usize = 64;
 pub const MAX_FIELD_VALUE_BYTES: usize = 4096;
@@ -1136,11 +1137,9 @@ fn validate_resolution_input(
 ) -> Result<(), FieldResolutionError> {
     let mut record_id = None;
     let mut field_key: Option<&FieldKey> = None;
-    for (index, claim) in claims.iter().enumerate() {
-        if claims[..index]
-            .iter()
-            .any(|prior| prior.claim_id() == claim.claim_id())
-        {
+    let mut claim_ids = HashSet::<MetadataClaimId>::with_capacity(claims.len());
+    for claim in claims {
+        if !claim_ids.insert(claim.claim_id()) {
             return Err(FieldResolutionError::DuplicateClaimId);
         }
         if let Some(candidate) = claim.record_id() {
@@ -1156,11 +1155,10 @@ fn validate_resolution_input(
             field_key = Some(candidate);
         }
     }
-    if lifecycle_events.iter().any(|event| {
-        !claims
-            .iter()
-            .any(|claim| claim.claim_id() == event.claim_id())
-    }) {
+    if lifecycle_events
+        .iter()
+        .any(|event| !claim_ids.contains(&event.claim_id()))
+    {
         return Err(FieldResolutionError::UnknownLifecycleClaim);
     }
     if let Some(override_) = override_ {
@@ -1244,7 +1242,8 @@ pub fn resolve_profile_field(
     validate_resolution_input(override_, claims, lifecycle_events, policy)?;
 
     // Validate every lifecycle before an override can hide corrupt evidence.
-    // Keep resolution O(1) in additional space even for long claim histories.
+    // This lifecycle pass uses constant additional space; input validation
+    // above temporarily retains one identifier per supplied claim.
     for claim in claims {
         effective_status(claim, lifecycle_events, now)?;
     }
@@ -2855,6 +2854,162 @@ mod tests {
         assert_eq!(
             resolve_profile_field(Some(&override_), &[], &[], &other_policy, at(300)),
             Err(FieldResolutionError::OverrideProfileMismatch)
+        );
+    }
+
+    #[test]
+    fn profile_resolution_preserves_validation_error_precedence() {
+        let profile_id = ProfileId::new_v7();
+        let record_id = RecordId::new_v7();
+        let field_key = FieldKey::try_new(TITLE_FIELD_KEY).unwrap();
+        let policy = MetadataProjectionPolicy::default_for_profile(profile_id);
+        let first = provider_claim(
+            record_id,
+            &field_key,
+            "tmdb",
+            "tmdb.movie",
+            "550",
+            "Title",
+            Some("en"),
+            100,
+            None,
+            FieldClaimStatus::Fresh,
+        );
+        let mut mixed_record = first.clone();
+        mixed_record.claim_id = MetadataClaimId::new_v7();
+        mixed_record.record_id = Some(RecordId::new_v7());
+        let mut mixed_field = first.clone();
+        mixed_field.claim_id = MetadataClaimId::new_v7();
+        mixed_field.field_key = Some(FieldKey::try_new(OVERVIEW_FIELD_KEY).unwrap());
+        let mut duplicate_mixed = mixed_record.clone();
+        duplicate_mixed.claim_id = first.claim_id();
+        let lifecycle = |claim_id, sequence| {
+            FieldClaimLifecycleEvent::try_new(
+                claim_id,
+                sequence,
+                FieldClaimStatus::Fresh,
+                FieldClaimStatus::Stale,
+                received(150),
+                None,
+            )
+            .unwrap()
+        };
+        let unknown = lifecycle(MetadataClaimId::new_v7(), 1);
+        let invalid_sequence = lifecycle(first.claim_id(), 2);
+        let owned_override = ProfileFieldOverride::try_new(
+            profile_id,
+            record_id,
+            field_key.clone(),
+            "My title",
+            received(150),
+        )
+        .unwrap();
+        let wrong_override = ProfileFieldOverride::try_new(
+            ProfileId::new_v7(),
+            RecordId::new_v7(),
+            field_key,
+            "Another profile's title",
+            received(150),
+        )
+        .unwrap();
+        for (case, claims, events, override_, expected) in [
+            (
+                "earlier record mismatch precedes later duplicate",
+                vec![first.clone(), mixed_record.clone(), first.clone()],
+                vec![],
+                None,
+                FieldResolutionError::MixedClaimTarget,
+            ),
+            (
+                "earlier field mismatch precedes later duplicate",
+                vec![first.clone(), mixed_field, first.clone()],
+                vec![],
+                None,
+                FieldResolutionError::MixedClaimTarget,
+            ),
+            (
+                "same claim duplicate precedes its target mismatch",
+                vec![first.clone(), duplicate_mixed],
+                vec![],
+                None,
+                FieldResolutionError::DuplicateClaimId,
+            ),
+            (
+                "duplicate precedes unknown lifecycle",
+                vec![first.clone(), first.clone()],
+                vec![unknown.clone()],
+                None,
+                FieldResolutionError::DuplicateClaimId,
+            ),
+            (
+                "target mismatch precedes unknown lifecycle",
+                vec![first.clone(), mixed_record],
+                vec![unknown.clone()],
+                None,
+                FieldResolutionError::MixedClaimTarget,
+            ),
+            (
+                "unknown lifecycle precedes override ownership",
+                vec![first.clone()],
+                vec![unknown],
+                Some(wrong_override.clone()),
+                FieldResolutionError::UnknownLifecycleClaim,
+            ),
+            (
+                "override profile mismatch precedes target mismatch",
+                vec![first.clone()],
+                vec![],
+                Some(wrong_override),
+                FieldResolutionError::OverrideProfileMismatch,
+            ),
+            (
+                "valid override cannot hide invalid lifecycle sequence",
+                vec![first],
+                vec![invalid_sequence],
+                Some(owned_override),
+                FieldResolutionError::InvalidLifecycleSequence,
+            ),
+        ] {
+            assert_eq!(
+                resolve_profile_field(override_.as_ref(), &claims, &events, &policy, at(200)),
+                Err(expected),
+                "{case}"
+            );
+        }
+    }
+
+    #[test]
+    fn profile_resolution_accepts_256_unique_claims_and_rejects_a_last_duplicate() {
+        let record_id = RecordId::new_v7();
+        let field_key = FieldKey::try_new(TITLE_FIELD_KEY).unwrap();
+        let policy = MetadataProjectionPolicy::default_for_profile(ProfileId::new_v7());
+        let mut claims: Vec<_> = (0..256)
+            .map(|_| {
+                provider_claim(
+                    record_id,
+                    &field_key,
+                    "tmdb",
+                    "tmdb.movie",
+                    "550",
+                    "Title",
+                    Some("en"),
+                    100,
+                    None,
+                    FieldClaimStatus::Fresh,
+                )
+            })
+            .collect();
+        let resolved = resolve_profile_field(None, &claims, &[], &policy, at(200)).unwrap();
+        assert_eq!(resolved.value(), Some("Title"));
+        claims.reverse();
+        assert_eq!(
+            resolve_profile_field(None, &claims, &[], &policy, at(200)).unwrap(),
+            resolved
+        );
+        claims[255] = claims[0].clone();
+        assert_eq!(
+            resolve_profile_field(None, &claims, &[], &policy, at(200)),
+            Err(FieldResolutionError::DuplicateClaimId)
         );
     }
 

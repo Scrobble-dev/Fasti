@@ -959,6 +959,7 @@ dependencies = [
  "chrono",
  "fasti-application",
  "fasti-domain",
+ "httpdate",
  "keyring",
  "keyring-core",
  "reqwest",

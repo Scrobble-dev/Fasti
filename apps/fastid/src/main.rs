@@ -1,12 +1,12 @@
 use anyhow::{Context, Result};
 use fasti_api::{
-    api_router, direct_loopback_api_router, health_router, integration_router, metadata_api_router,
-    provider_api_router, remote_api_router, with_static_fallback,
+    api_router, health_router, integration_router, metadata_api_router, provider_api_router,
+    remote_api_router, search_api_router, with_static_fallback, DirectLoopbackAccessRuntime,
 };
-use fasti_application::OutboundAccessPolicy;
+use fasti_application::{BrowserRequestBoundaryPolicy, OutboundAccessPolicy};
 use fasti_provider_runtime::{
-    PlatformCredentialVault, ProviderMetadataRefreshService, ProviderRuntime,
-    PLATFORM_CREDENTIAL_SERVICE,
+    GovernedTransport, PlatformCredentialVault, ProviderMetadataRefreshService, ProviderRuntime,
+    ProviderSearchService, PLATFORM_CREDENTIAL_SERVICE,
 };
 use fasti_store::SqliteKernel;
 use sha2::{Digest, Sha256};
@@ -211,7 +211,53 @@ fn trailbase_root() -> Result<Option<PathBuf>> {
     Ok(value.map(PathBuf::from))
 }
 
-fn provider_runtime(kernel: &SqliteKernel) -> Result<Arc<ProviderRuntime>> {
+fn provider_transport_from_configuration(
+    fixture_address: Option<&str>,
+    fixture_ca_pem: Option<&str>,
+) -> Result<GovernedTransport> {
+    #[cfg(feature = "tmdb-smoke-fixture")]
+    {
+        let address = fixture_address
+            .context("the TMDB smoke fixture requires its loopback address")?
+            .parse::<SocketAddr>()
+            .context("the TMDB smoke fixture address is invalid")?;
+        let ca = fixture_ca_pem.context("the TMDB smoke fixture requires its private CA")?;
+        fasti_provider_runtime::tmdb_smoke_fixture_transport(address, ca.as_bytes())
+            .context("the TMDB smoke fixture transport is invalid")
+    }
+    #[cfg(not(feature = "tmdb-smoke-fixture"))]
+    {
+        anyhow::ensure!(
+            fixture_address.is_none() && fixture_ca_pem.is_none(),
+            "TMDB smoke fixture configuration requires the isolated fixture build"
+        );
+        Ok(GovernedTransport::default())
+    }
+}
+
+#[cfg(feature = "tmdb-smoke-fixture")]
+fn require_tmdb_smoke_listener(
+    requested: SocketAddr,
+    durable: bool,
+    fallback: PortFallback,
+    integration_configured: bool,
+    external_bind_configured: bool,
+) -> Result<()> {
+    anyhow::ensure!(
+        requested == DEFAULT_LISTEN.parse::<SocketAddr>()?
+            && durable
+            && fallback == PortFallback::Fail
+            && !integration_configured
+            && !external_bind_configured,
+        "the TMDB smoke fixture requires only the exact durable direct listener without fallback"
+    );
+    Ok(())
+}
+
+fn provider_runtime(
+    kernel: &SqliteKernel,
+    transport: GovernedTransport,
+) -> Result<Arc<ProviderRuntime>> {
     PlatformCredentialVault::initialize()
         .map_err(|error| anyhow::anyhow!("provider credential store is unavailable: {error}"))?;
     let digest = Sha256::digest(kernel.data_root_identity().as_bytes());
@@ -219,14 +265,19 @@ fn provider_runtime(kernel: &SqliteKernel) -> Result<Arc<ProviderRuntime>> {
     for byte in digest {
         write!(scope, "{byte:02x}").expect("writing to a String cannot fail");
     }
-    Ok(Arc::new(ProviderRuntime::new(Arc::new(
-        PlatformCredentialVault::new(PLATFORM_CREDENTIAL_SERVICE, scope),
-    ))))
+    Ok(Arc::new(ProviderRuntime::with_transport(
+        Arc::new(PlatformCredentialVault::new(
+            PLATFORM_CREDENTIAL_SERVICE,
+            scope,
+        )),
+        transport,
+    )))
 }
 
 fn metadata_and_provider_router(
     kernel: Arc<SqliteKernel>,
     providers: Arc<ProviderRuntime>,
+    browser_boundary: Option<BrowserRequestBoundaryPolicy>,
 ) -> axum::Router {
     let refresh = Arc::new(ProviderMetadataRefreshService::new(
         providers.clone(),
@@ -238,14 +289,22 @@ fn metadata_and_provider_router(
     provider_api_router(
         kernel.clone(),
         kernel.clone(),
-        providers,
+        providers.clone(),
         provider_operation_locks.clone(),
+        browser_boundary.clone(),
     )
     .merge(metadata_api_router(
         kernel.clone(),
         refresh,
-        kernel,
+        kernel.clone(),
+        provider_operation_locks.clone(),
+    ))
+    .merge(search_api_router(
+        kernel.clone(),
+        kernel.clone(),
+        Arc::new(ProviderSearchService::new(providers, kernel)),
         provider_operation_locks,
+        browser_boundary,
     ))
 }
 
@@ -304,6 +363,26 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
     let requested_addr = listen_addr()?;
+    let fixture_address = env::var_os("FASTI_TMDB_SMOKE_RESOLVE");
+    let fixture_ca = env::var_os("FASTI_TMDB_SMOKE_CA_PEM");
+    let provider_transport = provider_transport_from_configuration(
+        fixture_address
+            .as_deref()
+            .map(|value| value.to_str().context("TMDB smoke address must be UTF-8"))
+            .transpose()?,
+        fixture_ca
+            .as_deref()
+            .map(|value| value.to_str().context("TMDB smoke CA must be UTF-8"))
+            .transpose()?,
+    )?;
+    #[cfg(feature = "tmdb-smoke-fixture")]
+    require_tmdb_smoke_listener(
+        requested_addr,
+        data_root()?.is_some(),
+        port_fallback()?,
+        env::var_os("FASTI_INTEGRATION_LISTEN").is_some(),
+        env::var_os("FASTI_EXTERNAL_BIND_IP").is_some(),
+    )?;
     let local_api_addr = local_api_exposure_addr(
         requested_addr,
         external_bind_ip()?,
@@ -323,7 +402,10 @@ async fn main() -> Result<()> {
                 .map(Arc::new)
         })
         .transpose()?;
-    let providers = kernel.as_deref().map(provider_runtime).transpose()?;
+    let providers = kernel
+        .as_deref()
+        .map(|kernel| provider_runtime(kernel, provider_transport))
+        .transpose()?;
 
     let app = match (&configured_data_root, &kernel) {
         (Some(data_root), Some(kernel)) => {
@@ -343,31 +425,41 @@ async fn main() -> Result<()> {
                     "Fasti durable remote listener starting behind the trusted HTTPS proxy on http://{} with data root {:?}",
                     addr, data_root
                 );
-                remote_api_router(kernel.clone(), addr, data_root)
-                    .merge(metadata_and_provider_router(kernel.clone(), providers))
+                remote_api_router(kernel.clone(), addr, data_root).merge(
+                    metadata_and_provider_router(kernel.clone(), providers, None),
+                )
             } else {
                 info!(
                     "Fasti durable local listener starting on http://{} with data root {:?}",
                     addr, data_root
                 );
-                let local_router = if browser_access_is_direct(requested_addr, addr, used_fallback)
-                {
-                    direct_loopback_api_router(
-                        kernel.clone(),
-                        addr,
-                        used_fallback,
-                        data_root,
-                        configured_trailbase_root.as_deref(),
-                    )?
-                } else {
-                    api_router(
-                        kernel.clone(),
-                        local_api_addr
-                            .expect("configured durable local routes require local exposure"),
-                        data_root,
-                    )
-                };
-                local_router.merge(metadata_and_provider_router(kernel.clone(), providers))
+                let (local_router, browser_boundary) =
+                    if browser_access_is_direct(requested_addr, addr, used_fallback) {
+                        let direct = DirectLoopbackAccessRuntime::new(
+                            kernel.clone(),
+                            addr,
+                            used_fallback,
+                            data_root,
+                            configured_trailbase_root.as_deref(),
+                        )?;
+                        (direct.router(), Some(direct.browser_boundary()))
+                    } else {
+                        (
+                            api_router(
+                                kernel.clone(),
+                                local_api_addr.expect(
+                                    "configured durable local routes require local exposure",
+                                ),
+                                data_root,
+                            ),
+                            None,
+                        )
+                    };
+                local_router.merge(metadata_and_provider_router(
+                    kernel.clone(),
+                    providers,
+                    browser_boundary,
+                ))
             }
         }
         _ => {
@@ -447,6 +539,56 @@ async fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "tmdb-smoke-fixture")]
+    #[test]
+    fn tmdb_fixture_rejects_additional_or_alternate_listeners() {
+        let direct = DEFAULT_LISTEN.parse().unwrap();
+        assert!(
+            require_tmdb_smoke_listener(direct, true, PortFallback::Fail, false, false).is_ok()
+        );
+        for (address, durable, fallback, integration, external) in [
+            (direct, true, PortFallback::Fail, true, false),
+            (direct, true, PortFallback::Fail, false, true),
+            (direct, false, PortFallback::Fail, false, false),
+            (direct, true, PortFallback::Auto, false, false),
+            (
+                "0.0.0.0:8420".parse().unwrap(),
+                true,
+                PortFallback::Fail,
+                false,
+                false,
+            ),
+            (
+                "127.0.0.1:8421".parse().unwrap(),
+                true,
+                PortFallback::Fail,
+                false,
+                false,
+            ),
+        ] {
+            assert!(
+                require_tmdb_smoke_listener(address, durable, fallback, integration, external)
+                    .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn tmdb_fixture_configuration_is_explicit_and_never_activates_a_default_build() {
+        #[cfg(not(feature = "tmdb-smoke-fixture"))]
+        assert!(provider_transport_from_configuration(None, None).is_ok());
+        #[cfg(feature = "tmdb-smoke-fixture")]
+        assert!(provider_transport_from_configuration(None, None).is_err());
+        for (address, ca) in [
+            (Some("127.0.0.1:45678"), None),
+            (None, Some("invalid CA")),
+            (Some("not-an-address"), Some("invalid CA")),
+            (Some("127.0.0.1:45678"), Some("invalid CA")),
+        ] {
+            assert!(provider_transport_from_configuration(address, ca).is_err());
+        }
+    }
 
     #[test]
     fn accepts_explicit_socket_addresses() {

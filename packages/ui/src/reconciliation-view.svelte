@@ -1,11 +1,9 @@
 <script lang="ts">
   import type { ReviewItem } from "./types.js";
-  import {
-    IconCheck,
-    IconClock,
-    IconShieldCheck,
-    IconArrowRight,
-  } from "@tabler/icons-svelte";
+  import IconCheck from "@tabler/icons-svelte/icons/check";
+  import IconClock from "@tabler/icons-svelte/icons/clock";
+  import IconShieldCheck from "@tabler/icons-svelte/icons/shield-check";
+  import IconArrowRight from "@tabler/icons-svelte/icons/arrow-right";
 
   const GRAINS = [
     "work",

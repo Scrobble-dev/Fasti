@@ -2,13 +2,11 @@
   import type { MediaRecord } from "./types.js";
   import { recordProgressPercent } from "./progress.js";
   import FastActionBar from "./fast-action-bar.svelte";
-  import {
-    IconDeviceTv,
-    IconMovie,
-    IconBook,
-    IconDeviceGamepad2,
-    IconMicrophone,
-  } from "@tabler/icons-svelte";
+  import IconDeviceTv from "@tabler/icons-svelte/icons/device-tv";
+  import IconMovie from "@tabler/icons-svelte/icons/movie";
+  import IconBook from "@tabler/icons-svelte/icons/book";
+  import IconDeviceGamepad2 from "@tabler/icons-svelte/icons/device-gamepad-2";
+  import IconMicrophone from "@tabler/icons-svelte/icons/microphone";
 
   interface Props {
     record: MediaRecord;

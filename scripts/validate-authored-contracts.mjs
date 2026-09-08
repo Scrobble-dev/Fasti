@@ -311,6 +311,49 @@ export async function validateAuthoredContracts(root = repositoryRoot) {
     ],
   );
 
+  let previousStreams = portabilityV2Example.manifest.streams;
+  for (const [version, streamCount] of [
+    [3, 28],
+    [4, 29],
+    [5, 34],
+    [6, 35],
+    [7, 35],
+  ]) {
+    const directory = resolve(root, `contracts/portability/v${version}`);
+    const schema = await readStrictJson(
+      resolve(directory, "workspace-manifest.schema.json"),
+    );
+    const example = await readStrictJson(
+      resolve(directory, "workspace-manifest.example.json"),
+    );
+    assertInternalReferencesOnly(schema);
+    const validate = portabilityAjv.compile(schema);
+    assert.equal(
+      validate(example),
+      true,
+      `portability v${version} example errors:\n${JSON.stringify(validate.errors, null, 2)}`,
+    );
+    assert.equal(example.manifest.format_version, version);
+    assert.equal(example.manifest.streams.length, streamCount);
+    assert.equal(
+      example.manifest_digest,
+      `sha256:${createHash("sha256").update(canonicalize(example.manifest), "utf8").digest("hex")}`,
+      `archive-v${version} manifest_digest must cover RFC 8785/JCS canonical manifest bytes`,
+    );
+    assert.deepEqual(
+      example.manifest.streams
+        .slice(0, previousStreams.length)
+        .filter(
+          (stream) => version !== 7 || stream.entity !== "metadata_claims",
+        ),
+      previousStreams.filter(
+        (stream) => version !== 7 || stream.entity !== "metadata_claims",
+      ),
+      `archive v${version} must retain the frozen previous stream prefix byte-for-byte`,
+    );
+    previousStreams = example.manifest.streams;
+  }
+
   const loadedFileUrls = [];
   const expectedContextUrl = pathToFileURL(contextPath).href;
   const localContext = await readStrictJson(contextPath);

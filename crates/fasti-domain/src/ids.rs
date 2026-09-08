@@ -242,6 +242,12 @@ define_fasti_ids!(
     ),
     (Record, RecordId, "rec_", Executable),
     (MetadataClaim, MetadataClaimId, "mcl_", Executable),
+    (
+        SearchCandidateReceipt,
+        SearchCandidateReceiptId,
+        "scr_",
+        Reserved
+    ),
     (ExternalIdentifier, ExternalIdentifierId, "xid_", Executable),
     (IdentityAssertion, IdentityAssertionId, "asr_", Reserved),
     (Evidence, EvidenceId, "evd_", Executable),
@@ -265,7 +271,7 @@ mod tests {
 
     #[test]
     fn registry_has_one_unique_prefix_per_kind() {
-        assert_eq!(ID_PREFIX_REGISTRY.len(), 26);
+        assert_eq!(ID_PREFIX_REGISTRY.len(), 27);
         let prefixes: HashSet<_> = ID_PREFIX_REGISTRY
             .iter()
             .map(|entry| entry.prefix)
@@ -301,7 +307,10 @@ mod tests {
                 "pat_", "cnr_",
             ])
         );
-        assert_eq!(reserved, HashSet::from(["asr_", "cor_", "rst_", "fld_"]));
+        assert_eq!(
+            reserved,
+            HashSet::from(["asr_", "cor_", "rst_", "fld_", "scr_"])
+        );
     }
 
     #[test]

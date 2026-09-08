@@ -4,12 +4,15 @@
 //! credential storage. SQLite stores only the opaque credential reference and
 //! safe state. A `CredentialVaultPort` implementation stores secret material.
 
-use crate::ProblemCode;
+use crate::{ApplicationAccessContext, ApplicationResult, ProblemCode};
 use chrono::{DateTime, Utc};
-use fasti_domain::WorkspaceId;
+use fasti_domain::{RequestCorrelationId, WorkspaceId};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use zeroize::Zeroize;
+
+mod response_cache;
+pub use response_cache::{ProviderResponseCachePolicy, ProviderResponseReuse};
 
 pub const MAX_PROVIDER_ID_BYTES: usize = 128;
 pub const MAX_PROVIDER_CAPABILITY_ID_BYTES: usize = 128;
@@ -17,6 +20,22 @@ pub const MAX_CREDENTIAL_REFERENCE_BYTES: usize = 253;
 pub const MAX_CREDENTIAL_SECRET_BYTES: usize = 64 * 1024;
 /// Public provider-credential request limit shared by every adapter.
 pub const MAX_PROVIDER_CREDENTIAL_BYTES: usize = 4096;
+
+/// Keeps an already-acquired host provider guard alive during blocking work.
+/// This has no acquisition or authorization behavior. Hosts must supply their
+/// existing provider gate's guard, and workers retain a clone until they finish.
+#[derive(Clone)]
+pub struct ProviderOperationLease {
+    _guard: std::sync::Arc<dyn Send + Sync>,
+}
+
+impl ProviderOperationLease {
+    pub fn new(guard: impl Send + Sync + 'static) -> Self {
+        Self {
+            _guard: std::sync::Arc::new(guard),
+        }
+    }
+}
 const CONFIGURATION_DIGEST_BYTES: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -314,6 +333,24 @@ pub const fn credential_status_after_successful_check(
     match kind {
         ProviderCheckKind::Health => current,
         ProviderCheckKind::Credential => ProviderCredentialStatus::Valid,
+    }
+}
+
+pub fn credential_status_after_failed_check(
+    kind: ProviderCheckKind,
+    current: &ProviderCapabilityState,
+    code: ProblemCode,
+) -> ProviderCredentialStatus {
+    // Health is not credential verification. An absent reference must keep the
+    // requirement's Missing/Optional/NotRequired state, not invent a credential.
+    if kind == ProviderCheckKind::Health || current.credential_reference().is_none() {
+        return current.credential_status();
+    }
+    match code {
+        ProblemCode::ProviderCredentialMissing => ProviderCredentialStatus::Unavailable,
+        ProblemCode::ProviderCredentialInvalid => ProviderCredentialStatus::Invalid,
+        ProblemCode::ProviderCredentialExpired => ProviderCredentialStatus::Expired,
+        _ => current.credential_status(),
     }
 }
 
@@ -637,9 +674,16 @@ impl fmt::Display for ProviderStatePortError {
 
 impl std::error::Error for ProviderStatePortError {}
 
-/// Internal persistence boundary. Public application services authorize before
-/// calling it; the store adapter remains transport- and network-free.
+/// Provider state boundary. The public inventory read resolves current authority
+/// atomically; raw state operations require an already-authorized caller.
+/// The store adapter remains transport- and network-free.
 pub trait ProviderStatePort: Send + Sync {
+    fn authorize_and_list_provider_capability_states(
+        &self,
+        correlation_id: RequestCorrelationId,
+        access: &ApplicationAccessContext,
+    ) -> ApplicationResult<Vec<ProviderCapabilityState>>;
+
     fn get_provider_capability_state(
         &self,
         workspace_id: WorkspaceId,
@@ -768,5 +812,84 @@ mod tests {
             ),
             ProviderCredentialStatus::Valid
         );
+    }
+
+    #[test]
+    fn failed_checks_preserve_reference_and_health_boundaries() {
+        for (requirement, absent_status) in [
+            (
+                CredentialRequirement::ApiKey,
+                ProviderCredentialStatus::Missing,
+            ),
+            (
+                CredentialRequirement::OptionalApiKey,
+                ProviderCredentialStatus::Optional,
+            ),
+            (
+                CredentialRequirement::None,
+                ProviderCredentialStatus::NotRequired,
+            ),
+        ] {
+            for present in [false, true] {
+                if present && requirement == CredentialRequirement::None {
+                    continue;
+                }
+                let state = ProviderCapabilityState::try_new(
+                    ProviderId::try_new("tmdb").expect("provider"),
+                    ProviderCapabilityId::try_new("metadata.read").expect("capability"),
+                    ProviderCapabilityStatus::Available,
+                    1,
+                    requirement,
+                    present.then(|| {
+                        CredentialReference::try_new("secret:providers/tmdb/api-key")
+                            .expect("reference")
+                    }),
+                    if present {
+                        ProviderCredentialStatus::StoredUnverified
+                    } else {
+                        absent_status
+                    },
+                    digest(),
+                    ProviderCheckMetadata::never_run(),
+                    ProviderCheckMetadata::never_run(),
+                )
+                .expect("valid state");
+                for (code, expected) in [
+                    (
+                        ProblemCode::ProviderCredentialMissing,
+                        ProviderCredentialStatus::Unavailable,
+                    ),
+                    (
+                        ProblemCode::ProviderCredentialInvalid,
+                        ProviderCredentialStatus::Invalid,
+                    ),
+                    (
+                        ProblemCode::ProviderCredentialExpired,
+                        ProviderCredentialStatus::Expired,
+                    ),
+                    (ProblemCode::ProviderUnavailable, state.credential_status()),
+                ] {
+                    assert_eq!(
+                        credential_status_after_failed_check(
+                            ProviderCheckKind::Health,
+                            &state,
+                            code
+                        ),
+                        state.credential_status()
+                    );
+                    let status = credential_status_after_failed_check(
+                        ProviderCheckKind::Credential,
+                        &state,
+                        code,
+                    );
+                    assert_eq!(status, if present { expected } else { absent_status });
+                    assert!(valid_credential_state(
+                        requirement,
+                        state.credential_reference(),
+                        status
+                    ));
+                }
+            }
+        }
     }
 }
