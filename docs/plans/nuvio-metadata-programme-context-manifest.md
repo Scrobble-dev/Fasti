@@ -5645,3 +5645,123 @@ All M4 process handles are now terminal; the local resource slot returns to
 Access for its requested EOF gate. No new browser, canonical PR, whole Desktop,
 accessibility, performance or release receipt is claimed. M4 source ownership
 does not change. This is a local verified increment, not M4 completion or merge.
+
+### M4 exact-selected identity evidence — 2026-09-08
+
+The preceding goal turn made concrete progress: clean local commit
+`8b940d63075c0a7cfba2afc6778db01cbd0cb126`, tree
+`e2e0c5d26eac20925ba976a6a759fec30e07401a`, contains the verified Kitsu increment.
+This turn revalidated that clean state and moved to the shared identity reader
+needed for Search's domain-set filters. No completed planning gate restarted.
+
+Root changed the four existing preview evidence queries together: direct IDs,
+assertions, lifecycle-count preflight and lifecycle hydration now use the bounded
+`selected_record_ids_json` owner, not first/last-ID ranges. The singleton caller
+uses the same selected-ID slice. Existing record scope/status checks, complete
+lifecycle validation, dense-batch splitting, per-record bounds and sentinel
+limits remain. The complete B1 identifier reader is untouched and must not be
+replaced with the preview reader's tighter claim limit. No migration or index
+was added. Production SQL constants are used directly by query-plan tests.
+
+Parfit owned only a new regression leaf; root remains the shared production
+writer. Four focused regressions passed in
+`/tmp/fasti-m4-selected-identity-analyzed-sep8.log`: sparse A/C selection excludes
+malformed B assertions/events but selecting B fails closed; reversed/duplicate
+sets agree; empty/foreign/missing/inactive requests admit no evidence; 100 exact
+IDs among10,000 Records remain isolated. The populated fixture includes300
+assertions/events and verifies actual index key lookups before and after
+`ANALYZE`, including event primary-key lookup and no payload-table scans.
+The existing dense-valid split and singleton-overflow cases remain in the full
+store suite, currently running. This evidence does not yet prove end-to-end
+Search domain filtering, heap qualification or the full M4 acceptance gate.
+
+Wegener's read-only classifier audit confirms five current typed mapping rules
+and the need to preserve all ten domains, Exact overlap, latest negative/native
+evidence and explicit profile-owned Custom assignment. Do not treat the generic
+namespace fallback or Grain as a classifier. Epicurus found a narrower Music
+path in official MusicBrainz server `cff977f0ba8f06d5fa594e7590f6a134b1a5a22c`:
+recording lookup with `inc=work-rels` can return the linked work's type/type-id
+under the same response. The earlier blanket Music multi-response dependency
+is corrected for selected detail, not for Search responses. No Music adapter,
+taxonomy rule or runtime activation is claimed from source inspection alone.
+
+Access released actual terminal canonical handle38760 and M4 reclaimed the
+local slot. Access subsequently reported a user-requested pause for its own
+engineering/developer-experience audit, with no local workloads and explicit
+permission for independently authorized M4 work to continue. This does not
+transfer shared files, schema17/archive7 or migration18. Codex Security remains
+permanently excluded across all work and delegation. No push/rebase/merge.
+
+### M4 delivery audit — controlling correction, 2026-09-08
+
+The user paused implementation and requested plan-eng-review, plan-devex-review
+and Ponytail. All M4 builds/listeners are terminal; provider research is stopped.
+The final pre-pause store run exited 0: 507 library and 3 integration tests passed,
+with 6 ignored library tests and 1 ignored doctest. This does not qualify the
+whole dirty tree or replace final strict lint/browser/canonical gates.
+
+Current committed source remains `8b940d63075c0a7cfba2afc6778db01cbd0cb126`,
+tree `e2e0c5d26eac20925ba976a6a759fec30e07401a`. Preserve the dirty identity
+reader and `identity_selected_evidence_tests.rs`; no reset/stash/rebase/commit
+occurred during the audit. Live PR #128 remains open at `0aa0cde2`, 17 commits
+behind local HEAD. Its ARM gate fails and Codacy needs attention; all other
+observed conclusions are not certification of the later local work. Canonical
+and real-process receipts still bind `5ecc5649` and `4222141d` respectively.
+
+**Direct user approvals during the audit:**
+
+1. Split M4 into **M4a existing Search core delivery** and **M4b required
+   ten-domain/filter/provider-coverage completion**, preserving full scope.
+   M4 remains incomplete until both pass. Keep all committed Kitsu/native
+   evidence work; do not discard fixes to recreate an older core.
+2. Close the proven browser retention gaps by reusing existing result bounds
+   and durable retry ownership. Preserve pending work, navigation and safe
+   retries; no new cache framework or silent total-results cutoff.
+
+Finite course correction: finish those M4a bounds; put one landing checklist
+in the existing developer guide; preserve M4b preparation and reconcile the
+accepted dev head safely; freeze a clean source; run the canonical gate and
+only its uncovered JS/Desktop/browser/runtime/performance gates; publish and
+review that exact candidate; verify the merged tree. Stop broad rechecks between
+preparation edits. Do not resume Music/provider research on M4a's critical path.
+Full findings, evidence, test mapping and task list are in canonical plan section
+56; no second roadmap or orchestration framework exists.
+
+Commander remains sole shared production writer. Native agents completed
+read-only scope/history, Search-flow and delivery-workflow audits. On resumed
+M4a implementation, allocate separate test leaves and independent review; keep
+future preparation bounded. After compatible M4a schema/contracts are verified,
+offer C2 a file-exact browser-client-inventory handoff rather than a blanket
+wait for all provider work. No shared release, migration allocation or archive
+version change has occurred. Both programme audits remain paused for production.
+Historical planning approvals remain valid; current release status is **issues
+open**, not implementation-complete. Codex Security remains permanently excluded.
+
+### M4a bounded local pages and completion labels — 2026-09-08
+
+The audit was progress: the user approved a full-scope delivery split and reuse
+of existing retention/retry owners. Implementation resumed on that correction.
+Local Search and Attach now replace visible pages, retaining only the current
+and one adjacent page through the existing 100-row/4 MiB DTO contract. Cached
+Previous/Next performs no refetch; failed/oversized pages preserve the retry
+cursor. Empty Attach pages have a stable focus target. Completed candidate
+labels/Record IDs retain current/adjacent/routed/active candidates only; repeated
+Create after discard is a new explicit operation, not lifetime-wide replay.
+The existing exact-identifier store transaction remains the Record-reuse owner.
+
+Focused checks: UI compiler reported zero errors/warnings; seven new paging,
+oversize/retry and focus browser tests passed; 17 existing/extended Search,
+Attach and provider-window regressions passed on the final production diff.
+Handles 37017 and 80826 exited 0. The first new-leaf run failed because its
+native fixture used structuredClone on a Svelte cursor Proxy; its JSON IPC
+snapshot was corrected. Independent review's empty-focus/copy findings were
+fixed. No full canonical, release, public-provider or heap qualification is
+claimed. The existing developer guide now contains the one-pass landing checklist.
+
+Remaining M4a blocker: bound Workbench's unconfirmed intents without eviction,
+expose reachable retry of the complete original intent/operation ID, preserve
+authority isolation, and verify capacity recovery. Reuse existing action APIs
+and durable replay; no new schema/API is needed for the current Workbench lifetime.
+Do not claim new reload recovery. Then freeze/reconcile the final landing source
+and run the documented exact-head gates. M4b identity-reader preparation stays
+dirty and preserved; no migration/archive allocation or shared release occurred.

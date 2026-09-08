@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
+import type { SearchCandidateActionRequest } from "@fasti/sdk";
 import {
   expectNoHorizontalOverflow,
   mockAuthenticatedAccess,
@@ -10,10 +11,20 @@ interface WindowPageCall {
   request: { query: string; page: number; offline: boolean; grains: string[] };
 }
 
+interface WindowActionCall {
+  provider_id: string;
+  grain: string;
+  candidate_receipt_id: string;
+  request: SearchCandidateActionRequest;
+}
+
+const confirmedRecordId = "rec_01991f588e0070008000000000000001";
+
 declare global {
   interface Window {
     __DISCOVER_WINDOWS__: {
       calls: WindowPageCall[];
+      actions: WindowActionCall[];
       failProviders: string[];
       holdPage: number | null;
       released: boolean;
@@ -30,8 +41,10 @@ async function installWindowHost(
 ): Promise<void> {
   await mockAuthenticatedAccess(page);
   await page.addInitScript((thirdProvider) => {
+    const confirmedRecordId = "rec_01991f588e0070008000000000000001";
     const fixture: Window["__DISCOVER_WINDOWS__"] = {
       calls: [],
+      actions: [],
       failProviders: [],
       holdPage: null,
       released: false,
@@ -55,7 +68,11 @@ async function installWindowHost(
                   source: "default",
                   managed: false,
                 },
-                public_url: { value: null, source: "default", managed: false },
+                public_url: {
+                  value: null,
+                  source: "default",
+                  managed: false,
+                },
               },
               outbound_policy: {
                 allow_providers: [],
@@ -100,6 +117,30 @@ async function installWindowHost(
             return [];
           case "search_records":
             return { records: [], next: null };
+          case "save_search_candidate": {
+            const input = (args as { input: WindowActionCall }).input;
+            fixture.actions.push(structuredClone(input));
+            // Presentation-only confirmation. Store tests own exact-ID reuse;
+            // this fixture proves a discarded row may dispatch a new operation.
+            return {
+              outcome: "saved",
+              receipt: {
+                operation_id: input.request.operation_id,
+                candidate_receipt_id: input.candidate_receipt_id,
+                provider_id: input.provider_id,
+                grain: input.grain,
+                action: input.request.action,
+                evidence_mode: input.request.evidence_mode,
+                record_id: confirmedRecordId,
+                disposition:
+                  fixture.actions.length === 1 ? "created" : "reused",
+                fetched_at: "2026-09-08T12:00:00Z",
+                expires_at: "2026-09-09T12:00:00Z",
+                initial_status: "fresh",
+                committed_at: "2026-09-08T12:00:01Z",
+              },
+            };
+          }
           case "search_provider_page": {
             const input = (args as { input: WindowPageCall }).input;
             fixture.calls.push(structuredClone(input));
@@ -202,12 +243,27 @@ test("three provider result sets stay bounded and preserve one-step history with
   const firstHref = await first
     .getByRole("link", { name: "View details" })
     .getAttribute("href");
+  await first
+    .getByRole("button", { name: "Create Record", exact: true })
+    .click();
+  await expect(
+    first.getByRole("button", { name: "Record ready", exact: true }),
+  ).toHaveAttribute("aria-disabled", "true");
+  await expect(
+    first.getByText(confirmedRecordId, { exact: true }),
+  ).toBeVisible();
   await page.getByRole("button", { name: moreLabel }).click();
   await expect(rows).toHaveCount(200);
   await expect(page.getByRole("button", { name: continueLabel })).toBeVisible();
   await expect(rows).toHaveCount(200);
   await expect(
     first.getByText("Fresh cache evidence", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    first.getByRole("button", { name: "Record ready", exact: true }),
+  ).toHaveAttribute("aria-disabled", "true");
+  await expect(
+    first.getByText(confirmedRecordId, { exact: true }),
   ).toBeVisible();
   await expect(
     first.getByRole("link", { name: "View details" }),
@@ -238,6 +294,15 @@ test("three provider result sets stay bounded and preserve one-step history with
   await expect(
     first.getByText("Fresh cache evidence", { exact: true }),
   ).toBeVisible();
+  await expect(
+    first.getByRole("button", { name: "Record ready", exact: true }),
+  ).toHaveAttribute("aria-disabled", "true");
+  await expect(
+    first.getByText(confirmedRecordId, { exact: true }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(() => window.__DISCOVER_WINDOWS__.actions),
+  ).toHaveLength(1);
   await page.getByRole("button", { name: nextLabel }).click();
   await expect(rows).toHaveCount(100);
   expect(await pageCalls(page)).toEqual(beforeHistory);
@@ -283,6 +348,38 @@ test("three provider result sets stay bounded and preserve one-step history with
     page.getByRole("heading", { name: "Windows tmdb 6-99", exact: true }),
   ).toBeVisible();
   expect(await pageCalls(page)).toEqual(finalCalls);
+
+  // The first result set has now left both retained windows. Revisiting its
+  // identical receipt is a new explicit action, not lifetime-wide UI replay.
+  await submitSearch(page, "Windows");
+  await expect(first).toBeVisible();
+  await expect(
+    first.getByRole("button", { name: "Record ready", exact: true }),
+  ).toHaveCount(0);
+  await expect(first.getByText(confirmedRecordId, { exact: true })).toHaveCount(
+    0,
+  );
+  await first
+    .getByRole("button", { name: "Create Record", exact: true })
+    .click();
+  await expect(
+    first.getByRole("button", { name: "Record ready", exact: true }),
+  ).toHaveAttribute("aria-disabled", "true");
+  await expect(
+    first.getByText(confirmedRecordId, { exact: true }),
+  ).toBeVisible();
+  const actions = await page.evaluate(
+    () => window.__DISCOVER_WINDOWS__.actions,
+  );
+  expect(actions).toHaveLength(2);
+  expect(actions[1].candidate_receipt_id).toBe(actions[0].candidate_receipt_id);
+  expect(actions.map((action) => action.request.action)).toEqual([
+    { kind: "create" },
+    { kind: "create" },
+  ]);
+  expect(actions[1].request.operation_id).not.toBe(
+    actions[0].request.operation_id,
+  );
 });
 
 test("failed replacement retains the full prior result set and partial providers remain retryable", async ({

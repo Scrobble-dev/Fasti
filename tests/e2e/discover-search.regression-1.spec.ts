@@ -606,12 +606,12 @@ test("local and receipt-backed provider Search survive a partial source failure"
     .fill("Continuation");
   await page.getByRole("button", { name: "Search", exact: true }).click();
   await expect(
-    page.getByRole("button", { name: "Load more local Records" }),
+    page.getByRole("button", { name: "Next local Records" }),
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Retry or load more provider results" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Load more local Records" }).click();
+  await page.getByRole("button", { name: "Next local Records" }).click();
   await expect(page.getByRole("heading", { name: "Local Dune" })).toBeVisible();
   await page
     .getByRole("button", { name: "Retry or load more provider results" })

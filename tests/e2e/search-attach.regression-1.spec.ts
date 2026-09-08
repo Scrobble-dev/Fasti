@@ -281,10 +281,8 @@ for (const noStore of [false, true]) {
     await expect(dialog.getByRole("alert")).toContainText(
       "Attachment response interrupted",
     );
-    await dialog
-      .getByRole("button", { name: "Load more matching Records" })
-      .click();
-    await expect(dialog.getByRole("radio")).toHaveCount(2);
+    await dialog.getByRole("button", { name: "Next matching Records" }).click();
+    await expect(dialog.getByRole("radio")).toHaveCount(1);
     await dialog.getByRole("radio", { name: /Dune local B/ }).check();
     await dialog.getByRole("button", { name: "Confirm attachment" }).click();
     await expect(page).toHaveURL(`/records/film/${recordB}/dune-local-b`);

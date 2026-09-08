@@ -67,6 +67,23 @@ remain required; this selector alone does not complete them.
 
 ### M4 Kitsu typed Anime and Manga continuation — 2026-09-08
 
+The shared identity evidence reader now uses exact selected-ID sets for direct
+identifiers, assertions, lifecycle preflight and lifecycle hydration. Sparse
+Search selections must never hydrate Records between the first and last ID.
+The existing B1 complete identifier reader is unchanged; the preview reader's
+limits must not replace it. Regression coverage uses 100 selected Records among
+10,000, populated assertions/events and actual production query plans before
+and after `ANALYZE`. This prepares domain filtering but does not implement it.
+
+Music preparation corrects an earlier blanket assumption: the pinned
+[MusicBrainz recording lookup](https://github.com/metabrainz/musicbrainz-server/blob/cff977f0ba8f06d5fa594e7590f6a134b1a5a22c/lib/MusicBrainz/Server/Controller/WS/2/Recording.pm#L34)
+supports `inc=work-rels`; the server loads target work types and includes them
+in the same JSON response. Selected-detail recording/work evidence can therefore
+retain one real digest/time/policy. Search responses still lack that lookup
+evidence. Do not stamp lookup provenance onto Search rows, infer Music from a
+recording ID alone, or conflate Track with Recording. The exact affirmative
+work-type and relationship rules remain under source review before admission.
+
 The follow-on runtime adds `kitsu` / `anime` / `kitsu.anime` as Release,
 reusing the existing identity, selected-detail, receipt and artwork owners.
 Anime responses never supply Manga subtype claims. Numeric IDs remain scoped
@@ -857,10 +874,20 @@ Previous and retains failed providers' retry positions. Navigation/replacement
 cannot discard open Attach, detail or action work. Deduplication and receipt
 collision checks cover retained sets, not arbitrarily old discarded history.
 Existing action completion and retry-operation IDs retain their separate owners.
-This bounds retained row payloads, not the whole JavaScript heap, local Search
-rows, pending fan-out responses or all action state; their resource gates remain
-required. No total-results cutoff, browser storage, API, migration or archive
-change is introduced by this view policy.
+The M4a follow-up bounds both local Search and Attach target results to a current
+page and one adjacent cached page, each admitted through the existing 100-row,
+4 MiB response contract. Next/Previous replaces visible rows rather than growing
+the list. Failed or oversized pages preserve the current page and retry cursor;
+a new query clears adjacent history. Selection belongs to the visible Attach
+page. Completed candidate labels and Record IDs retain only current/adjacent,
+routed and active-action/Attach candidates. Reappearing discarded candidates may
+start a new explicit action, not a replay; existing store transactions reuse the
+exact identified Record, and a new action can append new receipt/claim evidence.
+These are retained-payload bounds, not whole-JavaScript-heap or pending-fan-out
+qualification. Unconfirmed Workbench operation IDs still require bounded
+admission with reachable original-intent retry; they must not be evicted.
+No total-results cutoff, browser storage, API, migration or archive change is
+introduced by these view policies.
 
 Each result opens a real details route without first creating a Record. Retained candidates use:
 
@@ -1932,6 +1959,18 @@ Use separate reviewable PRs.
 - keyset pagination;
 - Record action;
 - Search UI.
+
+Delivery correction approved by the user on 2026-09-08: deliver **M4a Search
+core** through PR #128, then **M4b ten-domain Search completion**. M4 remains
+incomplete until both pass. This is a delivery split, not a scope reduction.
+Preserve all committed native-evidence/Kitsu work and the uncommitted exact-ID
+preparation; do not remove tested code just to manufacture a smaller PR.
+M4a stops adding provider/classification features and closes only the proven
+core retention, integration, review and exact-head delivery gates. M4b retains
+the shared classifier, domain filters, overlap/unknown rules and required
+provider coverage. Do not equate ten media domains with activation of every
+registered provider. Any genuinely unresolved source requirement stays explicit.
+The detailed audit and finite landing sequence are in section 56 below.
 
 ### PR M5 — Library
 
@@ -3416,7 +3455,7 @@ Full-mode complexity review found no removable implementation layer:
 
 Review output: **Lean already. Ship. Net: -0 lines possible without removing requested scope or a required correctness, security, accessibility, recovery, or evidence control.**
 
-## GSTACK REVIEW REPORT
+### Historical M0 planning review (not current M4 release clearance)
 
 | Review | Trigger | Why | Runs | Status | Findings |
 | --- | --- | --- | ---: | --- | --- |
@@ -3429,5 +3468,175 @@ Review output: **Lean already. Ship. Net: -0 lines possible without removing req
 | Ponytail Review | `/ponytail-review` | Over-engineering and unnecessary-dependency review | 1 | CLEAR | Lean already; 0 removable layers; 0 new frameworks/databases/brokers/runtime dependencies; net -0 lines. |
 
 **VERDICT:** ALL PLANNING GATES CLEARED — M0 APPROVED FOR IMPLEMENTATION.
+
+NO UNRESOLVED DECISIONS
+
+## 56. M4 delivery re-audit and course correction — 2026-09-08
+
+Requested reviews: plan-eng-review, plan-devex-review and Ponytail full.
+Scope: approved M4 plan versus current implementation and delivery evidence;
+not a restart of completed product/design gates or an exhaustive new diff scan.
+Implementation, provider research, builds and publication were paused for this
+audit. Three native agents inspected scope/history, end-to-end Search and the
+verification workflow read-only. No Codex Security operation was performed.
+No tooling upgrade, new framework, dependency, migration or capability was added.
+
+### Exact state and finding disposition
+
+Current committed head is `8b940d63075c0a7cfba2afc6778db01cbd0cb126`, tree
+`e2e0c5d26eac20925ba976a6a759fec30e07401a`. The dirty identity reader and its
+new test leaf are preserved, not certified by that commit. Live PR #128 is open
+at `0aa0cde2f2301d7f3805b320a9d124d132a7e8af`: 17 local commits ahead,
+58 changed files, 9,512 additions and 281 deletions. Six commits are docs-only;
+976 added lines are in the plan/checkpoint. These counts prove delivery batching,
+not that the tests or correctness work should be deleted.
+
+| Finding | Evidence and confidence | Correction |
+| --- | --- | --- |
+| F1 — Delivery scope kept growing before landing | Original M0 `51fe1dc3` section 12 already requires domain/source filters; later native-evidence and Kitsu commits add prerequisites while PR #128 remains behind. Confidence 10/10 for history, not proof every adapter is mandatory. | User approved M4a/M4b split. Preserve all programme scope and stop provider research on M4a's critical path. |
+| F2 — Browser retention is incomplete | `discover-view.svelte:1108`: `localResults = [...localResults, ...page.records];`; lines 485–487 add to completion/Record maps. `fasti-workbench.svelte:773` owns `searchActionOperationIds`; failed intents survive until success or authority reset. Confidence 10/10. No observed out-of-memory claim. | User approved reuse of existing bounded-result handling and durable retry owner. Bound local rows and action state without losing navigation, unresolved actions or safe retry identity. No second cache framework. |
+| F3 — Acceptance evidence trails implementation | Canonical receipt source is `5ecc5649`; real-process browser source is `4222141d`, respectively 13 and 12 commits behind current HEAD. Confidence 10/10. | Freeze one landing head, run the required gates once, then publish/review that head. Historical passes stay historical. |
+| F4 — Landing knowledge is scattered | `docs/dev-loop.md` has the canonical command; special M4 invocation and physical-temp recovery are buried in a 5,693-line checkpoint. `xtask/src/main.rs:277` composes existing broad gates. Confidence 9/10. | Put one short M4 landing checklist in the existing developer guide; reuse current commands and distinguish their coverage. No new runner. |
+| F5 — Coordination was broader than the dependency | Access reported its approved browser-only C2 client inventory need not wait for every M4 provider. Shared registry/SDK/host files still overlap. Confidence 8/10; compatible exact diff remains to be proven. | Offer a file-exact handoff after compatible M4a schema/contracts are verified. Do not allocate a migration or release all shared files during this audit. |
+
+### Engineering review
+
+Architecture: preserve existing domain/application/store/runtime boundaries.
+One shared integration writer remains necessary; a whole-programme ownership
+lock is not the same as a semantic dependency. F1/F5 correct delivery sequencing.
+Code quality: reuse the existing result-window and durable receipt owners for
+F2; no classifier framework, duplicate persistence owner or speculative API.
+Tests: F3 is an evidence gap, not proof the implemented Search flow fails.
+Performance: F2 is a real unbounded-retention pattern; existing 10,000-Record
+query-plan and p95 tests remain the database gate, not whole-browser heap proof.
+
+```text
+Search input -> current authority -> local indexed keyset ------> results
+                               \-> enabled provider/cache ----> results
+                                    | offline / partial / empty
+                                    v
+                      retained receipt OR live coordinate
+                                    v
+                         canonical details (read only)
+                                    v
+                      explicit Create/Attach -> transaction
+                                    v
+                      durable retry receipt -> canonical Record
+```
+
+Existing tests cover scope/cursor rejection, cache-policy denial, expiry,
+partial/empty continuation, late responses, transaction rollback, duplicate
+actions and restart replay. The existing real-process journey crosses the
+browser, daemon and SQLite boundaries. New focused regressions must cover local
+result rollover and bounded completed/uncertain action retention. Retry after a
+lost response must keep the same operation identity; eviction must not create
+duplicate Records. Keyboard/focus/status announcements must remain usable when
+windows change. Final source-bound browser and performance evidence is pending.
+No new security vulnerability or exhaustive branch-coverage percentage is claimed.
+
+### Developer-experience review
+
+Reuse the approved persona: an OSS integration author/contributor using the
+generated TypeScript client and local Workbench, without provider credentials
+for first success. The existing offline `cargo xtask integration check
+contracts/addons/examples/minimal-metadata-source/provider.yaml` is the authoring
+entry point; do not make the whole PR gate their first experiment. The user-visible
+success remains Search -> details -> explicit Record -> offline reload.
+
+Inferred contributor journey, not a timed usability study: discover the existing
+guide -> run the deterministic fixture -> change the existing owner -> run its
+focused regression -> freeze source -> run the landing checklist -> publish.
+The confusing step is choosing sufficient verification from overlapping commands
+and historical receipts. Reuse the prior persona/empathy and benchmark in section
+51; do not invent new customer research, measured onboarding time or a playground.
+
+| DX pass | Current audit assessment | Disposition |
+| --- | --- | --- |
+| 1 Getting started | Existing credential-free fixture guide is present; time to first success was not measured. | Reuse it; no new install flow. |
+| 2 API/SDK | Generated Search/detail/action contracts and separate retained/live semantics exist. | Preserve; domain filters belong to M4b. |
+| 3 Errors/debugging | Expired/no-store offline reads, capacity errors and changed authority have explicit outcomes. Environmental SQLite symlink failure needed a physical temporary directory. | Keep recovery semantics; include physical-temp preflight in landing guide. |
+| 4 Documentation | Extensive evidence exists, but current landing instructions are scattered. | F4; one checklist in the existing guide. |
+| 5 Upgrade | Schema 17/archive 7 and historical formats have existing owners/tests. No new version is justified by this audit. | Preserve append-only migrations and restore gates; no down-migration shortcut. |
+| 6 Environment | Canonical gate covers root Rust/contracts/build/docs/portable checks, not every Desktop/JS/browser path. | F3/F4; one coverage-aware final pass. |
+| 7 Community | Contributor and provider-authoring guides already exist. No new M4-specific gap proven. | No community/platform project. |
+| 8 Measurement | Exact receipts exist but do not cover current source; onboarding time remains unmeasured. | Track source-qualified acceptance and merged delivery, not test/commit volume. |
+
+DX status: **issues open**. No new numeric score or improvement is claimed without
+a fresh usability measurement. The older 9/10 plan score is not current product
+qualification. Three examined recovery paths are: retained evidence unavailable
+offline (do not fabricate a live payload), action capacity exhausted (reads/replay
+remain usable; operator can raise the documented bound), and changed authority
+(reject stale delivery and require current access). Avoid adding a generic error
+framework or leaking provider details in an attempt to improve these messages.
+
+### Finite implementation and landing tasks
+
+- [ ] **T1 / F2 — M4a retention.** Commander owns `discover-view.svelte` and
+  `fasti-workbench.svelte`; delegate separate regression leaves. Reuse current
+  windows/receipt replay. Prove continued navigation, bounded retained data,
+  uncertain retry identity, profile isolation and keyboard recovery. Estimate:
+  human 0.5–1 day / agent 1–3 hours, not a completion promise.
+- [ ] **T2 / F4 — M4a landing instructions.** Update only the existing
+  `docs/dev-loop.md` checklist with actual prerequisites and command coverage.
+  Keep original failures. Estimate: human 1 hour / agent 15–30 minutes.
+- [ ] **T3 / F1,F3 — M4a exact landing.** Preserve dirty M4b preparation before
+  reconciling the accepted current `dev` base. Retain committed provider/native
+  work; do not cherry-pick an artificial old core that loses fixes. Freeze a
+  clean commit/tree, complete the sequence below, validate actual review findings,
+  deliver PR #128 and verify merged-tree identity. Duration depends on actual
+  failures and hosted gates; not estimated from historic green counts.
+- [ ] **T4 / F1,F5 — M4b and narrow shared handoff.** After M4a's verified
+  boundary, allocate exact files for shared domain classification/filtering and
+  required coverage; retain all ten domains, honest unknown/Custom separation,
+  accepted Exact overlap, offline evidence and stable filtered continuation.
+  Allocate a compatible C2 browser-inventory slice independently where proven.
+  Do not reserve a migration number before checking the exact accepted head.
+
+Final verification sequence, after focused fixes and source freeze:
+
+1. Confirm clean commit/tree, physical temporary directory, system pkg-config,
+   locked dependencies, available ports and exact prepared TrailBase input.
+2. Run `PKG_CONFIG=/usr/bin/pkg-config TMPDIR=/tmp cargo xtask test pr` once.
+3. Run uncovered gates once: complete `pnpm test`; changed Desktop formatting,
+   strict Clippy and tests using its own manifest; ordinary `pnpm test:ui
+   --grep-invert @performance --workers=1 --retries=0`; existing real-process
+   `scripts/smoke-access-browser.py --m4-search-journey` with verified input.
+   Use the existing separate performance lane for applicable performance claims.
+4. Require terminal results and unchanged source. If a source fix is needed,
+   prove its focused regression, then requalify the new final tree. Do not run
+   overlapping broad suites between every preparation edit.
+5. Publish once for exact-head review/CI. Current published ARM failure and
+   Codacy attention must be resolved or dispositioned against the actual final
+   head; old successes do not override them. Preserve distinct fixture, live
+   provider, Desktop, accessibility and hardware claims. Verify merge/tree.
+
+Rollback: preserve every committed result and dirty preparation; no reset,
+destructive extraction, receipt deletion or historical migration rewrite.
+Use existing archive/restore compatibility checks. A failed release check leaves
+the stage open; it does not authorize weakening the check or losing user state.
+
+Parallel allocation: commander integrates shared production surfaces; agent A
+reviews current-slice changes, B owns explicitly allocated regression leaves,
+C checks landing evidence/docs or prepares the next dependency-ready lane read-only.
+After M4a, prove M4b/C2 file ownership before either writes overlapping contracts.
+M5/M8/M9a/M11a stay in the existing programme; no second roadmap is created.
+
+Not in this correction: universal provider activation, new provider research
+without a demonstrated required gap, another review framework, tooling upgrades,
+new migration/API scaffolding, repeated unchanged Access polling, or new optional
+TODO projects. No approved capability is removed. Codex Security remains permanently
+excluded. Native agents supplied independent reads; no cross-model review is claimed.
+
+## GSTACK REVIEW REPORT
+
+| Review | Trigger | Why | Runs in this audit | Status | Findings |
+| --- | --- | --- | ---: | --- | --- |
+| Engineering | `/plan-eng-review` | M4 scope, architecture, tests and performance | 1 | ISSUES OPEN | F1/F2/F3/F5; delivery split and targeted retention approach approved; release proof pending. |
+| Developer experience | `/plan-devex-review` | All eight passes against existing contributor journey | 1 | ISSUES OPEN | F3/F4; no fresh onboarding-time or usability score claimed. |
+| Ponytail | `/ponytail` full | Minimum complete delivery path | 1 | APPLIED | Reuse owners, preserve work, stop new M4a provider expansion; no new framework or speculative surface. |
+
+**VERDICT:** Re-audit complete with concerns. M4a/M4b correction approved; M4
+is not complete and the current tree is not release-qualified. Historical M0
+planning approvals above remain historical approvals, not current clearance.
 
 NO UNRESOLVED DECISIONS

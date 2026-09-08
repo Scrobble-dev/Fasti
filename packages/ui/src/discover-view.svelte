@@ -13,7 +13,11 @@
     SearchRecordActionDto,
   } from "./types.js";
   import { onDestroy, tick, untrack } from "svelte";
-  import { parseSearchProviderPageForRequest } from "@fasti/sdk";
+  import {
+    LOCAL_SEARCH_MAX_RESPONSE_BYTES,
+    parseLocalSearchResponseDto,
+    parseSearchProviderPageForRequest,
+  } from "@fasti/sdk";
   import { dialogFocus } from "./dialog-focus.js";
   import {
     routeSlug,
@@ -179,6 +183,12 @@
   let candidateDetailProblems = $state<Record<string, string>>({});
   let localResults: LocalSearchResponseDto["records"] = $state([]);
   let localNext: LocalSearchCursorDto | undefined = $state();
+  interface AdjacentLocalPage {
+    direction: "previous" | "next";
+    page: LocalSearchResponseDto;
+  }
+  let otherLocalPage = $state<AdjacentLocalPage>();
+  let localResultsHeading = $state<HTMLElement>();
   let localProblem = $state("");
   let searching = $state(false);
   let problem = $state("");
@@ -205,6 +215,8 @@
   let attachCompletedQuery = "";
   let attachRecords = $state<LocalSearchResponseDto["records"]>([]);
   let attachNext = $state<LocalSearchCursorDto>();
+  let otherAttachPage = $state<AdjacentLocalPage>();
+  let attachResultsHeading = $state<HTMLElement>();
   let attachRecordId = $state("");
   let attachLoading = $state(false);
   let attachSearched = $state(false);
@@ -336,6 +348,7 @@
     attachResult = undefined;
     attachRecords = [];
     attachNext = undefined;
+    otherAttachPage = undefined;
     attachRecordId = "";
     attachProblem = "";
     attachLoading = false;
@@ -368,6 +381,7 @@
     )
       return;
     const generation = ++attachGeneration;
+    const previousFocus = document.activeElement;
     attachController?.abort();
     const controller = new AbortController();
     attachController = controller;
@@ -376,15 +390,18 @@
     if (!after) {
       attachRecords = [];
       attachNext = undefined;
+      otherAttachPage = undefined;
       attachRecordId = "";
       attachSearched = false;
     }
     try {
-      const page = await onSearchAttachTargets(
-        value,
-        selection.result.candidate.grain,
-        after,
-        controller.signal,
+      const page = checkedLocalPage(
+        await onSearchAttachTargets(
+          value,
+          selection.result.candidate.grain,
+          after,
+          controller.signal,
+        ),
       );
       if (generation !== attachGeneration) return;
       if (
@@ -395,12 +412,22 @@
         throw new Error(
           "The host returned a Record with an incompatible identity grain.",
         );
-      attachRecords = after
-        ? [...attachRecords, ...page.records]
-        : [...page.records];
+      if (after) {
+        otherAttachPage = {
+          direction: "previous",
+          page: { records: attachRecords, next: attachNext ?? null },
+        };
+      }
+      attachRecords = [...page.records];
+      attachRecordId = "";
       attachNext = page.next ?? undefined;
       attachCompletedQuery = value;
       attachSearched = true;
+      if (after) {
+        await tick();
+        if (generation === attachGeneration)
+          focusReplacedResults(attachResultsHeading, previousFocus);
+      }
     } catch (error) {
       if (generation === attachGeneration)
         attachProblem = hostProblemText(
@@ -411,6 +438,52 @@
       if (attachController === controller) attachController = undefined;
       if (generation === attachGeneration) attachLoading = false;
     }
+  }
+
+  // Keep one current and one adjacent page, never an all-history cursor stack.
+  // The shared response contract bounds each page's rows and retained bytes.
+  function checkedLocalPage(
+    page: LocalSearchResponseDto,
+  ): LocalSearchResponseDto {
+    if (
+      new TextEncoder().encode(JSON.stringify(page)).byteLength >
+      LOCAL_SEARCH_MAX_RESPONSE_BYTES
+    )
+      throw new Error(
+        "The host returned a local Search page that exceeds its size limit.",
+      );
+    return parseLocalSearchResponseDto(page);
+  }
+
+  function focusReplacedResults(
+    heading: HTMLElement | undefined,
+    previous: Element | null,
+  ): void {
+    if (
+      document.activeElement === previous ||
+      (previous &&
+        !previous.isConnected &&
+        document.activeElement === document.body)
+    )
+      heading?.focus();
+  }
+
+  async function switchAttachPage(): Promise<void> {
+    const other = otherAttachPage;
+    if (!other || attachLoading || actionKey) return;
+    const previousFocus = document.activeElement;
+    const generation = attachGeneration;
+    otherAttachPage = {
+      direction: other.direction === "previous" ? "next" : "previous",
+      page: { records: attachRecords, next: attachNext ?? null },
+    };
+    attachRecords = other.page.records;
+    attachNext = other.page.next ?? undefined;
+    attachRecordId = "";
+    attachProblem = "";
+    await tick();
+    if (generation === attachGeneration)
+      focusReplacedResults(attachResultsHeading, previousFocus);
   }
 
   async function confirmAttach(): Promise<void> {
@@ -447,6 +520,28 @@
   function candidateKey(result: ProviderResult): string {
     return result.receipt?.candidate_receipt_id ?? candidateCoordinate(result);
   }
+
+  $effect(() => {
+    const retained = new Set(
+      [...results, ...(otherProviderWindow?.window.results ?? [])].map(
+        candidateKey,
+      ),
+    );
+    if (routeCandidate)
+      retained.add(
+        candidateKey({ candidate: routeCandidate, receipt: routeReceipt }),
+      );
+    if (attachResult) retained.add(candidateKey(attachResult.result));
+    if (actionKey) retained.add(actionKey);
+    const completed = [...completedKeys].filter((key) => retained.has(key));
+    if (completed.length !== completedKeys.size)
+      completedKeys = new Set(completed);
+    const records = Object.entries(createdRecordIds).filter(([key]) =>
+      retained.has(key),
+    );
+    if (records.length !== Object.keys(createdRecordIds).length)
+      createdRecordIds = Object.fromEntries(records);
+  });
 
   async function runCandidateAction(
     result: ProviderResult,
@@ -662,6 +757,7 @@
     otherProviderWindow = undefined;
     localResults = [];
     localNext = undefined;
+    otherLocalPage = undefined;
     localProblem = "";
     problem = "";
     actionProblem = "";
@@ -952,6 +1048,7 @@
       otherProviderWindow = undefined;
       localResults = [];
       localNext = undefined;
+      otherLocalPage = undefined;
       searched = false;
       return;
     }
@@ -959,6 +1056,7 @@
     providerWindowFull = false;
     blockedProviders = [];
     otherProviderWindow = undefined;
+    otherLocalPage = undefined;
     cancelSearchRead();
     const controller = new AbortController();
     searchController = controller;
@@ -974,7 +1072,9 @@
     searched = false;
     try {
       const [localOutcome, providerOutcome] = await Promise.allSettled([
-        onSearchLocal?.(value, undefined, controller.signal),
+        onSearchLocal?.(value, undefined, controller.signal).then(
+          checkedLocalPage,
+        ),
         providers.length > 0
           ? searchProviders(providers, value, {}, controller.signal)
           : undefined,
@@ -1090,8 +1190,18 @@
   }
 
   async function loadMoreLocal(): Promise<void> {
-    if (!onSearchLocal || !localNext || searching || actionKey || detailKey)
+    if (
+      !onSearchLocal ||
+      !localNext ||
+      searching ||
+      actionKey ||
+      detailKey ||
+      attachResult ||
+      otherLocalPage?.direction === "next"
+    )
       return;
+    const previousFocus = document.activeElement;
+    const route = routeGeneration;
     cancelSearchRead();
     const controller = new AbortController();
     searchController = controller;
@@ -1099,14 +1209,23 @@
     searching = true;
     localProblem = "";
     try {
-      const page = await onSearchLocal(
-        completedQuery,
-        localNext,
-        controller.signal,
+      const page = checkedLocalPage(
+        await onSearchLocal(completedQuery, localNext, controller.signal),
       );
       if (revision !== searchRevision) return;
-      localResults = [...localResults, ...page.records];
+      otherLocalPage = {
+        direction: "previous",
+        page: { records: localResults, next: localNext ?? null },
+      };
+      localResults = [...page.records];
       localNext = page.next ?? undefined;
+      await tick();
+      if (
+        revision === searchRevision &&
+        route === routeGeneration &&
+        !candidateRoute
+      )
+        focusReplacedResults(localResultsHeading, previousFocus);
     } catch (error) {
       if (revision !== searchRevision) return;
       localProblem = hostProblemText(
@@ -1117,6 +1236,28 @@
       if (searchController === controller) searchController = undefined;
       if (revision === searchRevision) searching = false;
     }
+  }
+
+  async function switchLocalPage(): Promise<void> {
+    const other = otherLocalPage;
+    if (!other || searching || actionKey || detailKey || attachResult) return;
+    const previousFocus = document.activeElement;
+    const revision = searchRevision;
+    const route = routeGeneration;
+    otherLocalPage = {
+      direction: other.direction === "previous" ? "next" : "previous",
+      page: { records: localResults, next: localNext ?? null },
+    };
+    localResults = other.page.records;
+    localNext = other.page.next ?? undefined;
+    localProblem = "";
+    await tick();
+    if (
+      revision === searchRevision &&
+      route === routeGeneration &&
+      !candidateRoute
+    )
+      focusReplacedResults(localResultsHeading, previousFocus);
   }
 </script>
 
@@ -1265,6 +1406,8 @@
     <svelte:element
       this={embedded ? "h4" : "h2"}
       id="local-search-results-title"
+      bind:this={localResultsHeading}
+      tabindex="-1"
     >
       Local Records
     </svelte:element>
@@ -1280,7 +1423,7 @@
       <p role="status">
         {localResults.length}
         {localResults.length === 1 ? "local Record" : "local Records"} for
-        {completedQuery}.
+        {completedQuery} on this page.
       </p>
       <ol>
         {#each localResults as record (record.record_id)}
@@ -1318,12 +1461,26 @@
     {:else if !searched}
       <p>Local Records remain searchable without a network connection.</p>
     {/if}
-    {#if localNext}
+    {#if otherLocalPage}
+      <button
+        type="button"
+        class="btn btn-outline-secondary"
+        disabled={searching ||
+          Boolean(actionKey) ||
+          Boolean(detailKey) ||
+          Boolean(attachResult)}
+        onclick={switchLocalPage}
+        >{otherLocalPage.direction === "previous"
+          ? "Previous local Records"
+          : "Next local Records"}</button
+      >
+    {/if}
+    {#if localNext && otherLocalPage?.direction !== "next"}
       <button
         type="button"
         class="btn btn-outline-secondary"
         disabled={searching || Boolean(actionKey) || Boolean(detailKey)}
-        onclick={loadMoreLocal}>Load more local Records</button
+        onclick={loadMoreLocal}>Next local Records</button
       >
     {/if}
   </section>
@@ -1688,7 +1845,12 @@
   {#if attachResult}
     <section class="card m-0">
       <header class="card-header">
-        <h2 id="attach-record-title" class="card-title">
+        <h2
+          id="attach-record-title"
+          class="card-title"
+          bind:this={attachResultsHeading}
+          tabindex="-1"
+        >
           Attach to existing Record
         </h2>
       </header>
@@ -1762,13 +1924,24 @@
             {/each}
           </fieldset>
         {/if}
-        {#if attachNext}
+        {#if otherAttachPage}
+          <button
+            type="button"
+            class="btn btn-outline-secondary"
+            disabled={attachLoading || Boolean(actionKey)}
+            onclick={switchAttachPage}
+            >{otherAttachPage.direction === "previous"
+              ? "Previous matching Records"
+              : "Next matching Records"}</button
+          >
+        {/if}
+        {#if attachNext && otherAttachPage?.direction !== "next"}
           <button
             type="button"
             class="btn btn-outline-secondary"
             disabled={attachLoading || Boolean(actionKey)}
             onclick={() => searchAttachTargets(attachNext)}
-            >Load more matching Records</button
+            >Next matching Records</button
           >
         {/if}
         {#if attachProblem}
