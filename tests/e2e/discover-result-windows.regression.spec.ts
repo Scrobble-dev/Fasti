@@ -277,7 +277,7 @@ test("replacement restores heading focus after its connected Continue button los
 
 test("three provider result sets stay bounded and preserve one-step history without refetch", async ({
   page,
-}, testInfo) => {
+}) => {
   await installWindowHost(page);
   await page.goto("/discover");
   await submitSearch(page, "Windows");
@@ -358,25 +358,6 @@ test("three provider result sets stay bounded and preserve one-step history with
   await expect(rows).toHaveCount(200);
   await page.getByRole("button", { name: continueLabel }).click();
   await expect(rows).toHaveCount(100);
-  await page.setViewportSize({ width: 320, height: 1000 });
-  await expectNoHorizontalOverflow(page);
-  expect(
-    (
-      await new AxeBuilder({ page })
-        .include('.results[aria-labelledby="search-results-title"]')
-        .analyze()
-    ).violations,
-  ).toEqual([]);
-  for (const width of [320, 768, 1440]) {
-    await page.setViewportSize({ width, height: 1000 });
-    await page
-      .getByRole("button", { name: previousLabel })
-      .scrollIntoViewIfNeeded();
-    await expectNoHorizontalOverflow(page);
-    await page.screenshot({
-      path: testInfo.outputPath(`provider-window-navigation-${width}.png`),
-    });
-  }
   await page.getByRole("button", { name: moreLabel }).click();
   await expect(rows).toHaveCount(200);
   await expect(
@@ -426,6 +407,41 @@ test("three provider result sets stay bounded and preserve one-step history with
   expect(actions[1].request.operation_id).not.toBe(
     actions[0].request.operation_id,
   );
+});
+
+test("replacement result set navigation stays accessible across viewport sizes", async ({
+  page,
+}, testInfo) => {
+  await installWindowHost(page);
+  await page.goto("/discover");
+  await submitSearch(page, "Windows");
+  const rows = page
+    .getByRole("region", { name: "Search results" })
+    .getByRole("listitem");
+  await expect(rows).toHaveCount(100);
+  await page.getByRole("button", { name: moreLabel }).click();
+  await expect(rows).toHaveCount(200);
+  await page.getByRole("button", { name: continueLabel }).click();
+  await expect(rows).toHaveCount(100);
+  await page.setViewportSize({ width: 320, height: 1000 });
+  await expectNoHorizontalOverflow(page);
+  expect(
+    (
+      await new AxeBuilder({ page })
+        .include('.results[aria-labelledby="search-results-title"]')
+        .analyze()
+    ).violations,
+  ).toEqual([]);
+  for (const width of [320, 768, 1440]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await page
+      .getByRole("button", { name: previousLabel })
+      .scrollIntoViewIfNeeded();
+    await expectNoHorizontalOverflow(page);
+    await page.screenshot({
+      path: testInfo.outputPath(`provider-window-navigation-${width}.png`),
+    });
+  }
 });
 
 test("failed replacement retains the full prior result set and partial providers remain retryable", async ({

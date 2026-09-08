@@ -3123,6 +3123,11 @@
     margin-bottom: 0;
   }
 
+  .provider-list .badge.bg-secondary-lt {
+    background: var(--fasti-surface-archive) !important;
+    color: var(--fasti-text-primary) !important;
+  }
+
   .provider-name,
   .capability-purpose,
   .credential-source {

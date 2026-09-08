@@ -1146,77 +1146,86 @@ test("trusted-host provider settings retain a rejected secret for correction", a
   });
 });
 
-test("Kitsu native health controls do not require credential controls", async ({
-  page,
-}, testInfo) => {
-  await page.setViewportSize({ width: 320, height: 900 });
-  await mockTrustedHost(page, false, false, false, true);
-  await page.goto("/settings/metadata");
+for (const theme of ["light", "dark", "night"] as const) {
+  test(`Kitsu native health controls do not require credential controls (${theme})`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width: 320, height: 900 });
+    await page.addInitScript((mode) => {
+      localStorage.setItem("fasti-theme-settings", JSON.stringify({ mode }));
+    }, theme);
+    await mockTrustedHost(page, false, false, false, true);
+    await page.goto("/settings/metadata");
+    await expect(page.locator("html")).toHaveAttribute(
+      "data-fasti-theme",
+      theme,
+    );
 
-  const rows = page.getByRole("row", { name: /Kitsu/u });
-  await expect(rows).toHaveCount(2);
-  for (const capability of ["metadata.search", "metadata.read"]) {
-    const row = rows.filter({ hasText: capability });
-    await expect(row).toContainText("available");
-    await expect(row).toContainText("No credential is required.");
+    const rows = page.getByRole("row", { name: /Kitsu/u });
+    await expect(rows).toHaveCount(2);
+    for (const capability of ["metadata.search", "metadata.read"]) {
+      const row = rows.filter({ hasText: capability });
+      await expect(row).toContainText("available");
+      await expect(row).toContainText("No credential is required.");
+      await expect(
+        row.getByRole("button", { name: /Save|Remove|Test credential/u }),
+      ).toHaveCount(0);
+      await expect(row.locator("input")).toHaveCount(0);
+    }
+    const health = rows.getByRole("button", {
+      name: "Check provider health",
+      exact: true,
+    });
+    await expect(health).toHaveCount(1);
     await expect(
-      row.getByRole("button", { name: /Save|Remove|Test credential/u }),
+      rows
+        .filter({ hasText: "metadata.read" })
+        .getByRole("button", { name: "Check provider health" }),
     ).toHaveCount(0);
-    await expect(row.locator("input")).toHaveCount(0);
-  }
-  const health = rows.getByRole("button", {
-    name: "Check provider health",
-    exact: true,
+    await expect(health).toBeEnabled();
+    await health.focus();
+    await expect(health).toBeFocused();
+    const healthBounds = await health.boundingBox();
+    expect(healthBounds?.width).toBeGreaterThanOrEqual(44);
+    expect(healthBounds?.height).toBeGreaterThanOrEqual(44);
+    await page.screenshot({
+      path: testInfo.outputPath("kitsu-health-before-320.png"),
+      fullPage: true,
+    });
+    await health.press("Enter");
+    await expect(
+      page
+        .getByRole("status")
+        .filter({ hasText: "Provider health check passed." }),
+    ).toBeVisible();
+    const calls = await page.evaluate(() => {
+      const fixture = window as typeof window & {
+        __KITSU_HEALTH_CALLS__?: unknown[];
+        __KITSU_HOST_COMMANDS__?: string[];
+      };
+      return {
+        health: fixture.__KITSU_HEALTH_CALLS__ ?? [],
+        credentials: (fixture.__KITSU_HOST_COMMANDS__ ?? []).filter((command) =>
+          [
+            "save_provider_credential",
+            "delete_provider_credential",
+            "test_provider_credential",
+          ].includes(command),
+        ),
+      };
+    });
+    expect(calls.health).toEqual([{ input: { provider: "kitsu" } }]);
+    expect(calls.credentials).toEqual([]);
+    await expect(
+      rows.getByRole("button", { name: "Test credential" }),
+    ).toHaveCount(0);
+    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+    await page.screenshot({
+      path: testInfo.outputPath("kitsu-health-after-320.png"),
+      fullPage: true,
+    });
   });
-  await expect(health).toHaveCount(1);
-  await expect(
-    rows
-      .filter({ hasText: "metadata.read" })
-      .getByRole("button", { name: "Check provider health" }),
-  ).toHaveCount(0);
-  await expect(health).toBeEnabled();
-  await health.focus();
-  await expect(health).toBeFocused();
-  const healthBounds = await health.boundingBox();
-  expect(healthBounds?.width).toBeGreaterThanOrEqual(44);
-  expect(healthBounds?.height).toBeGreaterThanOrEqual(44);
-  await page.screenshot({
-    path: testInfo.outputPath("kitsu-health-before-320.png"),
-    fullPage: true,
-  });
-  await health.press("Enter");
-  await expect(
-    page
-      .getByRole("status")
-      .filter({ hasText: "Provider health check passed." }),
-  ).toBeVisible();
-  const calls = await page.evaluate(() => {
-    const fixture = window as typeof window & {
-      __KITSU_HEALTH_CALLS__?: unknown[];
-      __KITSU_HOST_COMMANDS__?: string[];
-    };
-    return {
-      health: fixture.__KITSU_HEALTH_CALLS__ ?? [],
-      credentials: (fixture.__KITSU_HOST_COMMANDS__ ?? []).filter((command) =>
-        [
-          "save_provider_credential",
-          "delete_provider_credential",
-          "test_provider_credential",
-        ].includes(command),
-      ),
-    };
-  });
-  expect(calls.health).toEqual([{ input: { provider: "kitsu" } }]);
-  expect(calls.credentials).toEqual([]);
-  await expect(
-    rows.getByRole("button", { name: "Test credential" }),
-  ).toHaveCount(0);
-  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
-  await page.screenshot({
-    path: testInfo.outputPath("kitsu-health-after-320.png"),
-    fullPage: true,
-  });
-});
+}
 
 test("provider credential tests fail closed when trusted execution is unavailable", async ({
   page,

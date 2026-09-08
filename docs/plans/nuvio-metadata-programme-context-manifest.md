@@ -5869,3 +5869,23 @@ Chromium for the final ordinary browser pass. Freeze and requalify the new commi
 do not merge the failed d54 head or relabel its receipts. M4b remains incomplete,
 its dirty identity work is preserved, and schema17/archive7 stay M4-owned. No
 shared release or next migration allocation. Codex Security remains excluded.
+
+The complete hosted report also contained a second failure: Kitsu credential
+neutral badges failed Axe contrast on both attempts (3.7:1). Runtime Settings now
+reuses the Account/Auth archive-surface and primary-text tokens, scoped to neutral
+provider-table badges. Credential semantics and the global palette are unchanged.
+The existing Kitsu health/credential/Axe test now verifies light, dark and night
+themes; all3 passed (handle76983), with independent read-only review clear.
+
+Clean focus-fix commit `6a6426bd719aa45dd0ca6d9afed1b9a7272da468`, tree
+`eed73a5da48a65922ba3aece41fc0d4a09e2224d`, passed canonical, JS and Desktop
+gates. Its full CI-mode browser run passed238 cases and timed out one long
+provider-window case. The focus assertions passed; trace showed about7 seconds
+of completed Axe work plus normal smooth-scroll actionability waits before the
+final Search click exceeded the aggregate30-second budget. The click subsequently
+completed; this was not a stalled provider operation. Visual/Axe coverage is now
+a separate short case using the same fixture. Every behavior, focus, paging,
+receipt, screenshot and overflow assertion remains; no timeout, retry, forced
+click or motion override was added. All7 targeted focus/window/theme cases passed
+(handle21758), and independent review confirmed preserved coverage. Requalify the
+next frozen commit; these previous runs do not qualify that new source.
