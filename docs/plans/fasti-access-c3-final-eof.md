@@ -2,10 +2,18 @@
 
 Status: FOCUSED_GATES_PASS; DELIVERY_PENDING.
 
-Stacked source base: constructor regression
+Initial stacked source base: constructor regression
 10b8f7a589c3912f53b5ebba8b345f1ed0c27659, tree
 f48d22cfe571647c0cd769765b8b98ffa951d374. That base is not merged yet.
 This separate worktree must not change the tree under canonical verification.
+
+Current verification base: constructor documentation correction
+b0ea74cb190a6415ebc26adacb503de07d7f77a9, tree
+06e8959ccaec210a9c765264ce5572240faf7588. Reconciliation preserves its corrected
+constructor wording and plan spacing alongside this slice's 22 unit tests and
+two doctests. The test, adapter and dependency source remain unchanged. The
+constructor PR is still unmerged; independent verification can proceed in the
+released local resource slot, but delivery remains dependency-gated.
 
 ## Need and ownership
 
@@ -89,5 +97,5 @@ encryption and fault-source helpers suffice. The unit-test description is kept
 separate from the Debug/Clone compile-fail checks.
 
 Remaining: clean-source canonical and dependency gates, applicable pre-landing
-and documentation review, constructor-base reconciliation, hosted checks and
+and documentation review, final merged-base reconciliation, hosted checks and
 merge. No production crypto, physical-erasure or packaged-auth claim is made.
