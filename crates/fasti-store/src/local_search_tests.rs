@@ -115,6 +115,97 @@ fn ids(node: &TestNode, access: RequestAccessContext, query: &str) -> Vec<Record
 }
 
 #[test]
+fn local_search_exact_record_id_preserves_literal_search_and_workspace_bounds() {
+    let node = node();
+    let record = seed(&node, 1, "Unrelated title")[0];
+    let foreign_workspace = fasti_domain::WorkspaceId::new_v7();
+    let (untitled, foreign) = {
+        let mut connection = node.kernel.inner.connection.lock().unwrap();
+        let transaction = connection.transaction().unwrap();
+        transaction
+            .execute(
+                "INSERT INTO workspaces(workspace_id, created_at) VALUES (?1, ?2)",
+                params![
+                    foreign_workspace.to_string(),
+                    crate::kernel::timestamp(crate::kernel::now())
+                ],
+            )
+            .unwrap();
+        let insert = |workspace| {
+            insert_record(
+                &transaction,
+                workspace,
+                Grain::Film,
+                CAPABILITY,
+                RequestCorrelationId::new_v7(),
+            )
+            .unwrap()
+        };
+        let result = (
+            insert(node.access.workspace_id()),
+            insert(foreign_workspace),
+        );
+        transaction.commit().unwrap();
+        result
+    };
+    for id in [record, untitled] {
+        let page = node
+            .kernel
+            .search_local_records(&request(node.access, &id.to_string()))
+            .unwrap();
+        assert_eq!(page.records.len(), 1);
+        assert_eq!(page.records[0].record_id(), id);
+        assert!(page.next.is_none());
+        if id == untitled {
+            assert!(page.records[0].title().value().is_none());
+        }
+    }
+    let canonical = record.to_string();
+    for query in [
+        foreign.to_string(),
+        RecordId::new_v7().to_string(),
+        canonical.to_uppercase(),
+        canonical[..20].to_owned(),
+    ] {
+        assert!(ids(&node, node.access, &query).is_empty(), "{query}");
+    }
+    let mut grain = request(node.access, &canonical);
+    grain.grains = vec![Grain::Series];
+    assert!(node
+        .kernel
+        .search_local_records(&grain)
+        .unwrap()
+        .records
+        .is_empty());
+    let title_match = seed(&node, 1, &format!("Reference {canonical}"))[0];
+    let mut expected = vec![record, title_match];
+    expected.sort_by_key(ToString::to_string);
+    assert_eq!(ids(&node, node.access, &canonical), expected);
+    for query in [canonical.to_uppercase(), canonical[..20].to_owned()] {
+        assert_eq!(ids(&node, node.access, &query), vec![title_match]);
+    }
+    // The "rec" posting admits this row even when the active singleton rejects it.
+    let inactive = seed(&node, 1, "Recovered title")[0];
+    {
+        let connection = node.kernel.inner.connection.lock().unwrap();
+        // Match the existing exact-Record selector's historical-row negative control.
+        connection
+            .pragma_update(None, "ignore_check_constraints", true)
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE records SET status='inactive' WHERE record_id=?1",
+                [inactive.to_string()],
+            )
+            .unwrap();
+        connection
+            .pragma_update(None, "ignore_check_constraints", false)
+            .unwrap();
+    }
+    assert!(ids(&node, node.access, &inactive.to_string()).is_empty());
+}
+
+#[test]
 fn local_search_literal_short_punctuation_and_unicode_queries() {
     let node = node();
     let record = seed(&node, 1, "Árbol 東京 🐎 %_ O\"R (NEAR) Straße")[0];
@@ -176,6 +267,19 @@ fn local_search_private_override_isolation_and_clear_keep_sibling_postings() {
     assert_eq!(ids(&node, node.access, "Private"), vec![record]);
     assert!(ids(&node, second, "Private").is_empty());
     assert_eq!(ids(&node, second, "Public"), vec![record]);
+    for (access, title, original) in [
+        (node.access, "Private secret", Some("Private sibling")),
+        (second, "Public title", None),
+    ] {
+        let page = node
+            .kernel
+            .search_local_records(&request(access, &record.to_string()))
+            .unwrap();
+        assert_eq!(page.records.len(), 1);
+        assert_eq!(page.records[0].record_id(), record);
+        assert_eq!(page.records[0].title().value(), Some(title));
+        assert_eq!(page.records[0].original_title().value(), original);
+    }
     configure(
         &node,
         node.access,
@@ -199,16 +303,18 @@ fn local_search_private_override_isolation_and_clear_keep_sibling_postings() {
 fn local_search_stable_pages_deduplicate_shared_and_private_hits_beyond_500() {
     let node = node();
     let mut expected = seed(&node, 605, "Common title");
+    expected.sort_by_key(ToString::to_string);
+    let exact = *expected.last().unwrap();
+    let private_title = format!("Common private {exact}");
     configure(
         &node,
         node.access,
         expected
             .iter()
             .take(101)
-            .map(|record| set(*record, ORIGINAL_TITLE_FIELD_KEY, "Common private"))
+            .map(|record| set(*record, ORIGINAL_TITLE_FIELD_KEY, &private_title))
             .collect(),
     );
-    expected.sort_by_key(ToString::to_string);
     let mut query = request(node.access, "Common");
     let mut found = Vec::new();
     let mut sizes = Vec::new();
@@ -224,6 +330,28 @@ fn local_search_stable_pages_deduplicate_shared_and_private_hits_beyond_500() {
     }
     assert_eq!(sizes, vec![100, 100, 100, 100, 100, 100, 5]);
     assert_eq!(found, expected);
+
+    let mut query = request(node.access, &exact.to_string());
+    let mut found = Vec::new();
+    let mut sizes = Vec::new();
+    loop {
+        let page = node.kernel.search_local_records(&query).unwrap();
+        sizes.push(page.records.len());
+        found.extend(page.records.into_iter().map(|record| record.record_id()));
+        let Some(next) = page.next else { break };
+        if let Some(previous) = &query.after {
+            assert!(next.last_record_id.to_string() > previous.last_record_id.to_string());
+        }
+        query.after = Some(next);
+        assert!(sizes.len() < 3, "exact-ID continuation must progress");
+    }
+    assert_eq!(sizes, vec![100, 2]);
+    let mut expected_exact = expected[..101].to_vec();
+    expected_exact.push(exact);
+    assert_eq!(
+        found, expected_exact,
+        "the exact hit beyond the first 100 title hits is retained once"
+    );
 }
 
 #[test]
@@ -254,32 +382,76 @@ fn local_search_empty_filtered_page_keeps_progress_to_later_matches() {
 #[test]
 fn local_search_cursor_binds_query_profile_grain_and_rechecks_revocation() {
     let node = node();
-    seed(&node, 101, "Common title");
+    let record = seed(&node, 101, "Common title")[0];
     let second = node.add_profile_with_scopes(&[ScopeKey::MetadataSearch]);
     let mut query = request(node.access, "Common");
     query.after = node.kernel.search_local_records(&query).unwrap().next;
     assert!(query.after.is_some());
-    for changed in [
-        LocalSearchRequest {
-            query: SearchQuery::try_new("Common title").unwrap(),
-            ..query.clone()
-        },
-        LocalSearchRequest {
-            access: second.into(),
-            ..query.clone()
-        },
-        LocalSearchRequest {
-            grains: vec![Grain::Film],
-            ..query.clone()
-        },
-    ] {
+    let mut exact = request(node.access, &record.to_string());
+    let context = {
+        let mut connection = node.kernel.inner.connection.lock().unwrap();
+        let transaction = connection.transaction().unwrap();
+        let access = authorize_application_transaction(
+            &transaction,
+            CAPABILITY,
+            &exact.access,
+            exact.correlation_id,
+        )
+        .unwrap();
+        exact.context_digest(&access)
+    };
+    exact.after = Some(LocalSearchCursor {
+        last_record_id: record,
+        context_digest: context,
+    });
+    assert!(node
+        .kernel
+        .search_local_records(&exact)
+        .unwrap()
+        .records
+        .is_empty());
+    for query in [&query, &exact] {
+        for changed in [
+            LocalSearchRequest {
+                query: SearchQuery::try_new("Common title").unwrap(),
+                ..query.clone()
+            },
+            LocalSearchRequest {
+                access: second.into(),
+                ..query.clone()
+            },
+            LocalSearchRequest {
+                grains: vec![Grain::Film],
+                ..query.clone()
+            },
+        ] {
+            assert_eq!(
+                node.kernel
+                    .search_local_records(&changed)
+                    .err()
+                    .unwrap()
+                    .code(),
+                ProblemCode::ValidationFailed
+            );
+        }
+    }
+    let denied = node.add_profile_with_scopes(&[]);
+    let wrong_workspace = RequestAccessContext::new(
+        fasti_domain::WorkspaceId::new_v7(),
+        node.access.profile_id(),
+        node.access.client_id(),
+        node.access.credential_id(),
+        node.access.grant_id(),
+        node.access.presented_credential_epoch(),
+    );
+    for access in [denied, wrong_workspace] {
         assert_eq!(
             node.kernel
-                .search_local_records(&changed)
+                .search_local_records(&request(access, &record.to_string()))
                 .err()
                 .unwrap()
                 .code(),
-            ProblemCode::ValidationFailed
+            ProblemCode::Forbidden
         );
     }
     node.kernel
@@ -295,6 +467,14 @@ fn local_search_cursor_binds_query_profile_grain_and_rechecks_revocation() {
     assert_eq!(
         node.kernel
             .search_local_records(&query)
+            .err()
+            .unwrap()
+            .code(),
+        ProblemCode::Forbidden
+    );
+    assert_eq!(
+        node.kernel
+            .search_local_records(&request(node.access, &record.to_string()))
             .err()
             .unwrap()
             .code(),
@@ -360,7 +540,7 @@ fn canceled_local_search_rebuild_rolls_back() {
 #[test]
 fn local_search_candidate_plan_uses_posting_keyset_without_full_scan() {
     let node = node();
-    seed(&node, 100, "Common title");
+    let records = seed(&node, 100, "Common title");
     let connection = node.kernel.inner.connection.lock().unwrap();
     let mut plan = connection
         .prepare(&format!("EXPLAIN QUERY PLAN {SELECT_CANDIDATES}"))
@@ -400,6 +580,42 @@ fn local_search_candidate_plan_uses_posting_keyset_without_full_scan() {
     assert_eq!(query.get_status(rusqlite::StatementStatus::FullscanStep), 0);
     let steps = query.get_status(rusqlite::StatementStatus::VmStep);
     assert!(steps < 5000, "candidate VM steps={steps}; plan={details:?}");
+
+    let workspace_id = node.access.workspace_id().to_string();
+    let record_id = records[0].to_string();
+    let parameters = params![workspace_id, record_id, ""];
+    let mut plan = connection
+        .prepare(&format!("EXPLAIN QUERY PLAN {SELECT_EXACT_CANDIDATE}"))
+        .unwrap();
+    let details = plan
+        .query_map(parameters, |row| row.get::<_, String>(3))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    assert!(
+        details.iter().any(|detail| detail
+            .contains("SEARCH records USING INDEX records_workspace_record_idx")
+            && detail.contains("workspace_id=?")
+            && detail.contains("record_id=?")),
+        "{details:?}"
+    );
+    assert!(
+        !details.iter().any(|detail| detail.contains("SCAN ")),
+        "{details:?}"
+    );
+    let mut exact = connection.prepare(SELECT_EXACT_CANDIDATE).unwrap();
+    let grains = exact
+        .query_map(parameters, |row| row.get::<_, String>(0))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    assert_eq!(grains, ["film"]);
+    assert_eq!(exact.get_status(rusqlite::StatementStatus::FullscanStep), 0);
+    let steps = exact.get_status(rusqlite::StatementStatus::VmStep);
+    assert!(
+        steps < 100,
+        "exact candidate VM steps={steps}; plan={details:?}"
+    );
 }
 
 #[test]
@@ -725,6 +941,20 @@ fn local_search_10000_records_release_latency() {
                 &dense_overflow_records[..1],
                 8_000,
                 true,
+            );
+            measure_identifier_path(
+                "exact_record_id",
+                &full_fit_records[0].to_string(),
+                &full_fit_records[..1],
+                8,
+                false,
+            );
+            measure_identifier_path(
+                "absent_record_id",
+                &RecordId::new_v7().to_string(),
+                &[],
+                0,
+                false,
             );
         }
     }

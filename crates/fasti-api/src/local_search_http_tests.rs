@@ -65,6 +65,44 @@ mod local_search_http_tests {
     }
 
     #[tokio::test]
+    async fn local_search_http_exact_record_id_requires_current_search_scope() {
+        let f = fixture().await;
+        let records = seed_records(&f, 2, "A title without a Record ID");
+        let record_id = records[1].to_string();
+        let body = local_body(&record_id).to_string();
+        let before = action_counts(&f);
+        for browser in [false, true] {
+            let (status, page) = response(&f.app, local_request(&f, browser, body.clone())).await;
+            assert_eq!(status, StatusCode::OK, "{page}");
+            assert_eq!(page["records"].as_array().unwrap().len(), 1, "{page}");
+            assert_eq!(page["records"][0]["record_id"], record_id);
+            assert_eq!(
+                page["records"][0]["title"]["value"],
+                "A title without a Record ID"
+            );
+            assert!(page["next"].is_null());
+        }
+        rusqlite::Connection::open(f.kernel.database_path())
+            .unwrap()
+            .execute(
+                "DELETE FROM grant_scopes WHERE grant_id=?1 AND scope_key='metadata_search'",
+                [f.access.grant_id().to_string()],
+            )
+            .unwrap();
+        for browser in [false, true] {
+            let (status, problem) =
+                response(&f.app, local_request(&f, browser, body.clone())).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{problem}");
+            assert_eq!(problem["code"], "forbidden");
+            assert_eq!(problem["capability_id"], "metadata.search");
+            assert!(problem.get("records").is_none());
+            assert!(!problem.to_string().contains(&record_id));
+        }
+        assert_eq!(action_counts(&f), before);
+        assert_eq!(f.vault.0.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
     async fn local_search_http_offline_605_records_progress_without_provider_locks_or_csrf() {
         let f = fixture().await;
         let expected: Vec<_> = seed_records(&f, 605, "Common 東京 %_")

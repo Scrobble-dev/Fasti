@@ -10,7 +10,7 @@ use fasti_application::{
     LocalSearchPage, LocalSearchRequest, MAX_LOCAL_SEARCH_RESPONSE_BYTES,
 };
 use fasti_domain::{Grain, RecordId, ORIGINAL_TITLE_FIELD_KEY, TITLE_FIELD_KEY};
-use rusqlite::{params, Connection, TransactionBehavior};
+use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 const CAPABILITY: CapabilityKey = CapabilityKey::SearchMetadata;
@@ -113,6 +113,10 @@ const SELECT_CANDIDATES: &str = "
     JOIN records record INDEXED BY records_workspace_record_idx
       ON record.record_id = posting.record_id AND record.workspace_id = posting.workspace_id";
 
+const SELECT_EXACT_CANDIDATE: &str = "
+    SELECT grain FROM records INDEXED BY records_workspace_record_idx
+    WHERE workspace_id = ?1 AND record_id = ?2 AND record_id > ?3 AND status = 'active'";
+
 pub(crate) fn search(
     kernel: &SqliteKernel,
     request: &LocalSearchRequest,
@@ -144,6 +148,7 @@ pub(crate) fn search(
             id,
         )));
     }
+    let requested_record_id = request.query.as_str().parse::<RecordId>().ok();
     let needle = normalize_local_search_text(request.query.as_str());
     let anchor: String = needle.chars().take(3).collect();
     let after = request
@@ -152,6 +157,31 @@ pub(crate) fn search(
         .map(|cursor| cursor.last_record_id.to_string())
         .unwrap_or_default();
     let mut candidates = BTreeMap::new();
+    let mut exact_record_id = None;
+    if let Some(record_id) = requested_record_id {
+        let grain: Option<String> = map_sql(
+            transaction
+                .query_row(
+                    SELECT_EXACT_CANDIDATE,
+                    params![
+                        access.workspace_id().to_string(),
+                        record_id.to_string(),
+                        after
+                    ],
+                    |row| row.get(0),
+                )
+                .optional(),
+            CAPABILITY,
+            id,
+        )?;
+        if let Some(grain) = grain {
+            let grain = grain
+                .parse::<Grain>()
+                .map_err(|_| Box::new(FastiProblem::integrity_failed(CAPABILITY, id)))?;
+            exact_record_id = Some(record_id);
+            candidates.insert(record_id.to_string(), (record_id, grain));
+        }
+    }
     let mut statement = map_sql(transaction.prepare(SELECT_CANDIDATES), CAPABILITY, id)?;
     // Two independent indexed ranges avoid a workspace-wide OR/UNION sort.
     for partition in [String::new(), access.profile_id().to_string()] {
@@ -196,13 +226,14 @@ pub(crate) fn search(
         id,
     )?;
     records.retain(|record| {
-        [record.title(), record.original_title()]
-            .into_iter()
-            .any(|field| {
-                field
-                    .value()
-                    .is_some_and(|value| normalize_local_search_text(value).contains(&needle))
-            })
+        Some(record.record_id()) == exact_record_id
+            || [record.title(), record.original_title()]
+                .into_iter()
+                .any(|field| {
+                    field
+                        .value()
+                        .is_some_and(|value| normalize_local_search_text(value).contains(&needle))
+                })
     });
     // The envelope/cursor has a fixed small shape. Each complete Record consumes
     // escaped-string budget with fixed field-shape headroom. The API additionally

@@ -4951,3 +4951,53 @@ qualification and merge remain open. A read-only agent is preparing only the
 exact local RecordId gap while root retains all production/shared ownership.
 Schema17/archive7, the permanent tool exclusion, and all later programme scope
 remain unchanged; no migration18 or shared-file handoff is allocated.
+
+### 2026-09-08 — Exact local RecordId Search through the existing owner
+
+Local Search now admits a canonical RecordId through the existing workspace/ID
+index and merges that singleton into the existing ordered candidate window.
+Both HTTP and native already call this store owner. Authorization and cursor
+context are checked first; the same profile projection, grain filter, complete
+identifier batching, 100-inspected-ID page bound and 4 MiB response admission
+remain authoritative. Literal title/original-title matching is preserved, even
+when a title contains another Record's ID. Partial or noncanonical IDs do not
+gain exact lookup. No schema, archive, capability, route, DTO or dependency changes.
+
+Store and HTTP RED tests reproduced empty results for an existing exact ID.
+Independent review then found that an inactive row with a `rec` title posting
+could bypass an initial singleton-only active predicate. The revised negative
+fixture reproduced that failure. Exact-ID acceptance now requires a successful
+active singleton lookup, not just a parsed query. Final production/test review
+is clear. Existing profile/workspace authorization, cursor and pagination tests
+were extended rather than creating alternate owners or a benchmark harness.
+
+Focused verification passes: 25 store local-search checks (one separately run
+release fixture) and seven HTTP checks. Full Rust validation passes: 110 API
+unit tests, seven webhook integration tests, 479 store unit tests and three
+correction integration tests; six existing store unit workers/benchmarks and
+one archive doctest remain ignored in that ordinary run. Strict API/store
+all-target Clippy, Rust formatting and diff checks pass. Logs use the prefix
+`/tmp/fasti-m4-exact-record-` with suffixes `store-red-sep8.log`,
+`http-red-sep8.log`, `inactive-red-sep8.log`, `store-green-sep8.log`,
+`http-green-sep8.log`, `full-rust-sep8.log` and `clippy-sep8.log`.
+
+The existing 10,000-Record release fixture passed separately in 47.97 seconds;
+log `/tmp/fasti-m4-exact-record-10000-sep8.log`. Each scenario retains 100 measured
+samples. Exact-ID p95 was 702.028/724.688 microseconds and absent-ID p95 was
+616.848/631.508 microseconds for unknown/observed policy respectively. Existing
+general, full-identifier and dense-overflow cases also passed unchanged budgets.
+The exact query-plan assertion uses the production SQL, requires the existing
+workspace/record index, zero full-scan steps and fewer than 100 VM steps. This
+is local fixture evidence, not full hardware qualification or a hosted receipt.
+
+Root owns production integration; the two workers owned only the existing store
+and HTTP test leaves, with independent read-only review. Parallel ten-domain
+preparation confirms the existing semantic gap remains: UI MediaKind/Grain
+heuristics cannot serve as governed classification. Source-backed rules for all
+ten domains, overlap and unknown handling still require completion. The older
+identifier-hydration warning is stale: retain the already implemented batch
+loader. No four-domain scope cut or speculative classifier was introduced.
+Rollback is an ordinary isolated revert with no data conversion. There is no
+visual change in this slice. Clean-head gates, hosted ARM measurement, remaining
+M4 acceptance and merge remain open. Schema17/archive7 and shared ownership stay
+with M4; no migration18 allocation, handoff or excluded-tool use occurred.
