@@ -4567,3 +4567,34 @@ isolated after M4, while durable schema/archive and lifecycle integration requir
 one explicit writer. Existing process-local Nuvio state/outbox is not durable
 sync evidence. These preparations do not activate capabilities, allocate a
 migration or reduce any programme scope. Codex Security remains prohibited.
+
+### 2026-09-08 — Preserve bot ancestry and verify the Attach callback contract
+
+Normal merge `8fcda9d171e4a627bc8f75bcd29f92a82d877117`, tree
+`fb98730459d63efa373024aea32335c1ea3ba86f`, incorporates published PR128 bot
+head `a65154bdbf1e3e2d1761e4795e555b32bc659977` without losing the twelve
+newer local commits. The resulting tree matched the read-only merge preview.
+
+The bot's extra HTTPS test server/dependency is not retained: its boolean Vite
+`https` option fails the pinned configuration typecheck. Removing that added
+harness restores the passing web typecheck and the existing single 4173 browser
+fixture. This changes no production TLS listener or upstream TLS validation.
+The original Attach browser suite had already passed in the 201/203 run; neither
+of that run's failures required the extra TLS server.
+
+The exported Discover callbacks legitimately allow successful `Promise<void>`.
+The shared action helper previously returned the same `undefined` for that
+success, a rejected action and a stale completion. It now returns `null` for
+successful void completion, retains `undefined` for no successful delivery, and
+the Attach handler captures its selected Record before awaiting the callback.
+No public type, dependency, migration or speculative abstraction is added.
+
+The new component-browser regression mounts the actual compiled DiscoverView.
+Both live and retained void-success cases failed before the fix; all four
+rejection/teardown cases passed. After the fix all six pass without retries.
+Logs: `/tmp/fasti-m4-attach-void-red-sep8.log` and
+`/tmp/fasti-m4-attach-void-green-sep8.log`; GREEN artifacts use their own directory
+and do not overwrite RED traces. UI typecheck also passes. These are behavioral
+checks, not visual, accessibility, public-provider or whole-programme acceptance.
+Clean-head canonical, full ordinary-browser and real-process gates remain due.
+M4 retains schema17/archive7 ownership; no migration18 or shared-file release.

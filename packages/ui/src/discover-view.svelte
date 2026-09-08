@@ -398,21 +398,20 @@
     )
       return;
     const generation = attachGeneration;
-    const key = candidateKey(selection.result, selection.index);
+    const targetRecordId = attachRecordId;
     const outcome = await runCandidateAction(
       selection.result,
       selection.index,
       {
         kind: "attach",
-        record_id: attachRecordId,
+        record_id: targetRecordId,
       },
     );
     if (generation !== attachGeneration) return;
-    if (completedKeys.has(key)) {
-      const recordId = outcome?.record_id ?? attachRecordId;
+    if (outcome !== undefined) {
       closeAttachPicker();
-      onOpenRecord?.(recordId);
-    } else if (actionProblemKey === key) {
+      onOpenRecord?.(outcome?.record_id ?? targetRecordId);
+    } else {
       attachProblem = actionProblem;
     }
   }
@@ -428,7 +427,7 @@
     result: ProviderResult,
     index: number,
     recordAction: SearchRecordActionDto = { kind: "create" },
-  ): Promise<CreateRecordResult | undefined> {
+  ): Promise<CreateRecordResult | null | undefined> {
     const key = candidateKey(result, index);
     const action = result.receipt
       ? onCandidateReceiptAction
@@ -464,6 +463,8 @@
         createdRecordIds = { ...createdRecordIds, [key]: outcome.record_id };
         return outcome;
       }
+      // A void callback succeeded; undefined means failure or stale delivery.
+      return null;
     } catch (error) {
       if (revision !== searchRevision || routeRevision !== routeGeneration)
         return;
