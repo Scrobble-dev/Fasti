@@ -4853,3 +4853,52 @@ Root alone writes SDK/shared production; the test worker owns only the transport
 test leaf, with separate read-only review and advisory triage. Rollback is a
 normal revert of this admission slice, with no data conversion. Schema17/archive7
 and shared ownership stay with M4; no migration18 allocation or merge occurred.
+
+### 2026-09-08 — Preserve ARM failure; add failure-only diagnostics
+
+Hosted run34214023467 is complete on published
+`0aa0cde2f2301d7f3805b320a9d124d132a7e8af`: x86_64 envelope job102021463603
+passed; aarch64 job102021463689 failed. The ARM failure occurred in the
+synthetic canonical-sampler self-test, before the real daemon idle measurement.
+The other eight self-tests, release build and artifact budgets passed. Actual
+ARM daemon measurement and receipt upload were skipped and remain open gates.
+No daemon budget overshoot is established. The retained raw log is
+`/tmp/fasti-aarch64-102021463689.YZNm8D/job.log`, SHA-256
+`d6076f8cd86b11110ee61db6768ef74cdf5cf87f2081c4914c0e6ad875b6a8f9`.
+
+The precise host cause is unknown: the old error combines an empty handshake
+and a missing cgroup directory, while cleanup removes the temporary evidence.
+The workload already honors the earlier lifetime fix; extending its duration
+without evidence is not justified. The bounded diagnostic change records the
+selected runner mode, elapsed discovery time, handshake byte count and escaped
+bounded path, directory presence, runner liveness at failure, and its eventual
+exit status. The self-test keeps the first 8 KiB of stderr input instead of only
+its last three lines. Workload arguments and environment are not added to logs.
+No discovery condition, loop, sampler, limit, lifetime, receipt contract or
+pass/fail rule changes. No hosted rerun, threshold change or waiver was made.
+
+Root owns the two diagnostic scripts and this existing checkpoint. A worker
+owns only the native JavaScript diagnostic regression leaf; another agent
+reviewed the production and test diffs read-only and found no behavioral defect.
+All three diagnostic regressions pass; all three fail against published0aa
+script copies in `/tmp/fasti-envelope-diagnostics-red.aNtPSs`. The fixture uses
+fake scope-selection tools, never executes its workload, and proves failure1,
+runner exit23, absent measurement/receipt, and bounded stderr retention. Bash
+syntax, formatting and diff checks pass. Full `pnpm test` passes with 445 tests
+and two existing live-docs skips, including build/contracts/examples/OKF/UI policy;
+log `/tmp/fasti-m4-arm-diagnostics-full-js-sep8.log`. This working-diff JavaScript
+gate includes the preserved SDK/UI edits; it is not a clean-head receipt or a
+browser run. These local checks cannot qualify the missing hosted ARM measurement.
+Rollback is an isolated ordinary revert,
+with no schema, archive, contract, data or UI conversion. Visual/accessibility
+evidence is not applicable to this headless diagnostic slice.
+
+The existing dirty SDK/Discover admission work and six-case browser leaf remain
+preserved. The four original admission regressions and baseline passed before
+the worker added provider-batch collision isolation, duplicate-page continuation
+and screenshot/Axe assertions; the expanded six-case leaf has not been run.
+Neither the new UI cases nor this diagnostic slice inherits published0aa proof.
+M4 retains schema17/archive7 and all shared integration ownership. PR128 remains
+unmerged; migration18 is not allocated, no shared files are released, and no
+remaining programme scope is removed. Codex Security remains permanently
+excluded, including every delegate and fallback.
