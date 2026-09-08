@@ -4642,3 +4642,30 @@ preserve first-admitted cross-page identity/order, reject conflicting reused
 receipts, and derive cumulative cache labels from admitted rows. Existing M1–M3
 owners remain authoritative; no public API, table, capability or next migration
 is allocated by these maps. M4 and all later programme scope remain active.
+
+### 2026-09-08 — Integrate the material PR134 handoff
+
+Live GitHub and fetched Git state confirm PR134 merged at
+`48fa62e517cddde268678f8231850f0981176c0d`. Its tree
+`828783f4ddd2403b13694b8250602eb122db390a` is exactly equal to reviewed Access
+head `222d22c579602c4a06aa9b78b3d041971402082b`. Access reports its canonical,
+qualification and both hardware jobs passed, while Codacy's historical-path
+finding remains explicitly `ACTION_REQUIRED`; do not call that service green.
+Pages deployment verification remains Access-owned and separate.
+
+Normal M4 merge `ec26c8eca2aed97b0dc372b4e76c5d4cd791be4c`, tree
+`54232f2386be1b8bd2fc5993ac509262ea18c378`, matched the conflict-free preview.
+It preserves clean M4 `ff047f0ea7d4e11f32ba6ea77ca9e46415a3c4bb`, including
+the committed Attach and route-focus repairs. The incoming nine-path delta is
+isolated source-notice custody tooling, its workflow/documentation guidance, and
+the already accepted Pages action pins. No production schema, archive, contract,
+runtime, registry, SDK, host or Workbench changes enter from this merge.
+
+M4 retains schema17/archive7 and shared integration ownership. No migration18 or
+shared-file release follows. Preserve Access's exact supervised exchange,
+status/logout recheck, vendor-token discard and opaque Fasti session boundaries;
+packaged Tauri authentication remains deferred. The Access resource slot is
+released; M4's final canonical, ordinary-browser and real-process gates run
+sequentially on the integrated source. Earlier passing receipts remain bound to
+their original commits until those new gates finish. The permanent tool
+exclusion remains unchanged.
