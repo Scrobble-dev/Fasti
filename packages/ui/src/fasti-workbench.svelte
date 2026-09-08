@@ -5,6 +5,7 @@
     parseListRecordsQueryParameters,
   } from "@fasti/sdk";
   import { flushSync, onMount, tick, untrack } from "svelte";
+  import { SvelteMap } from "svelte/reactivity";
   import IconChevronRight from "@tabler/icons-svelte/icons/chevron-right";
   import IconActivityHeartbeat from "@tabler/icons-svelte/icons/activity-heartbeat";
   import IconDatabase from "@tabler/icons-svelte/icons/database";
@@ -770,7 +771,30 @@
   let discoverSelectionExplicit = $state(false);
   let discoverLoadId = 0;
   let discoverSectionActive = false;
-  const searchActionOperationIds = new Map<string, string>();
+  type SearchActionIntent = {
+    provider: string;
+    grain: string;
+    action: SearchRecordActionDto;
+  } & (
+    | { kind: "provider"; providerRecordId: string }
+    | { kind: "receipt"; receiptId: string; evidenceMode: "cached" | "refetch" }
+  );
+  interface UnconfirmedSearchAction {
+    intent: SearchActionIntent;
+    operationId: string;
+    running: boolean;
+    problem: string;
+  }
+  // Bounded to two provider result sets. Unconfirmed IDs are never evicted.
+  const MAX_UNCONFIRMED_SEARCH_ACTIONS = 400;
+  const searchActionOperationIds = new SvelteMap<
+    string,
+    UnconfirmedSearchAction
+  >();
+  let searchActionGeneration = 0;
+  let confirmedSearchAction = $state<CreateRecordResult>();
+  let searchRecoveryInFlight = $state(0);
+  let searchRecoveryHeading = $state<HTMLElement>();
   const SEARCH_CANDIDATE_HISTORY_KEY = "fastiSearchCandidate";
 
   async function loadDiscover(): Promise<void> {
@@ -1123,6 +1147,9 @@
     clearDetailState();
     invalidateDiscoverProviders();
     searchActionOperationIds.clear();
+    searchActionGeneration += 1;
+    confirmedSearchAction = undefined;
+    searchRecoveryInFlight = 0;
     reviewsLoadId += 1;
     reviews = [];
     reviewsLoaded = false;
@@ -1197,49 +1224,13 @@
     if (!canAccessProfileData || !host.saveProviderIdentifier) {
       throw new Error("Sign in before saving provider identity to a Record.");
     }
-    const authorityIdentity = profileAuthorityIdentity;
-    const operationKey = JSON.stringify([
-      "provider",
-      candidate.provider,
-      candidate.grain,
-      candidate.provider_id,
-      action.kind,
-      action.kind === "attach" ? action.record_id : null,
-    ]);
-    const operationId =
-      searchActionOperationIds.get(operationKey) ?? newOperationId();
-    searchActionOperationIds.set(operationKey, operationId);
-    const result = await host.saveProviderIdentifier(
-      candidate.provider,
-      candidate.grain,
-      {
-        operation_id: operationId,
-        provider_record_id: candidate.provider_id,
-        action,
-      },
-    );
-    if (authorityIdentity !== profileAuthorityIdentity) {
-      throw new Error(
-        "Account access changed before the Record was confirmed.",
-      );
-    }
-    if (result.outcome === "unavailable") {
-      throw new Error(
-        `The provider could not confirm this identifier (${result.problem_code}).`,
-      );
-    }
-    searchActionOperationIds.delete(operationKey);
-    recordsLoaded = false;
-    await loadRecords();
-    if (authorityIdentity !== profileAuthorityIdentity) {
-      throw new Error(
-        "Account access changed before the Record was confirmed.",
-      );
-    }
-    return {
-      record_id: result.receipt.record_id,
-      grain: result.receipt.grain,
-    };
+    return runSearchAction({
+      kind: "provider",
+      provider: candidate.provider,
+      grain: candidate.grain,
+      providerRecordId: candidate.provider_id,
+      action,
+    });
   }
 
   async function searchProvider(
@@ -1315,51 +1306,160 @@
     if (!canAccessProfileData || !host.saveSearchCandidate) {
       throw new Error("Sign in before saving Search identity to a Record.");
     }
-    const authorityIdentity = profileAuthorityIdentity;
-    const operationKey = JSON.stringify([
-      "receipt",
-      receipt.candidate.provider,
-      receipt.grain,
-      receipt.candidate_receipt_id,
+    return runSearchAction({
+      kind: "receipt",
+      provider: receipt.candidate.provider,
+      grain: receipt.grain,
+      receiptId: receipt.candidate_receipt_id,
       evidenceMode,
-      action.kind,
-      action.kind === "attach" ? action.record_id : null,
+      action,
+    });
+  }
+
+  async function runSearchAction(
+    intent: SearchActionIntent,
+  ): Promise<CreateRecordResult> {
+    if (
+      !canAccessProfileData ||
+      (intent.kind === "provider"
+        ? !host.saveProviderIdentifier
+        : !host.saveSearchCandidate)
+    )
+      throw new Error("Sign in before retrying a Record action.");
+    const operationKey = JSON.stringify([
+      intent.kind,
+      intent.provider,
+      intent.grain,
+      intent.kind === "receipt" ? intent.receiptId : intent.providerRecordId,
+      ...(intent.kind === "receipt" ? [intent.evidenceMode] : []),
+      intent.action.kind,
+      intent.action.kind === "attach" ? intent.action.record_id : null,
     ]);
-    const operationId =
-      searchActionOperationIds.get(operationKey) ?? newOperationId();
-    searchActionOperationIds.set(operationKey, operationId);
-    const result = await host.saveSearchCandidate(
-      receipt.candidate.provider,
-      receipt.grain,
-      receipt.candidate_receipt_id,
-      {
-        operation_id: operationId,
-        action,
-        evidence_mode: evidenceMode,
+    const existing = searchActionOperationIds.get(operationKey);
+    if (existing?.running)
+      throw new Error(
+        "This Record action is already waiting for confirmation.",
+      );
+    if (
+      !existing &&
+      searchActionOperationIds.size >= MAX_UNCONFIRMED_SEARCH_ACTIONS
+    )
+      throw new Error(
+        "There are 400 unconfirmed Record actions. Retry an original action in Unconfirmed Record actions before starting another.",
+      );
+    const pending: UnconfirmedSearchAction = existing ?? {
+      intent: {
+        ...intent,
+        action:
+          intent.action.kind === "attach"
+            ? { kind: "attach", record_id: intent.action.record_id }
+            : { kind: "create" },
       },
-    );
-    if (authorityIdentity !== profileAuthorityIdentity) {
-      throw new Error(
-        "Account access changed before the Record was confirmed.",
-      );
-    }
-    if (result.outcome === "unavailable") {
-      throw new Error(
-        `The provider could not confirm this candidate (${result.problem_code}).`,
-      );
-    }
-    searchActionOperationIds.delete(operationKey);
-    recordsLoaded = false;
-    await loadRecords();
-    if (authorityIdentity !== profileAuthorityIdentity) {
-      throw new Error(
-        "Account access changed before the Record was confirmed.",
-      );
-    }
-    return {
-      record_id: result.receipt.record_id,
-      grain: result.receipt.grain,
+      operationId: newOperationId(),
+      running: false,
+      problem: "",
     };
+    const generation = searchActionGeneration;
+    const authority = profileAuthorityIdentity;
+    const stillCurrent = () =>
+      generation === searchActionGeneration &&
+      authority === profileAuthorityIdentity;
+    searchActionOperationIds.set(operationKey, {
+      ...pending,
+      running: true,
+      problem: "",
+    });
+    try {
+      const saved = pending.intent;
+      const result =
+        saved.kind === "provider"
+          ? await host.saveProviderIdentifier!(saved.provider, saved.grain, {
+              operation_id: pending.operationId,
+              provider_record_id: saved.providerRecordId,
+              action: saved.action,
+            })
+          : await host.saveSearchCandidate!(
+              saved.provider,
+              saved.grain,
+              saved.receiptId,
+              {
+                operation_id: pending.operationId,
+                evidence_mode: saved.evidenceMode,
+                action: saved.action,
+              },
+            );
+      if (!stillCurrent())
+        throw new Error(
+          "Account access changed before the Record was confirmed.",
+        );
+      if (result.outcome === "unavailable")
+        throw new Error(
+          `The provider could not confirm this ${saved.kind === "provider" ? "identifier" : "candidate"} (${result.problem_code}).`,
+        );
+      recordsLoaded = false;
+      await loadRecords();
+      if (!stillCurrent())
+        throw new Error(
+          "Account access changed before the Record was confirmed.",
+        );
+      searchActionOperationIds.delete(operationKey);
+      return {
+        record_id: result.receipt.record_id,
+        grain: result.receipt.grain,
+      };
+    } catch (error) {
+      if (
+        stillCurrent() &&
+        searchActionOperationIds.get(operationKey)?.operationId ===
+          pending.operationId
+      )
+        searchActionOperationIds.set(operationKey, {
+          ...pending,
+          problem: hostProblemText(
+            error,
+            "The Record action is unconfirmed. Retry the original action.",
+          ).slice(0, 2048),
+          running: false,
+        });
+      throw error;
+    } finally {
+      const current = searchActionOperationIds.get(operationKey);
+      if (
+        stillCurrent() &&
+        current?.operationId === pending.operationId &&
+        current.running
+      )
+        searchActionOperationIds.set(operationKey, {
+          ...current,
+          running: false,
+        });
+    }
+  }
+
+  async function retrySearchAction(
+    pending: UnconfirmedSearchAction,
+  ): Promise<void> {
+    const generation = searchActionGeneration;
+    const previousFocus = document.activeElement;
+    searchRecoveryInFlight += 1;
+    try {
+      const result = await runSearchAction(pending.intent);
+      if (generation !== searchActionGeneration) return;
+      confirmedSearchAction = result;
+      await tick();
+      if (
+        generation === searchActionGeneration &&
+        (document.activeElement === previousFocus ||
+          (previousFocus &&
+            !previousFocus.isConnected &&
+            document.activeElement === document.body))
+      )
+        searchRecoveryHeading?.focus();
+    } catch {
+      // The original entry retains its ID, complete intent and actionable error.
+    } finally {
+      if (generation === searchActionGeneration) searchRecoveryInFlight -= 1;
+    }
   }
 
   async function readSearchCandidate(
@@ -1887,6 +1987,70 @@
     </header>
 
     <main id="main-content" class="page-body main-content" tabindex="-1">
+      {#if canAccessProfileData && (searchActionOperationIds.size > 0 || confirmedSearchAction || searchRecoveryInFlight > 0)}
+        <details
+          id="unconfirmed-record-actions"
+          class="card mx-3 mb-3 search-action-recovery"
+        >
+          <summary class="card-header py-3" bind:this={searchRecoveryHeading}>
+            Unconfirmed Record actions ({searchActionOperationIds.size})
+          </summary>
+          <div class="card-body">
+            <p>
+              A missing response does not mean the action failed. Retry the
+              original action to confirm its result. These retries stay
+              available while this Workbench account session remains open.
+            </p>
+            {#if confirmedSearchAction}
+              <p role="status">
+                Record confirmed: <code class="text-break"
+                  >{confirmedSearchAction.record_id}</code
+                >
+              </p>
+              <button
+                type="button"
+                class="btn btn-outline-primary mb-3"
+                onclick={() =>
+                  confirmedSearchAction &&
+                  openRecord(confirmedSearchAction.record_id)}
+                >Open confirmed Record</button
+              >
+            {/if}
+            <ul class="list-group list-group-flush">
+              {#each [...searchActionOperationIds.values()] as pending (pending.operationId)}
+                <li class="list-group-item">
+                  <p class="mb-1 text-break">
+                    {pending.intent.action.kind === "attach"
+                      ? "Attach"
+                      : "Create Record"} · {pending.intent.provider} · {pending
+                      .intent.grain}
+                    <code
+                      >{pending.intent.kind === "provider"
+                        ? pending.intent.providerRecordId
+                        : pending.intent.receiptId}</code
+                    >
+                    {#if pending.intent.action.kind === "attach"}
+                      to <code>{pending.intent.action.record_id}</code>
+                    {/if}
+                  </p>
+                  {#if pending.problem}<p class="text-secondary" role="status">
+                      {pending.problem}
+                    </p>{/if}
+                  <button
+                    type="button"
+                    class="btn btn-outline-primary"
+                    disabled={pending.running}
+                    onclick={() => retrySearchAction(pending)}
+                    >{pending.running
+                      ? "Waiting for confirmation…"
+                      : "Retry original action"}</button
+                  >
+                </li>
+              {/each}
+            </ul>
+          </div>
+        </details>
+      {/if}
       {#if showsRecordFeedback && recordActionNotice}
         <p class="record-action-feedback" role="status">
           {recordActionNotice}
@@ -2372,6 +2536,11 @@
   .main-content {
     min-width: 0;
     margin-bottom: 0;
+  }
+
+  .search-action-recovery summary:focus-visible {
+    outline: 3px solid var(--fasti-focus);
+    outline-offset: 2px;
   }
 
   .record-action-feedback {

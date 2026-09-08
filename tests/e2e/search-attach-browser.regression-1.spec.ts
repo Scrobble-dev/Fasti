@@ -902,3 +902,80 @@ test("the browser SDK rejects an Attach receipt for a different target", async (
     fixture.actionRequests[0].request,
   );
 });
+
+for (const holdOldRetry of [false, true]) {
+  test(`browser profile change clears private recovery${holdOldRetry ? " and an A-to-B-to-A late retry cannot restore it" : ""}`, async ({
+    page,
+  }) => {
+    const fixture = await installBrowserAttachHost(page);
+    fixture.malformedTarget = true;
+    const dialog = await openAttachPicker(page);
+    await dialog.getByRole("button", { name: "Find Records" }).click();
+    await dialog.getByRole("radio", { name: /Dune local/ }).check();
+    await dialog.getByRole("button", { name: "Confirm attachment" }).click();
+    await expect(dialog.getByRole("alert")).toContainText(
+      "Candidate action response violates the generated contract",
+    );
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    const recovery = page.locator("#unconfirmed-record-actions");
+    await expect(recovery.locator("summary")).toHaveText(
+      "Unconfirmed Record actions (1)",
+    );
+    await recovery.locator("summary").click();
+    await expect(recovery).toContainText(recordA);
+    await expect(
+      recovery.getByRole("button", {
+        name: "Retry original action",
+        exact: true,
+      }),
+    ).toBeVisible();
+
+    const originalResponse = await page.request.get(stubProjectionUrl);
+    expect(originalResponse.ok()).toBe(true);
+    const originalProjection =
+      (await originalResponse.json()) as AccessProjectionResponse;
+    if (holdOldRetry) {
+      fixture.malformedTarget = false;
+      fixture.holdAction = true;
+      await recovery
+        .getByRole("button", { name: "Retry original action", exact: true })
+        .click();
+      await expect.poll(() => fixture.actionStarted).toBe(2);
+      expect(fixture.actionRequests[1].request).toEqual(
+        fixture.actionRequests[0].request,
+      );
+    }
+
+    await revalidateAuthority(page, "profile");
+    await expect(recovery).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "Retry original action", exact: true }),
+    ).toHaveCount(0);
+    if (holdOldRetry) {
+      // Return to the exact original profile before releasing its old request.
+      // Identity equality alone must not revive a prior authority generation.
+      await page.route("**/api/access/v1/projection", (route) =>
+        fulfillJson(route, originalProjection),
+      );
+      const returnedProjection = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === "/api/access/v1/projection",
+      );
+      await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+      expect((await returnedProjection).ok()).toBe(true);
+      await settleBrowserWork(page);
+      fixture.releaseAction?.();
+      await expect.poll(() => fixture.actionResponded).toBe(2);
+      await settleBrowserWork(page);
+      await expect(recovery).toHaveCount(0);
+      await expect(
+        page.getByRole("button", {
+          name: "Open confirmed Record",
+          exact: true,
+        }),
+      ).toHaveCount(0);
+    }
+    await expect(page).toHaveURL("/discover");
+    expect(fixture.actionRequests).toHaveLength(holdOldRetry ? 2 : 1);
+  });
+}

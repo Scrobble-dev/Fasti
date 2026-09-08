@@ -5765,3 +5765,32 @@ and durable replay; no new schema/API is needed for the current Workbench lifeti
 Do not claim new reload recovery. Then freeze/reconcile the final landing source
 and run the documented exact-head gates. M4b identity-reader preparation stays
 dirty and preserved; no migration/archive allocation or shared release occurred.
+
+### M4a unconfirmed-action recovery — 2026-09-08
+
+The existing Workbench retry map now admits at most400 complete action intents.
+It never evicts an unconfirmed operation ID. New actions at capacity are rejected
+before dispatch; original retries remain reachable after query/navigation changes
+and confirmation releases capacity. Both provider and candidate actions reuse one
+runner and the existing durable Store replay APIs. This is current-Workbench
+recovery, not persistence across reload. Native details/summary and existing
+Tabler controls expose exact Create/Attach intent, errors and confirmed navigation.
+Profile reset clears private state; a generation check also rejects A-to-B-to-A
+late responses. Pending admission remains held through Record-list refresh.
+
+Focused browser handle80896 exited0: all19 tests passed, including five new
+recovery cases, two browser-authority cases and12 existing browser regressions.
+The earlier native-fixture profile failure tested the wrong scoped-host authority;
+that coverage now uses the real browser HTTP host adapter. Independent native
+source/test review found no remaining concrete defect after the refresh overlap
+fix. Recovery errors have a polite status role; final full-tree accessibility and
+release checks remain required. Evidence: `/tmp/fasti-m4a-action-recovery-final`.
+
+T1 retention and T2 landing instructions are implemented; T3 exact-tree landing
+is next. Preserve the two dirty M4b identity-reader files in this worktree and
+prepare M4a in a separate clean delivery worktree, retaining every committed M4
+result. Reconcile accepted dev416843b4/tree06e8959c (PR135 has no incoming
+production overlap), then run the existing one-pass landing checklist. No M4b
+provider expansion, migration allocation or shared release is authorized by this
+checkpoint. Schema17/archive7 remain M4-owned; accepted dev15/5 does not permit
+C2 to reuse v16. Codex Security remains permanently excluded.

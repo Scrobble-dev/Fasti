@@ -3571,12 +3571,12 @@ framework or leaking provider details in an attempt to improve these messages.
 
 ### Finite implementation and landing tasks
 
-- [ ] **T1 / F2 — M4a retention.** Commander owns `discover-view.svelte` and
+- [x] **T1 / F2 — M4a retention.** Commander owns `discover-view.svelte` and
   `fasti-workbench.svelte`; delegate separate regression leaves. Reuse current
   windows/receipt replay. Prove continued navigation, bounded retained data,
   uncertain retry identity, profile isolation and keyboard recovery. Estimate:
   human 0.5–1 day / agent 1–3 hours, not a completion promise.
-- [ ] **T2 / F4 — M4a landing instructions.** Update only the existing
+- [x] **T2 / F4 — M4a landing instructions.** Update only the existing
   `docs/dev-loop.md` checklist with actual prerequisites and command coverage.
   Keep original failures. Estimate: human 1 hour / agent 15–30 minutes.
 - [ ] **T3 / F1,F3 — M4a exact landing.** Preserve dirty M4b preparation before
