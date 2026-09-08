@@ -5001,3 +5001,27 @@ Rollback is an ordinary isolated revert with no data conversion. There is no
 visual change in this slice. Clean-head gates, hosted ARM measurement, remaining
 M4 acceptance and merge remain open. Schema17/archive7 and shared ownership stay
 with M4; no migration18 allocation, handoff or excluded-tool use occurred.
+
+### 2026-09-08: whole-head browser fixture contract repair
+
+Clean `5ecc56496233062d917eed16d3b1d661ca445be2` passed the canonical PR
+gate (`/tmp/fasti-m4-canonical-5ecc5649-sep8.log`). Its ordinary browser run
+passed 216 cases and failed the provider-change Search race fixture. The
+retained context reports generated page-contract rejection: both fixture
+candidates omitted required `grain`. A direct SDK parser probe reproduced
+rejection and accepted the same candidate with its grain restored. Independent
+Access source/schema review confirmed this finding, not a production race bug.
+
+The existing test now reuses generated `SearchCandidateDto`, supplies both
+current and stale candidates' grains, and serves an empty local Search page.
+Both race candidates must be valid so rejection cannot substitute for stale
+response suppression. Existing race assertions remain; a no-alert assertion
+also excludes the unrelated missing local Search handler. Focused browser
+verification passes (one case, seven seconds), with artifacts and log at
+`/tmp/fasti-m4-race-fixture-green-sep8` and the corresponding `.log` path.
+Production validation and revision guards are unchanged. This is a test-only
+repair with no schema/archive/contracts/runtime change; rollback is an isolated
+revert. Final ordinary browser rerun and real-process journey remain pending.
+Published PR head stays `0aa0cde2f2301d7f3805b320a9d124d132a7e8af`; no push,
+merge or shared-file release occurred. Codex Security remains permanently
+excluded. Previously accepted broader reviews were not repeated.

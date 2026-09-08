@@ -1,4 +1,5 @@
 import AxeBuilder from "@axe-core/playwright";
+import type { SearchCandidateDto } from "@fasti/sdk";
 import { expect, test, type Page } from "@playwright/test";
 
 type Scenario =
@@ -14,14 +15,7 @@ type Scenario =
   | "record-retry"
   | "record-retry-failure";
 
-type Candidate = {
-  provider: string;
-  provider_id: string;
-  title: string;
-  kind: string;
-  authors: string[];
-  image_url: null;
-};
+type Candidate = SearchCandidateDto;
 
 declare global {
   interface Window {
@@ -235,6 +229,8 @@ async function installTrustedHost(page: Page, scenario: Scenario) {
             return activeScenario === "credential-delete"
               ? statuses(providerConfigured, false)
               : statuses(true, true);
+          case "search_records":
+            return { records: [], next: null };
           case "search_provider_page":
             if (activeScenario !== "search-race") return [];
             return new Promise((resolve) => {
@@ -354,6 +350,7 @@ test("Discover ignores an in-flight result after the provider changes", async ({
       provider_id: "current",
       title: "Current Google result",
       kind: "book",
+      grain: "work",
       authors: [],
       image_url: null,
     }),
@@ -366,6 +363,7 @@ test("Discover ignores an in-flight result after the provider changes", async ({
       provider_id: "stale",
       title: "Stale TMDB result",
       kind: "show",
+      grain: "series",
       authors: [],
       image_url: null,
     }),
@@ -373,6 +371,7 @@ test("Discover ignores an in-flight result after the provider changes", async ({
   await expect(page.getByText("Stale TMDB result")).toHaveCount(0);
   await expect(page.getByText("Current Google result")).toBeVisible();
   await expect(provider).toHaveValue("google-books");
+  await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
 test("Discover keeps the newest provider status when refreshes resolve out of order", async ({
