@@ -8,6 +8,7 @@ on:
       - "qualification/access-c3-signing/**"
       - "qualification/access-c3-framing/**"
       - "qualification/access-c3-kdf/**"
+      - "qualification/access-c3-native-attribution/**"
       - "crates/fasti-domain/**"
       - "crates/fasti-application/**"
       - "crates/fasti-contracts/**"
@@ -21,6 +22,7 @@ on:
       - "qualification/access-c3-signing/**"
       - "qualification/access-c3-framing/**"
       - "qualification/access-c3-kdf/**"
+      - "qualification/access-c3-native-attribution/**"
       - "crates/fasti-domain/**"
       - "crates/fasti-application/**"
       - "crates/fasti-contracts/**"
@@ -32,6 +34,30 @@ permissions:
   contents: read
 
 jobs:
+  native-attribution:
+    name: Source-notice structural qualification (not runtime)
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Verify the complete structural suite without skips
+        working-directory: qualification/access-c3-native-attribution
+        run: |
+          python3 -B - <<'PY'
+          import sys
+          import unittest
+
+          suite = unittest.defaultTestLoader.loadTestsFromName("test_bundle")
+          if suite.countTestCases() != 14:
+              sys.exit("Expected exactly 14 source-notice structural tests")
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          sys.exit(not (result.testsRun == 14 and result.wasSuccessful() and not result.skipped and not result.expectedFailures))
+          PY
+
   qualification:
     name: ${{ matrix.label }} qualification (not runtime)
     strategy:
