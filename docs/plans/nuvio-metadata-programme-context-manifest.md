@@ -5025,3 +5025,101 @@ revert. Final ordinary browser rerun and real-process journey remain pending.
 Published PR head stays `0aa0cde2f2301d7f3805b320a9d124d132a7e8af`; no push,
 merge or shared-file release occurred. Codex Security remains permanently
 excluded. Previously accepted broader reviews were not repeated.
+
+### 2026-09-08: bounded parallel Search evidence closure
+
+The preceding turn made progress: fixture repair is committed at
+`4222141d38386fc19d3d595e3b0ed82c81595cbf`, tree
+`8d96bbae6db9e153c3999d23984e99a4595784c7`. Its ordinary browser run passed
+217/217 in 2.5 minutes (`/tmp/fasti-m4-browser-4222141d-sep8.log`). The
+real-process Search/Create/Attach/cache/no-store/restart journey also passed
+(`/tmp/fasti-m4-real-browser-4222141d-sep8.log`); its receipt binds that exact
+clean source. Canonical receipts still bind parent `5ecc5649`, not this later
+test/checkpoint-only commit. No workload remains active from those checks.
+
+The commander retains sole shared integration ownership. Three existing agents
+performed read-only work: domain evidence/admission mapping, aggregate provider
+result retention, and missing primary-source/Scrob verification. No speculative
+production API, table, migration, generated contract or alternate roadmap was
+introduced. Previously accepted reviews remain accepted.
+
+The user's instruction to select recommended answers resolves broad Manga
+membership: manga, one-shots, doujinshi, manhwa, manhua and original
+English-language manga are included; novels are not Manga. Missing or unknown
+source types do not imply Manga or Custom. Independently proven Comic and Manga
+memberships may coexist; this is not permission to merge their identities.
+
+New primary-source closure, retrieved 2026-09-08:
+
+- [MAL API v2](https://myanimelist.net/apiconfig/references/api/v2#operation/manga_manga_id_get):
+  embedded OpenAPI 3.0.0, API version 2, `MangaForList.media_type` documents
+  `unknown`, `manga`, `novel`, `one_shot`, `doujinshi`, `manhwa`, `manhua`, `oel`.
+  These are in the property description, not a schema enum. Request the field
+  explicitly. `MangaForDetails` inherits it; `light_novel` is not a listed value.
+  No immutable source URL was exposed. SHA-256 of the retrieved embedded spec's
+  JSON serialization: `6417849b9032b227479b05eada01b3bff7ff75932ef740c2d6261af8b2833264`.
+- [ComicVine documentation](https://comicvine.gamespot.com/api/documentation):
+  Search distinguishes `resource_type=issue|volume`; typed issue and volume
+  detail resources expose their own IDs and relationships. `/types` exposes
+  `id`, `detail_resource_name` and `list_resource_name`. Naked IDs or provider
+  names cannot classify comics. Inspected official text does not prove numeric
+  prefixes `4000`/`4050`; do not freeze those from third-party examples. Hash of
+  normalized inspected issue/volume/search/types sections:
+  `a4c3beb2398f89981e8007e4299d91c72b41701971d6978f29ef05974c068985`.
+- [Scrob benchmark](https://github.com/ellite/scrob/commit/b0deceab6b09c1db0fa1fb62bf1bda5d446964f0)
+  is pinned to `b0deceab6b09c1db0fa1fb62bf1bda5d446964f0`. Its Search UI is a
+  useful interaction benchmark, not authority for Fasti's ten domains. Its
+  [Nuvio adapter](https://github.com/ellite/scrob/blob/b0deceab6b09c1db0fa1fb62bf1bda5d446964f0/backend/core/nuvio.py)
+  uses offset/limit for Library, page/page-size for watched history, and a
+  limit-only progress request. Its Library merge reads the remote snapshot,
+  applies changes locally, then replaces the remote snapshot. This is client
+  behavior, not proof of server-atomic merge or of the current server contract.
+
+The full ten-domain implementation remains required. Use existing `FieldClaim`
+and complete provenance/lifecycle for native discriminator facts, not Grain or
+UI fallback labels. Keep compound same-response facts together (for example,
+AniList type plus format), including explicit negative observations. Derive a
+domain set, not one scalar winner that erases accepted Exact Anime/Show/Movie
+overlap. Custom requires explicit current-profile assignment through the
+existing override owner; absence of provider evidence is never Custom.
+Empty domain filters must preserve existing digest/cursor bytes. Nonempty
+filters must use the same local/provider semantics and retain continuation
+through empty filtered pages. Exact selected-ID batches, complete bounded
+identity lifecycles and existing indexes remain the Search performance boundary.
+
+Admission gaps are now concrete, not reasons to remove scope: Google currently
+discards `printType` even though volumes include magazines; native type retention
+must precede Book classification. Podcast episode/feed and Music recording/work
+proofs join multiple source responses. Existing provider metadata writes require
+one shared provenance and lifetime, so do not disguise joined evidence as a
+single native type string or weaken that validator. Implement bounded joined
+evidence in the appropriate existing provider owner. Offline Search must retain
+eligible cached classification with honest freshness; a fresh-only rule is not
+approved. New negative, invalid, revoked or disputed evidence must not resurrect
+an old positive type. That selection rule is being checked against existing
+metadata resolution before implementation.
+
+Aggregate retention is also proven open: provider responses are individually
+bounded, but Discover appends pages and retains action/detail maps. A hidden
+total-result cutoff or an unbounded all-history dedup set is not a solution.
+The prepared direction is explicit bounded result windows with retained-window
+navigation and access to later provider continuation. Preserve per-provider
+retry positions, partial results, receipt integrity and operation retry IDs;
+never silently evict current work. Window-scoped integrity is distinct from
+unbounded historical collision detection. No production window policy or heap
+qualification is claimed yet. The index-based identity of live candidates is
+under a separate bounded correctness check before any window change.
+
+The stale-classification selection check is complete. Reuse the store's
+`reusable_field_claims`/`metadata_observation_permits_reuse` newest-observation
+gate before interpreting type values, including unknown/restricted observations
+beyond the bounded payload window. Then use `resolve_profile_field` per source
+variant without raw-fact overrides. Do not prefilter history to positive type
+values: a newer MAGAZINE, NOVEL, unknown, revoked, invalid or restricted
+observation must not reveal an older positive claim. Preserve existing response
+policy deadlines and profile last-known-good choice; no-store/every-reuse or
+expired reuse cannot be treated as cached permission. Eligible stale facts remain
+searchable with their real freshness/provenance. Contradictory intrinsic type
+observations across admitted locale/region variants require explicit conflict
+handling, not a fabricated multi-domain overlap. Separate legitimate Exact
+identity overlap remains governed by its own complete assertion lifecycle.
