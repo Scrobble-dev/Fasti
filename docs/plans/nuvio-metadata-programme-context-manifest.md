@@ -5155,3 +5155,56 @@ UI typecheck reports zero errors/warnings; log
 Full JavaScript and browser regression gates are next. Rollback is an isolated
 revert with no data conversion. Aggregate retention and full domain integration
 remain open; no schema/archive allocation, publication or shared release occurred.
+
+The stable-key production slice is committed at
+`d2df04397900f00df8a7efa34b3ca58abe0ebb51`, tree
+`6ce985e095532639dfb1ac7f0570f35d54527586`. Full JavaScript verification passes
+445 tests with two existing live-documentation skips
+(`/tmp/fasti-m4-live-key-full-js-sep8.log`). All 218 ordinary browser cases pass
+on that clean commit in 2.5 minutes (`/tmp/fasti-m4-browser-d2df0439-sep8.log`).
+Both workload handles are terminal and fixture listeners are released. The
+earlier real-process receipt still binds `4222141d`; canonical receipts still
+bind `5ecc5649`. Do not re-label either as verification of the newer production
+commit. Exact final canonical/runtime/hosted acceptance remains required.
+
+Read-only prerequisite closure for multiple source responses:
+
+- Existing per-field claim storage, archive export and refresh receipt evidence
+  already retain independent policies/provenance. No new table is inherently
+  needed to retain separate native facts atomically.
+- Current runtime candidate/refresh admission still describes one response.
+  Repeated public `apply_provider_metadata` calls commit separate transactions;
+  they are not an atomic joined refresh. Keep the same-response validator per
+  bounded response group and reuse the existing refresh owner’s single outer
+  immediate transaction after all bounded I/O and current-authority checks.
+- Preserve per-field source digests, original observation times/corrected ages,
+  and each contributing response policy. Dependent reuse cannot outlive the
+  earliest contributing absolute deadline; no-store/every-reuse rules cannot be
+  flattened into a reusable aggregate. Separate admissible facts are not proof
+  that an output depending on forbidden evidence may be retained.
+- Cache references do not encode typed dependencies. A persisted derived field
+  with multiple source digests or cross-Record lineage would need explicit
+  domain/contract/archive work. Deriving classification from admitted separate
+  native facts avoids inventing such persisted truth.
+- The existing refresh outcome has no per-endpoint completeness/failure map.
+  Do not label a partial joined result complete or overwrite previous valid
+  claims because a dependency failed. A richer public outcome/receipt requires
+  its own compatibility review, not an unannounced DTO change.
+
+M5 preparation was checked for deltas, not restarted. Library currently consumes
+one Grain-inferred `mediaKind`, never produces Anime, classifies arbitrary
+Work/Edition as Book and unmatched grains as Custom. Its filtering operates on
+already-loaded Record/tracking prefixes capped at 500; missing or failed
+tracking evidence can become `plan_to_watch`. M5 must consume M4’s eventual
+evidence-backed domain set and perform membership/state filtering through its
+own authorized paged owner. Search query/candidate receipts are not Library
+authority. The UI completion/watchlist callbacks would overwrite one another’s
+single WatchStatus, but Workbench does not currently supply those callbacks;
+do not report false writes from these unavailable controls. Preserve the actual
+tracking-disposition writer as distinct from saved membership and completion.
+The prepared exact tracking selector is still unimplemented. Reuse the corrected
+M4 selected-ID metadata/identifier/activity owners, rather than reopening them.
+Required M5 negatives include saved+completed coexistence, unsaved Search Records
+excluded from saved Library, independent clear operations, profile isolation,
+selection beyond row 500, and missing state not matching Plan to Watch. All
+shared integration remains M4-owned until its explicit merged handoff.
