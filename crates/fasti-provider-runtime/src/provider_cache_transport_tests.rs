@@ -6,7 +6,7 @@ mod cache_transport_tests {
 
     // This deliberately tests send_json's HTTP boundary, not governed provider
     // DNS, TLS, credential access, or provider availability.
-    async fn fixture(
+    pub(super) async fn fixture(
         headers: String,
         body: Vec<u8>,
         body_gate: Option<tokio::sync::oneshot::Receiver<()>>,

@@ -2701,7 +2701,7 @@ fn reusable_field_claims(
         .collect();
     let mut allowed = reusable_metadata_evidence(&evidence, read_at);
     restrict_unknown_metadata(&evidence, &mut allowed, key, known, read_at)?;
-    if key.1 == fasti_application::GOOGLE_BOOKS_PRINT_TYPE_FIELD_KEY {
+    if fasti_application::is_native_publication_field(key.1) {
         for ((claim, _), allowed) in claims.iter().zip(allowed.iter_mut()) {
             if Some(claim.claim_id()) == live_claim {
                 *allowed = true;
@@ -2725,11 +2725,12 @@ pub(crate) fn load_field_claims(
     correlation_id: RequestCorrelationId,
     read_at: chrono::DateTime<chrono::Utc>,
 ) -> ApplicationResult<Vec<FieldClaim>> {
-    if field_key.as_str() == fasti_application::GOOGLE_BOOKS_PRINT_TYPE_FIELD_KEY {
+    if fasti_application::is_native_publication_field(field_key.as_str()) {
         return Ok(native::load_publication_observations(
             connection,
             workspace_id,
             &[record_id],
+            field_key.as_str(),
             capability,
             correlation_id,
             read_at,
@@ -4901,12 +4902,13 @@ impl MetadataRefreshPersistencePort for SqliteKernel {
                 field.claim().status_at(write_at),
             ));
             let native_field =
-                field.field_key().as_str() == fasti_application::GOOGLE_BOOKS_PRINT_TYPE_FIELD_KEY;
+                fasti_application::is_native_publication_field(field.field_key().as_str());
             let mut claims = if native_field {
                 native::load_publication_observations(
                     &transaction,
                     workspace_id,
                     &[current.record_id()],
+                    field.field_key().as_str(),
                     capability,
                     correlation_id,
                     write_at,

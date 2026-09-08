@@ -67,6 +67,7 @@ mod metadata_native_query_tests {
             connection,
             workspace,
             ids,
+            GOOGLE_BOOKS_PRINT_TYPE_FIELD_KEY,
             CAP,
             RequestCorrelationId::new_v7(),
             received(150).value(),

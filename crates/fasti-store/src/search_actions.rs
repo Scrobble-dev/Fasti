@@ -636,6 +636,7 @@ pub(crate) fn commit(
         image_url: None,
         overview: None,
         google_books_print_type: None,
+        kitsu_manga_subtype: None,
     };
     for field in fields {
         let value = field.claim().value();
@@ -654,6 +655,12 @@ pub(crate) fn commit(
             fasti_application::GOOGLE_BOOKS_PRINT_TYPE_FIELD_KEY => {
                 normalized.google_books_print_type = Some(
                     fasti_application::GoogleBooksPrintType::parse_claim(value)
+                        .ok_or_else(|| problem(ProblemCode::ValidationFailed, id))?,
+                );
+            }
+            fasti_application::KITSU_MANGA_SUBTYPE_FIELD_KEY => {
+                normalized.kitsu_manga_subtype = Some(
+                    fasti_application::KitsuMangaSubtype::parse_claim(value)
                         .ok_or_else(|| problem(ProblemCode::ValidationFailed, id))?,
                 );
             }

@@ -839,6 +839,7 @@ mod tests {
                     kind: "movie".into(),
                     title: "Original observation".into(),
                     google_books_print_type: None,
+                    kitsu_manga_subtype: None,
                     original_title: None,
                     release_year: Some(2026),
                     authors: vec![],

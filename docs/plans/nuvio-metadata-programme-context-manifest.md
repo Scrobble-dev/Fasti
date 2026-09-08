@@ -5477,3 +5477,98 @@ green full-store run and this final run; the additional change was the10k test.
 All M4 build/test handles are terminal; the resource slot is released to Access.
 This is not a shared-file release. No new canonical or real-browser receipt is
 claimed. The next writer must retain all thirteen native selection regressions.
+
+### 2026-09-08: Kitsu Manga runtime, custody and host verification
+
+The previous reminder-only turn was no progress. This continuation revalidated
+local HEAD `a3d66d8f0f59a9b553a66aec119ada9c9044798c` and preserved every existing
+M4 change. PR128 remains OPEN on dev at published head
+`0aa0cde2f2301d7f3805b320a9d124d132a7e8af`; no push or merge occurred. Access's
+local workload was terminal and root retained the coordinated build slot.
+Root remains the only production/shared writer. Three agents supplied separate
+API, Desktop, archive and browser test work with explicit ownership returns;
+Anime preparation stayed read-only. Codex Security remains permanently excluded.
+
+The real Kitsu Manga adapter now supports governed public search and selected
+details, typed resource/ID validation, bounded continuation, and canonical
+Work/kitsu.manga identity. Native subtype claims preserve positive, novel and
+unknown observations through receipts, cached/refetched Create/Attach, refresh
+and the existing latest-observation selector. `description` takes precedence
+over deprecated `synopsis`; malformed or oversized text cannot escape existing
+field bounds. Source pins and unresolved terms evidence are in the canonical
+plan's Kitsu section, not a second roadmap. The API-doc licence and a successful
+public request do not establish metadata redistribution permission.
+
+Credential-free state retains None/NotRequired and never accesses the vault.
+An explicit bearer health operation initializes both API capabilities; inventory
+reads remain nonmutating. The optional/default-false `health_checkable` contract
+separates health from credential tests; the browser projection disables it.
+The native host uses its existing privileged health action and Tabler control.
+An independent source trace found that Settings reconciliation cleared Degraded
+state after a failed public health check. Root fixed the common reconciliation
+owner and tested failure, repeated reads, successful recovery and operator
+disablement without changing credentials or inventing a second state owner.
+
+Verification completed before the final browser pass:
+
+- Five Rust packages: API112+7, application179+30, contracts37, runtime123,
+  store503+3 passes. Six existing store unit ignores, one archive doctest ignore,
+  and two opt-in public-network tests are explicit. The later description
+  precedence addition passed the full runtime suite124; other package tests
+  were not relabeled as rerun. Logs: `/tmp/fasti-m4-kitsu-final-rust-sep8.log`
+  and `/tmp/fasti-m4-kitsu-runtime-final-sep8.log`.
+- Desktop full default-feature suite90 passed, two existing ignored; strict
+  all-target Clippy passed for Desktop and all five packages. Logs:
+  `/tmp/fasti-m4-kitsu-desktop-final-sep8.log`,
+  `/tmp/fasti-m4-kitsu-desktop-clippy-sep8.log`,
+  `/tmp/fasti-m4-kitsu-clippy-final-sep8.log`.
+- Real public runtime search/details/pagination had passed separately in
+  `/tmp/fasti-m4-kitsu-live-sep8.log`. This continuation's opt-in real bearer
+  health route initialized both capabilities, made zero vault calls, closed
+  the final kernel handle and reopened identical persisted state:
+  `/tmp/fasti-m4-kitsu-live-health-sep8.log`. These are separate proofs, not one
+  complete packaged Search journey or legal/operator approval.
+- Archive-v7 Manga/Novel/Unknown matrix passed actual export and pass-two
+  restore, identical selected claims and policy, cache exclusion, exact
+  re-export of all35 streams and cleanup. Schema17/archive7 are unchanged.
+  `/tmp/fasti-m4-kitsu-archive-sep8.log`.
+- Regenerated22 contract artifacts; pnpm build, authored/generated/example/OKF
+  validation, UI policy, workspace checks and445 JavaScript tests passed with
+  two existing skips: `/tmp/fasti-m4-kitsu-js-sep8.log`.
+
+The first focused browser pass proved the native320px health control, keyboard
+activation,44px hitbox and zero Axe violations. The browser test incorrectly
+assumed Settings makes exactly one inventory read. Existing mount and active-tab
+owners can each read; the corrected regression requires nonempty same-origin
+inventory reads and zero privileged provider operations, remote-service calls
+or Tauri presence. No production request-count contract was weakened. The first
+failure trace/screenshots remain in `target/qa-kitsu-focused-20260908`. Public rows
+now say no credential is required instead of implying credential-store failure.
+The final two-file ordinary browser pass and refreshed client evidence are
+recorded below after their handles terminate.
+
+Remaining full scope is unchanged: Kitsu Anime, all ten media domains, shared
+domain-set classification/filter contracts, bounded durable action-state lookup,
+the complete current M4 journey and later M gates. Anime preparation confirms
+the existing M3 `kitsu.anime` Release grain even for movie-format resources.
+Unfiltered Anime+Manga search needs honest multi-response page/evidence
+composition; never concatenate independent response digests under one receipt.
+Official duration fields are minutes and cannot become progress seconds or
+fabricated totals. No migration18, archive change or shared-file release occurs.
+Forward correction remains preferred; populated internal candidate receipts
+still require explicit safe cache disposition before older-reader downgrade.
+
+Final browser session5497 is terminal exit0:31 ordinary tests passed across
+the complete shell and browser-provider-inventory files, including both Kitsu
+regressions. Final screenshots and traces are preserved in
+`target/qa-kitsu-browser-20260908`; log:
+`/tmp/fasti-m4-kitsu-browser-sep8.log`. The320px keyboard health action has a
+44px minimum hitbox and zero Axe violations. These are trusted-host/browser
+fixtures, not packaged native, whole-site accessibility or performance proof.
+The two temporary report directories were moved under ignored target paths,
+not deleted. Refreshed client session81525 is terminal exit0 with445 passes
+and two existing skips in `/tmp/fasti-m4-kitsu-js-final-sep8.log`. Root-workspace
+format, changed Desktop file format and diff checks passed. All root workloads
+are terminal; the build slot can return to Access without releasing source.
+Canonical PR and real-process Search receipts remain bound to their older
+heads, not this new slice. No migration18 allocation or shared handoff occurred.

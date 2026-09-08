@@ -38,8 +38,11 @@ const candidate = {
   overview: "A governed provider candidate.",
 };
 
-function providerInventory(credentialState: "valid" | "missing") {
-  return {
+function providerInventory(
+  credentialState: "valid" | "missing",
+  credentialFreeKitsu = false,
+) {
+  const inventory = {
     providers: [
       {
         provider_id: "tmdb",
@@ -76,6 +79,40 @@ function providerInventory(credentialState: "valid" | "missing") {
         locale_support: true,
         region_support: true,
         identity_namespaces: ["tmdb.movie", "tmdb.tv"],
+      },
+    ],
+  };
+  if (!credentialFreeKitsu) return inventory;
+  const base = inventory.providers[0];
+  return {
+    providers: [
+      {
+        ...base,
+        provider_id: "kitsu",
+        display_name: "Kitsu",
+        documentation_url: "https://kitsu.docs.apiary.io",
+        attribution: "Metadata from Kitsu",
+        supported_media_grains: ["work"],
+        capabilities: ["metadata.search", "metadata.read"].map(
+          (capability_id) => ({
+            ...base.capabilities[0],
+            capability_id,
+            purpose:
+              capability_id === "metadata.search"
+                ? "Search manga metadata"
+                : "Read manga metadata",
+            credential_requirement: "none",
+            credential_state: "not_required",
+            credential_source: "none",
+            state: "available",
+            version: 1,
+            health_checkable: false,
+          }),
+        ),
+        network_hosts: ["kitsu.io"],
+        locale_support: false,
+        region_support: false,
+        identity_namespaces: ["kitsu.manga"],
       },
     ],
   };
@@ -278,6 +315,50 @@ test("browser provider inventory and Search stay on the browser-session origin",
       name: /Save|Remove|Test credential|Check provider health/u,
     }),
   ).toHaveCount(0);
+});
+
+test("Kitsu browser inventory hides health and credential controls", async ({
+  page,
+}) => {
+  const remoteRequests: string[] = [];
+  const providerOperations: string[] = [];
+  const inventoryRequests: string[] = [];
+  await mockAuthenticatedAccess(page);
+  await installSavedServiceReads(page, remoteRequests);
+  await page.route(`${browserOrigin}/api/v1/providers/**`, async (route) => {
+    providerOperations.push(route.request().url());
+    await route.abort("blockedbyclient");
+  });
+  await page.route(`${browserOrigin}/api/v1/providers`, async (route) => {
+    inventoryRequests.push(route.request().url());
+    expect(route.request().method()).toBe("GET");
+    await fulfillJson(route, providerInventory("valid", true));
+  });
+  await page.goto("/settings/providers");
+
+  const rows = page.getByRole("row", { name: /Kitsu/u });
+  await expect(rows).toHaveCount(2);
+  for (const capability of ["metadata.search", "metadata.read"]) {
+    const row = rows.filter({ hasText: capability });
+    await expect(row).toContainText("available");
+    await expect(
+      row.getByRole("button", {
+        name: /Save|Remove|Test credential|Check provider health/u,
+      }),
+    ).toHaveCount(0);
+    await expect(row.locator("input")).toHaveCount(0);
+  }
+  // Settings mount and active-tab reconciliation can each read inventory;
+  // neither may promote that read into a health/credential operation.
+  expect(inventoryRequests.length).toBeGreaterThan(0);
+  expect([...new Set(inventoryRequests)]).toEqual([
+    `${browserOrigin}/api/v1/providers`,
+  ]);
+  expect(providerOperations).toEqual([]);
+  expect(remoteRequests).toEqual([]);
+  expect(await page.evaluate(() => "__TAURI_INTERNALS__" in window)).toBe(
+    false,
+  );
 });
 
 test("a missing browser provider credential preserves truthful local Search", async ({

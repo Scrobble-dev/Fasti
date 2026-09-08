@@ -279,22 +279,30 @@ fn initial_state(
     provider: &ProviderSpec,
     capability: &ProviderCapabilitySpec,
 ) -> Result<ProviderCapabilityState, ProviderRuntimeError> {
-    let reference = runtime.credential_reference(provider.provider)?;
-    let source = runtime.credential_source(&reference)?;
+    let credential_free = capability.credential_requirement == CredentialRequirement::None;
+    let reference = if credential_free {
+        None
+    } else {
+        Some(runtime.credential_reference(provider.provider)?)
+    };
+    let source = match &reference {
+        Some(reference) => runtime.credential_source(reference)?,
+        None => CredentialVaultSource::None,
+    };
     let present = source != CredentialVaultSource::None;
     ProviderCapabilityState::try_new(
         ProviderId::try_new(provider.provider)
             .map_err(|_| ProviderRuntimeError::configuration("Invalid provider ID."))?,
         ProviderCapabilityId::try_new(capability.capability_id)
             .map_err(|_| ProviderRuntimeError::configuration("Invalid capability ID."))?,
-        if present {
+        if present || credential_free {
             ProviderCapabilityStatus::Available
         } else {
             ProviderCapabilityStatus::Unavailable
         },
         1,
         capability.credential_requirement,
-        present.then_some(reference),
+        reference.filter(|_| present),
         if present {
             ProviderCredentialStatus::StoredUnverified
         } else {
@@ -453,7 +461,9 @@ fn capability_dto(
             state.map(ProviderCapabilityState::capability_status),
         ) {
             (false, _, _) => ProviderCapabilityStateDto::Degraded,
-            (true, false, Some(ProviderCapabilityStatus::Available)) => {
+            (true, false, Some(ProviderCapabilityStatus::Available))
+                if spec.credential_requirement != CredentialRequirement::None =>
+            {
                 ProviderCapabilityStateDto::Unavailable
             }
             (_, _, Some(ProviderCapabilityStatus::Available)) => {
@@ -484,6 +494,7 @@ fn capability_dto(
                 CredentialRequirement::None | CredentialRequirement::UserAgentOnly
             ),
         testable: spec.credential_test,
+        health_checkable: runtime_available && spec.health_test,
         health: state
             .map(ProviderCapabilityState::health)
             .map(check_dto)
@@ -594,6 +605,11 @@ pub(crate) async fn list_providers(
         .filter(|provider| provider.runtime_available)
     {
         for provider_capability in provider.capabilities {
+            // Public provider authority is initialized by the existing explicit
+            // health operation, never by this inventory read.
+            if provider_capability.credential_requirement == CredentialRequirement::None {
+                continue;
+            }
             if !persisted.iter().any(|item| {
                 item.provider_id().as_str() == provider.provider
                     && item.capability_id().as_str() == provider_capability.capability_id
@@ -632,6 +648,7 @@ pub(crate) async fn list_providers(
         {
             capability.writable = false;
             capability.testable = false;
+            capability.health_checkable = false;
         }
     }
     Ok((
@@ -1044,7 +1061,9 @@ async fn execute_check(
         .map_err(|_| state_problem(ProviderStatePortError::Corrupt, capability, correlation_id))?;
     let updated = next_state(
         &current,
-        if outcome.is_ok() {
+        if current.capability_status() == ProviderCapabilityStatus::Disabled {
+            ProviderCapabilityStatus::Disabled
+        } else if outcome.is_ok() {
             ProviderCapabilityStatus::Available
         } else {
             ProviderCapabilityStatus::Degraded
@@ -1241,6 +1260,7 @@ pub(crate) fn router() -> Router<ProviderApiState> {
 
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
+    include!("provider_kitsu_tests.rs");
     use super::*;
     use axum::{
         body::{to_bytes, Body},

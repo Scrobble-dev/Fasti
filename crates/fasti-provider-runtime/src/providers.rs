@@ -4,11 +4,12 @@ use fasti_application::{
     provider_candidate_metadata_fields, provider_identity_mapping, valid_search_candidate_image,
     valid_search_candidate_text as valid_candidate_text, ConfigurationDigest, CredentialReference,
     CredentialRequirement, CredentialSecret, CredentialVaultError, CredentialVaultPort,
-    CredentialVaultSource, GoogleBooksPrintType, NetworkClass, OutboundAccessDeclaration,
-    OutboundAccessPolicy, ProviderCapabilityState, ProviderCapabilityStatus, ProviderCheckKind,
-    ProviderCredentialStatus, ProviderIdentityMapping, ProviderMetadataField,
-    ProviderResponseCachePolicy, SearchCandidate, SearchCandidateData, StoredCredential,
-    GOOGLE_BOOKS_PROVIDER_ID, MAX_PROVIDER_CREDENTIAL_BYTES, TMDB_PROVIDER_ID,
+    CredentialVaultSource, GoogleBooksPrintType, KitsuMangaSubtype, NetworkClass,
+    OutboundAccessDeclaration, OutboundAccessPolicy, ProviderCapabilityState,
+    ProviderCapabilityStatus, ProviderCheckKind, ProviderCredentialStatus, ProviderIdentityMapping,
+    ProviderMetadataField, ProviderResponseCachePolicy, SearchCandidate, SearchCandidateData,
+    StoredCredential, GOOGLE_BOOKS_PROVIDER_ID, KITSU_PROVIDER_ID, MAX_PROVIDER_CREDENTIAL_BYTES,
+    TMDB_PROVIDER_ID,
 };
 use fasti_domain::{
     ExternalIdentifierClaim, FieldClaimStatus, Grain, MetadataLocale, NamespaceDefinition,
@@ -19,6 +20,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::sync::Arc;
+
+#[path = "kitsu.rs"]
+mod kitsu;
+use kitsu::{parse_kitsu_candidates, parse_kitsu_selection};
 
 pub const GOOGLE_BOOKS_PROVIDER: &str = GOOGLE_BOOKS_PROVIDER_ID;
 const GOOGLE_BOOKS_LABEL: &str = "Google Books";
@@ -41,6 +46,14 @@ const READ_CAPABILITY: &str = "metadata.read";
 const RESPONSE_LIMIT: usize = 2_000_000;
 const RESULT_LIMIT: usize = 10;
 const TMDB_PAGE_SIZE: usize = 20;
+pub const KITSU_PROVIDER: &str = KITSU_PROVIDER_ID;
+const KITSU_URL: &str = "https://kitsu.io/api/edge/manga";
+const KITSU_ACCESS: OutboundAccessDeclaration<'static> = OutboundAccessDeclaration {
+    provider: KITSU_PROVIDER,
+    capabilities: &[SEARCH_CAPABILITY, READ_CAPABILITY],
+    hosts: &["kitsu.io"],
+    networks: &[NetworkClass::Public],
+};
 
 const GOOGLE_BOOKS_ACCESS: OutboundAccessDeclaration<'static> = OutboundAccessDeclaration {
     provider: GOOGLE_BOOKS_PROVIDER,
@@ -177,7 +190,20 @@ macro_rules! unavailable_capabilities {
 }
 
 unavailable_capabilities!(OPEN_LIBRARY_CAPABILITIES, CredentialRequirement::None);
-unavailable_capabilities!(KITSU_CAPABILITIES, CredentialRequirement::None);
+const KITSU_CAPABILITIES: &[ProviderCapabilitySpec] = &[
+    ProviderCapabilitySpec {
+        capability_id: SEARCH_CAPABILITY,
+        credential_requirement: CredentialRequirement::None,
+        health_test: true,
+        credential_test: false,
+    },
+    ProviderCapabilitySpec {
+        capability_id: READ_CAPABILITY,
+        credential_requirement: CredentialRequirement::None,
+        health_test: true,
+        credential_test: false,
+    },
+];
 unavailable_capabilities!(ANILIST_CAPABILITIES, CredentialRequirement::None);
 unavailable_capabilities!(
     MUSICBRAINZ_CAPABILITIES,
@@ -281,13 +307,27 @@ const OPEN_LIBRARY_SPEC: ProviderSpec = unavailable_provider(
     &["edition", "work"],
     OPEN_LIBRARY_CAPABILITIES,
 );
-const KITSU_SPEC: ProviderSpec = unavailable_provider(
-    "kitsu",
-    "Kitsu (Anime & Manga)",
-    "https://kitsu.docs.apiary.io",
-    &["film", "series", "edition", "work"],
-    KITSU_CAPABILITIES,
-);
+const KITSU_SPEC: ProviderSpec = ProviderSpec {
+    provider: KITSU_PROVIDER,
+    label: "Kitsu (Manga)",
+    kind: ProviderKind::Metadata,
+    environment: "",
+    account: "",
+    docs_url: "https://kitsu.docs.apiary.io",
+    attribution: "Metadata from Kitsu",
+    media_grains: &["work"],
+    capabilities: KITSU_CAPABILITIES,
+    network_hosts: &["kitsu.io"],
+    identity_namespaces: &["kitsu.manga"],
+    locale_support: "provider_default",
+    region_support: "not_supported",
+    rate_limit_policy: "respect_provider_responses",
+    cache_policy: PUBLIC_METADATA_CACHE_POLICY,
+    offline_behavior: "cached_reads_subject_to_response_policy",
+    licence_and_terms: "operator_review_required_before_activation",
+    request_limits: REQUEST_LIMITS,
+    runtime_available: true,
+};
 const ANILIST_SPEC: ProviderSpec = unavailable_provider(
     "anilist",
     "AniList GraphQL (Anime/Manga)",
@@ -430,6 +470,8 @@ pub struct ProviderCandidate {
     #[serde(skip)]
     google_books_print_type: Option<GoogleBooksPrintType>,
     #[serde(skip)]
+    kitsu_manga_subtype: Option<KitsuMangaSubtype>,
+    #[serde(skip)]
     evidence_digest: Sha256Digest,
     #[serde(skip)]
     response_cache_policy: Option<ProviderResponseCachePolicy>,
@@ -468,6 +510,7 @@ impl ProviderCandidate {
             image_url: self.image_url.clone(),
             overview: self.overview.clone(),
             google_books_print_type: self.google_books_print_type,
+            kitsu_manga_subtype: self.kitsu_manga_subtype,
         })
         .map_err(|error| ProviderRuntimeError::response_invalid(error.to_string()))
     }
@@ -734,13 +777,14 @@ impl ProviderRuntime {
             .await?;
         let credential = self.load_bound_credential(&client, spec, state)?;
         let response = send_json(
-            credential_request(&input.provider, &client, url, &credential)?,
+            credential_request(&input.provider, &client, url, credential.as_ref())?,
             spec,
         )
         .await?;
         match input.provider.as_str() {
             GOOGLE_BOOKS_PROVIDER => parse_google_candidates(&response.body, page),
             TMDB_PROVIDER => parse_tmdb_candidates(&response.body, page),
+            KITSU_PROVIDER => parse_kitsu_candidates(&response.body, page, &query),
             _ => Err(unsupported_provider()),
         }
         .map(|page| page.with_response_cache_policy(response.cache_policy))
@@ -755,7 +799,7 @@ impl ProviderRuntime {
         let mapping = provider_identity_mapping(&input.provider, &input.kind).ok_or_else(|| {
             if matches!(
                 input.provider.as_str(),
-                GOOGLE_BOOKS_PROVIDER | TMDB_PROVIDER
+                GOOGLE_BOOKS_PROVIDER | TMDB_PROVIDER | KITSU_PROVIDER
             ) {
                 ProviderRuntimeError::configuration(
                     "The selected provider does not support that media type.",
@@ -782,6 +826,10 @@ impl ProviderRuntime {
                     state,
                 )
                 .await
+            }
+            KITSU_PROVIDER => {
+                self.fetch_kitsu_manga(&input.provider_id, policy, state)
+                    .await
             }
             _ => Err(unsupported_provider()),
         }
@@ -825,16 +873,48 @@ impl ProviderRuntime {
                 .map_err(|_| {
                     ProviderRuntimeError::configuration("The TMDB check URL is invalid.")
                 })?,
+            KITSU_PROVIDER => {
+                let mut url = endpoint;
+                url.query_pairs_mut().append_pair("page[limit]", "1");
+                url
+            }
             _ => return Err(unsupported_provider()),
         };
         let credential = self.load_bound_credential(&client, spec, state)?;
-        let request = credential_request(provider, &client, url, &credential)?;
+        let request = credential_request(provider, &client, url, credential.as_ref())?;
         let response = send_json(request, spec).await?;
+        if provider == KITSU_PROVIDER {
+            return kitsu::validate_health_response(&response.body);
+        }
         serde_json::from_slice::<serde_json::Value>(&response.body)
             .map(|_| ())
             .map_err(|_| {
                 ProviderRuntimeError::response_invalid("The provider check returned invalid JSON.")
             })
+    }
+
+    async fn fetch_kitsu_manga(
+        &self,
+        provider_id: &str,
+        policy: &OutboundAccessPolicy,
+        state: &ProviderCapabilityState,
+    ) -> Result<ProviderCandidate, ProviderRuntimeError> {
+        let (access, endpoint) = endpoint(KITSU_PROVIDER, READ_CAPABILITY)?;
+        let mut url = endpoint.clone();
+        url.path_segments_mut()
+            .map_err(|_| unsupported_provider())?
+            .push(provider_id);
+        let client = self
+            .authorized_credential(access, KITSU_SPEC, READ_CAPABILITY, endpoint, policy, state)
+            .await?;
+        let credential = self.load_bound_credential(&client, KITSU_SPEC, state)?;
+        let response = send_json(
+            credential_request(KITSU_PROVIDER, &client, url, credential.as_ref())?,
+            KITSU_SPEC,
+        )
+        .await?;
+        parse_kitsu_selection(&response.body, provider_id)
+            .map(|candidate| candidate.with_response_cache_policy(response.cache_policy))
     }
 
     async fn fetch_google_book(
@@ -861,7 +941,7 @@ impl ProviderRuntime {
             .push(provider_id);
         url.query_pairs_mut().append_pair("projection", "full");
         let response = send_json(
-            credential_request(GOOGLE_BOOKS_PROVIDER, &client, url, &credential)?,
+            credential_request(GOOGLE_BOOKS_PROVIDER, &client, url, credential.as_ref())?,
             GOOGLE_BOOKS_SPEC,
         )
         .await?;
@@ -900,7 +980,7 @@ impl ProviderRuntime {
             .await?;
         let credential = self.load_bound_credential(&client, TMDB_SPEC, state)?;
         let response = send_json(
-            credential_request(TMDB_PROVIDER, &client, url, &credential)?,
+            credential_request(TMDB_PROVIDER, &client, url, credential.as_ref())?,
             TMDB_SPEC,
         )
         .await?;
@@ -936,12 +1016,22 @@ impl ProviderRuntime {
         client: &crate::AuthorizedClient,
         spec: ProviderSpec,
         state: &ProviderCapabilityState,
-    ) -> Result<CredentialSecret, ProviderRuntimeError> {
+    ) -> Result<Option<CredentialSecret>, ProviderRuntimeError> {
         if state.configuration_digest().as_str() != client.configuration_digest() {
             return Err(ProviderRuntimeError::configuration(format!(
                 "The {} provider configuration changed after authorization.",
                 spec.label
             )));
+        }
+        if state.credential_requirement() == CredentialRequirement::None {
+            if state.credential_status() != ProviderCredentialStatus::NotRequired
+                || state.credential_reference().is_some()
+            {
+                return Err(ProviderRuntimeError::configuration(
+                    "The credential-free provider state is inconsistent.",
+                ));
+            }
+            return Ok(None);
         }
         let reference = state.credential_reference().ok_or_else(|| {
             ProviderRuntimeError::credential_missing(format!(
@@ -950,7 +1040,7 @@ impl ProviderRuntime {
             ))
         })?;
         // The only vault read occurs after DNS, policy, origin, and address pinning.
-        self.vault.load(reference).map_err(vault_error)
+        self.vault.load(reference).map(Some).map_err(vault_error)
     }
 
     fn active_spec(&self, provider: &str) -> Result<ProviderSpec, ProviderRuntimeError> {
@@ -1017,7 +1107,12 @@ async fn send_json(
         .headers()
         .get(CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| value.to_ascii_lowercase().starts_with("application/json"));
+        .is_some_and(|value| {
+            let media_type = value.split(';').next().unwrap_or("").trim();
+            media_type.eq_ignore_ascii_case("application/json")
+                || (spec.provider == KITSU_PROVIDER
+                    && media_type.eq_ignore_ascii_case("application/vnd.api+json"))
+        });
     if !json_content_type {
         return Err(ProviderRuntimeError::response_invalid(format!(
             "{} returned an unexpected content type.",
@@ -1089,6 +1184,7 @@ fn endpoint(
         }
         (TMDB_PROVIDER, SEARCH_CAPABILITY) => (TMDB_ACCESS, TMDB_SEARCH_URL),
         (TMDB_PROVIDER, READ_CAPABILITY) => (TMDB_ACCESS, TMDB_BASE_URL),
+        (KITSU_PROVIDER, SEARCH_CAPABILITY | READ_CAPABILITY) => (KITSU_ACCESS, KITSU_URL),
         _ => return Err(unsupported_provider()),
     };
     reqwest::Url::parse(value)
@@ -1117,6 +1213,9 @@ fn validate_state(
         ));
     }
     match state.credential_status() {
+        ProviderCredentialStatus::NotRequired
+            if declaration.credential_requirement == CredentialRequirement::None
+                && state.credential_reference().is_none() => {}
         ProviderCredentialStatus::StoredUnverified | ProviderCredentialStatus::Valid => {}
         ProviderCredentialStatus::Missing | ProviderCredentialStatus::Revoked => Err(
             ProviderRuntimeError::credential_missing("The provider credential is missing."),
@@ -1151,8 +1250,23 @@ fn credential_request(
     provider: &str,
     client: &crate::AuthorizedClient,
     url: reqwest::Url,
-    credential: &CredentialSecret,
+    credential: Option<&CredentialSecret>,
 ) -> Result<reqwest::RequestBuilder, ProviderRuntimeError> {
+    if provider == KITSU_PROVIDER {
+        if credential.is_some() {
+            return Err(ProviderRuntimeError::configuration(
+                "Public Kitsu reads must not carry credentials.",
+            ));
+        }
+        return Ok(client
+            .get(url)
+            .map_err(ProviderRuntimeError::network)?
+            .header(reqwest::header::ACCEPT, "application/vnd.api+json")
+            .header(CONTENT_TYPE, "application/vnd.api+json"));
+    }
+    let credential = credential.ok_or_else(|| {
+        ProviderRuntimeError::credential_missing("The provider credential is missing.")
+    })?;
     let bytes = credential.expose();
     if bytes.is_empty()
         || bytes.len() > MAX_PROVIDER_CREDENTIAL_BYTES
@@ -1220,6 +1334,15 @@ fn search_url(
     let offset = page.checked_sub(1).ok_or_else(invalid_page)?;
     let (_, mut url) = endpoint(provider, SEARCH_CAPABILITY)?;
     match provider {
+        KITSU_PROVIDER => {
+            let start = offset
+                .checked_mul(RESULT_LIMIT as u32)
+                .ok_or_else(invalid_page)?;
+            url.query_pairs_mut()
+                .append_pair("filter[text]", query.as_str())
+                .append_pair("page[limit]", &RESULT_LIMIT.to_string())
+                .append_pair("page[offset]", &start.to_string());
+        }
         GOOGLE_BOOKS_PROVIDER => {
             let start = offset
                 .checked_mul(RESULT_LIMIT as u32)
@@ -1310,6 +1433,7 @@ fn google_candidate(
                 .as_ref()
                 .and_then(serde_json::Value::as_str),
         )),
+        kitsu_manga_subtype: None,
         release_year: volume_info.published_date.as_deref().and_then(release_year),
         authors: volume_info.authors,
         image_url: volume_info
@@ -1413,6 +1537,7 @@ fn tmdb_candidate(
         original_title,
         kind,
         google_books_print_type: None,
+        kitsu_manga_subtype: None,
         release_year: date.as_deref().and_then(release_year),
         authors: Vec::new(),
         image_url,
@@ -1457,6 +1582,7 @@ mod tests {
     use super::*;
     include!("provider_cache_transport_tests.rs");
     include!("google_print_type_tests.rs");
+    include!("kitsu_tests.rs");
     use fasti_application::{
         ConfigurationDigest, ProblemCode, ProviderCapabilityId, ProviderCheckMetadata, ProviderId,
     };
@@ -1621,19 +1747,24 @@ mod tests {
         );
         let url = reqwest::Url::parse(GOOGLE_BOOKS_URL).expect("provider URL");
         let valid = CredentialSecret::try_from_bytes(b"valid-key".to_vec()).expect("credential");
-        assert!(credential_request(GOOGLE_BOOKS_PROVIDER, &client, url.clone(), &valid).is_ok());
+        assert!(
+            credential_request(GOOGLE_BOOKS_PROVIDER, &client, url.clone(), Some(&valid)).is_ok()
+        );
         let maximum = CredentialSecret::try_from_bytes(vec![b'x'; MAX_PROVIDER_CREDENTIAL_BYTES])
             .expect("maximum credential");
-        assert!(credential_request(GOOGLE_BOOKS_PROVIDER, &client, url.clone(), &maximum).is_ok());
+        assert!(
+            credential_request(GOOGLE_BOOKS_PROVIDER, &client, url.clone(), Some(&maximum)).is_ok()
+        );
         let too_long =
             CredentialSecret::try_from_bytes(vec![b'x'; MAX_PROVIDER_CREDENTIAL_BYTES + 1])
                 .expect("general secret bound remains larger");
         assert!(
-            credential_request(GOOGLE_BOOKS_PROVIDER, &client, url.clone(), &too_long).is_err()
+            credential_request(GOOGLE_BOOKS_PROVIDER, &client, url.clone(), Some(&too_long))
+                .is_err()
         );
         let invalid = CredentialSecret::try_from_bytes(b"key with spaces".to_vec())
             .expect("bounded credential");
-        assert!(credential_request(GOOGLE_BOOKS_PROVIDER, &client, url, &invalid).is_err());
+        assert!(credential_request(GOOGLE_BOOKS_PROVIDER, &client, url, Some(&invalid)).is_err());
     }
 
     #[test]
@@ -1834,7 +1965,7 @@ mod tests {
         let url = reqwest::Url::parse(GOOGLE_BOOKS_URL).expect("provider URL");
         let credential =
             CredentialSecret::try_from_bytes(b"test-key".to_vec()).expect("credential");
-        let request = credential_request(GOOGLE_BOOKS_PROVIDER, &client, url, &credential)
+        let request = credential_request(GOOGLE_BOOKS_PROVIDER, &client, url, Some(&credential))
             .expect("authenticated request")
             .build()
             .expect("built request");
@@ -1932,7 +2063,7 @@ mod tests {
         let url = reqwest::Url::parse(TMDB_SEARCH_URL).expect("provider URL");
         let credential =
             CredentialSecret::try_from_bytes(b"test-token".to_vec()).expect("credential");
-        let request = credential_request(TMDB_PROVIDER, &client, url, &credential)
+        let request = credential_request(TMDB_PROVIDER, &client, url, Some(&credential))
             .expect("authenticated request")
             .build()
             .expect("built request");

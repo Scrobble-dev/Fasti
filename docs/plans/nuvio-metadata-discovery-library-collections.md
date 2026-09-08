@@ -65,6 +65,48 @@ before cache reuse is allowed, but cannot bypass conflicts or lifecycle checks.
 The shared ten-domain classifier, filter contracts and UI integration still
 remain required; this selector alone does not complete them.
 
+### M4 Kitsu Manga adapter and native custody — 2026-09-08
+
+The first Kitsu runtime slice uses the public JSON:API Manga search and selected
+resource routes. The shared mapping is `kitsu` / `manga` / `kitsu.manga`, with
+canonical positive decimal IDs and Work grain. This is the aggregate Manga
+resource, not a volume edition. It does not implement the still-required Anime
+adapter or complete the ten-domain classifier.
+
+The pinned [Manga schema](https://github.com/hummingbird-me/api-docs/blob/c95e259bec851f4bddf13c7bce3dd2f08eba7d19/api/schemas/resources/manga.yml)
+defines `subtype` and deprecates `mangaType`. The pinned
+[subtype enum](https://github.com/hummingbird-me/api-docs/blob/c95e259bec851f4bddf13c7bce3dd2f08eba7d19/api/schemas/enums/subtype_manga.yml)
+supplies manga, manhwa, manhua, oneshot, doujin, oel and novel. Fasti retains
+novel as negative Manga-family evidence and normalizes absent/unrecognized
+observations to its own unknown value. It never revives deprecated `mangaType`.
+Display overview prefers the bounded `description` field over deprecated
+`synopsis`, with a bounded legacy fallback, as defined by the pinned
+[shared media schema](https://github.com/hummingbird-me/api-docs/blob/c95e259bec851f4bddf13c7bce3dd2f08eba7d19/api/schemas/resources/media.yml).
+The reserved `kitsu.manga_subtype` field reuses the native observation selector,
+receipt/action admission, response-policy custody and archive claim streams.
+No new migration or archive version is needed.
+
+Public Kitsu reads use the existing DNS/address-pinned, proxy-free,
+redirect-free transport and never access the credential vault. Pages contain
+at most ten resources. A next link must equal the expected next request's
+origin, path and complete query tuple; Fasti constructs the request itself.
+Health accepts only a bounded typed Manga response. The existing health
+operation can initialize both public capabilities; API inventory reads do not
+activate them. A browser inventory cannot offer privileged health controls.
+The additive `health_checkable` projection is independent of credential tests
+and defaults false for older responses. Native reconciliation preserves
+unchanged failure and disabled state instead of clearing it on Settings refresh.
+
+The earlier live response had `max-age=0, private, must-revalidate` and `Vary`;
+the existing response-policy owner therefore requires validation before reuse.
+This is not an offline reuse grant. Saved Record claims remain subject to
+their captured policy and lifecycle. The pinned
+[terms source](https://github.com/hummingbird-me/kitsu-web/blob/df0f97cca3bc579002b50660922a81421ec6c3a1/markdown/terms.md)
+references separate API terms. Current deployed terms and redistribution
+permission are not approved by successful public reads or the API-doc licence.
+Preserve attribution and the operator-review requirement. Forward correction
+and the explicit candidate-cache downgrade disposition above still apply.
+
 ## 1. Decision
 
 Build one source-neutral media surface inside Fasti.

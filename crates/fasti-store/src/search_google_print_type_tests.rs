@@ -48,6 +48,7 @@ pub(crate) mod google_print_type_tests {
             provider: "google-books".into(),
             kind: "book".into(),
             google_books_print_type: Some(value),
+            kitsu_manga_subtype: None,
             ..candidate("42").data().clone()
         })
         .unwrap();

@@ -2564,6 +2564,10 @@
           "health": {
             "$ref": "#/components/schemas/ProviderCheckDto"
           },
+          "health_checkable": {
+            "description": "Whether this caller can request the existing provider health check.",
+            "type": "boolean"
+          },
           "purpose": {
             "type": "string"
           },

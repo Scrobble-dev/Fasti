@@ -6,7 +6,8 @@ use fasti_application::{
 };
 use fasti_domain::RecordId;
 use fasti_provider_runtime::{
-    bounded_body, GovernedTransport, ProviderCandidate, GOOGLE_BOOKS_PROVIDER, TMDB_PROVIDER,
+    bounded_body, GovernedTransport, ProviderCandidate, GOOGLE_BOOKS_PROVIDER, KITSU_PROVIDER,
+    TMDB_PROVIDER,
 };
 use reqwest::header::{ACCEPT, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
@@ -49,6 +50,13 @@ const GOOGLE_ARTWORK_ACCESS: OutboundAccessDeclaration<'static> = OutboundAccess
     provider: GOOGLE_BOOKS_PROVIDER,
     capabilities: &[ARTWORK_CAPABILITY],
     hosts: GOOGLE_IMAGE_HOSTS,
+    networks: &[NetworkClass::Public],
+};
+
+const KITSU_ARTWORK_ACCESS: OutboundAccessDeclaration<'static> = OutboundAccessDeclaration {
+    provider: KITSU_PROVIDER,
+    capabilities: &[ARTWORK_CAPABILITY],
+    hosts: &["media.kitsu.app"],
     networks: &[NetworkClass::Public],
 };
 
@@ -623,6 +631,13 @@ fn artwork_target(provider: &str, value: &str) -> Result<ArtworkTarget, DesktopP
         }
         GOOGLE_BOOKS_PROVIDER if parsed_host == GOOGLE_IMAGE_HOSTS[0] => GOOGLE_ARTWORK_ACCESS,
         GOOGLE_BOOKS_PROVIDER if parsed_host == GOOGLE_IMAGE_HOSTS[1] => GOOGLE_ARTWORK_ACCESS,
+        KITSU_PROVIDER
+            if parsed_host == "media.kitsu.app"
+                && url.path().starts_with("/manga/")
+                && url.query().is_none() =>
+        {
+            KITSU_ARTWORK_ACCESS
+        }
         _ => return Err(unsafe_artwork_url()),
     };
     Ok(ArtworkTarget { url, access })
@@ -900,7 +915,33 @@ mod tests {
             "https://books.google.com/books/content?id=abc&printsec=frontcover"
         )
         .is_ok());
+        assert!(artwork_target(
+            KITSU_PROVIDER,
+            "https://media.kitsu.app/manga/8/poster_image/small.jpeg"
+        )
+        .is_ok());
         for (provider, url) in [
+            (
+                KITSU_PROVIDER,
+                "https://media.kitsu.app/anime/8/poster.jpeg",
+            ),
+            (
+                KITSU_PROVIDER,
+                "https://media.kitsu.app/manga/8/poster.jpeg?redirect=1",
+            ),
+            (
+                KITSU_PROVIDER,
+                "https://media.kitsu.app.evil.test/manga/8/poster.jpeg",
+            ),
+            (
+                KITSU_PROVIDER,
+                "https://media.kitsu.app/manga/../anime/8/poster.jpeg",
+            ),
+            (
+                KITSU_PROVIDER,
+                "https://user@media.kitsu.app/manga/8/poster.jpeg",
+            ),
+            (KITSU_PROVIDER, "http://media.kitsu.app/manga/8/poster.jpeg"),
             (
                 TMDB_PROVIDER,
                 "https://api.themoviedb.org/t/p/w500/poster.jpg",

@@ -142,6 +142,7 @@ mod provider_inventory_http_tests {
         assert_eq!(browser_capability["version"], 1);
         assert_eq!(browser_capability["writable"], false);
         assert_eq!(browser_capability["testable"], false);
+        assert_eq!(browser_capability["health_checkable"], false);
 
         let serialized = browser_inventory.to_string();
         let private_values = [
@@ -174,6 +175,7 @@ mod provider_inventory_http_tests {
         assert_eq!(bearer_capability["version"], 1);
         assert_eq!(bearer_capability["writable"], false);
         assert_eq!(bearer_capability["testable"], true);
+        assert_eq!(bearer_capability["health_checkable"], true);
         assert!(f.vault.0.load(Ordering::SeqCst) > calls_after_browser);
 
         let mut browser_projection = browser_capability.clone();
@@ -186,6 +188,10 @@ mod provider_inventory_http_tests {
             .as_object_mut()
             .expect("browser capability object")
             .remove("testable");
+        browser_projection
+            .as_object_mut()
+            .expect("browser capability object")
+            .remove("health_checkable");
         bearer_projection
             .as_object_mut()
             .expect("bearer capability object")
@@ -194,6 +200,10 @@ mod provider_inventory_http_tests {
             .as_object_mut()
             .expect("bearer capability object")
             .remove("testable");
+        bearer_projection
+            .as_object_mut()
+            .expect("bearer capability object")
+            .remove("health_checkable");
         assert_eq!(browser_projection, bearer_projection);
     }
 

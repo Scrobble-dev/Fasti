@@ -95,17 +95,21 @@ pub(super) const SELECT_PUBLICATION_OBSERVATIONS: &str = r#"
 
 /// Existing authorized callers supply exact selected IDs. Keep one bounded
 /// latest-variant group in memory; old history does not consume its payload cap.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn load_publication_observations(
     connection: &Connection,
     workspace_id: WorkspaceId,
     record_ids: &[RecordId],
+    field: &str,
     capability: CapabilityKey,
     correlation_id: RequestCorrelationId,
     read_at: chrono::DateTime<chrono::Utc>,
     live_claim: Option<MetadataClaimId>,
 ) -> ApplicationResult<HashMap<RecordId, Vec<FieldClaim>>> {
     let ids = selected_record_ids_json(record_ids, capability, correlation_id)?;
-    let field = fasti_application::GOOGLE_BOOKS_PRINT_TYPE_FIELD_KEY;
+    if !fasti_application::is_native_publication_field(field) {
+        return Err(receipt_integrity(capability, correlation_id));
+    }
     let fields = serde_json::to_string(&[field])
         .map_err(|_| receipt_integrity(capability, correlation_id))?;
     let mut policies = map_sql(

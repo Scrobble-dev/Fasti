@@ -89,6 +89,9 @@ pub struct ProviderCapabilityDto {
     pub version: u64,
     pub writable: bool,
     pub testable: bool,
+    /// Whether this caller can request the existing provider health check.
+    #[serde(default)]
+    pub health_checkable: bool,
     pub health: ProviderCheckDto,
     pub credential_test: ProviderCheckDto,
 }

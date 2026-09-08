@@ -24,6 +24,55 @@ pub const MAX_PROVIDER_METADATA_FIELDS: usize = 16;
 pub const GOOGLE_BOOKS_PROVIDER_ID: &str = "google-books";
 pub const TMDB_PROVIDER_ID: &str = "tmdb";
 pub const GOOGLE_BOOKS_PRINT_TYPE_FIELD_KEY: &str = "google_books.print_type";
+pub const KITSU_PROVIDER_ID: &str = "kitsu";
+pub const KITSU_MANGA_SUBTYPE_FIELD_KEY: &str = "kitsu.manga_subtype";
+
+/// The subtype of one typed Kitsu manga resource, including negative evidence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KitsuMangaSubtype {
+    Manga,
+    Manhwa,
+    Manhua,
+    Oneshot,
+    Doujin,
+    Oel,
+    Novel,
+    Unknown,
+}
+
+impl KitsuMangaSubtype {
+    pub fn from_source(value: Option<&str>) -> Self {
+        value.and_then(Self::parse_claim).unwrap_or(Self::Unknown)
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Manga => "manga",
+            Self::Manhwa => "manhwa",
+            Self::Manhua => "manhua",
+            Self::Oneshot => "oneshot",
+            Self::Doujin => "doujin",
+            Self::Oel => "oel",
+            Self::Novel => "novel",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    pub fn parse_claim(value: &str) -> Option<Self> {
+        match value {
+            "manga" => Some(Self::Manga),
+            "manhwa" => Some(Self::Manhwa),
+            "manhua" => Some(Self::Manhua),
+            "oneshot" => Some(Self::Oneshot),
+            "doujin" => Some(Self::Doujin),
+            "oel" => Some(Self::Oel),
+            "novel" => Some(Self::Novel),
+            "unknown" => Some(Self::Unknown),
+            _ => None,
+        }
+    }
+}
 
 /// A bounded observation of volumeInfo.printType, not a Fasti media domain.
 /// UNKNOWN records a new response without a recognized publication type;
@@ -155,6 +204,14 @@ impl ProviderIdentityMapping {
 }
 
 const PROVIDER_IDENTITY_MAPPINGS: &[ProviderIdentityMapping] = &[
+    ProviderIdentityMapping {
+        provider: KITSU_PROVIDER_ID,
+        kind: "manga",
+        namespace: "kitsu.manga",
+        label: "Kitsu Manga",
+        grain: Grain::Work,
+        value_kind: ProviderIdentifierValueKind::PositiveDecimal,
+    },
     ProviderIdentityMapping {
         provider: GOOGLE_BOOKS_PROVIDER_ID,
         kind: "book",
@@ -892,9 +949,10 @@ pub fn preview_anime_grouping_change_for_record_with_evidence(
 
 pub fn metadata_field_group(field_key: &FieldKey) -> Option<MetadataFieldGroup> {
     match field_key.as_str() {
-        TITLE_FIELD_KEY | ORIGINAL_TITLE_FIELD_KEY | GOOGLE_BOOKS_PRINT_TYPE_FIELD_KEY => {
-            Some(MetadataFieldGroup::BasicInfo)
-        }
+        TITLE_FIELD_KEY
+        | ORIGINAL_TITLE_FIELD_KEY
+        | GOOGLE_BOOKS_PRINT_TYPE_FIELD_KEY
+        | KITSU_MANGA_SUBTYPE_FIELD_KEY => Some(MetadataFieldGroup::BasicInfo),
         OVERVIEW_FIELD_KEY => Some(MetadataFieldGroup::Details),
         POSTER_FIELD_KEY => Some(MetadataFieldGroup::Artwork),
         RELEASE_YEAR_FIELD_KEY => Some(MetadataFieldGroup::ReleaseDates),
@@ -925,16 +983,31 @@ impl ProviderMetadataField {
 /// Validate reserved native facts without restricting extensible display fields.
 /// Observation policy, scope and lifecycle remain the admission owner's checks.
 pub fn valid_provider_native_fact(field_key: &FieldKey, claim: &FieldClaim) -> bool {
-    field_key.as_str() != GOOGLE_BOOKS_PRINT_TYPE_FIELD_KEY
-        || (claim
-            .provenance()
-            .provider_id()
-            .map(|provider| provider.as_str())
-            == Some(GOOGLE_BOOKS_PROVIDER_ID)
-            && provider_identity_mapping(GOOGLE_BOOKS_PROVIDER_ID, "book").is_some_and(|mapping| {
-                claim.provenance().source_namespace().as_str() == mapping.namespace()
-            })
-            && GoogleBooksPrintType::parse_claim(claim.value()).is_some())
+    let (provider, kind, valid) = match field_key.as_str() {
+        GOOGLE_BOOKS_PRINT_TYPE_FIELD_KEY => (
+            GOOGLE_BOOKS_PROVIDER_ID,
+            "book",
+            GoogleBooksPrintType::parse_claim(claim.value()).is_some(),
+        ),
+        KITSU_MANGA_SUBTYPE_FIELD_KEY => (
+            KITSU_PROVIDER_ID,
+            "manga",
+            KitsuMangaSubtype::parse_claim(claim.value()).is_some(),
+        ),
+        _ => return true,
+    };
+    valid
+        && claim.provenance().provider_id().map(|id| id.as_str()) == Some(provider)
+        && provider_identity_mapping(provider, kind).is_some_and(|mapping| {
+            claim.provenance().source_namespace().as_str() == mapping.namespace()
+        })
+}
+
+pub fn is_native_publication_field(field: &str) -> bool {
+    matches!(
+        field,
+        GOOGLE_BOOKS_PRINT_TYPE_FIELD_KEY | KITSU_MANGA_SUBTYPE_FIELD_KEY
+    )
 }
 
 /// Convert bounded provider evidence without choosing a new observation time or
@@ -972,6 +1045,10 @@ pub fn provider_candidate_metadata_fields(
             GOOGLE_BOOKS_PRINT_TYPE_FIELD_KEY,
             data.google_books_print_type
                 .map(GoogleBooksPrintType::as_str),
+        ),
+        (
+            KITSU_MANGA_SUBTYPE_FIELD_KEY,
+            data.kitsu_manga_subtype.map(KitsuMangaSubtype::as_str),
         ),
     ]
     .into_iter()

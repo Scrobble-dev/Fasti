@@ -1586,11 +1586,13 @@
                         </form>
                       {:else}
                         <p class="managed-note">
-                          {provider.source === "environment"
-                            ? "Managed by the process environment."
-                            : provider.state === "unavailable"
-                              ? "This capability is unavailable in this runtime."
-                              : "This host cannot write this credential."}
+                          {provider.credential_requirement === "none"
+                            ? "No credential is required."
+                            : provider.source === "environment"
+                              ? "Managed by the process environment."
+                              : provider.state === "unavailable"
+                                ? "This capability is unavailable in this runtime."
+                                : "This host cannot write this credential."}
                         </p>
                       {/if}
 
@@ -1606,7 +1608,7 @@
                             : "Test credential"}
                         </button>
                       {/if}
-                      {#if provider.capability_id === "metadata.search" && provider.testable && hasStoredCredential(provider)}
+                      {#if provider.capability_id === "metadata.search" && (provider.health_checkable ?? (provider.testable && hasStoredCredential(provider)))}
                         <button
                           type="button"
                           class="btn btn-outline-secondary secondary test-conn-btn"

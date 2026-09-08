@@ -310,7 +310,15 @@
     isEditingNotes = false;
   }
 
-  function providerKindForRecord(): "book" | "movie" | "show" | null {
+  function providerKindForRecord(): "book" | "movie" | "show" | "manga" | null {
+    // This selects a typed provider resource, not a media-domain classification.
+    if (
+      record.externalIds.some(
+        (identifier) => identifier.namespace === "kitsu.manga",
+      )
+    ) {
+      return "manga";
+    }
     if (record.mediaKind === "book") return "book";
     if (record.mediaKind === "movie") return "movie";
     if (record.mediaKind === "show" || record.mediaKind === "anime") {
@@ -341,6 +349,8 @@
     }
     if (namespace === "tmdb.movie") return { provider: "tmdb", kind: "movie" };
     if (namespace === "tmdb.tv") return { provider: "tmdb", kind: "show" };
+    if (namespace === "kitsu.manga")
+      return { provider: "kitsu", kind: "manga" };
     const currentKind = providerKindForRecord();
     return namespace === "tmdb" &&
       (currentKind === "movie" || currentKind === "show")

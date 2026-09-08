@@ -348,6 +348,7 @@ export interface ProviderCredentialStatus {
     "none" | "environment" | "credential_store" | "operator_secret_mount";
   readonly writable: boolean;
   readonly testable: boolean;
+  readonly health_checkable?: boolean;
   readonly docs_url: string;
 }
 

@@ -184,6 +184,7 @@ async function loadProviderRows(
       source: capability.credential_source,
       writable: capability.writable,
       testable: capability.testable,
+      health_checkable: capability.health_checkable,
       docs_url: provider.documentation_url,
     })),
   );

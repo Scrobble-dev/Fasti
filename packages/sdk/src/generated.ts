@@ -2630,6 +2630,10 @@ const PRODUCTION_SCHEMAS = {
       "health": {
         "$ref": "#/components/schemas/ProviderCheckDto"
       },
+      "health_checkable": {
+        "description": "Whether this caller can request the existing provider health check.",
+        "type": "boolean"
+      },
       "purpose": {
         "type": "string"
       },
@@ -5031,6 +5035,7 @@ export interface ProviderCapabilityDto {
   readonly credential_state: ProviderCredentialStateDto;
   readonly credential_test: ProviderCheckDto;
   readonly health: ProviderCheckDto;
+  readonly health_checkable?: boolean;
   readonly purpose: string;
   readonly state: ProviderCapabilityStateDto;
   readonly testable: boolean;

@@ -844,6 +844,7 @@ pub(crate) mod tests {
     include!("search_details_tests.rs");
     include!("search_metadata_tests.rs");
     include!("search_google_print_type_tests.rs");
+    include!("search_kitsu_tests.rs");
     include!("google_print_type_rollback_tests.rs");
     include!("search_action_tests.rs");
     use super::*;
@@ -926,6 +927,7 @@ pub(crate) mod tests {
             kind: "movie".into(),
             title: format!("Film {value}"),
             google_books_print_type: None,
+            kitsu_manga_subtype: None,
             original_title: None,
             release_year: None,
             authors: vec![],

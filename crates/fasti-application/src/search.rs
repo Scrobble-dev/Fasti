@@ -900,6 +900,8 @@ pub struct SearchCandidateData {
     pub overview: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub google_books_print_type: Option<crate::GoogleBooksPrintType>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kitsu_manga_subtype: Option<crate::KitsuMangaSubtype>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -939,6 +941,8 @@ impl SearchCandidate {
             .map_err(|_| SearchEvidenceError::InvalidCandidate)?;
         if (data.google_books_print_type.is_some()
             && data.provider != crate::GOOGLE_BOOKS_PROVIDER_ID)
+            || (data.kitsu_manga_subtype.is_some()
+                && (data.provider != crate::KITSU_PROVIDER_ID || data.kind != "manga"))
             || !valid_search_candidate_text(&data.title, 512)
             || data
                 .original_title
@@ -1016,6 +1020,7 @@ pub fn valid_search_candidate_image(provider: &str, value: &str) -> bool {
             "https://books.google.com/",
             "https://books.googleusercontent.com/",
         ],
+        "kitsu" => &["https://media.kitsu.app/manga/"],
         _ => return false,
     };
     prefixes.iter().any(|prefix| value.starts_with(prefix))
@@ -1221,6 +1226,7 @@ mod tests {
     include!("search_response_context_tests.rs");
     include!("search_metadata_tests.rs");
     include!("search_native_type_tests.rs");
+    include!("search_kitsu_tests.rs");
     include!("search_action_tests.rs");
     use super::*;
     use fasti_domain::BrowserSessionId;
@@ -1274,6 +1280,7 @@ mod tests {
             image_url: Some("https://image.tmdb.org/t/p/w500/film.jpg".into()),
             overview: Some("A description.".into()),
             google_books_print_type: None,
+            kitsu_manga_subtype: None,
         }
     }
 
