@@ -80,9 +80,7 @@ test("deferred route focus cannot replace a newer global Search shortcut", async
   await expect(search, focusEvents.join(" -> ")).toBeFocused();
 });
 
-test("normal route focus reaches main content", async ({
-  page,
-}) => {
+test("normal route focus reaches main content", async ({ page }) => {
   await page.goto("/library");
   await expect(
     page.getByRole("heading", { name: "Library", exact: true }),
