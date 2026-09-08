@@ -635,6 +635,7 @@ pub(crate) fn commit(
         authors: Vec::new(),
         image_url: None,
         overview: None,
+        google_books_print_type: None,
     };
     for field in fields {
         let value = field.claim().value();
@@ -649,6 +650,12 @@ pub(crate) fn commit(
                         .parse()
                         .map_err(|_| problem(ProblemCode::ValidationFailed, id))?,
                 )
+            }
+            fasti_application::GOOGLE_BOOKS_PRINT_TYPE_FIELD_KEY => {
+                normalized.google_books_print_type = Some(
+                    fasti_application::GoogleBooksPrintType::parse_claim(value)
+                        .ok_or_else(|| problem(ProblemCode::ValidationFailed, id))?,
+                );
             }
             _ => return Err(problem(ProblemCode::ValidationFailed, id)),
         }

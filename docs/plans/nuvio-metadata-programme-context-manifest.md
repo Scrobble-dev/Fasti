@@ -5330,3 +5330,62 @@ approved as a new production contract by this preparation. A missing receipt
 only means no committed receipt was observed, never proof of failed or absent
 in-flight work. Preserve this distinction and the full action capability when
 freezing the next implementation slice.
+
+### 2026-09-08: preserve native publication evidence end to end
+
+Google's documented `volumeInfo.printType` now survives both existing parser
+paths, normalized internal Search receipts, cached/refetched Create and Attach,
+metadata refresh and hydrated claim/receipt reads. The application owns
+`GoogleBooksPrintType` and `google_books.print_type`; provider coordinates reuse
+`provider_identity_mapping`. BOOK/MAGAZINE retain source meaning. UNKNOWN marks
+a newly observed absent/unrecognized value, not a fabricated Google enum or
+Book inference. Historical missing candidate members remain absent and preserve
+their canonical bytes. Observation digest, locale, time and policy are unchanged
+by save/replay. The public candidate DTO is unchanged.
+
+Root retained sole production/shared-file ownership. Agents wrote distinct test
+leaves and returned ownership; independent native review identified and closed
+a runtime-test constant namespace error and the provider-backed projection-only
+receipt decoder bypass. The shared native-fact predicate now guards that decoder
+as well as field receipts, persisted claim reads and both admission paths.
+UserOverride with absent provenance remains distinct and cannot be relabeled as
+provider evidence. The initial store RED was an invalid OptionalApiKey fixture
+status; correcting it to Optional preserved production credential validation.
+
+The combined final test command was:
+`TMPDIR=/tmp cargo test -p fasti-application -p fasti-provider-runtime -p fasti-store -p fasti-api -p fasti-contracts --offline --locked -j 2`.
+It exited zero: application 173 unit plus 30 integration; runtime112; API110 plus
+7 integration; contracts37; store487 plus 3 integration. The six store unit
+ignores and one archive doctest ignore remain explicit, not silently counted as
+passes. Log: `/tmp/fasti-m4-native-type-final-tests-sep8.log`.
+Strict Clippy for those five packages and all targets exited zero with
+`--offline --locked -j 2 -- -D warnings`
+(`/tmp/fasti-m4-native-type-final-clippy-sep8.log`). `cargo fmt --all -- --check`
+and `git diff --check` pass. Unrelated formatting changes were removed.
+All eight new store cases pass, including canonical archive7/35-stream
+round-trip and re-export, no restored candidate caches, wrong-value/provider/
+namespace rejection, original lifetime preservation and atomic failed actions.
+This is headless evidence; no new UI/a11y or release-performance claim is made.
+
+Rollback evidence uses the exact pre-change candidate wire from `1252e0a6`:
+populated native facts are rejected by that old typed parser, while omitted
+facts preserve old bytes. Current Search propagates incompatible payload errors,
+not automatic cache misses. The existing authorized partition-discard port
+removes only the selected page/receipts; the regression preserves another
+profile's cache, durable rows and exact action replay. This proves an internal
+port, not a public purge workflow or seamless binary downgrade. Generic saved
+claims need no archive/schema change. No data-root/cache deletion was performed
+outside disposable tests. Forward correction is the default; any downgrade must
+explicitly verify cache disposition and the target schema/archive compatibility.
+
+Parallel preparation reaffirms the next shared selector must retain observation
+identity before reuse filtering, choose the latest applicable observation before
+interpreting its value, and never resurrect an older positive after a newer
+unknown/negative/revoked/denied fact. Reuse the existing policy mask and overflow
+history protection, exact selected-ID reads and effective lifecycle owner;
+ordinary display fallback remains unchanged. Same-time conflicts and compound
+facts from different response digests/times cannot acquire positive meaning.
+Media-domain classification/filtering, bounded action-state retention and all
+remaining M4/later programme acceptance remain open. Schema17/archive7 and root
+shared ownership are unchanged; no migration18, push, merge or shared release.
+Codex Security remains permanently excluded from every agent and stage.

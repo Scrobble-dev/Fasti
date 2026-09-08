@@ -317,7 +317,7 @@ fn receipt_field_claim(
     let claim = FieldClaim::try_new_provider(
         claim_id,
         record_id,
-        field_key,
+        field_key.clone(),
         value.value.clone(),
         provenance,
         fetched_at,
@@ -325,6 +325,9 @@ fn receipt_field_claim(
         status,
     )
     .map_err(|_| receipt_integrity(capability, correlation_id))?;
+    if !fasti_application::valid_provider_native_fact(&field_key, &claim) {
+        return Err(receipt_integrity(capability, correlation_id));
+    }
     Ok(FieldClaimView::new(claim, status))
 }
 
@@ -557,6 +560,9 @@ fn receipt_projection(
                 status,
             )
             .map_err(|_| receipt_integrity(capability, correlation_id))?;
+            if !fasti_application::valid_provider_native_fact(&field_key, &claim) {
+                return Err(receipt_integrity(capability, correlation_id));
+            }
             Ok::<_, Box<FastiProblem>>((claim, status))
         })
         .transpose()?;
@@ -2081,6 +2087,7 @@ pub(crate) fn validate_provider_fields(
             || claim.provenance() != first.provenance()
             || claim.expires_at() != first.expires_at()
             || claim.initial_status() != first.initial_status()
+            || !fasti_application::valid_provider_native_fact(field.field_key(), claim)
             || !keys.insert(field.field_key().as_str())
         {
             return Err(invalid_provider_metadata(capability, correlation_id));
@@ -2906,6 +2913,9 @@ impl PersistedFieldClaimRow {
             status,
         )
         .map_err(|_: FieldClaimError| integrity())?;
+        if !fasti_application::valid_provider_native_fact(&field_key, &claim) {
+            return Err(integrity());
+        }
         let response_policy = validate_loaded_response_policy(
             self.response_policy_json.as_deref(),
             claim.provenance(),
@@ -3983,6 +3993,7 @@ fn validate_refresh_commit(
         let claim = field.claim();
         let provenance = claim.provenance();
         if !field_keys.insert(field.field_key().as_str())
+            || !fasti_application::valid_provider_native_fact(field.field_key(), claim)
             || Some(provenance) != response_provenance
             || timestamp(claim.fetched_at()) != timestamp(command.response_policy().received_at())
             || claim
@@ -5364,6 +5375,7 @@ mod tests {
     use super::*;
     include!("metadata_response_policy_tests.rs");
     include!("metadata_reuse_tests.rs");
+    include!("google_print_type_refresh_tests.rs");
     use crate::test_support::TestNode;
     use fasti_application::{
         provider_identity_mapping, ApplyProviderMetadataCommand, CommitMetadataRefreshCommand,

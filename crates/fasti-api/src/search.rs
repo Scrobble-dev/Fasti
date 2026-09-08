@@ -680,6 +680,7 @@ mod tests {
                 provider_id: "42".into(),
                 kind: "movie".into(),
                 title: "New observation only".into(),
+                google_books_print_type: None,
                 original_title: None,
                 release_year: Some(2026),
                 authors: vec![],

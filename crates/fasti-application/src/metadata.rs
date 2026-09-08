@@ -23,6 +23,41 @@ use std::{collections::HashMap, future::Future, pin::Pin};
 pub const MAX_PROVIDER_METADATA_FIELDS: usize = 16;
 pub const GOOGLE_BOOKS_PROVIDER_ID: &str = "google-books";
 pub const TMDB_PROVIDER_ID: &str = "tmdb";
+pub const GOOGLE_BOOKS_PRINT_TYPE_FIELD_KEY: &str = "google_books.print_type";
+
+/// A bounded observation of volumeInfo.printType, not a Fasti media domain.
+/// UNKNOWN records a new response without a recognized publication type;
+/// absence of the optional candidate field means historical evidence is absent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum GoogleBooksPrintType {
+    Book,
+    Magazine,
+    Unknown,
+}
+
+impl GoogleBooksPrintType {
+    pub fn from_source(value: Option<&str>) -> Self {
+        value.and_then(Self::parse_claim).unwrap_or(Self::Unknown)
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Book => "BOOK",
+            Self::Magazine => "MAGAZINE",
+            Self::Unknown => "UNKNOWN",
+        }
+    }
+
+    pub fn parse_claim(value: &str) -> Option<Self> {
+        match value {
+            "BOOK" => Some(Self::Book),
+            "MAGAZINE" => Some(Self::Magazine),
+            "UNKNOWN" => Some(Self::Unknown),
+            _ => None,
+        }
+    }
+}
 
 /// Actual top-level provider response locale, independent of UI preference.
 pub fn provider_metadata_response_locale(
@@ -857,7 +892,9 @@ pub fn preview_anime_grouping_change_for_record_with_evidence(
 
 pub fn metadata_field_group(field_key: &FieldKey) -> Option<MetadataFieldGroup> {
     match field_key.as_str() {
-        TITLE_FIELD_KEY | ORIGINAL_TITLE_FIELD_KEY => Some(MetadataFieldGroup::BasicInfo),
+        TITLE_FIELD_KEY | ORIGINAL_TITLE_FIELD_KEY | GOOGLE_BOOKS_PRINT_TYPE_FIELD_KEY => {
+            Some(MetadataFieldGroup::BasicInfo)
+        }
         OVERVIEW_FIELD_KEY => Some(MetadataFieldGroup::Details),
         POSTER_FIELD_KEY => Some(MetadataFieldGroup::Artwork),
         RELEASE_YEAR_FIELD_KEY => Some(MetadataFieldGroup::ReleaseDates),
@@ -883,6 +920,21 @@ impl ProviderMetadataField {
     pub const fn claim(&self) -> &FieldClaim {
         &self.claim
     }
+}
+
+/// Validate reserved native facts without restricting extensible display fields.
+/// Observation policy, scope and lifecycle remain the admission owner's checks.
+pub fn valid_provider_native_fact(field_key: &FieldKey, claim: &FieldClaim) -> bool {
+    field_key.as_str() != GOOGLE_BOOKS_PRINT_TYPE_FIELD_KEY
+        || (claim
+            .provenance()
+            .provider_id()
+            .map(|provider| provider.as_str())
+            == Some(GOOGLE_BOOKS_PROVIDER_ID)
+            && provider_identity_mapping(GOOGLE_BOOKS_PROVIDER_ID, "book").is_some_and(|mapping| {
+                claim.provenance().source_namespace().as_str() == mapping.namespace()
+            })
+            && GoogleBooksPrintType::parse_claim(claim.value()).is_some())
 }
 
 /// Convert bounded provider evidence without choosing a new observation time or
@@ -916,6 +968,11 @@ pub fn provider_candidate_metadata_fields(
         (OVERVIEW_FIELD_KEY, data.overview.as_deref()),
         (POSTER_FIELD_KEY, data.image_url.as_deref()),
         (RELEASE_YEAR_FIELD_KEY, year.as_deref()),
+        (
+            GOOGLE_BOOKS_PRINT_TYPE_FIELD_KEY,
+            data.google_books_print_type
+                .map(GoogleBooksPrintType::as_str),
+        ),
     ]
     .into_iter()
     .filter_map(|(key, value)| value.map(|value| (key, value)))

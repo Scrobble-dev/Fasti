@@ -898,6 +898,8 @@ pub struct SearchCandidateData {
     pub authors: Vec<String>,
     pub image_url: Option<String>,
     pub overview: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub google_books_print_type: Option<crate::GoogleBooksPrintType>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -935,7 +937,9 @@ impl SearchCandidate {
         let identifier = mapping
             .identifier(&data.provider_id)
             .map_err(|_| SearchEvidenceError::InvalidCandidate)?;
-        if !valid_search_candidate_text(&data.title, 512)
+        if (data.google_books_print_type.is_some()
+            && data.provider != crate::GOOGLE_BOOKS_PROVIDER_ID)
+            || !valid_search_candidate_text(&data.title, 512)
             || data
                 .original_title
                 .as_deref()
@@ -1216,6 +1220,7 @@ impl SearchCandidateReceipt {
 mod tests {
     include!("search_response_context_tests.rs");
     include!("search_metadata_tests.rs");
+    include!("search_native_type_tests.rs");
     include!("search_action_tests.rs");
     use super::*;
     use fasti_domain::BrowserSessionId;
@@ -1268,6 +1273,7 @@ mod tests {
             authors: vec![],
             image_url: Some("https://image.tmdb.org/t/p/w500/film.jpg".into()),
             overview: Some("A description.".into()),
+            google_books_print_type: None,
         }
     }
 

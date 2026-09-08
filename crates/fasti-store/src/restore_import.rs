@@ -3473,6 +3473,7 @@ mod tests {
     include!("restore_capture_capacity_tests.rs");
     include!("metadata_policy_archive_tests.rs");
     include!("search_action_archive_tests.rs");
+    include!("google_print_type_archive_tests.rs");
     use super::*;
     use crate::archive::ArchiveWriter;
     use crate::kernel::scope_storage_key;

@@ -4,11 +4,11 @@ use fasti_application::{
     provider_candidate_metadata_fields, provider_identity_mapping, valid_search_candidate_image,
     valid_search_candidate_text as valid_candidate_text, ConfigurationDigest, CredentialReference,
     CredentialRequirement, CredentialSecret, CredentialVaultError, CredentialVaultPort,
-    CredentialVaultSource, NetworkClass, OutboundAccessDeclaration, OutboundAccessPolicy,
-    ProviderCapabilityState, ProviderCapabilityStatus, ProviderCheckKind, ProviderCredentialStatus,
-    ProviderIdentityMapping, ProviderMetadataField, ProviderResponseCachePolicy, SearchCandidate,
-    SearchCandidateData, StoredCredential, GOOGLE_BOOKS_PROVIDER_ID, MAX_PROVIDER_CREDENTIAL_BYTES,
-    TMDB_PROVIDER_ID,
+    CredentialVaultSource, GoogleBooksPrintType, NetworkClass, OutboundAccessDeclaration,
+    OutboundAccessPolicy, ProviderCapabilityState, ProviderCapabilityStatus, ProviderCheckKind,
+    ProviderCredentialStatus, ProviderIdentityMapping, ProviderMetadataField,
+    ProviderResponseCachePolicy, SearchCandidate, SearchCandidateData, StoredCredential,
+    GOOGLE_BOOKS_PROVIDER_ID, MAX_PROVIDER_CREDENTIAL_BYTES, TMDB_PROVIDER_ID,
 };
 use fasti_domain::{
     ExternalIdentifierClaim, FieldClaimStatus, Grain, MetadataLocale, NamespaceDefinition,
@@ -428,6 +428,8 @@ pub struct ProviderCandidate {
     pub image_url: Option<String>,
     pub overview: Option<String>,
     #[serde(skip)]
+    google_books_print_type: Option<GoogleBooksPrintType>,
+    #[serde(skip)]
     evidence_digest: Sha256Digest,
     #[serde(skip)]
     response_cache_policy: Option<ProviderResponseCachePolicy>,
@@ -465,6 +467,7 @@ impl ProviderCandidate {
             authors: self.authors.clone(),
             image_url: self.image_url.clone(),
             overview: self.overview.clone(),
+            google_books_print_type: self.google_books_print_type,
         })
         .map_err(|error| ProviderRuntimeError::response_invalid(error.to_string()))
     }
@@ -559,6 +562,8 @@ struct GoogleVolumeInfo {
     title: Option<String>,
     #[serde(default)]
     authors: Vec<String>,
+    #[serde(default, rename = "printType")]
+    print_type: Option<serde_json::Value>,
     #[serde(default)]
     description: Option<String>,
     #[serde(rename = "publishedDate")]
@@ -1299,6 +1304,12 @@ fn google_candidate(
         title,
         original_title: None,
         kind: "book",
+        google_books_print_type: Some(GoogleBooksPrintType::from_source(
+            volume_info
+                .print_type
+                .as_ref()
+                .and_then(serde_json::Value::as_str),
+        )),
         release_year: volume_info.published_date.as_deref().and_then(release_year),
         authors: volume_info.authors,
         image_url: volume_info
@@ -1401,6 +1412,7 @@ fn tmdb_candidate(
         title,
         original_title,
         kind,
+        google_books_print_type: None,
         release_year: date.as_deref().and_then(release_year),
         authors: Vec::new(),
         image_url,
@@ -1444,6 +1456,7 @@ fn normalize_google_image(value: String) -> Option<String> {
 mod tests {
     use super::*;
     include!("provider_cache_transport_tests.rs");
+    include!("google_print_type_tests.rs");
     use fasti_application::{
         ConfigurationDigest, ProblemCode, ProviderCapabilityId, ProviderCheckMetadata, ProviderId,
     };

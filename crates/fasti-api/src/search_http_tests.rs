@@ -341,6 +341,7 @@ mod search_http_tests {
             provider_id: "438631".into(),
             kind: "movie".into(),
             title: "Dune".into(),
+            google_books_print_type: None,
             original_title: None,
             release_year: Some(2021),
             authors: vec![],

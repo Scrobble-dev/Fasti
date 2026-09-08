@@ -25,6 +25,33 @@
   invariants. Removing this tool requirement does not remove product safeguards
   or scope, and does not reopen completed planning gates.
 
+### M4 native publication evidence — 2026-09-08
+
+The existing Google Books adapter now retains `volumeInfo.printType` through
+Search and selected-volume parsing, internal candidate receipts, cached/refetched
+Create and Attach, metadata refresh, and stored claims. Google's
+[Volume reference](https://developers.google.com/books/docs/v1/reference/volumes)
+defines `BOOK` and `MAGAZINE`. Fasti normalizes a newly observed missing or
+unrecognized value to `UNKNOWN`; this is not an additional Google enum value.
+Historical absence stays absent. The fact retains the original response digest,
+provider coordinates, locale, observation time and reuse lifetime.
+
+The application owns the bounded value and reserved `google_books.print_type`
+field rule. Existing metadata admission and hydrated claim/receipt readers
+validate the value and provider coordinates. No new dependency, table, migration,
+capability, public candidate property or UI projection is added. Schema17 and
+archive7 remain unchanged; generic claim streams preserve saved facts while
+Search caches remain node-local. This is evidence custody, not completion of
+media-domain classification, filtering or the broader M4 acceptance gates.
+
+Rollback is not an unqualified binary replacement: pre-change candidate readers
+reject populated native-fact fields in node-local caches. The existing authorized
+partition-discard port preserves durable Records, claims and action replay, but
+it is not a public cache-clear or automatic downgrade workflow. Do not discard
+data roots or claim older binaries can read new candidate receipts. Forward
+correction remains the default; a downgrade needs an explicit verified cache
+disposition and exact target schema/archive compatibility.
+
 ## 1. Decision
 
 Build one source-neutral media surface inside Fasti.
