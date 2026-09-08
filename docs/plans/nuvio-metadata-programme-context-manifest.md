@@ -4752,3 +4752,55 @@ checks. Existing replacement assertions were not relaxed. Logs are
 confirmation remain required after this checkpoint. Only the test leaf and this
 checkpoint change; production, contracts, schema17/archive7 and ownership remain
 unchanged. The permanent tool exclusion continues to apply.
+
+### 2026-09-08 — Keep offline Search independent of provider I/O contention
+
+Published head `2c428e473c6d80d50e981cb095d864a5f720e245`, tree
+`0e9a6412ce064c74596ad5afb8d72d80f35ae74e`, passed canonical validation,
+212 ordinary CI Chromium cases with zero retries, and the real-process Search
+journey on clean source. Those receipts do not qualify subsequent dirty edits.
+The hosted readback has all checks successful except Codacy ACTION_REQUIRED.
+The 23 Codacy annotations match the preceding head. Source-backed dispositions
+for 21 annotations and two still-open executable-PATH hardening items are at
+https://github.com/Scrobble-dev/Fasti/pull/128#issuecomment-5581536483.
+An explanation is not a scanner resolution or an M4 completion claim.
+
+The next reproduced defect is independent of provider availability: HTTP and
+native Search acquired the provider I/O gate before checking offline mode.
+A real SQLite HTTP regression held that gate, observed completed authorization,
+and failed after the offline page waited one second. The repair routes offline
+pages, retained candidate details and coordinate-only unavailable replies through
+the existing service and persistence owners without acquiring that gate. It
+preserves input/provider validation, actor partitions, current authorization,
+configuration and policy checks, and original payload lifetimes. Online paths
+still require a concrete lease retained by any started blocking persistence job.
+
+No provider, cache, Record or receipt writes are added to offline reads. Existing
+browser session maintenance remains. Native packaged-host authentication still
+reads its own secure credential; the bypass avoids provider-credential reads,
+not authentication. No dependency, capability ID, wire contract, schema or archive
+change is needed. The three native commands use the same service methods as HTTP.
+There is no UI/layout change or new accessibility conformance claim.
+
+Focused verification on the working diff: 35 Search HTTP tests pass, including
+cached page/snapshot partitioning, invalid locators, revoked scope, unchanged
+durable content, zero provider-vault calls and both existing online waiter tests.
+All 108 provider-runtime tests and strict API/runtime Clippy pass. Native
+production builds with default features and all targets. A separate native
+held-gate regression passes, exercising all three wrappers with missing/unavailable
+offline replies and pending online calls (one test, 0.14 seconds). Its log is
+`/tmp/fasti-m4-offline-gate-native-test-sep8.log`. The full native headless library
+suite passes (59 passed, one existing ignored) in
+`/tmp/fasti-m4-offline-gate-native-suite-sep8.log`. Populated native snapshots and
+packaged WebView behavior are not inferred from that fixture. Full clean-head
+verification remains required.
+
+Allocation stays compact: commander owns shared production integration; one
+worker owns the explicitly named HTTP/native regression leaves; one reviewer
+checks runtime, HTTP and native locking/authorization; one read-only preparer
+maps SDK/Discover continuation and duplicate-result handling. The latter reuses
+the existing application page validator and does not create production APIs.
+Rollback is an ordinary revert of this isolated repair, restoring prior locking
+without data conversion. M4 retains schema17/archive7 and shared ownership;
+PR128 remains unmerged, migration18 is not allocated, and remaining programme
+scope is unchanged. Codex Security remains permanently excluded for every lane.

@@ -200,23 +200,21 @@ pub(crate) async fn search_provider_page(
         .locks
         .get(&provider)
         .ok_or_else(|| invalid(id, "/provider_id"))?;
-    let lease = ProviderOperationLease::new(gate.lock_owned().await);
-    let outcome = state
-        .service
-        .search_page(
-            SearchPageRequest {
-                correlation_id: id,
-                access,
-                query: query.clone(),
-                outbound_policy: OutboundAccessPolicy::default(),
-                // The service replaces this with its trusted provider cache-policy revision.
-                terms_revision: String::new(),
-            },
-            offline,
-            lease,
-        )
-        .await
-        .map_err(application_problem)?;
+    let request = SearchPageRequest {
+        correlation_id: id,
+        access,
+        query: query.clone(),
+        outbound_policy: OutboundAccessPolicy::default(),
+        // The service replaces this with its trusted provider cache-policy revision.
+        terms_revision: String::new(),
+    };
+    let outcome = if offline {
+        state.service.search_page_offline(request).await
+    } else {
+        let lease = ProviderOperationLease::new(gate.lock_owned().await);
+        state.service.search_page(request, false, lease).await
+    }
+    .map_err(application_problem)?;
     let response = SearchProviderPageResponse::from_outcome(&query, outcome);
     Ok((
         [(header::CACHE_CONTROL, "private, no-store")],
@@ -276,12 +274,13 @@ pub(crate) async fn read_search_candidate(
         .locks
         .get(&provider)
         .ok_or_else(|| invalid(id, "/provider_id"))?;
-    let lease = ProviderOperationLease::new(gate.lock_owned().await);
-    let outcome = state
-        .service
-        .candidate_details(request, query.offline, lease)
-        .await
-        .map_err(application_problem)?;
+    let outcome = if query.offline {
+        state.service.candidate_details_offline(request).await
+    } else {
+        let lease = ProviderOperationLease::new(gate.lock_owned().await);
+        state.service.candidate_details(request, false, lease).await
+    }
+    .map_err(application_problem)?;
     Ok(candidate_details_response(outcome))
 }
 
@@ -345,12 +344,19 @@ pub(crate) async fn read_provider_identifier_details(
         .locks
         .get(&provider)
         .ok_or_else(|| invalid(id, "/provider_id"))?;
-    let lease = ProviderOperationLease::new(gate.lock_owned().await);
-    let outcome = state
-        .service
-        .provider_identifier_details(request.clone(), query.offline, lease)
-        .await
-        .map_err(application_problem)?;
+    let outcome = if query.offline {
+        state
+            .service
+            .provider_identifier_details_offline(request.clone())
+            .await
+    } else {
+        let lease = ProviderOperationLease::new(gate.lock_owned().await);
+        state
+            .service
+            .provider_identifier_details(request.clone(), false, lease)
+            .await
+    }
+    .map_err(application_problem)?;
     let response = fasti_contracts::ProviderIdentifierDetailsResponse::from((&request, outcome));
     Ok((
         [(header::CACHE_CONTROL, "private, no-store")],

@@ -534,18 +534,13 @@ async fn search_provider_page(
     )?;
     let runtime = state.provider_runtime(&kernel)?;
     let configuration = state.network.load()?;
-    let lease = ProviderOperationLease::new(
-        Arc::clone(&state.provider_operation_gate)
-            .lock_owned()
-            .await,
-    );
     search::provider_page(
         runtime,
         kernel,
         access,
         configuration.outbound_policy().clone(),
         input,
-        lease,
+        Arc::clone(&state.provider_operation_gate),
     )
     .await
 }
@@ -563,18 +558,13 @@ async fn read_search_candidate(
     )?;
     let runtime = state.provider_runtime(&kernel)?;
     let configuration = state.network.load()?;
-    let lease = ProviderOperationLease::new(
-        Arc::clone(&state.provider_operation_gate)
-            .lock_owned()
-            .await,
-    );
     search::candidate_details(
         runtime,
         kernel,
         access,
         configuration.outbound_policy().clone(),
         input,
-        lease,
+        Arc::clone(&state.provider_operation_gate),
     )
     .await
 }
@@ -592,16 +582,13 @@ async fn read_provider_identifier_details(
     )?;
     let runtime = state.provider_runtime(&kernel)?;
     let configuration = state.network.load()?;
-    let lease = ProviderOperationLease::new(
-        Arc::clone(&state.provider_operation_gate).lock_owned().await,
-    );
     search::provider_identifier_details(
         runtime,
         kernel,
         access,
         configuration.outbound_policy().clone(),
         input,
-        lease,
+        Arc::clone(&state.provider_operation_gate),
     ).await
 }
 

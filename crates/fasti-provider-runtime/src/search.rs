@@ -1,4 +1,4 @@
-use crate::metadata::{provider_response_locale, run_blocking};
+use crate::metadata::{provider_response_locale, run_blocking, run_blocking_local};
 use crate::{
     ProviderCandidate, ProviderRuntime, ProviderRuntimeError, ProviderRuntimeErrorKind,
     ProviderSearchInput, ProviderSearchPage, ProviderSelectionInput,
@@ -19,7 +19,8 @@ pub use fasti_application::{
 };
 
 /// Governed provider-page orchestration. Hosts acquire their existing provider
-/// gate before calling; this service neither creates locks nor owns user state.
+/// gate for online operations. Offline reads use the same persistence authority
+/// without waiting for provider I/O; this service creates no locks or user state.
 pub struct ProviderSearchService {
     runtime: Arc<ProviderRuntime>,
     persistence: Arc<dyn SearchPersistencePort>,
@@ -52,6 +53,30 @@ impl ProviderSearchService {
         .await
     }
 
+    pub async fn provider_identifier_details_offline(
+        &self,
+        request: ReadProviderIdentifierDetailsRequest,
+    ) -> ApplicationResult<ProviderIdentifierDetailsOutcome> {
+        provider_identifier_details_identity(&request)?;
+        let persistence = Arc::clone(&self.persistence);
+        // A live coordinate has no authorized cached payload to disclose.
+        // Recheck Search authority without provider state, DNS or vault access.
+        run_blocking_local(
+            CapabilityKey::SearchMetadata,
+            request.correlation_id,
+            move || {
+                persistence.authorize_search_candidate_read_request(
+                    request.correlation_id,
+                    &request.access,
+                )
+            },
+        )
+        .await?;
+        Ok(ProviderIdentifierDetailsOutcome::Unavailable {
+            problem: ProblemCode::ProviderUnavailable,
+        })
+    }
+
     async fn provider_identifier_details_with<F, Fut>(
         &self,
         request: ReadProviderIdentifierDetailsRequest,
@@ -65,39 +90,12 @@ impl ProviderSearchService {
     {
         let capability = CapabilityKey::SearchMetadata;
         let id = request.correlation_id;
-        let mapping = fasti_application::provider_identity_mapping_for_grain(
-            request.provider.as_str(),
-            request.grain,
-        )
-        .ok_or_else(|| {
-            Box::new(fasti_application::FastiProblem::from_code(
-                ProblemCode::ValidationFailed,
-                capability,
-                id,
-            ))
-        })?;
-        let expected = mapping
-            .identifier(request.provider_record_id.clone())
-            .map_err(|_| {
-                Box::new(fasti_application::FastiProblem::from_code(
-                    ProblemCode::ValidationFailed,
-                    capability,
-                    id,
-                ))
-            })?;
+        if offline {
+            return self.provider_identifier_details_offline(request).await;
+        }
+        let (mapping, expected) = provider_identifier_details_identity(&request)?;
         let persistence = Arc::clone(&self.persistence);
         let read = request.clone();
-        if offline {
-            // A live coordinate has no authorized cached payload to disclose.
-            // Recheck Search authority without provider state, DNS or vault access.
-            run_blocking(&lease, capability, id, move || {
-                persistence.authorize_search_candidate_read_request(id, &read.access)
-            })
-            .await?;
-            return Ok(ProviderIdentifierDetailsOutcome::Unavailable {
-                problem: ProblemCode::ProviderUnavailable,
-            });
-        }
         let prepared = run_blocking(&lease, capability, id, move || {
             persistence.prepare_provider_identifier_details(&read)
         })
@@ -391,6 +389,35 @@ impl ProviderSearchService {
         Ok(ProviderSearchActionOutcome::Saved(Box::new(receipt)))
     }
 
+    pub async fn search_page_offline(
+        &self,
+        mut request: SearchPageRequest,
+    ) -> ApplicationResult<ProviderSearchOutcome> {
+        request.query = effective_query(&request.query, request.correlation_id)?;
+        request.terms_revision =
+            self.cache_policy_revision(request.query.provider().as_str(), request.correlation_id)?;
+        let persistence = Arc::clone(&self.persistence);
+        run_blocking_local(
+            CapabilityKey::SearchMetadata,
+            request.correlation_id,
+            move || {
+                persistence.prepare_search_page(&request)?;
+                for stale in [false, true] {
+                    if let Some(page) = persistence.read_cached_search_page(&request, stale)? {
+                        return Ok(ProviderSearchOutcome::Page {
+                            page,
+                            upstream_problem: stale.then_some(ProblemCode::ProviderUnavailable),
+                        });
+                    }
+                }
+                Ok(ProviderSearchOutcome::Unavailable {
+                    problem: ProblemCode::ProviderUnavailable,
+                })
+            },
+        )
+        .await
+    }
+
     pub async fn search_page(
         &self,
         mut request: SearchPageRequest,
@@ -416,6 +443,28 @@ impl ProviderSearchService {
                 .await
         })
         .await
+    }
+
+    pub async fn candidate_details_offline(
+        &self,
+        mut request: ReadSearchCandidateRequest,
+    ) -> ApplicationResult<Option<ProviderCandidateDetailsOutcome>> {
+        request.terms_revision =
+            self.cache_policy_revision(request.provider.as_str(), request.correlation_id)?;
+        let persistence = Arc::clone(&self.persistence);
+        // An authorized original snapshot needs no provider-read capability,
+        // DNS, credential or network access. Its stored lifetime is unchanged.
+        run_blocking_local(
+            CapabilityKey::SearchMetadata,
+            request.correlation_id,
+            move || persistence.read_search_candidate(&request),
+        )
+        .await
+        .map(|candidate| {
+            candidate
+                .filter(|candidate| candidate.payload_is_reusable(chrono::Utc::now()))
+                .map(ProviderCandidateDetailsOutcome::Snapshot)
+        })
     }
 
     pub async fn candidate_details(
@@ -450,22 +499,12 @@ impl ProviderSearchService {
     {
         let capability = CapabilityKey::SearchMetadata;
         let id = request.correlation_id;
+        if offline {
+            return self.candidate_details_offline(request).await;
+        }
         request.terms_revision = self.cache_policy_revision(request.provider.as_str(), id)?;
         let persistence = Arc::clone(&self.persistence);
         let read = request.clone();
-        if offline {
-            // An authorized original snapshot needs no provider-read capability,
-            // DNS, credential or network access. Its stored lifetime is unchanged.
-            return run_blocking(&lease, capability, id, move || {
-                persistence.read_search_candidate(&read)
-            })
-            .await
-            .map(|candidate| {
-                candidate
-                    .filter(|candidate| candidate.payload_is_reusable(chrono::Utc::now()))
-                    .map(ProviderCandidateDetailsOutcome::Snapshot)
-            });
-        }
         let Some(prepared) = run_blocking(&lease, capability, id, move || {
             persistence.prepare_search_candidate_details(&read)
         })
@@ -588,6 +627,9 @@ impl ProviderSearchService {
         F: FnOnce(ProviderCapabilityState) -> Fut,
         Fut: Future<Output = Result<ProviderSearchPage, ProviderRuntimeError>>,
     {
+        if offline {
+            return self.search_page_offline(request).await;
+        }
         let capability = CapabilityKey::SearchMetadata;
         let id = request.correlation_id;
         // The legacy partition slot holds trusted Fasti cache policy, never a
@@ -605,11 +647,6 @@ impl ProviderSearchService {
                 page,
                 upstream_problem: None,
             });
-        }
-        if offline {
-            return self
-                .fallback(&request, ProblemCode::ProviderUnavailable, &lease)
-                .await;
         }
         let fetched = fetch(prepared.provider_state.clone()).await;
         // Errors also expose source state. Recheck authority before returning any
@@ -741,6 +778,30 @@ impl ProviderSearchService {
             None => ProviderSearchOutcome::Unavailable { problem },
         })
     }
+}
+
+fn provider_identifier_details_identity(
+    request: &ReadProviderIdentifierDetailsRequest,
+) -> ApplicationResult<(
+    fasti_application::ProviderIdentityMapping,
+    fasti_domain::ExternalIdentifierClaim,
+)> {
+    let invalid = || {
+        Box::new(fasti_application::FastiProblem::from_code(
+            ProblemCode::ValidationFailed,
+            CapabilityKey::SearchMetadata,
+            request.correlation_id,
+        ))
+    };
+    let mapping = fasti_application::provider_identity_mapping_for_grain(
+        request.provider.as_str(),
+        request.grain,
+    )
+    .ok_or_else(invalid)?;
+    let identifier = mapping
+        .identifier(request.provider_record_id.clone())
+        .map_err(|_| invalid())?;
+    Ok((mapping, identifier))
 }
 
 fn effective_query(

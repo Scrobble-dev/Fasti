@@ -121,23 +121,23 @@ pub(crate) async fn provider_page(
     access: RequestAccessContext,
     policy: OutboundAccessPolicy,
     input: ProviderPageInput,
-    lease: ProviderOperationLease,
+    gate: Arc<tokio::sync::Mutex<()>>,
 ) -> Result<SearchProviderPageResponse, DesktopProblem> {
     let (query, offline) = provider_query(input.provider_id, input.request)?;
-    let outcome = ProviderSearchService::new(runtime, kernel)
-        .search_page(
-            SearchPageRequest {
-                correlation_id: RequestCorrelationId::new_v7(),
-                access: access.into(),
-                query: query.clone(),
-                outbound_policy: policy,
-                terms_revision: String::new(),
-            },
-            offline,
-            lease,
-        )
-        .await
-        .map_err(|problem| DesktopProblem::application(&problem))?;
+    let service = ProviderSearchService::new(runtime, kernel);
+    let request = SearchPageRequest {
+        correlation_id: RequestCorrelationId::new_v7(),
+        access: access.into(),
+        query: query.clone(),
+        outbound_policy: policy,
+        terms_revision: String::new(),
+    };
+    let outcome = if offline {
+        service.search_page_offline(request).await
+    } else {
+        let lease = ProviderOperationLease::new(gate.lock_owned().await);
+        service.search_page(request, false, lease).await
+    }.map_err(|problem| DesktopProblem::application(&problem))?;
     Ok(SearchProviderPageResponse::from_outcome(&query, outcome))
 }
 
@@ -170,7 +170,7 @@ pub(crate) async fn candidate_details(
     access: RequestAccessContext,
     policy: OutboundAccessPolicy,
     input: CandidateDetailsInput,
-    lease: ProviderOperationLease,
+    gate: Arc<tokio::sync::Mutex<()>>,
 ) -> Result<SearchCandidateDetailsResponse, DesktopProblem> {
     let request = candidate_request(
         access,
@@ -179,10 +179,13 @@ pub(crate) async fn candidate_details(
         input.grain,
         input.candidate_receipt_id,
     )?;
-    let outcome = ProviderSearchService::new(runtime, kernel)
-        .candidate_details(request, input.offline, lease)
-        .await
-        .map_err(|problem| DesktopProblem::application(&problem))?;
+    let service = ProviderSearchService::new(runtime, kernel);
+    let outcome = if input.offline {
+        service.candidate_details_offline(request).await
+    } else {
+        let lease = ProviderOperationLease::new(gate.lock_owned().await);
+        service.candidate_details(request, false, lease).await
+    }.map_err(|problem| DesktopProblem::application(&problem))?;
     Ok(SearchCandidateDetailsResponse::from(outcome))
 }
 
@@ -192,7 +195,7 @@ pub(crate) async fn provider_identifier_details(
     access: RequestAccessContext,
     policy: OutboundAccessPolicy,
     input: ProviderIdentifierDetailsInput,
-    lease: ProviderOperationLease,
+    gate: Arc<tokio::sync::Mutex<()>>,
 ) -> Result<fasti_contracts::ProviderIdentifierDetailsResponse, DesktopProblem> {
     let request = fasti_application::ReadProviderIdentifierDetailsRequest {
         correlation_id: RequestCorrelationId::new_v7(),
@@ -206,10 +209,13 @@ pub(crate) async fn provider_identifier_details(
             .map_err(|_| DesktopProblem::invalid_input("The Search locale is invalid."))?,
         outbound_policy: policy,
     };
-    let outcome = ProviderSearchService::new(runtime, kernel)
-        .provider_identifier_details(request.clone(), input.query.offline, lease)
-        .await
-        .map_err(|problem| DesktopProblem::application(&problem))?;
+    let service = ProviderSearchService::new(runtime, kernel);
+    let outcome = if input.query.offline {
+        service.provider_identifier_details_offline(request.clone()).await
+    } else {
+        let lease = ProviderOperationLease::new(gate.lock_owned().await);
+        service.provider_identifier_details(request.clone(), false, lease).await
+    }.map_err(|problem| DesktopProblem::application(&problem))?;
     Ok(fasti_contracts::ProviderIdentifierDetailsResponse::from((&request, outcome)))
 }
 
@@ -520,5 +526,103 @@ mod tests {
             },
         )
         .is_err());
+    }
+
+    #[tokio::test]
+    async fn native_offline_search_reads_bypass_held_provider_gate_while_online_reads_wait() {
+        use fasti_application::{
+            ConfigurationDigest, CredentialReference, CredentialRequirement,
+            ProviderCapabilityId, ProviderCapabilityState, ProviderCapabilityStatus,
+            ProviderCheckMetadata, ProviderCredentialStatus, ProviderStatePort,
+        };
+        use fasti_provider_runtime::{PlatformCredentialVault, PLATFORM_CREDENTIAL_SERVICE};
+        use std::time::Duration;
+
+        let root = tempfile::tempdir().unwrap();
+        let kernel = Arc::new(SqliteKernel::open(root.path()).unwrap());
+        let store = MemoryStore::default();
+        complete_setup(&kernel, &store).unwrap();
+        let access = records::require_access(&kernel, &store).unwrap();
+        kernel.put_provider_capability_state(
+            access.workspace_id(),
+            ProviderCapabilityState::try_new(
+                ProviderId::try_new("tmdb").unwrap(),
+                ProviderCapabilityId::try_new("metadata.search").unwrap(),
+                ProviderCapabilityStatus::Available,
+                1,
+                CredentialRequirement::BearerToken,
+                Some(CredentialReference::try_new("secret:native-search-test").unwrap()),
+                ProviderCredentialStatus::StoredUnverified,
+                ConfigurationDigest::parse("a".repeat(64)).unwrap(),
+                ProviderCheckMetadata::never_run(),
+                ProviderCheckMetadata::never_run(),
+            ).unwrap(),
+        ).unwrap();
+        let runtime = Arc::new(ProviderRuntime::new(Arc::new(PlatformCredentialVault::new(
+            PLATFORM_CREDENTIAL_SERVICE,
+            "native-search-offline-test",
+        ))));
+        let gate = Arc::new(tokio::sync::Mutex::new(()));
+        let _held = gate.clone().lock_owned().await;
+        let receipt = fasti_domain::SearchCandidateReceiptId::new_v7().to_string();
+
+        for offline in [true, false] {
+            for route in 0..3 {
+                let response = tokio::time::timeout(
+                    if offline { Duration::from_secs(1) } else { Duration::from_millis(25) },
+                    async {
+                        match route {
+                            0 => provider_page(
+                                runtime.clone(), kernel.clone(), access,
+                                OutboundAccessPolicy::default(),
+                                ProviderPageInput {
+                                    provider_id: "tmdb".into(),
+                                    request: SearchProviderPageRequest {
+                                        query: "Not cached".into(), page: 1,
+                                        locale: None, region: None, grains: Vec::new(), offline,
+                                    },
+                                },
+                                gate.clone(),
+                            ).await.map(|value| serde_json::to_value(value).unwrap()),
+                            1 => candidate_details(
+                                runtime.clone(), kernel.clone(), access,
+                                OutboundAccessPolicy::default(),
+                                CandidateDetailsInput {
+                                    provider_id: "tmdb".into(), grain: "film".into(),
+                                    candidate_receipt_id: receipt.clone(), offline,
+                                },
+                                gate.clone(),
+                            ).await.map(|value| serde_json::to_value(value).unwrap()),
+                            _ => provider_identifier_details(
+                                runtime.clone(), kernel.clone(), access,
+                                OutboundAccessPolicy::default(),
+                                ProviderIdentifierDetailsInput {
+                                    provider_id: "tmdb".into(), grain: "film".into(),
+                                    query: fasti_contracts::ProviderIdentifierDetailsQueryParameters {
+                                        provider_record_id: "438631".into(), locale: None, offline,
+                                    },
+                                },
+                                gate.clone(),
+                            ).await.map(|value| serde_json::to_value(value).unwrap()),
+                        }
+                    },
+                ).await;
+                if offline {
+                    let actual = response.expect("offline native read waited for provider gate")
+                        .unwrap();
+                    let expected = match route {
+                        0 => serde_json::json!({"outcome":"unavailable", "provider_id":"tmdb",
+                            "problem_code":"provider_unavailable"}),
+                        1 => serde_json::json!({"outcome":"missing"}),
+                        _ => serde_json::json!({"outcome":"unavailable", "provider_id":"tmdb",
+                            "grain":"film", "provider_record_id":"438631",
+                            "problem_code":"provider_unavailable"}),
+                    };
+                    assert_eq!(actual, expected, "native route {route}");
+                } else {
+                    assert!(response.is_err(), "online native route {route} bypassed provider gate");
+                }
+            }
+        }
     }
 }

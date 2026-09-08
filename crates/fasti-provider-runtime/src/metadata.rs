@@ -298,12 +298,25 @@ where
     F: FnOnce() -> fasti_application::ApplicationResult<T> + Send + 'static,
 {
     let lease = lease.clone();
-    tokio::task::spawn_blocking(move || {
+    run_blocking_local(capability, correlation_id, move || {
         let _lease = lease;
         operation()
     })
     .await
-    .map_err(|_| problem(ProblemCode::StorageUnavailable, capability, correlation_id))?
+}
+
+pub(crate) async fn run_blocking_local<T, F>(
+    capability: CapabilityKey,
+    correlation_id: fasti_domain::RequestCorrelationId,
+    operation: F,
+) -> fasti_application::ApplicationResult<T>
+where
+    T: Send + 'static,
+    F: FnOnce() -> fasti_application::ApplicationResult<T> + Send + 'static,
+{
+    tokio::task::spawn_blocking(operation)
+        .await
+        .map_err(|_| problem(ProblemCode::StorageUnavailable, capability, correlation_id))?
 }
 
 impl MetadataClaimRefreshService for ProviderMetadataRefreshService {

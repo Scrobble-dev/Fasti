@@ -11,7 +11,7 @@ mod provider_identifier_details_http_tests {
 
     // Compare full values for every durable Search/detail destination. Browser
     // session activity is intentionally outside this projection.
-    fn content_state(f: &Fixture) -> Vec<Vec<Vec<Value>>> {
+    pub(super) fn content_state(f: &Fixture) -> Vec<Vec<Vec<Value>>> {
         let connection = rusqlite::Connection::open(f.kernel.database_path()).unwrap();
         [
             "provider_capability_states",

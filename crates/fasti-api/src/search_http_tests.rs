@@ -281,14 +281,17 @@ mod search_http_tests {
     fn observed_request(
         f: &Fixture,
         browser: bool,
+        offline: bool,
     ) -> (Request<Body>, tokio::sync::oneshot::Receiver<()>) {
-        let text = body("Dune");
+        let mut text: serde_json::Value = serde_json::from_str(&body("Dune")).unwrap();
+        text["offline"] = offline.into();
+        let text = text.to_string();
         let mut req = request(f, browser, PATH, text.clone());
         let (entered, observed) = tokio::sync::oneshot::channel();
         let mut entered = Some(entered);
         // Axum consumes the body only after SearchPageAccess has completed its
-        // real store authorization. The provider gate is already held by the
-        // test, so the service cannot have started when this signal arrives.
+        // real store authorization. Online requests then wait on the provider
+        // gate held by the test; offline requests must bypass that gate.
         *req.body_mut() = Body::from_stream(
             tokio_stream::once(Ok::<_, std::io::Error>(axum::body::Bytes::from(text))).map(
                 move |chunk| {
@@ -712,6 +715,117 @@ mod search_http_tests {
     }
 
     #[tokio::test]
+    async fn search_http_offline_reads_bypass_held_provider_gate_without_disclosing_other_receipts() {
+        let f = fixture().await;
+        let bearer_receipt = seed(&f, false);
+        let browser_receipt = seed(&f, true);
+        let before = provider_identifier_details_http_tests::content_state(&f);
+        let _held = f.locks.get("tmdb").unwrap().lock_owned().await;
+        let coordinate = "/api/v1/search/providers/tmdb/film/details?provider_record_id=438631&offline=true";
+        for (browser, receipt, other) in [
+            (false, &bearer_receipt, &browser_receipt),
+            (true, &browser_receipt, &bearer_receipt),
+        ] {
+            let (req, authorized) = observed_request(&f, browser, true);
+            let mut caller = tokio::spawn(f.app.clone().oneshot(req));
+            let authorization =
+                tokio::time::timeout(std::time::Duration::from_secs(5), authorized).await;
+            if !matches!(authorization, Ok(Ok(()))) {
+                caller.abort();
+                let _ = caller.await;
+                panic!("offline Search page did not reach authorized body extraction");
+            }
+            let reply = tokio::time::timeout(std::time::Duration::from_secs(1), &mut caller).await;
+            if reply.is_err() {
+                caller.abort();
+                assert!(caller.await.unwrap_err().is_cancelled());
+                panic!("authorized offline Search page waited for the held provider gate");
+            }
+            let (status, page) = decode_response(reply.unwrap().unwrap().unwrap()).await;
+            assert_eq!(status, StatusCode::OK, "{page}");
+            assert_eq!(page["outcome"], "page");
+            assert_eq!(page["candidates"][0]["candidate_receipt_id"], *receipt);
+
+            for (path, expected) in [
+                (
+                    candidate_path(receipt),
+                    serde_json::json!({"outcome":"snapshot", "snapshot": {
+                        "receipt": page["candidates"][0],
+                        "lifetime": page["lifetime"], "locale":"en-us"
+                    }}),
+                ),
+                (
+                    coordinate.to_owned(),
+                    serde_json::json!({"outcome":"unavailable", "provider_id":"tmdb",
+                        "grain":"film", "provider_record_id":"438631",
+                        "problem_code":"provider_unavailable"}),
+                ),
+                (candidate_path(other), serde_json::json!({"outcome":"missing"})),
+                (
+                    candidate_path(receipt).replace("/film/", "/series/"),
+                    serde_json::json!({"outcome":"missing"}),
+                ),
+            ] {
+                let (status, actual) = tokio::time::timeout(
+                    std::time::Duration::from_secs(1),
+                    response(&f.app, candidate_get(&f, browser, &path)),
+                )
+                .await
+                .expect("offline details must not wait for the provider gate");
+                assert_eq!(status, StatusCode::OK, "{path}: {actual}");
+                assert_eq!(actual, expected, "{path}");
+            }
+
+            let mut invalid = vec![
+                (request(&f, browser, PATH, "{".into()), StatusCode::BAD_REQUEST),
+                (
+                    request(&f, browser, "/api/v1/search/providers/unknown-provider", body("Dune")),
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                ),
+            ];
+            invalid.extend([
+                candidate_path(receipt).replace("/tmdb/", "/unknown-provider/"),
+                candidate_path("invalid-receipt"),
+                coordinate.replace("/tmdb/", "/unknown-provider/"),
+                coordinate.replace("438631", "042"),
+                coordinate.replace("/film/", "/episode/"),
+            ].into_iter().map(|path| (
+                candidate_get(&f, browser, &path), StatusCode::UNPROCESSABLE_ENTITY,
+            )));
+            for (req, expected_status) in invalid {
+                let (status, problem) = tokio::time::timeout(
+                    std::time::Duration::from_secs(1), response(&f.app, req),
+                ).await.expect("offline validation must not wait for the provider gate");
+                assert_eq!(status, expected_status, "{problem}");
+                assert!(problem.get("snapshot").is_none());
+                assert!(problem.get("candidates").is_none());
+                assert!(!problem.to_string().contains(receipt));
+            }
+        }
+        rusqlite::Connection::open(f.kernel.database_path()).unwrap().execute(
+            "DELETE FROM grant_scopes WHERE grant_id = ?1 AND scope_key = 'metadata_search'",
+            [f.access.grant_id().to_string()],
+        ).unwrap();
+        for (browser, receipt) in [(false, &bearer_receipt), (true, &browser_receipt)] {
+            for req in [
+                request(&f, browser, PATH, body("Dune")),
+                candidate_get(&f, browser, &candidate_path(receipt)),
+                candidate_get(&f, browser, coordinate),
+            ] {
+                let (status, problem) = tokio::time::timeout(
+                    std::time::Duration::from_secs(1), response(&f.app, req),
+                ).await.expect("revoked offline reads must not wait for the provider gate");
+                assert_eq!(status, StatusCode::FORBIDDEN, "{problem}");
+                assert_eq!(problem["code"], "forbidden");
+                assert!(problem.get("snapshot").is_none());
+                assert!(problem.get("candidates").is_none());
+            }
+        }
+        assert_eq!(provider_identifier_details_http_tests::content_state(&f), before);
+        assert_eq!(f.vault.0.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
     async fn search_http_candidate_get_offline_preserves_original_evidence_and_actor_partition() {
         let f = fixture().await;
         let bearer_receipt = seed(&f, false);
@@ -1105,7 +1219,7 @@ mod search_http_tests {
             let before = counts(&f);
             let gate = f.locks.get("tmdb").unwrap();
             let held = gate.clone().lock_owned().await;
-            let (req, authorized) = observed_request(&f, browser);
+            let (req, authorized) = observed_request(&f, browser, false);
             let caller = tokio::spawn(f.app.clone().oneshot(req));
             tokio::time::timeout(std::time::Duration::from_secs(5), authorized)
                 .await
@@ -1169,7 +1283,7 @@ mod search_http_tests {
             let receipt = seed(&f, browser);
             let before = counts(&f);
             let held = f.locks.get("tmdb").unwrap().lock_owned().await;
-            let (req, authorized) = observed_request(&f, browser);
+            let (req, authorized) = observed_request(&f, browser, false);
             let caller = tokio::spawn(f.app.clone().oneshot(req));
             tokio::time::timeout(std::time::Duration::from_secs(5), authorized)
                 .await
