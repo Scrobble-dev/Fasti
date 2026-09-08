@@ -1,13 +1,33 @@
 # C3 final physical-EOF failure regression
 
-Status: FOCUSED_GATES_PASS; DELIVERY_PENDING.
+Status: FOCUSED_AND_CANONICAL_GATES_PASS; FINAL_DELIVERY_PENDING.
+
+## Current delivery checkpoint
+
+Constructor PR #135 merged into `dev` at
+416843b40f6112e8498e9da976d48041b54886d5, tree
+06e8959ccaec210a9c765264ce5572240faf7588. This EOF branch is reconciled onto
+that merged parent. Its pre-documentation-correction tree
+681b31e2f4d944518cfb02e3ef19966a1b82984c is byte-identical to the clean tree
+that passed the canonical PR gate at 2776704a. The canonical command exited 0;
+its retained log is 2026-09-08T16-59-23-260Z-tests-1667901-d1238422.log,
+SHA256 da45c195d4300f3c93876fe76cc2c688342f77e769b33ce355794d8e07af00d4.
+Isolated dependency policy and advisory checks also exited 0 without a new
+suppression. Existing policy warnings remain recorded.
+
+This documentation correction labels the earlier checkpoints below as
+historical. Source, adapter, workflow and dependency inputs are unchanged.
+Final documentation verification, hosted checks and merge remain required.
+No complete-C3, production-crypto or packaged-authentication claim follows.
+
+## Historical preparation and verification bases
 
 Initial stacked source base: constructor regression
 10b8f7a589c3912f53b5ebba8b345f1ed0c27659, tree
 f48d22cfe571647c0cd769765b8b98ffa951d374. That base is not merged yet.
 This separate worktree must not change the tree under canonical verification.
 
-Current verification base: constructor documentation correction
+Pre-merge verification base: constructor documentation correction
 b0ea74cb190a6415ebc26adacb503de07d7f77a9, tree
 06e8959ccaec210a9c765264ce5572240faf7588. Reconciliation preserves its corrected
 constructor wording and plan spacing alongside this slice's 22 unit tests and
