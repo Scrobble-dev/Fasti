@@ -218,9 +218,11 @@ export function createWebHost(
     baseUrl:
       typeof window === "undefined" ? defaultApiUrl : window.location.origin,
   });
-  const currentApplicationClient = () => (credential ? client : accessClient);
+  const usesScopedCredential = credential !== undefined;
+  const currentApplicationClient = () =>
+    usesScopedCredential ? client : accessClient;
 
-  const metadataHost: Partial<WorkbenchHost> = credential
+  const metadataHost: Partial<WorkbenchHost> = usesScopedCredential
     ? {
         async readMetadataProjection(
           recordId: string,
@@ -245,7 +247,7 @@ export function createWebHost(
 
   return {
     networkConfigurationScope: "client",
-    profileDataAuthority: credential ? "scoped" : "browser_session",
+    profileDataAuthority: usesScopedCredential ? "scoped" : "browser_session",
     startTrailBaseSignIn: (request) =>
       accessClient.startTrailBaseSignIn(request),
     readTrailBaseContinuation: (signal) =>

@@ -109,7 +109,7 @@ function jsonResponse(value) {
   });
 }
 
-async function exerciseHost(credential) {
+async function exerciseHost(credential, inspectHost) {
   const calls = [];
   const savedNetworkConfigurations = [];
   const restore = [
@@ -187,6 +187,7 @@ async function exerciseHost(credential) {
 
   try {
     const host = createWebHost(browserOrigin, credential);
+    if (inspectHost) return await inspectHost(host, calls);
     const records = await host.listRecords({ record_id: recordId });
     const created = await host.createRecord("film");
     const attached = await host.attachIdentifier(attachRequest);
@@ -332,6 +333,63 @@ test("credential Record and profile operations retain the configured service ori
     csrf: null,
   });
   assertProjections(result);
+});
+
+test("supplied invalid credentials never fall back to browser-session authority", async (context) => {
+  for (const [name, credential] of [
+    ["empty credential", ""],
+    ["empty provider result", async () => ""],
+    [
+      "rejected provider",
+      async () => {
+        throw new Error("synthetic credential failure");
+      },
+    ],
+  ]) {
+    await context.test(name, async (variant) => {
+      await exerciseHost(credential, async (host, calls) => {
+        await variant.test("retains explicit scoped authority", () => {
+          assert.equal(host.profileDataAuthority, "scoped");
+          for (const method of [
+            "readMetadataProjection",
+            "configureMetadataProjection",
+            "refreshMetadataClaims",
+          ])
+            assert.equal(typeof host[method], "function");
+        });
+        for (const [operation, invoke] of [
+          ["read Records", () => host.listRecords({ record_id: recordId })],
+          ["create Record", () => host.createRecord("film")],
+          ["attach identifier", () => host.attachIdentifier(attachRequest)],
+          [
+            "register namespace",
+            () => host.registerNamespace(namespaceRequest),
+          ],
+          ["read tracking", () => host.listTrackingDispositions()],
+          [
+            "write tracking",
+            () => host.setTrackingDisposition(recordId, "watching"),
+          ],
+          ["read Collections", () => host.getNuvioCollections()],
+          [
+            "replace Collections",
+            () => host.replaceNuvioCollections(nuvioDocument),
+          ],
+          ["clear Collections", () => host.clearNuvioCollections()],
+        ]) {
+          await variant.test(operation, async () => {
+            const before = calls.length;
+            await assert.rejects(invoke(), /Credential provider failed/);
+            assert.equal(
+              calls.length,
+              before,
+              "invalid credentials must fail before fetch",
+            );
+          });
+        }
+      });
+    });
+  }
 });
 
 test("browser-session mutations reject a missing CSRF cookie before fetch", async (context) => {
@@ -491,6 +549,7 @@ test("browser-session routing does not promote scoped provider or metadata opera
       const headers = new Headers(init.headers);
       calls.push({
         url: String(input),
+        method: init.method,
         credentials: init.credentials,
         authorization: headers.get("authorization"),
         csrf: headers.get("x-csrf-token"),
@@ -509,17 +568,47 @@ test("browser-session routing does not promote scoped provider or metadata opera
       public_url: null,
       outbound_policy: outboundPolicy,
     });
-    await assert.rejects(
-      host.saveProviderCredential("tmdb", "metadata.search", "fixture-secret"),
-    );
-    assert.deepEqual(calls, [
-      {
-        url: `${updatedServiceOrigin}/api/v1/providers/tmdb/credentials/metadata.search`,
-        credentials: "same-origin",
-        authorization: null,
-        csrf: null,
-      },
-    ]);
+    for (const [method, path, invoke] of [
+      [
+        "PUT",
+        "credentials/metadata.search",
+        () =>
+          host.saveProviderCredential(
+            "tmdb",
+            "metadata.search",
+            "fixture-secret",
+          ),
+      ],
+      [
+        "DELETE",
+        "credentials/metadata.search",
+        () => host.deleteProviderCredential("tmdb", "metadata.search"),
+      ],
+      [
+        "POST",
+        "credentials/metadata.search/tests",
+        () => host.testProviderCredential("tmdb", "metadata.search"),
+      ],
+      ["GET", "health", () => host.readProviderHealth("tmdb")],
+    ]) {
+      const before = calls.length;
+      await assert.rejects(invoke());
+      assert.ok(
+        calls.length > before,
+        `${method} must use the scoped service transport`,
+      );
+      if (method !== "GET")
+        assert.equal(calls.length - before, 1, "mutations must not retry");
+      for (const call of calls.slice(before)) {
+        assert.deepEqual(call, {
+          url: `${updatedServiceOrigin}/api/v1/providers/tmdb/${path}`,
+          method,
+          credentials: "same-origin",
+          authorization: null,
+          csrf: null,
+        });
+      }
+    }
   } finally {
     for (const restoreGlobal of restore.reverse()) restoreGlobal();
   }
