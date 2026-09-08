@@ -4669,3 +4669,48 @@ released; M4's final canonical, ordinary-browser and real-process gates run
 sequentially on the integrated source. Earlier passing receipts remain bound to
 their original commits until those new gates finish. The permanent tool
 exclusion remains unchanged.
+
+### 2026-09-08 — Close the bounded Access origin/proof findings
+
+Native Access review of clean 2231e919 identified two P2 boundary defects, not
+HTTP authorization bypasses. The incoming review is retained at
+`/home/ryan/code/fasti-access-c3-native-attribution/.gstack/reviews/m4-origin-sdk-2231-review.md`.
+
+The host used credential truthiness for application client selection, metadata
+method exposure and declared actor. An explicit empty string therefore selected
+browser-session authority instead of reaching the SDK's existing invalid-value
+rejection. Real host tests reproduced all nine Record/profile fallback paths
+with a valid browser CSRF cookie. One shared `credential !== undefined` decision
+now governs the three choices; no new credential validator or fallback exists.
+Commit `aafe2f2d550d125fdb75bb045c5e3558286752e8` contains only that host fix and
+its test leaf. All 49 focused JavaScript checks and web typecheck pass. The tests
+also cover empty/rejected credential providers and all four restricted provider
+operations, retaining exact-one-attempt writes. Current-diff review is CLEAR.
+
+The central application proof list omitted `ApplyAnimeGroupingPolicyChange`.
+Its HTTP handler already requires mutation proof, but a direct application/store
+caller could pass a valid read-only browser context with profile-write scope.
+The durable real-session regression reproduced a successful policy mutation
+where Forbidden was required. The test uses the existing browser-auth fixture,
+not a new setup abstraction. The one missing central policy entry now rejects
+both initial mutation and replay before policy/receipt writes. The regression
+compares exact persisted policy and receipt rows, then proves a genuine mutation
+proof succeeds. Both this test and the amended frozen-list test pass. Independent
+inspection found no second missing flag among the 16 current hybrid capabilities;
+Search's mixed operations retain their existing dedicated mutation checks.
+
+The durable RED ran on aafe2f2d with dirty test-only additions and the unchanged
+production matcher; its tool receipt records exit101, one failure at the first
+Forbidden assertion. The first application command accidentally filtered every
+test and is not evidence; the corrected lib command ran one test and failed.
+Logs: `/tmp/fasti-m4-proof-policy-red-confirmed-sep8.log`,
+`/tmp/fasti-web-host-invalid-credential-red-final.log`,
+`/tmp/fasti-m4-proof-policy-green-sep8.log`,
+`/tmp/fasti-m4-durable-proof-green-sep8.log`, and
+`/tmp/fasti-m4-invalid-credential-green-sep8.log`.
+
+Fresh combined review and exact-head gates precede normal PR128 publication.
+The earlier 2231e919 canonical/211-browser/runtime results remain valid for that
+head only. These repairs change no schema, archive, public wire type, dependency
+or capability ID. M4 retains schema17/archive7 and shared-file ownership; no
+migration18 is allocated and all remaining M4/programme scope stays active.

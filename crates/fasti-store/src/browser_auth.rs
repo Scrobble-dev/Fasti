@@ -1064,6 +1064,7 @@ mod tests {
     use chrono::TimeZone;
     use fasti_application::SecretMaterial;
     use fasti_domain::{ClientId, ProfileId, TrailBaseInstanceId};
+    use rusqlite::types::Value;
 
     struct Fixture {
         _root: tempfile::TempDir,
@@ -1275,6 +1276,126 @@ mod tests {
             )
             .expect("session authentication");
         created
+    }
+
+    fn anime_policy_state(fixture: &Fixture) -> (Vec<Vec<Value>>, Vec<Vec<Value>>) {
+        let connection = fixture.kernel.inner.connection.lock().expect("connection");
+        let rows = |sql: &str| {
+            let mut statement = connection.prepare(sql).expect("policy state query");
+            let columns = statement.column_count();
+            statement
+                .query_map([], |row| {
+                    (0..columns).map(|column| row.get(column)).collect()
+                })
+                .expect("policy state rows")
+                .collect::<rusqlite::Result<Vec<Vec<Value>>>>()
+                .expect("collect policy state")
+        };
+        (
+            rows("SELECT * FROM profile_anime_grouping_policies ORDER BY workspace_id, profile_id"),
+            rows("SELECT * FROM anime_grouping_policy_receipts ORDER BY workspace_id, profile_id, operation_id"),
+        )
+    }
+
+    #[test]
+    fn anime_grouping_policy_change_requires_browser_mutation_proof_before_replay() {
+        use fasti_application::{
+            AnimeGroupingPolicyChange, AnimeGroupingPolicyScope,
+            ApplyAnimeGroupingPolicyChangeCommand, BrowserRequestBoundaryPolicy,
+            BrowserSessionAccessContext, BrowserSessionQuery, IdentityRoutingPort,
+        };
+        use fasti_domain::{
+            AnimeGroupingPreference, OperationId, RequestCorrelationId, Sha256Digest,
+        };
+
+        let mut fixture = fixture();
+        fixture.created_at = crate::kernel::now() - ChronoDuration::seconds(15);
+        fixture
+            .kernel
+            .inner
+            .connection
+            .lock()
+            .expect("connection")
+            .execute(
+                "INSERT INTO grant_scopes(grant_id, scope_key) VALUES (?1, 'profile_state_write')",
+                [fixture.grants[0].to_string()],
+            )
+            .expect("profile-state write scope");
+        let session = create_session(&fixture, &fixture.grants[..1], fixture.grants[0], 0);
+        let boundary =
+            BrowserRequestBoundaryPolicy::try_new("https://fasti.example", "fasti.example")
+                .expect("browser boundary");
+        let read_access = || {
+            BrowserSessionAccessContext::read(
+                BrowserSessionQuery::new(
+                    RequestCorrelationId::new_v7(),
+                    secret_copy(session.session_secret()),
+                    crate::kernel::now(),
+                ),
+                boundary
+                    .validate_read(Some("fasti.example"))
+                    .expect("read boundary"),
+            )
+        };
+        let command = |access, operation_id, digest| {
+            ApplyAnimeGroupingPolicyChangeCommand::try_new(
+                RequestCorrelationId::new_v7(),
+                access,
+                AnimeGroupingPolicyScope::Profile,
+                operation_id,
+                digest,
+                0,
+                AnimeGroupingPolicyChange::Set(AnimeGroupingPreference::KeepMalReleasesSeparate),
+            )
+            .expect("anime grouping policy command")
+        };
+
+        let initial = anime_policy_state(&fixture);
+        assert_problem(
+            fixture
+                .kernel
+                .authorize_and_apply_anime_grouping_policy_change(command(
+                    read_access(),
+                    OperationId::new_v7(),
+                    Sha256Digest::from_bytes(&[90; 32]),
+                )),
+            ProblemCode::Forbidden,
+        );
+        assert_eq!(anime_policy_state(&fixture), initial);
+
+        let operation_id = OperationId::new_v7();
+        let semantic_digest = Sha256Digest::from_bytes(&[91; 32]);
+        let applied = fixture
+            .kernel
+            .authorize_and_apply_anime_grouping_policy_change(command(
+                BrowserSessionAccessContext::mutation(mutation_command(
+                    RequestCorrelationId::new_v7(),
+                    secret_copy(session.session_secret()),
+                    secret_copy(session.csrf_secret()),
+                    crate::kernel::now(),
+                )),
+                operation_id,
+                semantic_digest.clone(),
+            ))
+            .expect("mutation proof applies anime grouping policy");
+        assert_eq!(applied.policy().revision(), 1);
+        assert_eq!(
+            applied.policy().preference(),
+            AnimeGroupingPreference::KeepMalReleasesSeparate
+        );
+        let applied_state = anime_policy_state(&fixture);
+
+        assert_problem(
+            fixture
+                .kernel
+                .authorize_and_apply_anime_grouping_policy_change(command(
+                    read_access(),
+                    operation_id,
+                    semantic_digest,
+                )),
+            ProblemCode::Forbidden,
+        );
+        assert_eq!(anime_policy_state(&fixture), applied_state);
     }
 
     #[test]
