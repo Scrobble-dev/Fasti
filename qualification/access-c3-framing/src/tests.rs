@@ -607,6 +607,41 @@ impl Write for FaultSink {
     }
 }
 #[test]
+fn constructor_prefix_failure_preserves_error_releases_sink_and_borrows_key() {
+    let key = key();
+    let policy = limits(64);
+    let prefix = prefix_len(&encrypt(b"fixture", &key, BACKUP, policy));
+    for fail_after in [0, prefix - 1] {
+        let bytes = Rc::new(RefCell::new(Vec::new()));
+        let failure = Rc::new(Cell::new(false));
+        let sink = FaultSink {
+            bytes: bytes.clone(),
+            fail_after,
+            flush_error: failure.clone(),
+        };
+        let error = match FrameWriter::new(sink, &key, BACKUP, policy) {
+            Ok(_) => panic!("constructor returned a writer after prefix failure"),
+            Err(error) => error,
+        };
+        assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
+        assert_eq!(error.to_string(), "injected sink error");
+        assert_eq!(bytes.borrow().len(), fail_after);
+        assert_eq!(Rc::strong_count(&bytes), 1);
+        assert_eq!(Rc::strong_count(&failure), 1);
+        assert_eq!(
+            decrypt(
+                &encrypt(b"fixture", &key, BACKUP, policy),
+                &key,
+                BACKUP,
+                policy
+            )
+            .unwrap(),
+            b"fixture"
+        );
+    }
+}
+
+#[test]
 fn partial_sink_error_poison_preserves_error_and_never_reseals() {
     let key = key();
     let bytes = Rc::new(RefCell::new(Vec::new()));

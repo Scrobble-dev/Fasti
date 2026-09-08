@@ -23,7 +23,7 @@ CC=/usr/bin/cc cargo +1.97.1 clippy --offline --locked --manifest-path qualifica
 )
 ```
 
-Each full debug/release run must report **20 passed unit tests and two passed
+Each full debug/release run must report **21 passed unit tests and two passed
 compile-fail doctests**, with zero failed, ignored or filtered tests. Do not
 pass a test-name filter. Expected compiler errors in the two doctests prove
 that the opaque key cannot be formatted with Debug or cloned.
@@ -77,6 +77,10 @@ policy allowances or advisory suppression to obtain a pass.
 - Short/interrupted I/O preserves identity; partial output and source errors
   poison the owner; unfinished Drop never finalizes; terminal state cannot
   advance; rejected readers release state/plaintext before caller Drop.
+- Constructor prefix-write failures before the first byte and one byte before
+  completion preserve the injected error and exact partial length, return no
+  writer and release sink ownership. The borrowed key remains usable for a
+  successful round trip. This does not prove physical erasure or native-error cleanup.
 - Runtime native identity is libsodium 1.0.22, ABI 26/4, nonminimal.
 
 The test-only native fixture produces valid authenticated unsupported tags.
