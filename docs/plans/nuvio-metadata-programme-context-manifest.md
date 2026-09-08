@@ -5579,3 +5579,69 @@ The Kitsu implementation and verification record are committed locally at
 commit. Access received the terminal resource-slot release with that exact
 identity. This final checkpoint annotation changes documentation only; no
 verification receipt is relabeled and no source ownership is released.
+
+### M4 typed Kitsu continuation and upstream-tail correction — 2026-09-08
+
+Continuation resumed from `9bd052deb32c392f4809282e1b18243d6a05826b`, preserving
+the committed Manga implementation and the four existing dirty preparation
+files. The preceding acknowledgement-only turn made no programme progress;
+this turn revalidated the actual worktree and resumed implementation.
+Ponytail reuses the existing GET, identity, candidate and response-policy owners.
+Codex Security remains permanently excluded, including every delegated lane.
+
+Root owns all production edits. Wegener owns only bounded Kitsu test leaves;
+Parfit independently reviewed the diff and replay path; Epicurus inspected
+official REST pagination and made six anonymous read-only probes. No agent
+owns migration, registry, generated contracts, SDK, host or Workbench writes.
+
+The dirty slice adds typed Anime Release identity/details/artwork, mixed
+single-response continuation, Kitsu-specific cache partition revision, both-route
+health validation and the legacy picker’s first-page-per-kind preservation.
+Review caught the legacy picker omission before delivery. Its all-or-error
+semantics remain explicit; new paged Search retains independent response state.
+Committed Manga action replay remains ahead of cache lookup. No migration18,
+archive version change, source release, push, merge or rebase occurred.
+
+Pinned REST inspection and live probes showed repeated first pages at offsets
+0/10 with advancing next links. GraphQL was rejected as the replacement because
+its pinned service slices a first-hit array instead of advancing the backend.
+The REST correction never skips offsets or guesses the deployed backend:
+a full raw no-link response needs one following-page observation. Invalid links
+still fail; partial/empty no-link pages stop. Per-response limits and evidence
+remain unchanged. The independent review found no blocker in this fallback.
+
+The governed opt-in traversal is terminal exit0 in
+`/tmp/fasti-m4-kitsu-anime-live-tails-sep8.log`: 11 HTTP response pages,
+100 rows, 37 unique Anime plus 43 unique Manga IDs, zero vault loads.
+This is one observed query, not a universal upstream, packaged or programme
+completion claim. Focused tests passed before broader verification, which
+must be recorded separately at its actual terminal state.
+
+Access released actual terminal handles1483/38493; root then claimed the local
+build/browser resource slot. Its material PR135 merged handoff is dev
+`416843b40f6112e8498e9da976d48041b54886d5`, tree
+`06e8959ccaec210a9c765264ce5572240faf7588`. This identity is reported by Access;
+M4 has not rebased or independently fetched/verified that tree yet. Existing
+schema17/archive7 shared ownership remains with root. Historical receipts are
+not relabeled. Full M4 and the remaining M programme remain active.
+
+Verification update: the first five-package run retained four snapshot failures
+in `/tmp/fasti-m4-kitsu-anime-rust-final-sep8.log`, including SQLite
+`CannotOpen` extended1550 through the host's symlinked temporary path. No
+product guard or test assertion was weakened. The documented `TMPDIR=/tmp`
+rerun is terminal exit0 in
+`/tmp/fasti-m4-kitsu-anime-rust-physical-temp-sep8.log`: API112+7,
+application180+30, contracts37, runtime132, store503+3 (1,004 passes).
+Existing store unit/doctest and explicit network opt-in ignores remain visible.
+The runtime set includes full-invalid-page continuation, repeated-first-page
+tail traversal and correct-backend full-page-to-empty fixtures. Strict
+all-target Clippy for the same five packages is terminal exit0 in
+`/tmp/fasti-m4-kitsu-anime-clippy-sep8.log`. The changed Desktop artwork test
+is terminal exit0 in `/tmp/fasti-m4-kitsu-anime-desktop-sep8.log`; its compilation
+does not prove the whole Desktop suite or packaged UI. Client verification is
+terminal exit0 in `/tmp/fasti-m4-kitsu-anime-js-sep8.log`: the client build,
+contract/OKF/UI/workspace checks and445 JS tests passed, with two existing skips.
+All M4 process handles are now terminal; the local resource slot returns to
+Access for its requested EOF gate. No new browser, canonical PR, whole Desktop,
+accessibility, performance or release receipt is claimed. M4 source ownership
+does not change. This is a local verified increment, not M4 completion or merge.

@@ -309,20 +309,21 @@ const OPEN_LIBRARY_SPEC: ProviderSpec = unavailable_provider(
 );
 const KITSU_SPEC: ProviderSpec = ProviderSpec {
     provider: KITSU_PROVIDER,
-    label: "Kitsu (Manga)",
+    label: "Kitsu (Anime and Manga)",
     kind: ProviderKind::Metadata,
     environment: "",
     account: "",
     docs_url: "https://kitsu.docs.apiary.io",
     attribution: "Metadata from Kitsu",
-    media_grains: &["work"],
+    media_grains: &["release", "work"],
     capabilities: KITSU_CAPABILITIES,
     network_hosts: &["kitsu.io"],
-    identity_namespaces: &["kitsu.manga"],
+    identity_namespaces: &["kitsu.anime", "kitsu.manga"],
     locale_support: "provider_default",
     region_support: "not_supported",
     rate_limit_policy: "respect_provider_responses",
-    cache_policy: PUBLIC_METADATA_CACHE_POLICY,
+    // Manga-only page coordinates must never be read as mixed-source tokens.
+    cache_policy: "fasti.kitsu-mixed-metadata-cache.v2",
     offline_behavior: "cached_reads_subject_to_response_policy",
     licence_and_terms: "operator_review_required_before_activation",
     request_limits: REQUEST_LIMITS,
@@ -753,10 +754,17 @@ impl ProviderRuntime {
         policy: &OutboundAccessPolicy,
         state: &ProviderCapabilityState,
     ) -> Result<Vec<ProviderCandidate>, ProviderRuntimeError> {
-        Ok(self
-            .search_page(input, 1, None, policy, state)
-            .await?
-            .candidates)
+        let first = self
+            .search_page(input.clone(), 1, None, policy, state)
+            .await?;
+        let mut candidates = first.candidates;
+        if input.provider == KITSU_PROVIDER {
+            // The legacy detail picker has no continuation field. Include the
+            // first Manga page too; each candidate retains its own response evidence.
+            let manga = self.search_page(input, 2, None, policy, state).await?;
+            candidates.extend(manga.candidates);
+        }
+        Ok(candidates)
     }
 
     pub async fn search_page(
@@ -784,7 +792,17 @@ impl ProviderRuntime {
         match input.provider.as_str() {
             GOOGLE_BOOKS_PROVIDER => parse_google_candidates(&response.body, page),
             TMDB_PROVIDER => parse_tmdb_candidates(&response.body, page),
-            KITSU_PROVIDER => parse_kitsu_candidates(&response.body, page, &query),
+            KITSU_PROVIDER => {
+                let continuation = kitsu::Continuation::decode(page)?;
+                let mut parsed = parse_kitsu_candidates(
+                    &response.body,
+                    continuation.source_page(),
+                    &query,
+                    continuation.kind(),
+                )?;
+                parsed.next_page = continuation.advance(parsed.next_page.is_some())?;
+                Ok(parsed)
+            }
             _ => Err(unsupported_provider()),
         }
         .map(|page| page.with_response_cache_policy(response.cache_policy))
@@ -828,7 +846,7 @@ impl ProviderRuntime {
                 .await
             }
             KITSU_PROVIDER => {
-                self.fetch_kitsu_manga(&input.provider_id, policy, state)
+                self.fetch_kitsu_media(&input.provider_id, mapping.kind(), policy, state)
                     .await
             }
             _ => Err(unsupported_provider()),
@@ -884,7 +902,15 @@ impl ProviderRuntime {
         let request = credential_request(provider, &client, url, credential.as_ref())?;
         let response = send_json(request, spec).await?;
         if provider == KITSU_PROVIDER {
-            return kitsu::validate_health_response(&response.body);
+            kitsu::validate_health_response(&response.body, "manga")?;
+            let mut anime_url = kitsu::media_url("anime")?;
+            anime_url.query_pairs_mut().append_pair("page[limit]", "1");
+            let response = send_json(
+                credential_request(provider, &client, anime_url, credential.as_ref())?,
+                spec,
+            )
+            .await?;
+            return kitsu::validate_health_response(&response.body, "anime");
         }
         serde_json::from_slice::<serde_json::Value>(&response.body)
             .map(|_| ())
@@ -893,14 +919,15 @@ impl ProviderRuntime {
             })
     }
 
-    async fn fetch_kitsu_manga(
+    async fn fetch_kitsu_media(
         &self,
         provider_id: &str,
+        kind: &'static str,
         policy: &OutboundAccessPolicy,
         state: &ProviderCapabilityState,
     ) -> Result<ProviderCandidate, ProviderRuntimeError> {
         let (access, endpoint) = endpoint(KITSU_PROVIDER, READ_CAPABILITY)?;
-        let mut url = endpoint.clone();
+        let mut url = kitsu::media_url(kind)?;
         url.path_segments_mut()
             .map_err(|_| unsupported_provider())?
             .push(provider_id);
@@ -913,7 +940,7 @@ impl ProviderRuntime {
             KITSU_SPEC,
         )
         .await?;
-        parse_kitsu_selection(&response.body, provider_id)
+        parse_kitsu_selection(&response.body, provider_id, kind)
             .map(|candidate| candidate.with_response_cache_policy(response.cache_policy))
     }
 
@@ -1335,13 +1362,12 @@ fn search_url(
     let (_, mut url) = endpoint(provider, SEARCH_CAPABILITY)?;
     match provider {
         KITSU_PROVIDER => {
-            let start = offset
-                .checked_mul(RESULT_LIMIT as u32)
-                .ok_or_else(invalid_page)?;
-            url.query_pairs_mut()
-                .append_pair("filter[text]", query.as_str())
-                .append_pair("page[limit]", &RESULT_LIMIT.to_string())
-                .append_pair("page[offset]", &start.to_string());
+            let continuation = kitsu::Continuation::decode(page)?;
+            return kitsu::source_search_url(
+                query,
+                continuation.source_page(),
+                continuation.kind(),
+            );
         }
         GOOGLE_BOOKS_PROVIDER => {
             let start = offset
@@ -1583,6 +1609,7 @@ mod tests {
     include!("provider_cache_transport_tests.rs");
     include!("google_print_type_tests.rs");
     include!("kitsu_tests.rs");
+    include!("kitsu_continuation_tests.rs");
     use fasti_application::{
         ConfigurationDigest, ProblemCode, ProviderCapabilityId, ProviderCheckMetadata, ProviderId,
     };
@@ -2083,7 +2110,9 @@ mod tests {
         for entry in registry() {
             assert_eq!(
                 entry.cache_policy,
-                if entry.runtime_available {
+                if entry.provider == KITSU_PROVIDER {
+                    "fasti.kitsu-mixed-metadata-cache.v2"
+                } else if entry.runtime_available {
                     PUBLIC_METADATA_CACHE_POLICY
                 } else {
                     "no_runtime_cache"

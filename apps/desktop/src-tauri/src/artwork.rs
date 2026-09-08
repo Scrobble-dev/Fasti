@@ -633,7 +633,7 @@ fn artwork_target(provider: &str, value: &str) -> Result<ArtworkTarget, DesktopP
         GOOGLE_BOOKS_PROVIDER if parsed_host == GOOGLE_IMAGE_HOSTS[1] => GOOGLE_ARTWORK_ACCESS,
         KITSU_PROVIDER
             if parsed_host == "media.kitsu.app"
-                && url.path().starts_with("/manga/")
+                && (url.path().starts_with("/manga/") || url.path().starts_with("/anime/"))
                 && url.query().is_none() =>
         {
             KITSU_ARTWORK_ACCESS
@@ -920,10 +920,15 @@ mod tests {
             "https://media.kitsu.app/manga/8/poster_image/small.jpeg"
         )
         .is_ok());
+        assert!(artwork_target(
+            KITSU_PROVIDER,
+            "https://media.kitsu.app/anime/8/poster_image/small.jpeg"
+        )
+        .is_ok());
         for (provider, url) in [
             (
                 KITSU_PROVIDER,
-                "https://media.kitsu.app/anime/8/poster.jpeg",
+                "https://media.kitsu.app/drama/8/poster.jpeg",
             ),
             (
                 KITSU_PROVIDER,
@@ -935,7 +940,7 @@ mod tests {
             ),
             (
                 KITSU_PROVIDER,
-                "https://media.kitsu.app/manga/../anime/8/poster.jpeg",
+                "https://media.kitsu.app/manga/../drama/8/poster.jpeg",
             ),
             (
                 KITSU_PROVIDER,

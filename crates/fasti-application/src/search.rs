@@ -200,6 +200,7 @@ fn search_digest(value: &impl Serialize) -> Sha256Digest {
 pub struct SearchProviderQuery {
     query: SearchQuery,
     provider: ProviderId,
+    // Provider-specific continuation coordinate, not necessarily an upstream ordinal.
     page: u32,
     locale: Option<MetadataLocale>,
     region: Option<MetadataRegion>,
@@ -1020,7 +1021,10 @@ pub fn valid_search_candidate_image(provider: &str, value: &str) -> bool {
             "https://books.google.com/",
             "https://books.googleusercontent.com/",
         ],
-        "kitsu" => &["https://media.kitsu.app/manga/"],
+        "kitsu" => &[
+            "https://media.kitsu.app/manga/",
+            "https://media.kitsu.app/anime/",
+        ],
         _ => return false,
     };
     prefixes.iter().any(|prefix| value.starts_with(prefix))

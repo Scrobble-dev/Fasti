@@ -22,6 +22,19 @@ mod kitsu_tests {
             provider: KITSU_PROVIDER.to_owned(),
             query: "berserk".to_owned(),
         };
+        let picker = runtime
+            .search(
+                query.clone(),
+                &OutboundAccessPolicy::default(),
+                &state(SEARCH_CAPABILITY),
+            )
+            .await
+            .unwrap();
+        assert!(picker.iter().any(|candidate| candidate.kind == "anime"));
+        assert!(picker.iter().any(|candidate| candidate.kind == "manga"));
+        assert!(picker
+            .iter()
+            .all(|candidate| candidate.response_cache_policy().is_some()));
         let page = runtime
             .search_page(
                 query.clone(),
@@ -41,7 +54,7 @@ mod kitsu_tests {
                 ProviderSelectionInput {
                     provider: KITSU_PROVIDER.to_owned(),
                     provider_id: first.provider_id.clone(),
-                    kind: "manga".to_owned(),
+                    kind: first.kind.to_owned(),
                     locale: None,
                     region: None,
                 },
@@ -51,7 +64,10 @@ mod kitsu_tests {
             .await
             .unwrap();
         assert_eq!(selected.identifier().unwrap(), first.identifier().unwrap());
-        assert!(selected.kitsu_manga_subtype.is_some());
+        assert_eq!(
+            selected.kitsu_manga_subtype.is_some(),
+            selected.kind == "manga"
+        );
         assert!(selected.response_cache_policy().is_some());
         if let Some(next) = page.next_page {
             let next_page = runtime
@@ -75,17 +91,21 @@ mod kitsu_tests {
 
     #[test]
     fn kitsu_health_requires_a_bounded_typed_resource_response() {
-        assert!(kitsu::validate_health_response(&body(vec![], None)).is_ok());
-        assert!(kitsu::validate_health_response(&body(vec![manga(None)], None)).is_ok());
+        assert!(kitsu::validate_health_response(&body(vec![], None), "manga").is_ok());
+        assert!(kitsu::validate_health_response(&body(vec![manga(None)], None), "manga").is_ok());
         let mut wrong_type = manga(None);
         wrong_type["type"] = json!("anime");
+        assert!(
+            kitsu::validate_health_response(&body(vec![wrong_type.clone()], None), "anime").is_ok()
+        );
+        assert!(kitsu::validate_health_response(&body(vec![manga(None)], None), "anime").is_err());
         for invalid in [
             b"{}".to_vec(),
             br#"{"errors":[{"status":"503"}]}"#.to_vec(),
             body(vec![wrong_type], None),
             body(vec![manga(None), manga(None)], None),
         ] {
-            assert!(kitsu::validate_health_response(&invalid).is_err());
+            assert!(kitsu::validate_health_response(&invalid, "manga").is_err());
         }
     }
 
@@ -100,10 +120,12 @@ mod kitsu_tests {
             let mut resource = manga(None);
             resource["attributes"]["description"] = description;
             let search =
-                parse_kitsu_candidates(&body(vec![resource.clone()], None), 1, &query()).unwrap();
+                parse_kitsu_candidates(&body(vec![resource.clone()], None), 1, &query(), "manga")
+                    .unwrap();
             let details = parse_kitsu_selection(
                 &serde_json::to_vec(&json!({"data": resource})).unwrap(),
                 "42",
+                "manga",
             )
             .unwrap();
             assert_eq!(search.candidates[0].overview.as_deref(), Some(expected));
@@ -133,14 +155,106 @@ mod kitsu_tests {
         serde_json::to_vec(&json!({"data": resources, "links": {"next": next}})).unwrap()
     }
 
+    #[test]
+    fn kitsu_full_body_without_next_requires_an_exhaustion_observation() {
+        for kind in ["anime", "manga"] {
+            let resources: Vec<_> = (1..=10)
+                .map(|id| {
+                    let mut item = manga(None);
+                    item["id"] = json!(id.to_string());
+                    item["type"] = json!(kind);
+                    item
+                })
+                .collect();
+            let raw = body(resources.clone(), None);
+            let page = parse_kitsu_candidates(&raw, 4, &query(), kind).unwrap();
+            assert_eq!(page.next_page, Some(5));
+            assert_eq!(page.evidence_digest, provider_evidence_digest(&raw));
+            assert_eq!(
+                parse_kitsu_candidates(&body(vec![], None), 5, &query(), kind)
+                    .unwrap()
+                    .next_page,
+                None
+            );
+            assert_eq!(
+                parse_kitsu_candidates(&body(resources[..7].to_vec(), None), 5, &query(), kind)
+                    .unwrap()
+                    .next_page,
+                None
+            );
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "explicit public Kitsu complete-tail observation; no credentials"]
+    async fn kitsu_live_mixed_search_observes_both_source_tails() {
+        let vault = Arc::new(CountingVault::default());
+        let runtime = ProviderRuntime::new(vault.clone());
+        let state = credential_free_state(
+            KITSU_PROVIDER,
+            SEARCH_CAPABILITY,
+            runtime
+                .configuration_digest(KITSU_PROVIDER, SEARCH_CAPABILITY)
+                .unwrap()
+                .as_str(),
+        );
+        let mut token = Some(1);
+        let mut pages = 0;
+        let mut identities = BTreeSet::new();
+        let mut rows = 0;
+        while let Some(current) = token {
+            assert!(pages < 16, "bounded live probe did not reach exhaustion");
+            let page = runtime
+                .search_page(
+                    ProviderSearchInput {
+                        provider: KITSU_PROVIDER.into(),
+                        query: "naruto".into(),
+                    },
+                    current,
+                    None,
+                    &OutboundAccessPolicy::default(),
+                    &state,
+                )
+                .await
+                .unwrap();
+            for candidate in &page.candidates {
+                assert!(candidate.response_cache_policy().is_some());
+                identities.insert((candidate.kind, candidate.provider_id.clone()));
+            }
+            rows += page.candidates.len();
+            pages += 1;
+            token = page.next_page;
+            eprintln!(
+                "Kitsu token={current} rows={} next={token:?}",
+                page.candidates.len()
+            );
+        }
+        for kind in ["anime", "manga"] {
+            let count = identities
+                .iter()
+                .filter(|(resource, _)| *resource == kind)
+                .count();
+            assert!(
+                count > 20,
+                "probe must traverse beyond the initial hit window"
+            );
+            eprintln!("Kitsu {kind} unique={count}");
+        }
+        eprintln!(
+            "Kitsu pages={pages} rows={rows} unique={}",
+            identities.len()
+        );
+        assert_eq!(vault.loads.load(Ordering::Relaxed), 0);
+    }
+
     fn assert_subtype(subtype: Option<Value>, expected: KitsuMangaSubtype) {
         let resource = manga(subtype);
         let search_body = body(vec![resource.clone()], None);
-        let page = parse_kitsu_candidates(&search_body, 1, &query()).unwrap();
+        let page = parse_kitsu_candidates(&search_body, 1, &query(), "manga").unwrap();
         assert_eq!(page.candidates.len(), 1);
         assert_eq!(page.next_page, None);
         let detail_body = serde_json::to_vec(&json!({"data": resource})).unwrap();
-        let detail = parse_kitsu_selection(&detail_body, "42").unwrap();
+        let detail = parse_kitsu_selection(&detail_body, "42", "manga").unwrap();
         for (candidate, raw) in [
             (&page.candidates[0], search_body.as_slice()),
             (&detail, detail_body.as_slice()),
@@ -221,12 +335,92 @@ mod kitsu_tests {
     }
 
     #[test]
+    fn kitsu_anime_search_and_details_keep_typed_identity_without_manga_native_facts() {
+        let mut resource = manga(Some(json!("manga")));
+        resource["type"] = json!("anime");
+        resource["attributes"]["canonicalTitle"] = json!("An Anime");
+        let next = kitsu::source_search_url(&query(), 2, "anime").unwrap();
+        let search_body = body(vec![resource.clone()], Some(next.to_string()));
+        let policy = crate::cache_policy::observe(
+            &reqwest::header::HeaderMap::new(),
+            chrono::Utc::now(),
+            std::time::Duration::ZERO,
+        );
+        let page = parse_kitsu_candidates(&search_body, 1, &query(), "anime")
+            .unwrap()
+            .with_response_cache_policy(policy);
+        assert_eq!(page.candidates.len(), 1);
+        assert_eq!(
+            page.next_page,
+            Some(2),
+            "parser returns the raw source page"
+        );
+        assert_eq!(page.evidence_digest, provider_evidence_digest(&search_body));
+        let detail_body = serde_json::to_vec(&json!({"data": resource})).unwrap();
+        let detail = parse_kitsu_selection(&detail_body, "42", "anime")
+            .unwrap()
+            .with_response_cache_policy(policy);
+        assert_eq!(
+            page.candidates[0].identifier().unwrap(),
+            detail.identifier().unwrap()
+        );
+        for (candidate, raw) in [
+            (&page.candidates[0], search_body.as_slice()),
+            (&detail, detail_body.as_slice()),
+        ] {
+            assert_eq!(candidate.provider, "kitsu");
+            assert_eq!(candidate.kind, "anime");
+            assert_eq!(candidate.provider_id, "42");
+            assert_eq!(candidate.title, "An Anime");
+            assert_eq!(candidate.grain().unwrap(), fasti_domain::Grain::Release);
+            assert_eq!(candidate.identifier().unwrap().namespace(), "kitsu.anime");
+            assert_eq!(candidate.evidence_digest, provider_evidence_digest(raw));
+            assert_eq!(candidate.kitsu_manga_subtype, None);
+            assert_eq!(
+                candidate
+                    .search_evidence()
+                    .unwrap()
+                    .data()
+                    .kitsu_manga_subtype,
+                None
+            );
+            let fields = candidate.metadata_fields(None, None).unwrap();
+            assert!(!fields.is_empty(), "ordinary metadata remains available");
+            assert!(
+                fields.iter().all(|field| {
+                    field.field_key().as_str() != fasti_application::KITSU_MANGA_SUBTYPE_FIELD_KEY
+                }),
+                "a manga-like subtype on an Anime resource is not Manga evidence"
+            );
+        }
+        for (requested_id, requested_kind) in [("43", "anime"), ("42", "manga")] {
+            assert_eq!(
+                parse_kitsu_selection(&detail_body, requested_id, requested_kind)
+                    .unwrap_err()
+                    .problem_code(),
+                ProblemCode::ProviderResponseInvalid
+            );
+        }
+        let manga_body = serde_json::to_vec(&json!({"data": manga(None)})).unwrap();
+        assert!(parse_kitsu_selection(&manga_body, "42", "anime").is_err());
+        let wrong_source = body(vec![manga(None)], Some(next.to_string()));
+        let filtered = parse_kitsu_candidates(&wrong_source, 1, &query(), "anime").unwrap();
+        assert!(filtered.candidates.is_empty());
+        assert_eq!(filtered.next_page, Some(2));
+    }
+
+    #[test]
     fn kitsu_search_urls_bind_encoded_query_and_bounded_offsets() {
-        for (page, offset) in [(1, "0"), (2, "10"), (3, "20")] {
+        for (page, kind, offset) in [
+            (1, "anime", "0"),
+            (2, "manga", "0"),
+            (5, "anime", "10"),
+            (8, "manga", "10"),
+        ] {
             let url = search_url("kitsu", &query(), page, None).unwrap();
             assert_eq!(url.scheme(), "https");
             assert_eq!(url.host_str(), Some("kitsu.io"));
-            assert_eq!(url.path(), "/api/edge/manga");
+            assert_eq!(url.path(), format!("/api/edge/{kind}"));
             assert_eq!(url.username(), "");
             assert!(url.password().is_none());
             assert!(url.fragment().is_none());
@@ -248,7 +442,7 @@ mod kitsu_tests {
         let resource = manga(Some(json!("manga")));
         let duplicate = body(vec![resource.clone(), resource.clone()], None);
         assert_eq!(
-            parse_kitsu_candidates(&duplicate, 1, &query())
+            parse_kitsu_candidates(&duplicate, 1, &query(), "manga")
                 .unwrap_err()
                 .problem_code(),
             ProblemCode::ProviderResponseInvalid
@@ -259,13 +453,14 @@ mod kitsu_tests {
             &body(vec![anime.clone(), resource.clone()], None),
             1,
             &query(),
+            "manga",
         )
         .unwrap();
         assert_eq!(page.candidates.len(), 1);
         for (resource, requested_id) in [(anime, "42"), (resource, "43")] {
             let detail = serde_json::to_vec(&json!({"data": resource})).unwrap();
             assert_eq!(
-                parse_kitsu_selection(&detail, requested_id)
+                parse_kitsu_selection(&detail, requested_id, "manga")
                     .unwrap_err()
                     .problem_code(),
                 ProblemCode::ProviderResponseInvalid
@@ -284,32 +479,119 @@ mod kitsu_tests {
         let mut missing_title = manga(Some(json!("manga")));
         missing_title["attributes"] = json!({"subtype": "manga"});
         resources.push(missing_title);
-        let next = search_url("kitsu", &query(), 2, None).unwrap().to_string();
+        let next = kitsu::source_search_url(&query(), 2, "manga")
+            .unwrap()
+            .to_string();
         let raw = body(resources, Some(next));
-        let page = parse_kitsu_candidates(&raw, 1, &query()).unwrap();
+        let page = parse_kitsu_candidates(&raw, 1, &query(), "manga").unwrap();
         assert!(page.candidates.is_empty());
         assert_eq!(page.next_page, Some(2));
         assert_eq!(page.evidence_digest, provider_evidence_digest(&raw));
     }
 
     #[test]
+    fn kitsu_full_raw_page_without_link_continues_even_when_every_candidate_is_filtered() {
+        let resources = (1..=10)
+            .map(|id| {
+                let mut resource = manga(None);
+                resource["id"] = json!(id.to_string());
+                resource["attributes"] = json!({"subtype": "manga"});
+                resource
+            })
+            .collect::<Vec<_>>();
+        let raw = body(resources.clone(), None);
+        let page = parse_kitsu_candidates(&raw, 1, &query(), "manga").unwrap();
+        assert!(page.candidates.is_empty());
+        assert_eq!(page.next_page, Some(2));
+        assert_eq!(page.evidence_digest, provider_evidence_digest(&raw));
+        let partial = body(resources.into_iter().take(9).collect(), None);
+        let page = parse_kitsu_candidates(&partial, 2, &query(), "manga").unwrap();
+        assert!(page.candidates.is_empty());
+        assert_eq!(page.next_page, None, "a partial unlinked body terminates");
+    }
+
+    #[test]
+    fn kitsu_source_continuation_drains_repeated_first_page_and_unlinked_tail() {
+        for (source_pages, expected_additions, expected_last_id) in [
+            (
+                vec![
+                    (1..=10).collect::<Vec<_>>(),
+                    (1..=10).collect(),
+                    (11..=20).collect(),
+                    (21..=23).collect(),
+                ],
+                vec![10, 0, 10, 3],
+                23,
+            ),
+            (
+                vec![(1..=10).collect(), (11..=20).collect(), Vec::new()],
+                vec![10, 10, 0],
+                20,
+            ),
+        ] {
+            let mut next = Some(1);
+            let mut visited = Vec::new();
+            let mut discovered = std::collections::BTreeSet::new();
+            let mut additions = Vec::new();
+            while let Some(source_page) = next {
+                assert!(
+                    visited.len() < source_pages.len(),
+                    "source traversal must terminate"
+                );
+                let ids = source_pages
+                    .get((source_page - 1) as usize)
+                    .expect("continuation must not skip source offsets");
+                let resources = ids
+                    .iter()
+                    .map(|id| {
+                        let mut resource = manga(Some(json!("manga")));
+                        resource["id"] = json!(id.to_string());
+                        resource
+                    })
+                    .collect();
+                // No next link: the parser must use raw fullness, not accepted additions.
+                let raw = body(resources, None);
+                let page = parse_kitsu_candidates(&raw, source_page, &query(), "manga").unwrap();
+                assert_eq!(page.evidence_digest, provider_evidence_digest(&raw));
+                assert_eq!(page.candidates.len(), ids.len());
+                let before = discovered.len();
+                for candidate in page.candidates {
+                    assert_eq!(candidate.evidence_digest, provider_evidence_digest(&raw));
+                    discovered.insert((candidate.kind, candidate.provider_id));
+                }
+                additions.push(discovered.len() - before);
+                visited.push(source_page);
+                next = page.next_page;
+                if let Some(next_page) = next {
+                    assert_eq!(next_page, source_page + 1);
+                }
+            }
+            assert_eq!(visited, (1..=source_pages.len() as u32).collect::<Vec<_>>());
+            assert_eq!(additions, expected_additions);
+            assert_eq!(
+                discovered,
+                (1..=expected_last_id)
+                    .map(|id| ("manga", id.to_string()))
+                    .collect::<std::collections::BTreeSet<_>>()
+            );
+        }
+    }
+
+    #[test]
     fn kitsu_continuations_reject_coordinate_changes_and_non_forward_pages() {
-        let forward = search_url("kitsu", &query(), 3, None).unwrap();
+        let forward = kitsu::source_search_url(&query(), 3, "manga").unwrap();
         let raw = body(vec![manga(Some(json!("manga")))], Some(forward.to_string()));
         assert_eq!(
-            parse_kitsu_candidates(&raw, 2, &query()).unwrap().next_page,
+            parse_kitsu_candidates(&raw, 2, &query(), "manga")
+                .unwrap()
+                .next_page,
             Some(3)
         );
         let mut invalid = vec![
-            search_url("kitsu", &query(), 1, None).unwrap(),
-            search_url("kitsu", &query(), 2, None).unwrap(),
-            search_url(
-                "kitsu",
-                &SearchQuery::try_new("Different").unwrap(),
-                3,
-                None,
-            )
-            .unwrap(),
+            kitsu::source_search_url(&query(), 1, "manga").unwrap(),
+            kitsu::source_search_url(&query(), 2, "manga").unwrap(),
+            kitsu::source_search_url(&SearchQuery::try_new("Different").unwrap(), 3, "manga")
+                .unwrap(),
         ];
         let mut url = forward.clone();
         url.set_host(Some("example.com")).unwrap();
@@ -326,7 +608,7 @@ mod kitsu_tests {
         for url in invalid {
             let raw = body(vec![manga(Some(json!("manga")))], Some(url.to_string()));
             assert_eq!(
-                parse_kitsu_candidates(&raw, 2, &query())
+                parse_kitsu_candidates(&raw, 2, &query(), "manga")
                     .unwrap_err()
                     .problem_code(),
                 ProblemCode::ProviderResponseInvalid,
@@ -505,7 +787,7 @@ mod kitsu_tests {
                     response.cache_policy.reuse(),
                     fasti_application::ProviderResponseReuse::NoStore
                 );
-                let page = parse_kitsu_candidates(&response.body, 1, &query())
+                let page = parse_kitsu_candidates(&response.body, 1, &query(), "manga")
                     .unwrap()
                     .with_response_cache_policy(response.cache_policy);
                 assert_eq!(page.response_cache_policy(), Some(&response.cache_policy));

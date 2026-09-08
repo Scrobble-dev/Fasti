@@ -206,6 +206,14 @@ impl ProviderIdentityMapping {
 const PROVIDER_IDENTITY_MAPPINGS: &[ProviderIdentityMapping] = &[
     ProviderIdentityMapping {
         provider: KITSU_PROVIDER_ID,
+        kind: "anime",
+        namespace: "kitsu.anime",
+        label: "Kitsu Anime",
+        grain: Grain::Release,
+        value_kind: ProviderIdentifierValueKind::PositiveDecimal,
+    },
+    ProviderIdentityMapping {
+        provider: KITSU_PROVIDER_ID,
         kind: "manga",
         namespace: "kitsu.manga",
         label: "Kitsu Manga",

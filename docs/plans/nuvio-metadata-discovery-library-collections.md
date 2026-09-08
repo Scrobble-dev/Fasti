@@ -65,13 +65,48 @@ before cache reuse is allowed, but cannot bypass conflicts or lifecycle checks.
 The shared ten-domain classifier, filter contracts and UI integration still
 remain required; this selector alone does not complete them.
 
-### M4 Kitsu Manga adapter and native custody — 2026-09-08
+### M4 Kitsu typed Anime and Manga continuation — 2026-09-08
+
+The follow-on runtime adds `kitsu` / `anime` / `kitsu.anime` as Release,
+reusing the existing identity, selected-detail, receipt and artwork owners.
+Anime responses never supply Manga subtype claims. Numeric IDs remain scoped
+by resource type. Search alternates one Anime or Manga HTTP response per Fasti
+continuation, then drains the remaining source. Each response retains its own
+digest and policy. The legacy detail picker reads the first page of both types;
+that older list-only operation remains all-or-error, not partial-success capable.
+Health checks validate both typed routes before reporting success.
+
+The private positive-u32 continuation encodes source page and remaining sources.
+No public field, table, migration or archive version is added. Kitsu's Fasti
+cache policy revision changes to `fasti.kitsu-mixed-metadata-cache.v2`, so old
+Manga-only page numbers cannot become Anime pages. This is not a vendor licence
+revision or a new offline reuse permission. Committed Record-action replay
+still precedes candidate-cache lookup; uncommitted old receipts must refetch.
+
+Source inspection found an upstream offset discrepancy in the pinned
+[Typesense service](https://github.com/hummingbird-me/kitsu-server/blob/e6575ed9fd73ba8cccb920fe2e3f1ef873a71333/app/services/typesense_search_service.rb#L96):
+it maps offset/limit to a zero-based page, while its locked client forwards
+that value to a one-based backend. On 2026-09-08, anonymous `naruto` requests
+at offsets 0 and 10 returned identical IDs for both resource types; offset 20
+advanced. This does not identify the deployed source revision or feature flag.
+Fasti does not compensate by skipping offsets. It validates supplied next links
+and requests a following-page observation when a full raw page has no link.
+Partial or empty no-link pages terminate. A correct backend can therefore cost
+one extra empty request at an exact page multiple. Limits remain per request;
+no assertion of universal upstream termination or snapshot stability is made.
+
+The governed live traversal observed 11 responses, 100 rows and 80 unique typed
+IDs (37 Anime, 43 Manga), ending in partial no-link responses with zero vault
+reads. This is evidence for that query, not whole-programme or packaged proof.
+The shared ten-domain classifier and remaining M4 acceptance work are unchanged.
+
+### M4 Kitsu Manga adapter and native custody — initial 2026-09-08 slice
 
 The first Kitsu runtime slice uses the public JSON:API Manga search and selected
 resource routes. The shared mapping is `kitsu` / `manga` / `kitsu.manga`, with
 canonical positive decimal IDs and Work grain. This is the aggregate Manga
-resource, not a volume edition. It does not implement the still-required Anime
-adapter or complete the ten-domain classifier.
+resource, not a volume edition. The initial slice did not implement Anime;
+the follow-on section above records that work. Neither completes the ten-domain classifier.
 
 The pinned [Manga schema](https://github.com/hummingbird-me/api-docs/blob/c95e259bec851f4bddf13c7bce3dd2f08eba7d19/api/schemas/resources/manga.yml)
 defines `subtype` and deprecates `mangaType`. The pinned

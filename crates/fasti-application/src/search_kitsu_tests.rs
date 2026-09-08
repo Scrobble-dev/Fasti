@@ -31,6 +31,24 @@ mod search_kitsu_tests {
     }
 
     #[test]
+    fn kitsu_anime_identity_is_a_release_without_manga_classification() {
+        let mut data = manga_data();
+        data.kind = "anime".into();
+        data.image_url = Some("https://media.kitsu.app/anime/42/poster_image/small.jpeg".into());
+        let candidate = SearchCandidate::try_new(data.clone()).unwrap();
+        assert_eq!(candidate.identifier().namespace(), "kitsu.anime");
+        assert_eq!(candidate.identifier().grain(), Grain::Release);
+        assert_eq!(candidate.identifier().value(), "42");
+        assert_ne!(
+            candidate.identifier(),
+            SearchCandidate::try_new(manga_data()).unwrap().identifier()
+        );
+        assert!(!candidate.to_json().unwrap().contains("kitsu_manga_subtype"));
+        data.kitsu_manga_subtype = Some(KitsuMangaSubtype::Manga);
+        assert!(SearchCandidate::try_new(data).is_err());
+    }
+
+    #[test]
     fn kitsu_absence_preserves_preexisting_canonical_candidate_bytes() {
         for json in [
             r#"{"provider":"tmdb","provider_id":"42","kind":"movie","title":"A film","original_title":null,"release_year":2026,"authors":[],"image_url":"https://image.tmdb.org/t/p/w500/film.jpg","overview":"A description."}"#,
