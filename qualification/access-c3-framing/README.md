@@ -23,7 +23,7 @@ CC=/usr/bin/cc cargo +1.97.1 clippy --offline --locked --manifest-path qualifica
 )
 ```
 
-Each full debug/release run must report **21 passed unit tests and two passed
+Each full debug/release run must report **22 passed unit tests and two passed
 compile-fail doctests**, with zero failed, ignored or filtered tests. Do not
 pass a test-name filter. Expected compiler errors in the two doctests prove
 that the opaque key cannot be formatted with Debug or cloned.
@@ -121,9 +121,10 @@ private. Its allocations are not hardened or memory-locked.
 
 The envelope is opaque fixture input and the `{}` manifest is a low-level
 archive fixture, not a complete joint Access manifest. Publication is an
-in-memory sink. The source-error fixture interrupts ciphertext-body reads;
-an I/O failure at the final physical-EOF check is not injected. Passing tests
-do not establish durable publication, production
+in-memory sink. Source-error fixtures cover ciphertext-body reads and the
+final physical-EOF check after valid archive data and authenticated Final.
+The latter preserves the I/O error and terminal rejection after the source
+recovers. Passing tests do not establish durable publication, production
 key custody, compiler-temporary erasure, startup/native-failure handling,
 abort cleanup, resource ceilings, throughput, other platforms, native-notice
 completeness, licence clearance, disposition freshness, fencing or authorized

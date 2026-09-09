@@ -70,7 +70,7 @@ jobs:
             doctests: 3
           - package: access-c3-framing
             label: Framing
-            unit_tests: 21
+            unit_tests: 22
             doctests: 2
           - package: access-c3-kdf
             label: KDF runner

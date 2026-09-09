@@ -746,6 +746,45 @@ fn source_error_survives_exact_read_and_reader_is_poisoned() {
 }
 
 #[test]
+fn physical_eof_error_after_valid_archive_poisons_reader_despite_source_recovery() {
+    let key = key();
+    let cap = archive_limits(1_000_000);
+    let mut archive = ArchiveWriter::new(Vec::new(), cap).unwrap();
+    append_fixture(&mut archive, b"fixture").unwrap();
+    let plain = archive.finish().unwrap();
+    let policy = limits(plain.len() as u64);
+    let bytes = encrypt(&plain, &key, BACKUP, policy);
+    let at = bytes.len();
+    let mut reader = FrameReader::new(
+        FaultSource {
+            inner: Cursor::new(bytes),
+            at,
+        },
+        &key,
+        BACKUP,
+        policy,
+    )
+    .unwrap();
+    assert_eq!(validate_archive(&mut reader, cap).unwrap().entries, 2);
+    assert!(reader.final_seen);
+    assert!(!reader.poisoned);
+    assert_eq!(reader.source.inner.position(), at as u64);
+
+    let error = reader.finish().unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::ConnectionReset);
+    assert_eq!(error.to_string(), "injected source error");
+    assert!(reader.poisoned);
+    assert!(reader.state.is_none());
+    assert!(reader.plain.is_none());
+
+    reader.source.at = at + 1;
+    assert_eq!(reader.source.read(&mut [0; 1]).unwrap(), 0);
+    assert!(reader.read(&mut [0; 1]).is_err());
+    assert!(reader.finish().is_err());
+    assert_eq!(reader.source.inner.position(), at as u64);
+}
+
+#[test]
 fn finalization_releases_state_and_refuses_later_advancement() {
     fn assert_send<T: Send>() {}
     assert_send::<FrameWriter<Vec<u8>>>();
