@@ -1,6 +1,7 @@
 # C3 final physical-EOF failure regression
 
-Status: FOCUSED_AND_CANONICAL_GATES_PASS; FINAL_DELIVERY_PENDING.
+Status: CLEAN_SOURCE_CANONICAL_AND_DEPENDENCY_GATES_PASS;
+CURRENT_TREE_FINAL_DELIVERY_PENDING.
 
 ## Current delivery checkpoint
 
@@ -12,12 +13,18 @@ that merged parent. Its pre-documentation-correction tree
 that passed the canonical PR gate at 2776704a. The canonical command exited 0;
 its retained log is 2026-09-08T16-59-23-260Z-tests-1667901-d1238422.log,
 SHA256 da45c195d4300f3c93876fe76cc2c688342f77e769b33ce355794d8e07af00d4.
-Isolated dependency policy and advisory checks also exited 0 without a new
-suppression. Existing policy warnings remain recorded.
+That clean-source tree's isolated dependency policy and advisory checks also
+exited 0 without a new suppression; existing policy warnings remain recorded.
+The current tree, 73006096022f072df0c2b5175be1f0537564e962, adds only this
+documentation correction and has not received a separate canonical or
+dependency run.
 
 This documentation correction labels the earlier checkpoints below as
-historical. Source, adapter, workflow and dependency inputs are unchanged.
-Final documentation verification, hosted checks and merge remain required.
+historical. Source, adapter and dependency inputs are unchanged. The
+`access-c3-signing-qualification.yml` workflow input changed with this EOF
+regression: its Framing expected unit-test count moved from 21 to 22; the
+current tree leaves that workflow change unchanged. Final documentation
+verification, hosted checks and merge remain required.
 No complete-C3, production-crypto or packaged-authentication claim follows.
 
 ## Historical preparation and verification bases
@@ -116,6 +123,5 @@ review and additive Ponytail review found no required changes: existing archive,
 encryption and fault-source helpers suffice. The unit-test description is kept
 separate from the Debug/Clone compile-fail checks.
 
-Remaining: clean-source canonical and dependency gates, applicable pre-landing
-and documentation review, final merged-base reconciliation, hosted checks and
-merge. No production crypto, physical-erasure or packaged-auth claim is made.
+Remaining: final documentation verification, hosted checks and merge. No
+production crypto, physical-erasure or packaged-auth claim is made.
