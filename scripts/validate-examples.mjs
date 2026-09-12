@@ -20,6 +20,48 @@ const EXAMPLE_DIRECTORY = "contracts/examples/v1";
 const isLeapYear = (year) =>
   year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
 
+const isCalendarDate = (year, month, day) => {
+  const days = [
+    31,
+    isLeapYear(year) ? 29 : 28,
+    31,
+    30,
+    31,
+    30,
+    31,
+    31,
+    30,
+    31,
+    30,
+    31,
+  ];
+  return month >= 1 && month <= 12 && day >= 1 && day <= days[month - 1];
+};
+
+// Inventory preserves Chrono's expanded years and second60; Date rounds both.
+const isInventoryUtcMicros = (value) => {
+  if (value.length < 27 || value.length > 30) return false;
+  const match =
+    /^([0-9]{4}|-[0-9]{4,6}|\+[0-9]{5,6})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})\.([0-9]{6})Z$/u.exec(
+      value,
+    );
+  if (!match) return false;
+  const [, yearText, month, day, hour, minute, second] = match;
+  const year = Number(yearText);
+  if (year < -262143 || year > 262142) return false;
+  const canonicalYear =
+    year >= 0 && year <= 9999
+      ? String(year).padStart(4, "0")
+      : (year < 0 ? "-" : "+") + String(Math.abs(year)).padStart(4, "0");
+  return (
+    yearText === canonicalYear &&
+    isCalendarDate(year, Number(month), Number(day)) &&
+    Number(hour) <= 23 &&
+    Number(minute) <= 59 &&
+    Number(second) <= 60
+  );
+};
+
 /**
  * Validates that a string is a strictly valid RFC 3339 date-time.
  * @param {string} value - The date-time string to validate.
@@ -41,26 +83,9 @@ const isStrictRfc3339 = (value) => {
     minuteText,
     secondText,
   ].map(Number);
-  const daysInMonth = [
-    31,
-    isLeapYear(year) ? 29 : 28,
-    31,
-    30,
-    31,
-    30,
-    31,
-    31,
-    30,
-    31,
-    30,
-    31,
-  ];
   if (
     year === 0 ||
-    month < 1 ||
-    month > 12 ||
-    day < 1 ||
-    day > daysInMonth[month - 1] ||
+    !isCalendarDate(year, month, day) ||
     hour > 23 ||
     minute > 59 ||
     second > 60
@@ -102,6 +127,16 @@ const addContractFormats = (ajv) => {
   ajv.addFormat("date-time", {
     type: "string",
     validate: isStrictRfc3339,
+  });
+  ajv.addFormat("fasti-inventory-utc-micros", {
+    type: "string",
+    validate: isInventoryUtcMicros,
+  });
+  ajv.addFormat("fasti-credential-epoch", {
+    type: "string",
+    validate: (value) =>
+      /^(0|[1-9][0-9]{0,18})$/u.test(value) &&
+      (value.length < 19 || value <= "9223372036854775807"),
   });
   ajv.addFormat("int32", {
     type: "number",
@@ -193,7 +228,11 @@ const looksLikeJwt = (text) => {
  * @param {string} [path="$"] - The JSONPath to the current value for error reporting.
  * @throws {AssertionError} If sensitive data patterns are detected.
  */
-const assertNoSensitiveRepresentation = (value, path = "$") => {
+const assertNoSensitiveRepresentation = (
+  value,
+  path = "$",
+  inventory = false,
+) => {
   if (typeof value === "string") {
     assert.doesNotMatch(
       value,
@@ -208,18 +247,25 @@ const assertNoSensitiveRepresentation = (value, path = "$") => {
   }
   if (Array.isArray(value)) {
     value.forEach((item, index) =>
-      assertNoSensitiveRepresentation(item, `${path}[${index}]`),
+      assertNoSensitiveRepresentation(item, `${path}[${index}]`, inventory),
     );
     return;
   }
   if (value === null || typeof value !== "object") return;
   for (const [key, child] of Object.entries(value)) {
-    assert.doesNotMatch(
-      key,
-      /(?:credential|initialization_proof|secret|token)/iu,
-      `${path}.${key} exposes a credential or secret field`,
-    );
-    assertNoSensitiveRepresentation(child, `${path}.${key}`);
+    // Only the schema-validated inventory counter is public credential metadata.
+    if (!(
+      inventory &&
+      /^\$\.clients\[[0-9]+\]$/u.test(path) &&
+      key === "current_credential_epoch"
+    )) {
+      assert.doesNotMatch(
+        key,
+        /(?:credential|initialization_proof|secret|token)/iu,
+        `${path}.${key} exposes a credential or secret field`,
+      );
+    }
+    assertNoSensitiveRepresentation(child, `${path}.${key}`, inventory);
   }
 };
 
@@ -450,6 +496,11 @@ export async function validateExamples(root = repositoryRoot) {
     openapi,
     "IntegrationStatusListResponse",
   );
+  const clientInventory = compileOpenApiComponent(
+    ajv,
+    openapi,
+    "ListAccessClientsResponse",
+  );
   const receiptEvent = ajv.compile(
     asyncApi.components.messages.receiptCommitted.payload.schema,
   );
@@ -525,7 +576,29 @@ export async function validateExamples(root = repositoryRoot) {
     }
 
     const value = await readStrictJson(path);
-    assertNoSensitiveRepresentation(value);
+    if (id === "access.client.list.success")
+      assertValid(clientInventory, value, id, ajv);
+    assertNoSensitiveRepresentation(
+      value,
+      "$",
+      id === "access.client.list.success",
+    );
+    if (id === "access.client.list.success") {
+      assert.equal(owner.id, "access.client.list", `${id} has the wrong owner`);
+      const operation = openapi.paths["/api/access/v1/clients"]?.get;
+      assert.equal(operation?.["x-fasti-capability-id"], owner.id);
+      const response = operation.responses["200"].content["application/json"];
+      assert.equal(
+        response?.schema.$ref,
+        "#/components/schemas/ListAccessClientsResponse",
+      );
+      assert.deepEqual(
+        response?.examples[id]?.value,
+        value,
+        `${id} differs from the embedded production OpenAPI example`,
+      );
+      continue;
+    }
     if (id === "system.health.success") {
       assertValid(health, value, id, ajv);
       assert.equal(value.status, "healthy");

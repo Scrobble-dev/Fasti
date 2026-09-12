@@ -269,7 +269,7 @@ mod metadata_policy_migration_tests {
             restored
                 .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
                 .unwrap(),
-            17
+            SCHEMA_VERSION
         );
         assert_eq!(
             preserved_rows(&restored),
@@ -620,7 +620,7 @@ mod metadata_policy_migration_tests {
         let columns = claim_columns(connection);
         assert_eq!(columns.len(), 5);
         let stable_schema = rows(connection, "SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' AND name != 'metadata_claims' ORDER BY type,name");
-        migrate(connection).unwrap();
+        migrate_v17(connection).unwrap();
         assert_eq!(
             connection
                 .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
@@ -652,6 +652,17 @@ mod metadata_policy_migration_tests {
             rows(connection, "PRAGMA integrity_check"),
             vec![vec![Value::Text("ok".into())]]
         );
+        // The assertions above pin v16-to-v17. Reopen separately through the
+        // current successor so future migrations do not change that evidence.
+        migrate(connection).unwrap();
+        assert_eq!(
+            connection
+                .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION
+        );
+        assert_eq!(preserved_rows(connection), before);
+        assert_eq!(claim_columns(connection), upgraded_columns);
         let upgraded_fingerprint =
             crate::portability::schema_fingerprint(connection, RequestCorrelationId::new_v7())
                 .unwrap();

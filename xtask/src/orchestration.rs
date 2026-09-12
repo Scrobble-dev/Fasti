@@ -152,6 +152,41 @@ pub(crate) fn access_c1_gates() -> [CommandGate; 8] {
     ]
 }
 
+pub(crate) fn access_client_inventory_gate() -> CommandGate {
+    CommandGate::new(
+        "access.client_inventory_runtime",
+        "python3",
+        [
+            "-B", "scripts/smoke-access-browser.py", "--root", ".dev-trailbase",
+            "--c2-client-inventory", "--receipt", crate::verify::INVENTORY_BROWSER_RECEIPT_PATH,
+        ],
+        "prepare clean-source daemon, CLI and web artifacts; free loopback ports and repair inventory authorization",
+    )
+}
+
+pub(crate) fn run_access_client_inventory(root: &Path) -> anyhow::Result<()> {
+    let relative = Path::new("target/fasti-receipts/access-c2-inventory.json");
+    match fs::remove_file(root.join(relative)) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error).context("failed to remove stale inventory receipt"),
+    }
+    let before = git_status(root)?;
+    let records = run_additional_gates(root, &[access_client_inventory_gate()])?;
+    ensure!(
+        git_status(root)? == before,
+        "inventory proof changed the Git worktree"
+    );
+    write_gate_suite_receipt(
+        root,
+        relative,
+        "fasti.access-c2-inventory.runtime",
+        "cargo xtask test access-client-inventory",
+        &records,
+    )?;
+    Ok(())
+}
+
 pub(crate) fn access_b_gates() -> [CommandGate; 8] {
     [
         CommandGate::new(

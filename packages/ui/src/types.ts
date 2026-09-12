@@ -7,6 +7,8 @@ import type {
   ApplyAnimeGroupingPolicyChangeResponse,
   CompleteTrailBaseContinuationRequest,
   ConfigureMetadataProjectionRequest,
+  ListAccessClientsQueryParameters,
+  ListAccessClientsResponse,
   ListRecordsQueryParameters,
   LocalSearchRequestDto,
   LocalSearchResponseDto,
@@ -43,6 +45,8 @@ export type {
   CompleteTrailBaseContinuationRequest,
   ConfigureMetadataProjectionRequest,
   EnrichmentPolicyDto,
+  ListAccessClientsQueryParameters,
+  ListAccessClientsResponse,
   ListRecordsQueryParameters,
   LocalSearchCursorDto,
   LocalSearchRequestDto,
@@ -508,6 +512,10 @@ export interface WorkbenchHost {
   readAccessProjection?(
     signal?: AbortSignal,
   ): Promise<AccessProjectionResponse>;
+  listAccessClients?(
+    query?: ListAccessClientsQueryParameters,
+    signal?: AbortSignal,
+  ): Promise<ListAccessClientsResponse>;
   endBrowserSession?(): Promise<void>;
   revokeBrowserSession?(
     browserSessionId: string,

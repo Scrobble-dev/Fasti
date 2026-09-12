@@ -4074,7 +4074,7 @@ pub(crate) fn sha256_bytes(bytes: &[u8]) -> String {
     encode_hex(&digest_bytes)
 }
 
-fn sha256_reader(reader: &mut impl Read, label: &str) -> anyhow::Result<(String, u64)> {
+pub(crate) fn sha256_reader(reader: &mut impl Read, label: &str) -> anyhow::Result<(String, u64)> {
     let mut digest = Sha256::new();
     let mut bytes = 0_u64;
     let mut buffer = [0_u8; 8192];

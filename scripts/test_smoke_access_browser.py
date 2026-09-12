@@ -29,6 +29,8 @@ INHERITED_REMOTE_ENVIRONMENT = (
 INHERITED_FIXTURE_ENVIRONMENT = (
     "FASTI_TMDB_SMOKE_RESOLVE",
     "FASTI_TMDB_SMOKE_CA_PEM",
+    "FASTI_IGDB_SMOKE_RESOLVE",
+    "FASTI_IGDB_SMOKE_CA_PEM",
 )
 RECORD_ID = "rec_0199a8e3a62c70008000000000000001"
 OTHER_RECORD_ID = "rec_0199a8e3a62c70008000000000000002"
@@ -197,6 +199,96 @@ class SmokeAccessBrowserStartupTest(unittest.TestCase):
         stop.assert_called_once_with(captured["process"])
         self.assert_process_group_absent(captured["process"])
         self.assert_fixture_environment(captured["environment"])
+
+    def test_changed_daemon_is_rejected_before_process_start(self):
+        with (
+            mock.patch.object(self.harness.runtime, "sha256_file", return_value="changed"),
+            mock.patch.object(self.harness.runtime, "start_managed_process_group") as start,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "artifact changed"):
+                self.harness._start_fastid(Path("data"), Path("trailbase"), expected_sha256="expected")
+            start.assert_not_called()
+
+
+class ClientInventoryOptInTest(unittest.TestCase):
+    def test_inventory_is_disabled_by_default_and_exclusive_with_m4(self):
+        harness = load_harness()
+        with mock.patch.object(sys, "argv", ["smoke-access-browser.py"]):
+            self.assertFalse(harness._arguments().c2_client_inventory)
+        with mock.patch.object(sys, "argv", ["smoke-access-browser.py", "--c2-client-inventory"]):
+            arguments = harness._arguments()
+            self.assertTrue(arguments.c2_client_inventory)
+            self.assertFalse(arguments.m4_search_journey)
+            self.assertFalse(arguments.m4_igdb_journey)
+        for mode in ("--m4-search-journey", "--m4-igdb-journey"):
+            with self.subTest(mode=mode):
+                with mock.patch.object(sys, "argv", ["smoke-access-browser.py", mode]):
+                    self.assertFalse(harness._arguments().c2_client_inventory)
+                with (
+                    mock.patch.object(sys, "argv", ["smoke-access-browser.py", mode, "--c2-client-inventory"]),
+                    mock.patch("sys.stderr"),
+                ):
+                    with self.assertRaises(SystemExit):
+                        harness._arguments()
+
+    def test_inventory_timeout_is_bounded_without_changing_existing_modes(self):
+        harness = load_harness()
+        result = type("Result", (), {"returncode": 0, "stdout": b"{}", "stderr": b""})()
+        for payload, timeout in (
+            ({}, 60),
+            ({"clientInventoryJourney": True}, 120),
+            ({"clientInventoryJourney": False}, 60),
+            ({"m4SearchJourney": True}, 180),
+            ({"m4IgdbJourney": True}, 180),
+        ):
+            with self.subTest(payload=payload):
+                with mock.patch.object(harness.subprocess, "run", return_value=result) as run:
+                    self.assertEqual(harness._browser(payload), {})
+                self.assertEqual(run.call_args.kwargs["timeout"], timeout)
+
+
+class ArtifactIdentityTest(unittest.TestCase):
+    def test_browser_helper_secret_failure_does_not_echo_output(self):
+        harness = load_harness()
+        for returncode in (0, 1):
+            with self.subTest(returncode=returncode):
+                result = type("Result", (), {
+                    "returncode": returncode,
+                    "stdout": b'{"value":"synthetic-provider-sentinel"}',
+                    "stderr": b"synthetic-provider-sentinel",
+                })()
+                with mock.patch.object(harness.subprocess, "run", return_value=result):
+                    with self.assertRaises(RuntimeError) as error:
+                        harness._browser({"forbiddenProviderValues": ["synthetic-provider-sentinel"]})
+                self.assertNotIn("synthetic-provider-sentinel", str(error.exception))
+
+    def test_clean_source_identity_rejects_dirty_tree(self):
+        harness = load_harness()
+        with mock.patch.object(harness.subprocess, "check_output", side_effect=[b"", b"commit\n", b"tree\n"]):
+            self.assertEqual(harness._source_identity(),
+                             {"git_commit": "commit", "git_tree": "tree", "dirty": False})
+        with mock.patch.object(harness.subprocess, "check_output", return_value=b" M source"):
+            with self.assertRaises(RuntimeError):
+                harness._source_identity()
+
+    def test_web_digest_binds_content_names_and_rejects_symlinks(self):
+        harness = load_harness()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with self.assertRaises(RuntimeError):
+                harness._web_digest(root)
+            (root / "index.html").write_text("first")
+            first = harness._web_digest(root)
+            self.assertEqual(first, harness._web_digest(root))
+            (root / "index.html").write_text("second")
+            self.assertNotEqual(first, harness._web_digest(root))
+            (root / "asset.js").write_text("asset")
+            before_rename = harness._web_digest(root)
+            (root / "asset.js").rename(root / "other.js")
+            self.assertNotEqual(before_rename, harness._web_digest(root))
+            (root / "link.js").symlink_to(root / "other.js")
+            with self.assertRaises(RuntimeError):
+                harness._web_digest(root)
 
 
 class SearchDatabaseEvidenceTest(unittest.TestCase):

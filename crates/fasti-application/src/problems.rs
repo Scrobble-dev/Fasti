@@ -702,6 +702,7 @@ impl ProblemCode {
                 CapabilityBody::B2
                 | CapabilityBody::B3
                 | CapabilityBody::C1
+                | CapabilityBody::C2
                 | CapabilityBody::M4 => ContractState::Reserved,
             },
         }

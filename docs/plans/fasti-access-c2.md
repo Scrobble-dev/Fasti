@@ -2,6 +2,14 @@
 
 Status: `FOUNDATION_MERGED_C2_RUNTIME_INTEGRATION_OPEN`
 
+Current execution (2026-09-08): Metadata PR128 merged at
+`d274e037daa6566e223f8309a7f314fee5b60384`, tree
+`b9da6d6358082d5afbcb22a26a2f513dfc656318`. The owner released the exact
+inventory-only C2-I paths and allocated append-only migration18 over schema17;
+archive7 remains frozen. Follow the [C2-I execution gate](fasti-access-c2-inventory.md)
+for the current file boundary, ordering contract and proof. This supersedes old
+blanket M4 waits and proposed migration numbers below, not full C2 scope.
+
 Delivery sequencing amendment (2026-09-05): the completed pure source may
 land through the separate [foundation delivery gate](fasti-access-c2-foundation.md).
 That PR does not close this plan, complete C2.1, activate runtime operations,

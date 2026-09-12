@@ -7,7 +7,7 @@ use fasti_domain::{Grain, MetadataClaimId, MAX_EXTERNAL_IDENTIFIER_BYTES};
 use rusqlite::{Connection, Result, Transaction, TransactionBehavior};
 use std::fmt::Write as _;
 
-pub(crate) const SCHEMA_VERSION: i64 = 17;
+pub(crate) const SCHEMA_VERSION: i64 = 18;
 
 pub(crate) fn migrate(connection: &Connection) -> Result<()> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -96,12 +96,71 @@ pub(crate) fn migrate(connection: &Connection) -> Result<()> {
     }
 
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version == 17 {
+        migrate_v18(connection)?;
+    }
+
+    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if version == SCHEMA_VERSION {
         let transaction = Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
         repair_legacy_provider_coordinates_v1(&transaction)?;
         transaction.commit()?;
     }
     Ok(())
+}
+
+fn migrate_v18(connection: &Connection) -> Result<()> {
+    let transaction = Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+    {
+        let mut statement = transaction.prepare("SELECT CASE WHEN length(CAST(created_at AS BLOB)) BETWEEN 20 AND 30 THEN created_at END FROM clients")?;
+        let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+        for row in rows {
+            if crate::client_credentials::canonical_inventory_timestamp(&row?).is_none() {
+                return Err(rusqlite::Error::InvalidQuery);
+            }
+        }
+    }
+    transaction.execute_batch(r#"
+        ALTER TABLE clients ADD COLUMN authentication_type TEXT NOT NULL DEFAULT 'confidential'
+            CHECK (authentication_type IN ('first_party', 'confidential'));
+        ALTER TABLE clients ADD COLUMN purpose TEXT NOT NULL DEFAULT 'integration'
+            CHECK ((authentication_type = 'first_party' AND purpose = 'node')
+                OR (authentication_type = 'confidential' AND purpose IN ('cli', 'device', 'integration')));
+        ALTER TABLE clients ADD COLUMN owner_subject_id TEXT REFERENCES auth_subjects(auth_subject_id)
+            CHECK (owner_subject_id IS NULL OR authentication_type = 'confidential');
+        ALTER TABLE clients ADD COLUMN name TEXT
+            CHECK (name IS NULL OR length(CAST(name AS BLOB)) BETWEEN 1 AND 128);
+        ALTER TABLE clients ADD COLUMN inventory_created_year INTEGER
+            GENERATED ALWAYS AS (CAST(created_at AS INTEGER)) VIRTUAL;
+        ALTER TABLE clients ADD COLUMN inventory_created_tail TEXT
+            GENERATED ALWAYS AS (
+                CASE WHEN instr(created_at, '.') = 0
+                    THEN substr(created_at, -16, 15) || '.000000Z'
+                    ELSE substr(created_at, -23) END
+            ) VIRTUAL;
+
+        UPDATE clients SET authentication_type = 'first_party', purpose = 'node'
+        WHERE EXISTS (
+            SELECT 1 FROM node_state
+            WHERE node_state.client_id = clients.client_id
+              AND node_state.workspace_id = clients.workspace_id
+        );
+
+        CREATE INDEX clients_inventory_workspace_idx ON clients(
+            workspace_id, inventory_created_year DESC, inventory_created_tail DESC, client_id DESC);
+        CREATE INDEX clients_inventory_owner_idx ON clients(
+            workspace_id, owner_subject_id, inventory_created_year DESC, inventory_created_tail DESC, client_id DESC);
+        CREATE TRIGGER clients_inventory_identity_no_update BEFORE UPDATE ON clients
+        WHEN OLD.client_id IS NOT NEW.client_id
+          OR OLD.workspace_id IS NOT NEW.workspace_id
+          OR OLD.authentication_type IS NOT NEW.authentication_type
+          OR OLD.purpose IS NOT NEW.purpose
+          OR OLD.owner_subject_id IS NOT NEW.owner_subject_id
+          OR OLD.created_at IS NOT NEW.created_at
+        BEGIN SELECT RAISE(ABORT, 'client inventory identity is immutable'); END;
+        PRAGMA user_version = 18;
+    "#)?;
+    transaction.commit()
 }
 
 fn migrate_v17(connection: &Connection) -> Result<()> {
@@ -3586,6 +3645,277 @@ pub(crate) fn workspace_revision(connection: &Connection, workspace_id: &str) ->
 #[cfg(test)]
 mod tests {
     include!("metadata_policy_migration_tests.rs");
+
+    fn version_seventeen_connection() -> Connection {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .unwrap();
+        migrate_to_version_fourteen(&connection);
+        migrate_v15(&connection).unwrap();
+        migrate_v16(&connection).unwrap();
+        migrate_v17(&connection).unwrap();
+        connection
+    }
+
+    #[test]
+    fn published_v17_schema_fingerprint() {
+        let connection = version_seventeen_connection();
+        let fingerprint = crate::portability::schema_fingerprint(
+            &connection,
+            fasti_domain::RequestCorrelationId::new_v7(),
+        )
+        .unwrap();
+        assert_eq!(fingerprint.migration_version(), 17);
+        assert_eq!(
+            fingerprint.digest().as_str(),
+            "sha256:7b481b2bf2a23ad261884c171710c7ceece6bd70312d8dca6a034a4f830c4649"
+        );
+    }
+
+    #[test]
+    fn v18_client_inventory_backfill_and_defaults_preserve_authority() {
+        for matching_workspace in [true, false] {
+            let connection = version_seventeen_connection();
+            connection.execute_batch("INSERT INTO workspaces VALUES ('inventory_workspace', '2026-09-08T00:00:00.000000Z');").unwrap();
+            for (id, status, epoch) in [("node", "active", 7), ("legacy", "revoked", 0)] {
+                connection.execute(
+                    "INSERT INTO clients(client_id, workspace_id, status, current_credential_epoch, created_at) VALUES (?1, 'inventory_workspace', ?2, ?3, ?4)",
+                    params![id, status, epoch, CREATED_AT],
+                ).unwrap();
+            }
+            connection.execute(
+                "INSERT INTO node_state(singleton, initialized, workspace_id, client_id, created_at) VALUES (1, 1, ?1, 'node', ?2)",
+                params![if matching_workspace { "inventory_workspace" } else { "other_workspace" }, CREATED_AT],
+            ).unwrap();
+            migrate_v18(&connection).unwrap();
+            for (id, kind, purpose, status, epoch) in [
+                (
+                    "node",
+                    if matching_workspace {
+                        "first_party"
+                    } else {
+                        "confidential"
+                    },
+                    if matching_workspace {
+                        "node"
+                    } else {
+                        "integration"
+                    },
+                    "active",
+                    7,
+                ),
+                ("legacy", "confidential", "integration", "revoked", 0),
+            ] {
+                let row: (String, String, Option<String>, Option<String>, String, i64, String) = connection.query_row(
+                    "SELECT authentication_type, purpose, owner_subject_id, name, status, current_credential_epoch, created_at FROM clients WHERE client_id = ?1",
+                    [id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?)),
+                ).unwrap();
+                assert_eq!(
+                    row,
+                    (
+                        kind.into(),
+                        purpose.into(),
+                        None,
+                        None,
+                        status.into(),
+                        epoch,
+                        CREATED_AT.into()
+                    )
+                );
+            }
+            connection.execute(
+                "INSERT INTO clients(client_id, workspace_id, status, current_credential_epoch, created_at) VALUES ('later', 'inventory_workspace', 'active', 1, ?1)",
+                [CREATED_AT],
+            ).unwrap();
+            assert!(connection.query_row(
+                "SELECT authentication_type = 'confidential' AND purpose = 'integration' AND owner_subject_id IS NULL AND name IS NULL FROM clients WHERE client_id = 'later'",
+                [], |row| row.get::<_, bool>(0),
+            ).unwrap());
+        }
+    }
+
+    #[test]
+    fn v18_client_inventory_constraints_keep_existing_lifecycle_operations() {
+        let connection = migrated_connection();
+        connection
+            .execute(
+                "INSERT INTO workspaces VALUES ('inventory_workspace', ?1)",
+                [CREATED_AT],
+            )
+            .unwrap();
+        connection.execute(
+            "INSERT INTO clients(client_id, workspace_id, status, current_credential_epoch, created_at) VALUES ('client', 'inventory_workspace', 'active', 1, ?1)",
+            [CREATED_AT],
+        ).unwrap();
+        for update in [
+            "client_id = 'changed'",
+            "workspace_id = 'changed'",
+            "authentication_type = 'first_party', purpose = 'node'",
+            "purpose = 'cli'",
+            "owner_subject_id = 'changed'",
+            "created_at = 'changed'",
+        ] {
+            assert!(connection
+                .execute(
+                    &format!("UPDATE clients SET {update} WHERE client_id = 'client'"),
+                    []
+                )
+                .is_err());
+        }
+        for name in [String::new(), "a".repeat(129), "é".repeat(65)] {
+            assert!(connection
+                .execute(
+                    "UPDATE clients SET name = ?1 WHERE client_id = 'client'",
+                    [name]
+                )
+                .is_err());
+        }
+        connection.execute("UPDATE clients SET name = ?1, current_credential_epoch = 2, status = 'revoked' WHERE client_id = 'client'", ["é".repeat(64)]).unwrap();
+        assert!(connection.execute(
+            "INSERT INTO clients(client_id, workspace_id, status, current_credential_epoch, created_at, authentication_type, purpose) VALUES ('invalid', 'inventory_workspace', 'active', 1, ?1, 'confidential', 'node')",
+            [CREATED_AT],
+        ).is_err());
+        assert_eq!(
+            connection
+                .execute("DELETE FROM clients WHERE client_id = 'client'", [])
+                .unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn v18_client_inventory_migration_is_atomic_and_matches_fresh_schema() {
+        let connection = version_seventeen_connection();
+        connection
+            .execute(
+                "CREATE INDEX clients_inventory_owner_idx ON clients(client_id)",
+                [],
+            )
+            .unwrap();
+        assert!(migrate_v18(&connection).is_err());
+        assert_eq!(
+            connection
+                .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            17
+        );
+        assert_eq!(connection.query_row("SELECT COUNT(*) FROM pragma_table_xinfo('clients') WHERE name = 'authentication_type'", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+        connection
+            .execute("DROP INDEX clients_inventory_owner_idx", [])
+            .unwrap();
+        migrate_v18(&connection).unwrap();
+        let correlation = fasti_domain::RequestCorrelationId::new_v7();
+        let upgraded = crate::portability::schema_fingerprint(&connection, correlation).unwrap();
+        let fresh =
+            crate::portability::schema_fingerprint(&migrated_connection(), correlation).unwrap();
+        assert_eq!(upgraded.migration_version(), 18);
+        assert_eq!(upgraded.digest(), fresh.digest());
+    }
+
+    #[test]
+    fn v18_rejects_noncanonical_client_times_before_installing_indexes() {
+        for value in [
+            "invalid",
+            "2026-09-08T00:00:00.123Z",
+            "2026-09-08T01:00:00.000000+01:00",
+        ] {
+            let connection = version_seventeen_connection();
+            connection
+                .execute(
+                    "INSERT INTO workspaces VALUES ('inventory_workspace', ?1)",
+                    [CREATED_AT],
+                )
+                .unwrap();
+            connection.execute(
+                "INSERT INTO clients(client_id, workspace_id, status, current_credential_epoch, created_at) VALUES ('client', 'inventory_workspace', 'active', 1, ?1)",
+                [value],
+            ).unwrap();
+            assert!(migrate_v18(&connection).is_err());
+            assert_eq!(
+                connection
+                    .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                    .unwrap(),
+                17
+            );
+            assert_eq!(
+                connection
+                    .query_row("SELECT created_at FROM clients", [], |row| row
+                        .get::<_, String>(0))
+                    .unwrap(),
+                value
+            );
+        }
+    }
+
+    #[test]
+    fn v18_inventory_time_index_preserves_domain_extremes_and_leap_seconds() {
+        use chrono::{DateTime, SubsecRound, Utc};
+        let connection = migrated_connection();
+        connection
+            .execute(
+                "INSERT INTO workspaces VALUES ('inventory_workspace', ?1)",
+                [CREATED_AT],
+            )
+            .unwrap();
+        let mut times = vec![
+            DateTime::<Utc>::MIN_UTC,
+            DateTime::<Utc>::MAX_UTC.trunc_subsecs(6),
+        ];
+        for value in [
+            "-0001-12-31T23:59:59.999999Z",
+            "0000-01-01T00:00:00.000000Z",
+            "9999-12-31T23:59:59.999999Z",
+            "+10000-01-01T00:00:00.000000Z",
+            "2016-12-31T23:59:59.999999Z",
+            "2016-12-31T23:59:60.000000Z",
+            "2016-12-31T23:59:60.999999Z",
+            "2017-01-01T00:00:00.000000Z",
+        ] {
+            times.push(value.parse().unwrap());
+        }
+        for (index, time) in times.iter().enumerate() {
+            let serialized = crate::kernel::timestamp(*time);
+            assert_eq!(
+                crate::client_credentials::canonical_inventory_timestamp(&serialized),
+                Some(*time)
+            );
+            connection.execute(
+                "INSERT INTO clients(client_id, workspace_id, status, current_credential_epoch, created_at) VALUES (?1, 'inventory_workspace', 'active', 1, ?2)",
+                params![format!("client{index:04}"), serialized],
+            ).unwrap();
+        }
+        let legacy = "2026-08-24T00:00:02Z";
+        let legacy_time = crate::client_credentials::canonical_inventory_timestamp(legacy).unwrap();
+        connection.execute(
+            "INSERT INTO clients(client_id, workspace_id, status, current_credential_epoch, created_at) VALUES ('legacy', 'inventory_workspace', 'active', 1, ?1)",
+            [legacy],
+        ).unwrap();
+        times.push(legacy_time);
+        times.sort_by(|left, right| right.cmp(left));
+        let mut statement = connection.prepare(
+            "SELECT created_at FROM clients WHERE workspace_id = 'inventory_workspace' ORDER BY inventory_created_year DESC, inventory_created_tail DESC, client_id DESC"
+        ).unwrap();
+        let actual = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .map(|row| {
+                crate::client_credentials::canonical_inventory_timestamp(&row.unwrap()).unwrap()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(actual, times);
+        let cursor = "2016-12-31T23:59:60.000000Z";
+        let plan: String = connection.query_row(
+            "EXPLAIN QUERY PLAN SELECT client_id FROM clients WHERE workspace_id = ?1 AND (inventory_created_year, inventory_created_tail, client_id) < (CAST(?2 AS INTEGER), substr(?2, -23), ?3) ORDER BY inventory_created_year DESC, inventory_created_tail DESC, client_id DESC LIMIT ?4",
+            params!["inventory_workspace", cursor, "client9999", 33], |row| row.get(3),
+        ).unwrap();
+        assert!(plan.contains("clients_inventory_workspace_idx"), "{plan}");
+        assert!(
+            plan.contains("inventory_created_year,inventory_created_tail,client_id"),
+            "{plan}"
+        );
+    }
+
     #[test]
     fn published_v16_schema_fingerprint() {
         let connection = Connection::open_in_memory().unwrap();

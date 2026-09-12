@@ -7,6 +7,31 @@ const FIXTURE_TITLE = "Fasti Fixture Film";
 const FIXTURE_OVERVIEW =
   "Deterministic provider detail for the real Search journey.";
 const FIXTURE_PROVIDER_IDS = ["842001", "842002"];
+const M4_FIXTURES = {
+  tmdb: {
+    provider: "tmdb",
+    title: FIXTURE_TITLE,
+    grain: "film",
+    slug: "fasti-fixture-film",
+    searchLabel: "Search The Movie Database (TMDB)",
+    namespace: "tmdb.movie",
+  },
+  igdb: {
+    provider: "igdb",
+    title: "Fasti Fixture Game",
+    grain: "game_release",
+    slug: "fasti-fixture-game",
+    searchLabel: "Search IGDB (Games)",
+    namespace: "igdb.game",
+  },
+};
+
+function m4Fixture(provider = "tmdb") {
+  if (provider !== "tmdb" && provider !== "igdb") {
+    throw new Error("unknown M4 fixture provider");
+  }
+  return M4_FIXTURES[provider];
+}
 const NO_STORE_TITLE = "Fasti Transient Fixture Film";
 const NO_STORE_OVERVIEW =
   "Transient provider payload sentinel 94a8bcd73cdd4ef5b350f838d5ec4dd1.";
@@ -19,43 +44,250 @@ const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext();
 const page = await context.newPage();
 
-async function trailBaseLogin() {
-  await page.locator("#login-form").waitFor();
-  await page.locator("#login-form input[name=email]").fill(input.email);
-  await page.locator("#login-form input[name=password]").fill(input.password);
-  await page.locator("#login-form").evaluate((form) => form.requestSubmit());
+async function trailBaseLogin(targetPage = page) {
+  await targetPage.locator("#login-form").waitFor();
+  await targetPage.locator("#login-form input[name=email]").fill(input.email);
+  await targetPage
+    .locator("#login-form input[name=password]")
+    .fill(input.password);
+  await targetPage
+    .locator("#login-form")
+    .evaluate((form) => form.requestSubmit());
 }
 
-async function signInToFasti() {
-  await page.goto(`${FASTI_ORIGIN}/first-run`);
-  await page
+async function signInToFasti(targetPage = page) {
+  await targetPage.goto(`${FASTI_ORIGIN}/first-run`);
+  await targetPage
     .getByRole("button", { name: "Sign in to an existing account" })
     .click();
-  await page.waitForURL((url) => url.origin === "http://127.0.0.1:4000");
-  await trailBaseLogin();
-  await page.waitForURL(
+  await targetPage.waitForURL((url) => url.origin === "http://127.0.0.1:4000");
+  await trailBaseLogin(targetPage);
+  await targetPage.waitForURL(
     (url) =>
       url.origin === FASTI_ORIGIN &&
       ["/first-run", "/settings/account"].includes(url.pathname),
     { timeout: 30_000 },
   );
-  await page
+  await targetPage
     .getByRole("heading", { name: "Choose where to continue" })
     .waitFor();
-  await page.getByRole("radio").first().check();
-  await page.getByRole("button", { name: "Confirm access" }).click();
-  await page.waitForFunction(() =>
+  await targetPage.getByRole("radio").first().check();
+  await targetPage.getByRole("button", { name: "Confirm access" }).click();
+  await targetPage.waitForFunction(() =>
     document.cookie.includes("__Host-fasti_csrf="),
   );
-  if (new URL(page.url()).pathname === "/first-run") {
-    await page.getByText("Account confirmed", { exact: true }).waitFor();
-    await page.goto(`${FASTI_ORIGIN}/settings/account`);
+  if (new URL(targetPage.url()).pathname === "/first-run") {
+    await targetPage.getByText("Account confirmed", { exact: true }).waitFor();
+    await targetPage.goto(`${FASTI_ORIGIN}/settings/account`);
   }
-  await page.getByRole("heading", { name: "Account and security" }).waitFor();
+  await targetPage
+    .getByRole("heading", { name: "Account and security" })
+    .waitFor();
 }
 
 function requireValue(condition, message) {
   if (!condition) throw new Error(message);
+}
+
+async function runClientInventoryJourney() {
+  const expectedClientId = input.clientInventoryClientId;
+  requireValue(
+    typeof expectedClientId === "string" &&
+      /^cli_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/.test(expectedClientId),
+    "client inventory node witness is invalid",
+  );
+
+  async function readInventory(targetPage) {
+    const pending = targetPage.waitForRequest(
+      (request) =>
+        request.method() === "GET" &&
+        request.url() === `${FASTI_ORIGIN}/api/access/v1/clients?limit=1`,
+    );
+    const result = await targetPage.evaluate(async () => {
+      const response = await fetch("/api/access/v1/clients?limit=1", {
+        credentials: "same-origin",
+        signal: AbortSignal.timeout(10_000),
+      });
+      return {
+        status: response.status,
+        cacheControl: response.headers.get("cache-control"),
+        contentType: response.headers.get("content-type"),
+        body: await response.json(),
+      };
+    });
+    const headers = await (await pending).allHeaders();
+    requireValue(
+      headers.authorization === undefined &&
+        /(?:^|; )__Host-fasti_session=[0-9a-f]{64}(?:;|$)/.test(
+          headers.cookie ?? "",
+        ),
+      "client inventory request did not use cookie-only authority",
+    );
+    requireValue(
+      result.cacheControl === "private, no-store",
+      "client inventory response permits retention",
+    );
+    return result;
+  }
+
+  function requireInventory(result) {
+    const body = result.body;
+    requireValue(
+      result.status === 200 &&
+        result.contentType?.startsWith("application/json") &&
+        body &&
+        Object.keys(body).sort().join(",") === "clients,next" &&
+        Array.isArray(body.clients) &&
+        body.clients.length === 1 &&
+        body.next === null,
+      "client inventory bounded response differs",
+    );
+    const client = body.clients[0];
+    requireValue(
+      client &&
+        Object.keys(client).sort().join(",") ===
+          "authentication_type,client_id,created_at,current_credential_epoch,lifecycle,name,owner_subject_id,purpose" &&
+        client.client_id === expectedClientId &&
+        client.authentication_type === "first_party" &&
+        client.purpose === "node" &&
+        client.lifecycle === "active" &&
+        client.owner_subject_id === null &&
+        client.name === null &&
+        client.current_credential_epoch === "1" &&
+        typeof client.created_at === "string" &&
+        /^(?:[0-9]{4}|[+-][0-9]{5,6})-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}Z$/.test(
+          client.created_at,
+        ),
+      "client inventory differs from the enrolled node witness",
+    );
+  }
+
+  requireInventory(await readInventory(page));
+  const secondContext = await browser.newContext();
+  try {
+    const secondPage = await secondContext.newPage();
+    await signInToFasti(secondPage);
+    requireInventory(await readInventory(secondPage));
+    const targetSessionId = await secondPage.evaluate(async () => {
+      const response = await fetch("/api/access/v1/browser-session", {
+        credentials: "same-origin",
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (response.status !== 200)
+        throw new Error("second browser session read failed");
+      return (await response.json()).session?.browser_session_id;
+    });
+    requireValue(
+      typeof targetSessionId === "string" &&
+        /^ses_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/.test(
+          targetSessionId,
+        ),
+      "second browser session identifier is invalid",
+    );
+    const secondCookie = (await secondContext.cookies(FASTI_ORIGIN)).find(
+      (cookie) => cookie.name === "__Host-fasti_session",
+    );
+    const originalCookie = (await context.cookies(FASTI_ORIGIN)).find(
+      (cookie) => cookie.name === "__Host-fasti_session",
+    );
+    requireValue(
+      secondCookie &&
+        originalCookie &&
+        secondCookie.value !== originalCookie.value,
+      "browser sessions are not independent",
+    );
+    await page.evaluate(async (sessionId) => {
+      const csrf = document.cookie
+        .split("; ")
+        .find((pair) => pair.startsWith("__Host-fasti_csrf="))
+        ?.split("=", 2)[1];
+      if (!csrf) throw new Error("revoking browser CSRF cookie is unavailable");
+      const response = await fetch(
+        `/api/access/v1/browser-sessions/${sessionId}`,
+        {
+          method: "DELETE",
+          headers: { "X-CSRF-Token": csrf },
+          credentials: "same-origin",
+          signal: AbortSignal.timeout(10_000),
+        },
+      );
+      if (
+        response.status !== 200 ||
+        (await response.json()).revoked_count !== 1
+      )
+        throw new Error("second browser session was not revoked exactly once");
+    }, targetSessionId);
+    requireValue(
+      (await secondContext.cookies(FASTI_ORIGIN)).find(
+        (cookie) => cookie.name === "__Host-fasti_session",
+      )?.value === secondCookie.value,
+      "revoked-session probe lost its original cookie",
+    );
+    const denied = await readInventory(secondPage);
+    requireValue(
+      denied.status === 401 &&
+        denied.contentType?.startsWith("application/problem+json") &&
+        denied.body?.status === 401 &&
+        denied.body.code === "browser_session_revoked" &&
+        denied.body.capability_id === "access.client.list" &&
+        !Object.hasOwn(denied.body, "clients") &&
+        !Object.hasOwn(denied.body, "next"),
+      "revoked-session client inventory was not denied with its typed problem",
+    );
+    requireInventory(await readInventory(page));
+    return {
+      capabilityId: "access.client.list",
+      requestedLimit: 1,
+      returnedClients: 1,
+      nodeClientId: expectedClientId,
+      nodeWitnessSource: "stopped_fasti_sqlite_node_state",
+      cookieOnly: true,
+      noStore: true,
+      exactNodeClientObserved: true,
+      secondSessionRevoked: true,
+      retainedCookieDenied: true,
+      denialStatus: 401,
+      denialCode: "browser_session_revoked",
+      originalSessionStillAuthorized: true,
+    };
+  } finally {
+    await secondContext.close();
+  }
+}
+
+async function verifyProviderSecretsAbsent() {
+  const forbidden = input.forbiddenProviderValues;
+  if (forbidden === undefined) return undefined;
+  try {
+    if (
+      !Array.isArray(forbidden) ||
+      forbidden.length === 0 ||
+      forbidden.length > 64 ||
+      forbidden.some(
+        (value) => typeof value !== "string" || !value || value.length > 4096,
+      )
+    ) {
+      throw new Error();
+    }
+    const values = await page.evaluate(() => [
+      document.body.innerText,
+      ...Object.entries(localStorage).flat(),
+      ...Object.entries(sessionStorage).flat(),
+    ]);
+    values.push(page.url());
+    for (const cookie of await context.cookies()) {
+      values.push(cookie.name, cookie.value, cookie.domain, cookie.path);
+    }
+    if (
+      forbidden.some((secret) => values.some((value) => value.includes(secret)))
+    ) {
+      throw new Error();
+    }
+    return true;
+  } catch {
+    // Neither a matching value nor inspected browser data belongs in evidence.
+    throw new Error("Provider secret absence check failed.");
+  }
 }
 
 async function requireCount(locator, expected, label) {
@@ -85,9 +317,9 @@ function providerResult(providerId) {
     .filter({ has: page.getByText(providerId, { exact: true }) });
 }
 
-async function searchFixtureFilm({ cachedOnly = false } = {}) {
+async function searchFixture(fixture, { cachedOnly = false } = {}) {
   const provider = page.getByLabel("Metadata provider");
-  await provider.selectOption("tmdb");
+  await provider.selectOption(fixture.provider);
   if (cachedOnly) {
     await page
       .getByRole("checkbox", {
@@ -96,19 +328,19 @@ async function searchFixtureFilm({ cachedOnly = false } = {}) {
       .check();
   }
   const search = page.getByRole("searchbox", {
-    name: "Search The Movie Database (TMDB)",
+    name: fixture.searchLabel,
   });
-  await search.fill(FIXTURE_TITLE);
+  await search.fill(fixture.title);
   await page.getByRole("button", { name: "Search", exact: true }).click();
   await page
     .getByRole("region", { name: "Search results" })
-    .getByText(`2 results for ${FIXTURE_TITLE}.`, { exact: false })
+    .getByText(`2 results for ${fixture.title}.`, { exact: false })
     .waitFor();
   for (const providerId of FIXTURE_PROVIDER_IDS) {
     await requireCount(
       providerResult(providerId),
       1,
-      `TMDB candidate ${providerId}`,
+      `${fixture.provider} candidate ${providerId}`,
     );
   }
 }
@@ -424,26 +656,29 @@ async function verifyRestartedNoStoreRecord() {
   };
 }
 
-async function openFixtureDetails(providerId) {
+async function openFixtureDetails(fixture, providerId) {
   const result = providerResult(providerId);
   await result.getByRole("link", { name: "View details" }).click();
   await page.waitForURL(
     (url) =>
       url.origin === FASTI_ORIGIN &&
-      /^\/explore\/tmdb\/film\/scr_[0-9a-f]{32}\/fasti-fixture-film$/.test(
-        url.pathname,
-      ),
+      new RegExp(
+        `^/explore/${fixture.provider}/${fixture.grain}/scr_[0-9a-f]{32}/${fixture.slug}$`,
+      ).test(url.pathname),
   );
   const details = page.locator("section").filter({
-    has: page.getByRole("heading", { name: FIXTURE_TITLE, level: 1 }),
+    has: page.getByRole("heading", { name: fixture.title, level: 1 }),
   });
   await details.getByText(FIXTURE_OVERVIEW, { exact: true }).waitFor();
   await details.getByText(providerId, { exact: true }).waitFor();
   await details.getByText("2020", { exact: true }).waitFor();
+  if (fixture.provider === "igdb") {
+    await details.getByText("game", { exact: true }).waitFor();
+  }
   return details;
 }
 
-async function runM4SearchJourney() {
+async function runM4SearchJourney(fixture = m4Fixture()) {
   const observed = [];
   const observeRequest = (request) => {
     const url = new URL(request.url());
@@ -458,7 +693,7 @@ async function runM4SearchJourney() {
   try {
     await page.goto(`${FASTI_ORIGIN}/discover`);
     await page.getByRole("heading", { name: "Discover", level: 1 }).waitFor();
-    await searchFixtureFilm();
+    await searchFixture(fixture);
     // Fresh describes reuse eligibility, including a just-persisted response.
     // The TLS fixture's exact request count separately proves the upstream call.
     await page
@@ -470,15 +705,18 @@ async function runM4SearchJourney() {
       .waitFor();
     await requireNoAccessibilityViolations("live provider Search results");
 
-    const firstDetails = await openFixtureDetails(FIXTURE_PROVIDER_IDS[0]);
+    const firstDetails = await openFixtureDetails(
+      fixture,
+      FIXTURE_PROVIDER_IDS[0],
+    );
     await requireNoAccessibilityViolations("provider candidate details");
     await firstDetails.getByRole("button", { name: "Create Record" }).click();
     await page.waitForURL(
       (url) =>
         url.origin === FASTI_ORIGIN &&
-        /^\/records\/film\/rec_[0-9a-f]{32}\/fasti-fixture-film$/.test(
-          url.pathname,
-        ),
+        new RegExp(
+          `^/records/${fixture.grain}/rec_[0-9a-f]{32}/${fixture.slug}$`,
+        ).test(url.pathname),
     );
     const recordPath = new URL(page.url()).pathname;
     const recordId = recordPath.split("/")[3];
@@ -487,14 +725,17 @@ async function runM4SearchJourney() {
       "created Record ID is not canonical",
     );
     await page
-      .getByRole("heading", { name: FIXTURE_TITLE, level: 1 })
+      .getByRole("heading", { name: fixture.title, level: 1 })
       .waitFor();
     await page.getByText("Fasti Entity ID:", { exact: true }).waitFor();
     await page.getByText(recordId, { exact: true }).first().waitFor();
 
     await page.goto(`${FASTI_ORIGIN}/discover`);
-    await searchFixtureFilm();
-    const secondDetails = await openFixtureDetails(FIXTURE_PROVIDER_IDS[1]);
+    await searchFixture(fixture);
+    const secondDetails = await openFixtureDetails(
+      fixture,
+      FIXTURE_PROVIDER_IDS[1],
+    );
     await secondDetails
       .getByRole("button", {
         name: "Attach to existing Record",
@@ -529,7 +770,7 @@ async function runM4SearchJourney() {
     await page.getByText(recordId, { exact: true }).first().waitFor();
 
     await page.goto(`${FASTI_ORIGIN}/discover`);
-    await searchFixtureFilm({ cachedOnly: true });
+    await searchFixture(fixture, { cachedOnly: true });
     await page
       .getByRole("region", { name: "Search results" })
       .getByRole("status")
@@ -547,21 +788,22 @@ async function runM4SearchJourney() {
     const counts = {
       providerSearch: observed.filter(
         ({ method, path }) =>
-          method === "POST" && path === "/api/v1/search/providers/tmdb",
+          method === "POST" &&
+          path === `/api/v1/search/providers/${fixture.provider}`,
       ).length,
       candidateDetails: observed.filter(
         ({ method, path }) =>
           method === "GET" &&
-          /^\/api\/v1\/search\/candidates\/tmdb\/film\/scr_[0-9a-f]{32}$/.test(
-            path,
-          ),
+          new RegExp(
+            `^/api/v1/search/candidates/${fixture.provider}/${fixture.grain}/scr_[0-9a-f]{32}$`,
+          ).test(path),
       ).length,
       candidateActions: observed.filter(
         ({ method, path }) =>
           method === "POST" &&
-          /^\/api\/v1\/search\/candidates\/tmdb\/film\/scr_[0-9a-f]{32}\/actions$/.test(
-            path,
-          ),
+          new RegExp(
+            `^/api/v1/search/candidates/${fixture.provider}/${fixture.grain}/scr_[0-9a-f]{32}/actions$`,
+          ).test(path),
       ).length,
       localRecordSearch: observed.filter(
         ({ method, path }) =>
@@ -590,10 +832,12 @@ async function runM4SearchJourney() {
       recordPath,
       providerIds: [...FIXTURE_PROVIDER_IDS],
       cachedOnly,
+      ...(fixture.provider === "igdb" ? { cacheState: "fresh" } : {}),
       browserRequests: counts,
       liveProviderDetailsObserved: true,
       createCanonicalRecordObserved: true,
       attachCanonicalRecordObserved: true,
+      providerSecretsAbsent: await verifyProviderSecretsAbsent(),
     };
   } finally {
     page.off("request", observeRequest);
@@ -601,6 +845,7 @@ async function runM4SearchJourney() {
 }
 
 async function verifyRestartedRecord() {
+  const fixture = m4Fixture(input.fixtureProvider);
   requireValue(
     typeof input.recordId === "string" &&
       /^rec_[0-9a-f]{32}$/.test(input.recordId),
@@ -608,14 +853,15 @@ async function verifyRestartedRecord() {
   );
   requireValue(
     typeof input.recordPath === "string" &&
-      input.recordPath === `/records/film/${input.recordId}/fasti-fixture-film`,
+      input.recordPath ===
+        `/records/${fixture.grain}/${input.recordId}/${fixture.slug}`,
     "restart Record path does not match its canonical identity",
   );
   await page.goto(`${FASTI_ORIGIN}${input.recordPath}`);
   await page.waitForURL(
     (url) => url.origin === FASTI_ORIGIN && url.pathname === input.recordPath,
   );
-  await page.getByRole("heading", { name: FIXTURE_TITLE, level: 1 }).waitFor();
+  await page.getByRole("heading", { name: fixture.title, level: 1 }).waitFor();
   await page.getByText("Fasti Entity ID:", { exact: true }).waitFor();
   await page.getByText(input.recordId, { exact: true }).first().waitFor();
   await page
@@ -630,12 +876,16 @@ async function verifyRestartedRecord() {
       has: page.getByRole("cell", { name: providerId, exact: true }),
     });
     await row.waitFor();
-    await requireCount(row, 1, `persisted TMDB identity ${providerId}`);
+    await requireCount(
+      row,
+      1,
+      `persisted ${fixture.provider} identity ${providerId}`,
+    );
     const cells = row.getByRole("cell");
     await requireCount(cells, 5, "persisted identifier columns");
     requireValue(
-      (await cells.nth(0).innerText()).trim() === "tmdb.movie",
-      `persisted TMDB identity ${providerId} has the wrong namespace`,
+      (await cells.nth(0).innerText()).trim() === fixture.namespace,
+      `persisted ${fixture.provider} identity ${providerId} has the wrong namespace`,
     );
   }
   await requireNoAccessibilityViolations("restarted canonical Record");
@@ -645,6 +895,7 @@ async function verifyRestartedRecord() {
     providerIds: [...FIXTURE_PROVIDER_IDS],
     canonicalRecordObservedAfterRestart: true,
     exactExternalIdentifiersObserved: true,
+    providerSecretsAbsent: await verifyProviderSecretsAbsent(),
   };
 }
 
@@ -853,8 +1104,15 @@ try {
     ) {
       throw new Error("vendor credentials reached browser storage");
     }
+    const clientInventory =
+      input.clientInventoryJourney === true
+        ? await runClientInventoryJourney()
+        : undefined;
     const m4SearchJourney = input.m4SearchJourney
       ? await runM4SearchJourney()
+      : undefined;
+    const m4IgdbJourney = input.m4IgdbJourney
+      ? await runM4SearchJourney(m4Fixture("igdb"))
       : undefined;
     process.stdout.write(
       JSON.stringify({
@@ -880,7 +1138,9 @@ try {
           distinct: true,
         },
         m3AnimeGroupingPolicy,
+        ...(clientInventory ? { clientInventory } : {}),
         ...(m4SearchJourney ? { m4SearchJourney } : {}),
+        ...(m4IgdbJourney ? { m4IgdbJourney } : {}),
         fastiOriginVendorCredentialStorageAbsent: true,
       }),
     );

@@ -4,6 +4,40 @@ capability_base_uri: https://fasti.scrobble.dev/ns/capabilities/v1/
 # Profiles keep repeated transport dispositions in one place. A required
 # binding is a contract-generation target, not a claim that its runtime exists.
 surface_profiles:
+  c2_access_inventory:
+    domain_application:
+      { state: required, binding: "application:{application_key}" }
+    http_openapi: { state: required, binding: "openapi:{capability_id}" }
+    sse_asyncapi:
+      {
+        state: not_applicable,
+        reason: Client inventory is a finite read without an event stream.,
+      }
+    cli:
+      {
+        state: not_applicable,
+        reason: This inventory uses first-party browser session authority.,
+      }
+    json_schema:
+      {
+        state: required,
+        binding: "schema:production-openapi-operation:{capability_id}",
+      }
+    json_ld:
+      {
+        state: not_applicable,
+        reason: Private client ownership and lifecycle state is not linked data.,
+      }
+    okf: { state: required, binding: "okf:capability-catalog" }
+    sdk: { state: required, binding: "sdk:{capability_id}" }
+    knowledge: { state: required, binding: "knowledge:problem-catalog" }
+    package_smoke:
+      {
+        state: later_body,
+        body: c2,
+        reason: Inventory runtime evidence follows complete route integration.,
+      }
+    ui: { state: required, binding: "ui:access-client-inventory" }
   m4_search:
     domain_application:
       { state: required, binding: "application:{application_key}" }
@@ -616,6 +650,35 @@ surface_profiles:
     ui: { state: not_applicable, reason: Fasti is headless through B3. }
 
 capabilities:
+  - application_key: list_access_clients
+    id: access.client.list
+    bounded_context: access.credentials
+    contract_body: c2
+    runtime_body: c2
+    authorization: browser_session
+    lifecycle:
+      {
+        introduced_in: c2,
+        contract_state: reserved,
+        runtime_availability: guarded,
+      }
+    surface_profile: c2_access_inventory
+    scopes: []
+    problems:
+      [
+        authentication_failed,
+        browser_session_expired,
+        browser_session_revoked,
+        capability_unavailable,
+        forbidden,
+        integrity_failed,
+        session_policy_changed,
+        storage_unavailable,
+        validation_failed,
+      ]
+    examples: [access.client.list.success]
+    uat: []
+
   - application_key: search_metadata
     id: metadata.search
     bounded_context: search.candidates

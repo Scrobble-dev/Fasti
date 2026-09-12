@@ -26,6 +26,7 @@ pub const fn public_capability_id(key: CapabilityKey) -> &'static str {
         CapabilityKey::InspectCorrectionChain => "correction.chain.inspect",
         CapabilityKey::InspectReview => "identity.review.inspect",
         CapabilityKey::IntegrationStatus => "integration.status",
+        CapabilityKey::ListAccessClients => "access.client.list",
         CapabilityKey::ListBrowserSessions => "browser.sessions.list",
         CapabilityKey::ListProviders => "provider.list",
         CapabilityKey::ListRecords => "identity.record.list",

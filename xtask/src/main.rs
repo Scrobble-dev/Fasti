@@ -76,6 +76,8 @@ enum DocsCommand {
 
 #[derive(Subcommand)]
 enum TestCommand {
+    /// Prove only browser client inventory against prepared clean-source artifacts
+    AccessClientInventory,
     /// Run the complete, bounded pull-request gate
     Pr,
     /// Run the pull-request gate plus applicable deep checks
@@ -243,6 +245,9 @@ fn run_existing(command: Command, root: &std::path::Path) -> anyhow::Result<()> 
         Command::Test {
             command: TestCommand::Deep,
         } => run_deep(root),
+        Command::Test {
+            command: TestCommand::AccessClientInventory,
+        } => orchestration::run_access_client_inventory(root),
         Command::Test {
             command: TestCommand::Milestone { body, manifest },
         } => run_milestone(root, body, manifest),

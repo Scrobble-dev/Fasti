@@ -32,6 +32,11 @@ from tmdb_smoke_fixture import (
     TmdbSmokeFixture,
     PROVIDER_IDS,
 )
+from igdb_smoke_fixture import IgdbSmokeFixture
+from igdb_smoke_evidence import (
+    search_database_evidence as igdb_database_evidence,
+    assert_secrets_absent,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -84,7 +89,9 @@ def _wait_health(process: subprocess.Popen[bytes]) -> None:
 
 
 def _start_fastid(
-    data_root: Path, trailbase_root: Path, provider: TmdbSmokeFixture | None = None,
+    data_root: Path, trailbase_root: Path,
+    provider: TmdbSmokeFixture | IgdbSmokeFixture | None = None,
+    expected_sha256: str | None = None,
 ) -> subprocess.Popen[bytes]:
     environment = dict(os.environ)
     for variable in (
@@ -92,6 +99,7 @@ def _start_fastid(
         "FASTI_REMOTE_TRUSTED_PROXY", "FASTI_PUBLIC_URL", "FASTI_EXTERNAL_BIND_IP",
         "FASTI_BOUND_ADDR_FILE", "FASTI_INTEGRATION_BOUND_ADDR_FILE",
         "FASTI_TMDB_SMOKE_RESOLVE", "FASTI_TMDB_SMOKE_CA_PEM",
+        "FASTI_IGDB_SMOKE_RESOLVE", "FASTI_IGDB_SMOKE_CA_PEM",
     ):
         environment.pop(variable, None)
     environment.update(
@@ -103,9 +111,13 @@ def _start_fastid(
     )
     executable = ROOT / "target/debug/fastid"
     if provider is not None:
-        environment.pop("GOOGLE_BOOKS_API_KEY", None)
+        for variable in ("GOOGLE_BOOKS_API_KEY", "TMDB_API_READ_ACCESS_TOKEN", "IGDB_CLIENT_CREDENTIALS"):
+            environment.pop(variable, None)
         environment.update(provider.child_environment())
-        executable = ROOT / "target/tmdb-smoke-fixture/debug/fastid"
+        feature = "igdb-smoke-fixture" if isinstance(provider, IgdbSmokeFixture) else "tmdb-smoke-fixture"
+        executable = ROOT / f"target/{feature}/debug/fastid"
+    if expected_sha256 is not None and runtime.sha256_file(executable) != expected_sha256:
+        raise RuntimeError("ordinary-browser daemon artifact changed before start")
     process = runtime.start_managed_process_group(
         [executable],
         environment=environment,
@@ -124,7 +136,8 @@ def _browser(
     payload: dict[str, object],
     checkpoint: tuple[Path, Path, Callable[[], None]] | None = None,
 ) -> dict[str, object]:
-    timeout = 180 if payload.get("m4SearchJourney") or checkpoint else 60
+    timeout = (180 if payload.get("m4SearchJourney") or payload.get("m4IgdbJourney") or checkpoint
+               else 120 if payload.get("clientInventoryJourney") is True else 60)
     if checkpoint is not None:
         ready, continuation, validate = checkpoint
         process = subprocess.Popen(  # nosec B603 -- fixed local script and no shell.
@@ -182,6 +195,10 @@ def _browser(
         check=False,
         timeout=timeout,
     )
+    if any(value.encode() in output
+           for value in payload.get("forbiddenProviderValues", ())
+           for output in (completed.stdout, completed.stderr)):
+        raise RuntimeError("provider credential reached browser helper output")
     if completed.returncode != 0:
         raise RuntimeError(completed.stderr.decode(errors="replace")[-4000:])
     result = json.loads(completed.stdout)
@@ -306,9 +323,18 @@ def _bootstrap_cli(
 def _arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=ROOT / ".dev-trailbase")
-    parser.add_argument(
+    journeys = parser.add_mutually_exclusive_group()
+    journeys.add_argument(
         "--m4-search-journey", action="store_true",
         help="also prove real-process Search/Create/Attach/cache/restart with isolated provider TLS",
+    )
+    journeys.add_argument(
+        "--m4-igdb-journey", action="store_true",
+        help="prove governed two-origin IGDB Search/Create/Attach/cache/restart through real fastid",
+    )
+    journeys.add_argument(
+        "--c2-client-inventory", action="store_true",
+        help="also prove bounded cookie-only client inventory and revoked-session denial",
     )
     parser.add_argument(
         "--receipt",
@@ -318,29 +344,59 @@ def _arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main() -> None:
-    runtime.install_termination_cleanup()
-    arguments = _arguments()
-    _execv_failure_self_test()
+def _source_identity() -> dict[str, object]:
     if subprocess.check_output(
         ["git", "status", "--porcelain=v1", "--untracked-files=all"], cwd=ROOT
     ).strip():
         raise RuntimeError("ordinary-browser proof requires a clean tree")
+    return {
+        "git_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT).decode().strip(),
+        "git_tree": subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], cwd=ROOT).decode().strip(),
+        "dirty": False,
+    }
+
+
+def _web_digest(directory: Path) -> str:
+    digest = hashlib.sha256()
+    if not (directory / "index.html").is_file():
+        raise RuntimeError("ordinary-browser web artifact is missing")
+    for path in sorted(directory.rglob("*")):
+        if path.is_symlink():
+            raise RuntimeError("ordinary-browser web artifact contains a symlink")
+        if path.is_file():
+            digest.update(path.relative_to(directory).as_posix().encode() + b"\0")
+            digest.update(bytes.fromhex(runtime.sha256_file(path)))
+    return digest.hexdigest()
+
+
+def main() -> None:
+    runtime.install_termination_cleanup()
+    arguments = _arguments()
+    _execv_failure_self_test()
+    source = _source_identity()
     fixture._require_free_port(4000, "ordinary-browser TrailBase proof")
     fixture._require_free_port(4001, "ordinary-browser TrailBase admin proof")
     fixture._require_free_port(8420, "ordinary-browser Fasti proof")
-    if arguments.m4_search_journey:
+    daemon_path = ROOT / "target/debug/fastid"
+    if arguments.m4_search_journey or arguments.m4_igdb_journey:
+        feature = "igdb-smoke-fixture" if arguments.m4_igdb_journey else "tmdb-smoke-fixture"
+        daemon_path = ROOT / f"target/{feature}/debug/fastid"
         for command in [
-            ["cargo", "build", "--locked", "--offline", "-p", "fasti-cli"],
+            ["cargo", "build", "--locked", "--offline", "-p", "fasti-cli", "--target-dir", "target"],
             ["cargo", "build", "--locked", "--offline", "-p", "fastid",
-             "--features", "tmdb-smoke-fixture", "--target-dir", "target/tmdb-smoke-fixture"],
+             "--features", feature, "--target-dir", f"target/{feature}"],
         ]:
             subprocess.run(command, cwd=ROOT, check=True, timeout=900)
+        subprocess.run(["pnpm", "run", "build"], cwd=ROOT, check=True, timeout=900)
+    web_digest = _web_digest(ROOT / "apps/web/dist")
+    daemon_digest = runtime.sha256_file(daemon_path)
+    cli_digest = runtime.sha256_file(ROOT / "target/debug/fasti")
 
     trailbase_process = None
     fastid = None
     smtp = None
     provider = None
+    secret_values = ()
     with tempfile.TemporaryDirectory(
         prefix="fasti-c1-browser-", dir=Path.home()
     ) as directory:
@@ -366,7 +422,10 @@ def main() -> None:
             email, password = fixture._register_verified_human(smoke, smtp.messages)
             if arguments.m4_search_journey:
                 provider = TmdbSmokeFixture(workspace / "tmdb")
-            fastid = _start_fastid(data_root, trailbase_root, provider)
+            elif arguments.m4_igdb_journey:
+                provider = IgdbSmokeFixture(workspace / "igdb")
+                secret_values = (*json.loads(provider.child_environment()["IGDB_CLIENT_CREDENTIALS"]).values(), provider._token)
+            fastid = _start_fastid(data_root, trailbase_root, provider, daemon_digest)
             secret = (data_root / "bootstrap.secret").read_text().strip()
             status, initialized = _post("/api/v1/node/initialization", {}, secret)
             if status != 200:
@@ -380,11 +439,12 @@ def main() -> None:
             secret = ""
             initialized.clear()
             if provider is not None:
+                provider_id = "igdb" if isinstance(provider, IgdbSmokeFixture) else "tmdb"
                 bearer = enrolled["credential"]
                 try:
                     for capability in ("metadata.search", "metadata.read"):
                         status, checked = _post(
-                            f"/api/v1/providers/tmdb/credentials/{capability}/tests", None, bearer,
+                            f"/api/v1/providers/{provider_id}/credentials/{capability}/tests", None, bearer,
                         )
                         selected = next(row for row in checked["capabilities"]
                                         if row["capability_id"] == capability)
@@ -397,11 +457,33 @@ def main() -> None:
             runtime.stop_managed_process_group(fastid)
             fastid = None
 
+            inventory_input: dict[str, object] = {}
+            if arguments.c2_client_inventory:
+                # Enrollment returns a credential, not an ID. Read only the
+                # nonsecret Fasti node identity while its daemon is stopped.
+                database = data_root / "current/fasti.sqlite3"
+                with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as connection:
+                    node = connection.execute(
+                        "SELECT client_id FROM node_state WHERE singleton = 1 AND initialized = 1"
+                    ).fetchone()
+                if (node is None or not isinstance(node[0], str)
+                        or re.fullmatch(r"cli_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}", node[0]) is None):
+                    raise RuntimeError("client inventory node witness is unavailable")
+                inventory_input = {
+                    "clientInventoryJourney": True,
+                    "clientInventoryClientId": node[0],
+                }
+
+            if runtime.sha256_file(ROOT / "target/debug/fasti") != cli_digest:
+                raise RuntimeError("ordinary-browser CLI artifact changed before bootstrap")
             _bootstrap_cli(data_root, trailbase_root, email, password)
-            fastid = _start_fastid(data_root, trailbase_root, provider)
+            fastid = _start_fastid(data_root, trailbase_root, provider, daemon_digest)
             evidence = _browser(
                 {"mode": "sign-in", "email": email, "password": password,
-                 "m4SearchJourney": arguments.m4_search_journey}
+                 "m4SearchJourney": arguments.m4_search_journey,
+                 "m4IgdbJourney": arguments.m4_igdb_journey,
+                 **inventory_input,
+                 **({"forbiddenProviderValues": secret_values} if secret_values else {})}
             )
             runtime.stop_managed_process_group(fastid)
             fastid = None
@@ -418,7 +500,44 @@ def main() -> None:
                 raise RuntimeError("ordinary browser did not create one active Fasti session")
             if administrator_count != 1:
                 raise RuntimeError("trusted CLI did not create one active administrator")
-            if provider is not None:
+            if isinstance(provider, IgdbSmokeFixture):
+                journey = evidence["m4IgdbJourney"]
+                events = provider.events()
+                operations = [event["operation"] for event in events]
+                if (Counter(operations) != Counter(token=7, health=2, search=1, detail=4)
+                        or provider.http_request_count() != len(events)
+                        or operations[::2] != ["token"] * 7):
+                    raise RuntimeError("real IGDB token/metadata/cache exchange differs")
+                assert_secrets_absent(database, (value.encode() for value in secret_values))
+                before = igdb_database_evidence(database, journey["recordId"], events)
+                content_before = _content_database_snapshot(database)
+                fastid = _start_fastid(data_root, trailbase_root, provider, daemon_digest)
+                restarted = _browser({
+                    "mode": "restart-record", "email": email, "password": password,
+                    "fixtureProvider": "igdb", "recordId": journey["recordId"],
+                    "recordPath": journey["recordPath"],
+                    "forbiddenProviderValues": secret_values,
+                })
+                runtime.stop_managed_process_group(fastid)
+                fastid = None
+                after = igdb_database_evidence(database, journey["recordId"], events)
+                if (before != after or provider.events() != events
+                        or provider.http_request_count() != len(events)
+                        or _content_database_snapshot(database) != content_before):
+                    raise RuntimeError("IGDB Record restart changed content or contacted a provider")
+                assert_secrets_absent(database, (value.encode() for value in secret_values))
+                evidence.update({
+                    "m4IgdbRestart": restarted, "m4IgdbDatabase": after,
+                    "m4IgdbProviderEvents": events,
+                    "m4IgdbProviderInput": {
+                        "classification": "disposable_loopback_igdb_tls_fixture",
+                        "public_provider_acceptance": False,
+                        "build_feature": "igdb-smoke-fixture",
+                        "daemon_sha256": daemon_digest,
+                        "sqlite_and_wal_credentials_absent": True,
+                    },
+                })
+            elif provider is not None:
                 journey = evidence["m4SearchJourney"]
                 requests = provider.requests()
                 if Counter(requests) != Counter({
@@ -427,7 +546,7 @@ def main() -> None:
                 }):
                     raise RuntimeError("real provider exchange/cache request evidence differs")
                 before = _search_database_evidence(database, journey["recordId"])
-                fastid = _start_fastid(data_root, trailbase_root, provider)
+                fastid = _start_fastid(data_root, trailbase_root, provider, daemon_digest)
                 restarted = _browser({
                     "mode": "restart-record", "email": email, "password": password,
                     "recordId": journey["recordId"], "recordPath": journey["recordPath"],
@@ -444,9 +563,7 @@ def main() -> None:
                     "classification": "disposable_loopback_tmdb_tls_fixture",
                     "public_provider_acceptance": False,
                     "build_feature": "tmdb-smoke-fixture",
-                    "daemon_sha256": runtime.sha256_file(
-                        ROOT / "target/tmdb-smoke-fixture/debug/fastid"
-                    ),
+                    "daemon_sha256": daemon_digest,
                 }
                 no_store_baseline = _content_database_snapshot(database)
                 no_store_requests = provider.requests()
@@ -478,7 +595,7 @@ def main() -> None:
                         "sqlite_and_wal_payload_absent": True,
                     })
 
-                fastid = _start_fastid(data_root, trailbase_root, provider)
+                fastid = _start_fastid(data_root, trailbase_root, provider, daemon_digest)
                 no_store = _browser(
                     {
                         "mode": "m4-no-store",
@@ -512,7 +629,7 @@ def main() -> None:
                     raise RuntimeError("complete no-store provider exchange differs")
                 requests_after_actions = provider.requests()
                 content_after_actions = _content_database_snapshot(database)
-                fastid = _start_fastid(data_root, trailbase_root, provider)
+                fastid = _start_fastid(data_root, trailbase_root, provider, daemon_digest)
                 no_store_restart = _browser({
                     "mode": "restart-no-store-record",
                     "email": email,
@@ -535,21 +652,19 @@ def main() -> None:
                 evidence["m4NoStoreDatabase"] = no_store_after
                 evidence["m4NoStoreProviderRequests"] = delta
                 evidence["m4NoStoreRestart"] = no_store_restart
+            if (_source_identity() != source
+                    or _web_digest(ROOT / "apps/web/dist") != web_digest
+                    or runtime.sha256_file(daemon_path) != daemon_digest
+                    or runtime.sha256_file(ROOT / "target/debug/fasti") != cli_digest):
+                raise RuntimeError("ordinary-browser source or artifacts changed during proof")
+            if any(value in json.dumps(evidence) for value in secret_values):
+                raise RuntimeError("provider credential reached browser proof output")
             receipt = {
                 "schema_version": "fasti.access-ordinary-browser.v1",
-                "source": {
-                    "git_commit": subprocess.check_output(
-                        ["git", "rev-parse", "HEAD"], cwd=ROOT
-                    )
-                    .decode()
-                    .strip(),
-                    "git_tree": subprocess.check_output(
-                        ["git", "rev-parse", "HEAD^{tree}"], cwd=ROOT
-                    )
-                    .decode()
-                    .strip(),
-                    "dirty": False,
-                },
+                "source": source,
+                "web_artifact_sha256": web_digest,
+                "daemon_artifact_sha256": daemon_digest,
+                "cli_artifact_sha256": cli_digest,
                 "trailbase_release": runtime.load_release()["version"],
                 "checks": evidence,
                 "active_browser_sessions": session_count,
@@ -570,6 +685,7 @@ def main() -> None:
             )
         finally:
             password = ""
+            secret_values = ()
             if fastid is not None:
                 runtime.stop_managed_process_group(fastid)
             if trailbase_process is not None:

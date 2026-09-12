@@ -40,10 +40,10 @@ const mutateJson = async (root, relativePath, mutate) => {
 
 test("checked-in generated contracts validate", async () => {
   assert.deepEqual(await validateGeneratedContracts(), {
-    capabilityCount: 53,
+    capabilityCount: 54,
     conformanceOpenApiPathCount: 9,
-    openApiPathCount: 42,
-    problemCount: 392,
+    openApiPathCount: 43,
+    problemCount: 401,
     schemaCount: 2,
   });
 });
@@ -155,6 +155,48 @@ test("Access schemas reject forbidden secret properties", async () => {
       }),
     (result) =>
       assert.rejects(result, /forbidden secret property refresh_token/u),
+  );
+});
+
+for (const security of [
+  undefined,
+  [{ credential_bearer: [] }],
+  [{ browser_session_cookie: [], csrf_cookie: [], csrf_header: [] }],
+]) {
+  test(`inventory rejects non-cookie-only security ${JSON.stringify(security)}`, async () => {
+    await withArtifacts(
+      (root) =>
+        mutateJson(root, "contracts/generated/v1/openapi.json", (document) => {
+          document.paths["/api/access/v1/clients"].get.security = security;
+        }),
+      (result) =>
+        assert.rejects(result, /list_access_clients security must match/u),
+    );
+  });
+}
+
+test("inventory rejects a secret added through its response reference", async () => {
+  await withArtifacts(
+    (root) =>
+      mutateJson(root, "contracts/generated/v1/openapi.json", (document) => {
+        document.components.schemas.ListAccessClientsResponse.properties.credential =
+          { type: "string" };
+      }),
+    (result) => assert.rejects(result, /forbidden secret property credential/u),
+  );
+});
+
+test("inventory rejects omitted revocation evidence in its problem contract", async () => {
+  await withArtifacts(
+    (root) =>
+      mutateJson(root, "contracts/generated/v1/openapi.json", (document) => {
+        const operation = document.paths["/api/access/v1/clients"].get;
+        operation["x-fasti-problem-codes"] = operation[
+          "x-fasti-problem-codes"
+        ].filter((code) => code !== "browser_session_revoked");
+      }),
+    (result) =>
+      assert.rejects(result, /list_access_clients problem subset drifted/u),
   );
 });
 

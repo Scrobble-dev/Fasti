@@ -384,6 +384,13 @@ impl ConfigureListenerCommand {
 }
 
 pub trait AccessAdministrationPort: Send + Sync {
+    /// Inspect only the clients visible to the current browser membership.
+    /// The store revalidates authority and reads the bounded page atomically.
+    fn list_access_clients(
+        &self,
+        query: crate::AccessInventoryQuery<fasti_domain::ClientId>,
+    ) -> ApplicationResult<crate::AccessClientInventory>;
+
     /// Returns the bootstrap secret, generating and persisting it (with
     /// owner-only file permissions) on first call. A legitimate client
     /// proves it can read a file owned by this data root's OS user -- the

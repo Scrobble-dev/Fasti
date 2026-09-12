@@ -124,6 +124,114 @@ const PRODUCTION_SCHEMAS = {
     ],
     "type": "string"
   },
+  "AccessClientAuthenticationTypeDto": {
+    "enum": [
+      "first_party",
+      "confidential"
+    ],
+    "type": "string"
+  },
+  "AccessClientInventoryCursorDto": {
+    "additionalProperties": false,
+    "properties": {
+      "client_id": {
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^cli_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      },
+      "created_at": {
+        "format": "fasti-inventory-utc-micros",
+        "maxLength": 30,
+        "minLength": 27,
+        "type": "string"
+      }
+    },
+    "required": [
+      "created_at",
+      "client_id"
+    ],
+    "type": "object"
+  },
+  "AccessClientInventoryItemDto": {
+    "additionalProperties": false,
+    "properties": {
+      "authentication_type": {
+        "$ref": "#/components/schemas/AccessClientAuthenticationTypeDto"
+      },
+      "client_id": {
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^cli_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      },
+      "created_at": {
+        "format": "fasti-inventory-utc-micros",
+        "maxLength": 30,
+        "minLength": 27,
+        "type": "string"
+      },
+      "current_credential_epoch": {
+        "description": "Decimal string, not a JavaScript number. Zero does not imply a credential.",
+        "format": "fasti-credential-epoch",
+        "maxLength": 19,
+        "minLength": 1,
+        "pattern": "^(0|[1-9][0-9]{0,18})$",
+        "type": "string"
+      },
+      "lifecycle": {
+        "$ref": "#/components/schemas/AccessClientLifecycleDto"
+      },
+      "name": {
+        "maxLength": 128,
+        "minLength": 1,
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "owner_subject_id": {
+        "description": "Null for historical/system clients without a human owner.",
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^sub_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "purpose": {
+        "$ref": "#/components/schemas/AccessClientPurposeDto"
+      }
+    },
+    "required": [
+      "client_id",
+      "owner_subject_id",
+      "name",
+      "authentication_type",
+      "purpose",
+      "lifecycle",
+      "current_credential_epoch",
+      "created_at"
+    ],
+    "type": "object"
+  },
+  "AccessClientLifecycleDto": {
+    "enum": [
+      "active",
+      "revoked"
+    ],
+    "type": "string"
+  },
+  "AccessClientPurposeDto": {
+    "enum": [
+      "node",
+      "cli",
+      "device",
+      "integration"
+    ],
+    "type": "string"
+  },
   "AccessEvidenceDto": {
     "additionalProperties": false,
     "properties": {
@@ -1477,6 +1585,67 @@ const PRODUCTION_SCHEMAS = {
       "deny"
     ],
     "type": "string"
+  },
+  "ListAccessClientsQueryParameters": {
+    "additionalProperties": false,
+    "properties": {
+      "after_client_id": {
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^cli_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "after_created_at": {
+        "description": "Echo both cursor fields unchanged; omit both for the first page.",
+        "format": "fasti-inventory-utc-micros",
+        "maxLength": 30,
+        "minLength": 27,
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "limit": {
+        "format": "int32",
+        "maximum": 100,
+        "minimum": 1,
+        "type": [
+          "integer",
+          "null"
+        ]
+      }
+    },
+    "type": "object"
+  },
+  "ListAccessClientsResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "clients": {
+        "items": {
+          "$ref": "#/components/schemas/AccessClientInventoryItemDto"
+        },
+        "maxItems": 100,
+        "type": "array"
+      },
+      "next": {
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "$ref": "#/components/schemas/AccessClientInventoryCursorDto"
+          }
+        ]
+      }
+    },
+    "required": [
+      "clients",
+      "next"
+    ],
+    "type": "object"
   },
   "ListBrowserSessionsResponse": {
     "additionalProperties": false,
@@ -4761,6 +4930,15 @@ function parseProductionDto<T>(schemaName: string, value: unknown): T {
 export type ObservationIngressKind = "consumption_occurrence";
 
 // prettier-ignore
+export type AccessClientAuthenticationTypeDto = "confidential" | "first_party";
+
+// prettier-ignore
+export type AccessClientPurposeDto = "cli" | "device" | "integration" | "node";
+
+// prettier-ignore
+export type AccessClientLifecycleDto = "active" | "revoked";
+
+// prettier-ignore
 export type TrackingDispositionDto = "dropped" | "on_hold" | "watching";
 
 // prettier-ignore
@@ -5503,6 +5681,33 @@ export interface ListBrowserSessionsResponse {
   readonly truncated: boolean;
 }
 
+export interface ListAccessClientsQueryParameters {
+  readonly after_client_id?: null | string;
+  readonly after_created_at?: null | string;
+  readonly limit?: null | number;
+}
+
+export interface AccessClientInventoryItemDto {
+  readonly authentication_type: AccessClientAuthenticationTypeDto;
+  readonly client_id: string;
+  readonly created_at: string;
+  readonly current_credential_epoch: string;
+  readonly lifecycle: AccessClientLifecycleDto;
+  readonly name: null | string;
+  readonly owner_subject_id: null | string;
+  readonly purpose: AccessClientPurposeDto;
+}
+
+export interface AccessClientInventoryCursorDto {
+  readonly client_id: string;
+  readonly created_at: string;
+}
+
+export interface ListAccessClientsResponse {
+  readonly clients: ReadonlyArray<AccessClientInventoryItemDto>;
+  readonly next: AccessClientInventoryCursorDto | null;
+}
+
 export interface RevokeBrowserSessionsResponse {
   readonly revoked_count: number;
 }
@@ -5600,6 +5805,7 @@ export interface AccessProjectionResponse {
 
 // prettier-ignore
 export const LOCAL_RUNTIME_OPERATIONS = {
+  listAccessClients: { operationId: "list_access_clients", method: "GET", path: "/api/access/v1/clients", capabilityId: "access.client.list", authorization: "browser_session", requiredScopes: [], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","integrity_failed","session_policy_changed","storage_unavailable","validation_failed"], exampleIds: ["access.client.list.success"], authenticated: false, runtimeAvailability: "guarded", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ListAccessClientsResponse" },
   readProviderIdentifierDetails: { operationId: "read_provider_identifier_details", method: "GET", path: "/api/v1/search/providers/{provider_id}/{grain}/details", capabilityId: "metadata.search", authorization: "scoped_or_browser_session", requiredScopes: ["metadata_search"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ProviderIdentifierDetailsResponse" },
   searchRecords: { operationId: "search_local_records", method: "POST", path: "/api/v1/search/records", capabilityId: "metadata.search", authorization: "scoped_or_browser_session", requiredScopes: ["metadata_search"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: "LocalSearchRequestDto", responseSchema: "LocalSearchResponseDto" },
   saveSearchCandidate: { operationId: "save_search_candidate", method: "POST", path: "/api/v1/search/candidates/{provider_id}/{grain}/{candidate_receipt_id}/actions", capabilityId: "identity.identifier.attach", authorization: "scoped_or_browser_session", requiredScopes: ["identity_write"], conditionalRequiredScopes: {"new_operation":["metadata_search"]}, problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","capacity_exceeded","forbidden","idempotency_conflict","identity_conflict","integrity_failed","invalid_identifier","malformed_json","payload_too_large","record_not_found","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["identity.identifier.attach.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: "SearchCandidateActionRequest", responseSchema: "SearchCandidateActionResponse" },
@@ -5915,6 +6121,58 @@ export function parseAccessProjectionResponse(value: unknown): AccessProjectionR
   return parseProductionDto("AccessProjectionResponse", value);
 }
 
+
+// prettier-ignore
+export function parseListAccessClientsQueryParameters(value: unknown): ListAccessClientsQueryParameters {
+  const query = parseProductionDto<ListAccessClientsQueryParameters>("ListAccessClientsQueryParameters", value);
+  if (query.limit === null || query.after_created_at === null || query.after_client_id === null ||
+      (query.after_created_at === undefined) !== (query.after_client_id === undefined)) {
+    throw new FastiContractParseError("Client inventory requires both cursor fields or neither, without null values");
+  }
+  return query;
+}
+
+// prettier-ignore
+export function parseListAccessClientsResponse(value: unknown, query?: ListAccessClientsQueryParameters): ListAccessClientsResponse {
+  const response = parseProductionDto<ListAccessClientsResponse>("ListAccessClientsResponse", value);
+  const request = query === undefined ? undefined : parseListAccessClientsQueryParameters(query);
+  const limit = request === undefined ? 100 : request.limit ?? 32;
+  if (response.clients.length > limit ||
+      (request !== undefined && response.next !== null && response.clients.length !== limit)) {
+    throw new FastiContractParseError("Client inventory page does not match its requested limit");
+  }
+  if (response.next !== null) {
+    const last = response.clients.at(-1);
+    if (last === undefined || response.next.client_id !== last.client_id || response.next.created_at !== last.created_at) {
+      throw new FastiContractParseError("Client inventory cursor must identify its last returned row");
+    }
+  }
+  const ids = new Set<string>();
+  let previous = typeof request?.after_created_at !== "string" ? undefined :
+    { created_at: request.after_created_at, client_id: request.after_client_id! };
+  for (const client of response.clients) {
+    if (ids.has(client.client_id) ||
+        (previous !== undefined && compareClientInventoryPosition(client, previous) >= 0) ||
+        (client.authentication_type === "first_party") !== (client.purpose === "node") ||
+        (client.authentication_type === "first_party" && client.owner_subject_id !== null) ||
+        (client.name !== null && (/^\p{White_Space}|\p{White_Space}$/u.test(client.name) ||
+          new TextEncoder().encode(client.name).length > 128 || /[\p{Cc}\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/u.test(client.name)))) {
+      throw new FastiContractParseError("Client inventory contains invalid ownership, classification, name, identity or cursor order");
+    }
+    ids.add(client.client_id);
+    previous = client;
+  }
+  return response;
+}
+
+// Canonical time validation precedes this comparison; never round through Date.
+// prettier-ignore
+function compareClientInventoryPosition(left: AccessClientInventoryCursorDto, right: AccessClientInventoryCursorDto): number {
+  const years = Number(left.created_at.slice(0, -23)) - Number(right.created_at.slice(0, -23));
+  const leftTail = left.created_at.slice(-23), rightTail = right.created_at.slice(-23);
+  return years || (leftTail < rightTail ? -1 : leftTail > rightTail ? 1 :
+    left.client_id < right.client_id ? -1 : left.client_id > right.client_id ? 1 : 0);
+}
 export interface AcceptObservationRequest {
   readonly evidence: EvidenceReferenceDto;
   readonly observed_at: ObservedTimeDto;
@@ -5931,14 +6189,14 @@ export interface AcceptObservationResponse {
 export interface CapabilityDescriptorDto {
   readonly authorization: "bootstrap_only" | "browser_session" | "local_operator" | "scoped" | "scoped_or_browser_session" | "unauthenticated";
   readonly bounded_context: string;
-  readonly contract_body: "b1" | "b2" | "b3" | "c1" | "m1" | "m2" | "m3" | "m4";
-  readonly examples: ReadonlyArray<"client.enroll.forbidden" | "credential.revoke.capability_unavailable" | "credential.rotate.capability_unavailable" | "identity.identifier.attach.validation_failed" | "identity.namespace.register.validation_failed" | "identity.record.create.validation_failed" | "identity.record.list.forbidden" | "integration.status.success" | "listener.configure.capability_unavailable" | "metadata.claim.refresh.metadata_claim_stale" | "metadata.projection.configure.validation_failed" | "node.initialize.validation_failed" | "observation.accept.capacity_exceeded" | "observation.accept.receipt" | "observation.accept.validation_failed" | "profile.record.tracking_disposition.list.forbidden" | "profile.record.tracking_disposition.set.validation_failed" | "profile.select.capability_unavailable" | "provider.credential.configure.validation_failed" | "provider.credential.test.provider_credential_missing" | "provider.health.read.provider_unavailable" | "provider.list.forbidden" | "receipt.replay.receipt_not_found" | "receipt.stream.event" | "receipt.stream.receipt_not_found" | "system.capabilities.forbidden" | "system.capabilities.success" | "system.health.success">;
-  readonly id: "access.identity.bootstrap" | "access.projection.read" | "browser.session.create" | "browser.session.end" | "browser.session.profile.select" | "browser.session.read" | "browser.session.revoke" | "browser.session.rotate" | "browser.sessions.list" | "browser.sessions.revoke_all" | "browser.sessions.revoke_others" | "client.enroll" | "correction.chain.append" | "correction.chain.inspect" | "credential.revoke" | "credential.rotate" | "identity.identifier.attach" | "identity.namespace.register" | "identity.record.create" | "identity.record.list" | "identity.review.defer" | "identity.review.inspect" | "identity.review.resolve" | "identity.review.resume" | "identity.route.resolve" | "integration.status" | "listener.configure" | "metadata.claim.refresh" | "metadata.projection.configure" | "metadata.projection.read" | "metadata.search" | "node.initialize" | "observation.accept" | "portability.workspace.export" | "portability.workspace.restore" | "portability.workspace.verify" | "profile.anime_grouping_policy.apply" | "profile.anime_grouping_policy.preview" | "profile.anime_grouping_policy.read" | "profile.nuvio_collections.clear" | "profile.nuvio_collections.get" | "profile.nuvio_collections.replace" | "profile.record.tracking_disposition.list" | "profile.record.tracking_disposition.set" | "profile.select" | "provider.credential.configure" | "provider.credential.test" | "provider.health.read" | "provider.list" | "receipt.replay" | "receipt.stream" | "system.capabilities.discover" | "system.health";
+  readonly contract_body: "b1" | "b2" | "b3" | "c1" | "c2" | "m1" | "m2" | "m3" | "m4";
+  readonly examples: ReadonlyArray<"access.client.list.success" | "client.enroll.forbidden" | "credential.revoke.capability_unavailable" | "credential.rotate.capability_unavailable" | "identity.identifier.attach.validation_failed" | "identity.namespace.register.validation_failed" | "identity.record.create.validation_failed" | "identity.record.list.forbidden" | "integration.status.success" | "listener.configure.capability_unavailable" | "metadata.claim.refresh.metadata_claim_stale" | "metadata.projection.configure.validation_failed" | "node.initialize.validation_failed" | "observation.accept.capacity_exceeded" | "observation.accept.receipt" | "observation.accept.validation_failed" | "profile.record.tracking_disposition.list.forbidden" | "profile.record.tracking_disposition.set.validation_failed" | "profile.select.capability_unavailable" | "provider.credential.configure.validation_failed" | "provider.credential.test.provider_credential_missing" | "provider.health.read.provider_unavailable" | "provider.list.forbidden" | "receipt.replay.receipt_not_found" | "receipt.stream.event" | "receipt.stream.receipt_not_found" | "system.capabilities.forbidden" | "system.capabilities.success" | "system.health.success">;
+  readonly id: "access.client.list" | "access.identity.bootstrap" | "access.projection.read" | "browser.session.create" | "browser.session.end" | "browser.session.profile.select" | "browser.session.read" | "browser.session.revoke" | "browser.session.rotate" | "browser.sessions.list" | "browser.sessions.revoke_all" | "browser.sessions.revoke_others" | "client.enroll" | "correction.chain.append" | "correction.chain.inspect" | "credential.revoke" | "credential.rotate" | "identity.identifier.attach" | "identity.namespace.register" | "identity.record.create" | "identity.record.list" | "identity.review.defer" | "identity.review.inspect" | "identity.review.resolve" | "identity.review.resume" | "identity.route.resolve" | "integration.status" | "listener.configure" | "metadata.claim.refresh" | "metadata.projection.configure" | "metadata.projection.read" | "metadata.search" | "node.initialize" | "observation.accept" | "portability.workspace.export" | "portability.workspace.restore" | "portability.workspace.verify" | "profile.anime_grouping_policy.apply" | "profile.anime_grouping_policy.preview" | "profile.anime_grouping_policy.read" | "profile.nuvio_collections.clear" | "profile.nuvio_collections.get" | "profile.nuvio_collections.replace" | "profile.record.tracking_disposition.list" | "profile.record.tracking_disposition.set" | "profile.select" | "provider.credential.configure" | "provider.credential.test" | "provider.health.read" | "provider.list" | "receipt.replay" | "receipt.stream" | "system.capabilities.discover" | "system.health";
   readonly lifecycle: CapabilityLifecycleDto;
   readonly problems: ReadonlyArray<"already_initialized" | "auth_browser_binding_invalid" | "auth_continuation_persistence_failed" | "auth_identity_conflict" | "auth_selection_changed" | "auth_subject_unaffiliated" | "authentication_failed" | "bootstrap_closed" | "browser_session_expired" | "browser_session_revoked" | "capability_unavailable" | "capacity_exceeded" | "forbidden" | "idempotency_conflict" | "identity_conflict" | "identity_service_unavailable" | "integrity_failed" | "invalid_identifier" | "invalid_observation" | "malformed_json" | "metadata_claim_stale" | "payload_too_large" | "provider_credential_expired" | "provider_credential_invalid" | "provider_credential_missing" | "provider_rate_limited" | "provider_response_invalid" | "provider_route_unavailable" | "provider_unavailable" | "receipt_not_found" | "record_not_found" | "session_policy_changed" | "storage_unavailable" | "trailbase_proof_invalid" | "trailbase_session_cleanup_failed" | "trailbase_trust_unavailable" | "trailbase_version_unsupported" | "unsupported_media_type" | "validation_failed">;
-  readonly runtime_body: "b0" | "b1" | "b2" | "b3" | "c1" | "m1" | "m2" | "m3" | "m4";
+  readonly runtime_body: "b0" | "b1" | "b2" | "b3" | "c1" | "c2" | "m1" | "m2" | "m3" | "m4";
   readonly scopes: ReadonlyArray<"capability_read" | "client_enroll" | "correction_read" | "correction_write" | "credential_manage" | "identity_read" | "identity_write" | "listener_configure" | "metadata_claim_refresh" | "metadata_projection_configure" | "metadata_projection_read" | "metadata_search" | "observation_accept" | "profile_select" | "profile_state_read" | "profile_state_write" | "provider_credential_manage" | "provider_read" | "receipt_read" | "review_read" | "review_write" | "workspace_export" | "workspace_verify">;
-  readonly surface_profile: "b1_durable_bootstrap" | "b1_http_fixture" | "b1_integration_status" | "b1_observation_accept" | "b1_receipt_replay" | "b1_receipt_stream" | "b1_records" | "b2_profile_state" | "c1_access_projection" | "c1_browser_session_foundation" | "c1_identity_bootstrap" | "health" | "later_b2" | "later_b3" | "m1_providers" | "m2_metadata" | "m3_identity_routing" | "m4_search";
+  readonly surface_profile: "b1_durable_bootstrap" | "b1_http_fixture" | "b1_integration_status" | "b1_observation_accept" | "b1_receipt_replay" | "b1_receipt_stream" | "b1_records" | "b2_profile_state" | "c1_access_projection" | "c1_browser_session_foundation" | "c1_identity_bootstrap" | "c2_access_inventory" | "health" | "later_b2" | "later_b3" | "m1_providers" | "m2_metadata" | "m3_identity_routing" | "m4_search";
   readonly uat: ReadonlyArray<CapabilityUatDto>;
 }
 
@@ -5952,21 +6210,21 @@ export interface CapabilityDiscoveryResponse {
 
 export interface CapabilityLifecycleDto {
   readonly contract_state: "finalized" | "reserved";
-  readonly introduced_in: "b0" | "b1" | "b2" | "c1" | "m1" | "m2" | "m3" | "m4";
+  readonly introduced_in: "b0" | "b1" | "b2" | "c1" | "c2" | "m1" | "m2" | "m3" | "m4";
   readonly runtime_availability: "fixture_only" | "guarded" | "implemented" | "later_body";
 }
 
 export interface CapabilitySurfaceDispositionDto {
   readonly binding?: null | string;
   readonly binding_visibility?: "internal" | "public";
-  readonly body?: "b0" | "b1" | "b2" | "b3" | "c1" | "m1" | "m2" | "m3" | "m4";
+  readonly body?: "b0" | "b1" | "b2" | "b3" | "c1" | "c2" | "m1" | "m2" | "m3" | "m4";
   readonly reason?: null | string;
   readonly state: "later_body" | "not_applicable" | "required";
 }
 
 export interface CapabilityUatDto {
   readonly id: string;
-  readonly owner_body: "b1" | "b2" | "b3" | "c1" | "m1" | "m2" | "m3";
+  readonly owner_body: "b1" | "b2" | "b3" | "c1" | "c2" | "m1" | "m2" | "m3";
   readonly reason: string;
   readonly relationship: "deferred" | "direct" | "split";
 }
@@ -6146,6 +6404,7 @@ const B1_CONFORMANCE_SCHEMAS = {
           "b2",
           "b3",
           "c1",
+          "c2",
           "m1",
           "m2",
           "m3",
@@ -6156,6 +6415,7 @@ const B1_CONFORMANCE_SCHEMAS = {
       "examples": {
         "items": {
           "enum": [
+            "access.client.list.success",
             "client.enroll.forbidden",
             "credential.revoke.capability_unavailable",
             "credential.rotate.capability_unavailable",
@@ -6192,6 +6452,7 @@ const B1_CONFORMANCE_SCHEMAS = {
       },
       "id": {
         "enum": [
+          "access.client.list",
           "access.identity.bootstrap",
           "access.projection.read",
           "browser.session.create",
@@ -6307,6 +6568,7 @@ const B1_CONFORMANCE_SCHEMAS = {
           "b2",
           "b3",
           "c1",
+          "c2",
           "m1",
           "m2",
           "m3",
@@ -6359,6 +6621,7 @@ const B1_CONFORMANCE_SCHEMAS = {
           "c1_access_projection",
           "c1_browser_session_foundation",
           "c1_identity_bootstrap",
+          "c2_access_inventory",
           "health",
           "later_b2",
           "later_b3",
@@ -6398,8 +6661,8 @@ const B1_CONFORMANCE_SCHEMAS = {
         "items": {
           "$ref": "#/components/schemas/CapabilityDescriptorDto"
         },
-        "maxItems": 53,
-        "minItems": 53,
+        "maxItems": 54,
+        "minItems": 54,
         "type": "array",
         "uniqueItems": true
       },
@@ -6437,8 +6700,8 @@ const B1_CONFORMANCE_SCHEMAS = {
           },
           "type": "object"
         },
-        "maxProperties": 18,
-        "minProperties": 18,
+        "maxProperties": 19,
+        "minProperties": 19,
         "propertyNames": {
           "enum": [
             "b1_durable_bootstrap",
@@ -6452,6 +6715,7 @@ const B1_CONFORMANCE_SCHEMAS = {
             "c1_access_projection",
             "c1_browser_session_foundation",
             "c1_identity_bootstrap",
+            "c2_access_inventory",
             "health",
             "later_b2",
             "later_b3",
@@ -6490,6 +6754,7 @@ const B1_CONFORMANCE_SCHEMAS = {
           "b1",
           "b2",
           "c1",
+          "c2",
           "m1",
           "m2",
           "m3",
@@ -6540,6 +6805,7 @@ const B1_CONFORMANCE_SCHEMAS = {
           "b2",
           "b3",
           "c1",
+          "c2",
           "m1",
           "m2",
           "m3",
@@ -6583,6 +6849,7 @@ const B1_CONFORMANCE_SCHEMAS = {
           "b2",
           "b3",
           "c1",
+          "c2",
           "m1",
           "m2",
           "m3"
@@ -7167,6 +7434,13 @@ function validateOpenApiValue(value: unknown, schemaValue: unknown, path: string
     if (schema.format === "iso-date-or-rfc3339" && !isRealIsoDateOrRfc3339(value)) {
       throw new FastiContractParseError(`${path} is not a real ISO date or RFC3339 instant`);
     }
+    if (schema.format === "fasti-inventory-utc-micros" && !isInventoryUtcMicros(value)) {
+      throw new FastiContractParseError(`${path} is not a canonical inventory time`);
+    }
+    if (schema.format === "fasti-credential-epoch" &&
+        (!/^(0|[1-9][0-9]{0,18})$/.test(value) || (value.length === 19 && value > "9223372036854775807"))) {
+      throw new FastiContractParseError(`${path} is not an exact credential epoch`);
+    }
     return;
   }
   if (schemaTypes.includes("integer")) {
@@ -7300,6 +7574,19 @@ function isRealRfc3339Instant(value: string): boolean {
 }
 
 // prettier-ignore
+function isInventoryUtcMicros(value: string): boolean {
+  if (value.length < 27 || value.length > 30) return false;
+  const match = /^([0-9]{4}|-[0-9]{4,6}|\+[0-9]{5,6})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})\.([0-9]{6})Z$/.exec(value);
+  if (match === null) return false;
+  const year = Number(match[1]);
+  if (year < -262143 || year > 262142) return false;
+  const yearText = year >= 0 && year <= 9999 ? String(year).padStart(4, "0") :
+    (year < 0 ? "-" : "+") + String(Math.abs(year)).padStart(4, "0");
+  return match[1] === yearText && isRealCalendarDate(year, Number(match[2]), Number(match[3])) &&
+    Number(match[4]) <= 23 && Number(match[5]) <= 59 && Number(match[6]) <= 60;
+}
+
+// prettier-ignore
 function isRealCalendarDate(year: number, month: number, day: number): boolean {
   const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
   const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
@@ -7308,6 +7595,7 @@ function isRealCalendarDate(year: number, month: number, day: number): boolean {
 
 // prettier-ignore
 export type CapabilityId =
+  | "access.client.list"
   | "access.identity.bootstrap"
   | "access.projection.read"
   | "browser.session.create"
@@ -7369,6 +7657,7 @@ export type CapabilityBody =
   | "b2"
   | "b3"
   | "c1"
+  | "c2"
   | "m1"
   | "m2"
   | "m3"
@@ -7431,6 +7720,35 @@ export type ProblemCode =
 // prettier-ignore
 export const PUBLIC_CAPABILITY_REGISTRY = {
   "capabilities": [
+    {
+      "authorization": "browser_session",
+      "bounded_context": "access.credentials",
+      "contract_body": "c2",
+      "examples": [
+        "access.client.list.success"
+      ],
+      "id": "access.client.list",
+      "lifecycle": {
+        "contract_state": "reserved",
+        "introduced_in": "c2",
+        "runtime_availability": "guarded"
+      },
+      "problems": [
+        "authentication_failed",
+        "browser_session_expired",
+        "browser_session_revoked",
+        "capability_unavailable",
+        "forbidden",
+        "integrity_failed",
+        "session_policy_changed",
+        "storage_unavailable",
+        "validation_failed"
+      ],
+      "runtime_body": "c2",
+      "scopes": [],
+      "surface_profile": "c2_access_inventory",
+      "uat": []
+    },
     {
       "authorization": "local_operator",
       "bounded_context": "access.identity",
@@ -9581,6 +9899,59 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "state": "not_applicable"
       }
     },
+    "c2_access_inventory": {
+      "cli": {
+        "reason": "This inventory uses first-party browser session authority.",
+        "state": "not_applicable"
+      },
+      "domain_application": {
+        "binding_visibility": "internal",
+        "state": "required"
+      },
+      "http_openapi": {
+        "binding": "openapi:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "json_ld": {
+        "reason": "Private client ownership and lifecycle state is not linked data.",
+        "state": "not_applicable"
+      },
+      "json_schema": {
+        "binding": "schema:production-openapi-operation:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "knowledge": {
+        "binding": "knowledge:problem-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "okf": {
+        "binding": "okf:capability-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "package_smoke": {
+        "body": "c2",
+        "reason": "Inventory runtime evidence follows complete route integration.",
+        "state": "later_body"
+      },
+      "sdk": {
+        "binding": "sdk:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "sse_asyncapi": {
+        "reason": "Client inventory is a finite read without an event stream.",
+        "state": "not_applicable"
+      },
+      "ui": {
+        "binding": "ui:access-client-inventory",
+        "binding_visibility": "public",
+        "state": "required"
+      }
+    },
     "health": {
       "cli": {
         "reason": "Health is exposed as the process HTTP probe.",
@@ -9966,6 +10337,168 @@ export const PUBLIC_PROBLEM_CATALOG = {
   "contract_version": "1.0.0",
   "documentation_base": "https://fasti.scrobble.dev",
   "problems": [
+    {
+      "capability_id": "access.client.list",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "access.client.list",
+      "code": "browser_session_expired",
+      "detail": "the Fasti browser session reached its idle or absolute expiry",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-expired"
+    },
+    {
+      "capability_id": "access.client.list",
+      "code": "browser_session_revoked",
+      "detail": "the Fasti browser session is no longer active",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Browser session revoked",
+      "type": "https://fasti.scrobble.dev/v1/problems/browser-session-revoked"
+    },
+    {
+      "capability_id": "access.client.list",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by c2",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "access.client.list",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "access.client.list",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "access.client.list",
+      "code": "session_policy_changed",
+      "detail": "the Fasti browser session no longer satisfies the current subject or authorization policy",
+      "next_actions": [
+        {
+          "id": "sign_in_again",
+          "label": "Sign in again to continue"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Session policy changed",
+      "type": "https://fasti.scrobble.dev/v1/problems/session-policy-changed"
+    },
+    {
+      "capability_id": "access.client.list",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "access.client.list",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
     {
       "capability_id": "access.identity.bootstrap",
       "code": "auth_browser_binding_invalid",
@@ -17057,7 +17590,7 @@ type JsonObject = Record<string, unknown>;
 const HEALTH_ALLOWED = ["status", "version"] as const;
 const HEALTH_REQUIRED = ["status", "version"] as const;
 // prettier-ignore
-const CAPABILITY_IDS = ["access.identity.bootstrap", "access.projection.read", "browser.session.create", "browser.session.end", "browser.session.profile.select", "browser.session.read", "browser.session.revoke", "browser.session.rotate", "browser.sessions.list", "browser.sessions.revoke_all", "browser.sessions.revoke_others", "client.enroll", "correction.chain.append", "correction.chain.inspect", "credential.revoke", "credential.rotate", "identity.identifier.attach", "identity.namespace.register", "identity.record.create", "identity.record.list", "identity.review.defer", "identity.review.inspect", "identity.review.resolve", "identity.review.resume", "identity.route.resolve", "integration.status", "listener.configure", "metadata.claim.refresh", "metadata.projection.configure", "metadata.projection.read", "metadata.search", "node.initialize", "observation.accept", "portability.workspace.export", "portability.workspace.restore", "portability.workspace.verify", "profile.anime_grouping_policy.apply", "profile.anime_grouping_policy.preview", "profile.anime_grouping_policy.read", "profile.nuvio_collections.clear", "profile.nuvio_collections.get", "profile.nuvio_collections.replace", "profile.record.tracking_disposition.list", "profile.record.tracking_disposition.set", "profile.select", "provider.credential.configure", "provider.credential.test", "provider.health.read", "provider.list", "receipt.replay", "receipt.stream", "system.capabilities.discover", "system.health"] as const;
+const CAPABILITY_IDS = ["access.client.list", "access.identity.bootstrap", "access.projection.read", "browser.session.create", "browser.session.end", "browser.session.profile.select", "browser.session.read", "browser.session.revoke", "browser.session.rotate", "browser.sessions.list", "browser.sessions.revoke_all", "browser.sessions.revoke_others", "client.enroll", "correction.chain.append", "correction.chain.inspect", "credential.revoke", "credential.rotate", "identity.identifier.attach", "identity.namespace.register", "identity.record.create", "identity.record.list", "identity.review.defer", "identity.review.inspect", "identity.review.resolve", "identity.review.resume", "identity.route.resolve", "integration.status", "listener.configure", "metadata.claim.refresh", "metadata.projection.configure", "metadata.projection.read", "metadata.search", "node.initialize", "observation.accept", "portability.workspace.export", "portability.workspace.restore", "portability.workspace.verify", "profile.anime_grouping_policy.apply", "profile.anime_grouping_policy.preview", "profile.anime_grouping_policy.read", "profile.nuvio_collections.clear", "profile.nuvio_collections.get", "profile.nuvio_collections.replace", "profile.record.tracking_disposition.list", "profile.record.tracking_disposition.set", "profile.select", "provider.credential.configure", "provider.credential.test", "provider.health.read", "provider.list", "receipt.replay", "receipt.stream", "system.capabilities.discover", "system.health"] as const;
 // prettier-ignore
 const PROBLEM_CODES = ["already_initialized", "auth_browser_binding_invalid", "auth_continuation_persistence_failed", "auth_identity_conflict", "auth_selection_changed", "auth_subject_unaffiliated", "authentication_failed", "bootstrap_closed", "browser_session_expired", "browser_session_revoked", "capability_unavailable", "capacity_exceeded", "forbidden", "idempotency_conflict", "identity_conflict", "identity_service_unavailable", "integrity_failed", "invalid_identifier", "invalid_observation", "malformed_json", "metadata_claim_stale", "payload_too_large", "provider_credential_expired", "provider_credential_invalid", "provider_credential_missing", "provider_rate_limited", "provider_response_invalid", "provider_route_unavailable", "provider_unavailable", "receipt_not_found", "record_not_found", "session_policy_changed", "storage_unavailable", "trailbase_proof_invalid", "trailbase_session_cleanup_failed", "trailbase_trust_unavailable", "trailbase_version_unsupported", "unsupported_media_type", "validation_failed"] as const;
 // prettier-ignore

@@ -190,6 +190,7 @@ impl Modify for ProductionSecurityAddon {
         access::read_browser_session,
         access::end_browser_session,
         access::list_browser_sessions,
+        access::list_access_clients,
         access::revoke_browser_session,
         access::revoke_other_browser_sessions,
         access::revoke_all_browser_sessions,
@@ -268,6 +269,13 @@ impl Modify for ProductionSecurityAddon {
         fasti_contracts::BrowserSessionDto,
         fasti_contracts::ReadBrowserSessionResponse,
         fasti_contracts::ListBrowserSessionsResponse,
+        fasti_contracts::ListAccessClientsQueryParameters,
+        fasti_contracts::AccessClientAuthenticationTypeDto,
+        fasti_contracts::AccessClientPurposeDto,
+        fasti_contracts::AccessClientLifecycleDto,
+        fasti_contracts::AccessClientInventoryItemDto,
+        fasti_contracts::AccessClientInventoryCursorDto,
+        fasti_contracts::ListAccessClientsResponse,
         fasti_contracts::RevokeBrowserSessionsResponse,
         fasti_contracts::RotateBrowserSessionResponse,
         fasti_contracts::SelectBrowserSessionProfileResponse,
@@ -1170,7 +1178,7 @@ mod tests {
             .paths
             .paths
             .contains_key("/api/v1/search/providers/{provider_id}/{grain}/details"));
-        assert_eq!(document.paths.paths.len(), 42);
+        assert_eq!(document.paths.paths.len(), 43);
 
         let serialized = serde_json::to_string(&document).expect("serializable OpenAPI document");
         assert!(serialized.contains("#/components/schemas/HealthResponse"));
@@ -1672,7 +1680,8 @@ mod tests {
             ))
             .expect("enrolled access");
 
-        let now = chrono::Utc::now();
+        // Complete the synthetic ceremony before real-clock HTTP requests begin.
+        let now = chrono::Utc::now() - chrono::TimeDelta::seconds(10);
         let installation = kernel
             .verify_trailbase_installation(VerifyTrailBaseInstallationCommand::new(
                 TrailBaseInstanceId::new_v7(),
@@ -1749,6 +1758,7 @@ mod tests {
             ))
             .expect("browser session");
 
+        assert!(session.session().created_at() <= chrono::Utc::now());
         let session_secret = session.session_secret().expose_hex();
         let csrf = session.csrf_secret().expose_hex();
         let cookie = format!(
@@ -1768,6 +1778,142 @@ mod tests {
         };
         let app = direct_loopback_api_router(kernel, test_bind_addr(), false, root.path(), None)
             .expect("direct loopback router");
+
+        // Reuse the real bootstrap/session fixture to prove that inventory is
+        // browser-read authority, not the scoped bearer or mutation envelope.
+        let session_cookie = format!("{}={session_secret}", local::SESSION_COOKIE);
+        let inventory = app
+            .clone()
+            .oneshot(
+                Request::get("/api/access/v1/clients?limit=32")
+                    .header(header::HOST, FASTI_ACCESS_HOST)
+                    .header(header::COOKIE, &session_cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(inventory.status(), StatusCode::OK);
+        assert_eq!(
+            inventory.headers().get(header::CACHE_CONTROL).unwrap(),
+            "private, no-store"
+        );
+        let body = axum::body::to_bytes(inventory.into_body(), 32 * 1024)
+            .await
+            .unwrap();
+        let inventory: fasti_contracts::ListAccessClientsResponse =
+            serde_json::from_slice(&body).unwrap();
+        assert!(inventory
+            .clients
+            .iter()
+            .any(|client| client.client_id == access.client_id().to_string()));
+        assert!(inventory.next.is_none());
+        let body = std::str::from_utf8(&body).unwrap();
+        assert!(!body.contains(&session_secret));
+        assert!(!body.contains(&enrolled.credential));
+        let malformed_cookie = format!("{}=not-a-secret", local::SESSION_COOKIE);
+        let unknown_cookie = format!("{}={}", local::SESSION_COOKIE, "ff".repeat(32));
+        let duplicated_cookie = format!("{session_cookie}; {session_cookie}");
+        for (label, host, cookie, bearer) in [
+            ("missing cookie", Some(FASTI_ACCESS_HOST), None, false),
+            (
+                "malformed cookie",
+                Some(FASTI_ACCESS_HOST),
+                Some(malformed_cookie.as_str()),
+                false,
+            ),
+            (
+                "unknown cookie",
+                Some(FASTI_ACCESS_HOST),
+                Some(unknown_cookie.as_str()),
+                false,
+            ),
+            (
+                "duplicated cookie",
+                Some(FASTI_ACCESS_HOST),
+                Some(duplicated_cookie.as_str()),
+                false,
+            ),
+            ("missing host", None, Some(session_cookie.as_str()), false),
+            (
+                "wrong host",
+                Some("localhost:8420"),
+                Some(session_cookie.as_str()),
+                false,
+            ),
+            ("bearer alone", Some(FASTI_ACCESS_HOST), None, true),
+        ] {
+            let mut request = Request::get("/api/access/v1/clients");
+            if let Some(host) = host {
+                request = request.header(header::HOST, host);
+            }
+            if let Some(cookie) = cookie {
+                request = request.header(header::COOKIE, cookie);
+            }
+            if bearer {
+                request = request.header(
+                    header::AUTHORIZATION,
+                    format!("Bearer {}", enrolled.credential),
+                );
+            }
+            let response = app
+                .clone()
+                .oneshot(request.body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{label}");
+            assert_eq!(
+                response.headers().get(header::CACHE_CONTROL).unwrap(),
+                "private, no-store",
+                "{label}"
+            );
+            assert_eq!(
+                response.headers().get(header::CONTENT_TYPE).unwrap(),
+                "application/problem+json",
+                "{label}"
+            );
+            let body = to_bytes(response.into_body(), 16 * 1024).await.unwrap();
+            let problem: fasti_contracts::ProblemDetails = serde_json::from_slice(&body).unwrap();
+            assert_eq!(problem.status, 401, "{label}");
+            assert_eq!(problem.capability_id, "access.client.list", "{label}");
+            assert_eq!(
+                problem.code,
+                if bearer {
+                    "authentication_failed"
+                } else {
+                    "browser_session_revoked"
+                },
+                "{label}"
+            );
+            assert!(
+                !std::str::from_utf8(&body)
+                    .unwrap()
+                    .contains(&session_secret),
+                "{label}"
+            );
+        }
+        for (query, bearer, expected) in [
+            ("", true, StatusCode::UNAUTHORIZED),
+            ("?limit=1&limit=2", false, StatusCode::UNPROCESSABLE_ENTITY),
+        ] {
+            let mut request = browser_read(Request::get(format!("/api/access/v1/clients{query}")));
+            if bearer {
+                request = request.header(
+                    header::AUTHORIZATION,
+                    format!("Bearer {}", enrolled.credential),
+                );
+            }
+            let response = app
+                .clone()
+                .oneshot(request.body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), expected);
+            assert_eq!(
+                response.headers().get(header::CACHE_CONTROL).unwrap(),
+                "private, no-store"
+            );
+        }
 
         let created = app
             .clone()
@@ -1888,6 +2034,7 @@ mod tests {
             fasti_contracts::AnimeGroupingPreferenceDto::Automatic
         );
         let replayed_rollback = app
+            .clone()
             .oneshot(send_rollback())
             .await
             .expect("rollback replay response");
@@ -1900,6 +2047,44 @@ mod tests {
             )
             .expect("rollback replay payload");
         assert_eq!(replayed_rollback, rolled_back);
+
+        let ended = app
+            .clone()
+            .oneshot(
+                browser_mutation(Request::delete("/api/access/v1/browser-session"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(ended.status(), StatusCode::NO_CONTENT);
+        let replay = app
+            .oneshot(
+                browser_read(Request::get("/api/access/v1/clients"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let replay_status = replay.status();
+        assert_eq!(
+            replay.headers().get(header::CACHE_CONTROL).unwrap(),
+            "private, no-store"
+        );
+        let body = to_bytes(replay.into_body(), 16 * 1024).await.unwrap();
+        let problem: fasti_contracts::ProblemDetails = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            replay_status,
+            StatusCode::UNAUTHORIZED,
+            "{}: {}",
+            problem.code,
+            problem.detail
+        );
+        assert_eq!(problem.code, "browser_session_revoked");
+        assert_eq!(problem.capability_id, "access.client.list");
+        assert!(
+            serde_json::from_slice::<fasti_contracts::ListAccessClientsResponse>(&body).is_err()
+        );
     }
 
     #[cfg(target_os = "linux")]
@@ -1989,6 +2174,7 @@ mod tests {
     async fn assert_access_routes_are_absent(router: Router) {
         for path in [
             "/api/access/v1/projection",
+            "/api/access/v1/clients",
             "/api/access/v1/trailbase/callback?code=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         ] {
             let response = router

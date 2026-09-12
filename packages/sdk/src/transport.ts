@@ -29,6 +29,8 @@ import {
   parseLocalSearchResponseDto,
   parseListRecordsQueryParameters,
   parseListBrowserSessionsResponse,
+  parseListAccessClientsQueryParameters,
+  parseListAccessClientsResponse,
   parseListProvidersResponse,
   parseListTrackingDispositionsResponse,
   parseMetadataProjectionConfigurationResponse,
@@ -97,6 +99,8 @@ import {
   type LocalSearchResponseDto,
   type ListRecordsQueryParameters,
   type ListBrowserSessionsResponse,
+  type ListAccessClientsQueryParameters,
+  type ListAccessClientsResponse,
   type ListProvidersResponse,
   type ListTrackingDispositionsResponse,
   type MetadataProjectionConfigurationResponse,
@@ -1661,6 +1665,33 @@ export class FastiClient {
       retryMode: "safe",
       responseParser: parseListBrowserSessionsResponse,
       responseLabel: "Browser session inventory response",
+      options,
+    });
+  }
+
+  listAccessClients(
+    query: ListAccessClientsQueryParameters = {},
+    options: CallOptions = {},
+  ): Promise<ListAccessClientsResponse> {
+    const safeQuery = { ...parseListAccessClientsQueryParameters(query) };
+    const parameters = new URLSearchParams();
+    if (typeof safeQuery.limit === "number")
+      parameters.set("limit", String(safeQuery.limit));
+    if (typeof safeQuery.after_created_at === "string")
+      parameters.set("after_created_at", safeQuery.after_created_at);
+    if (typeof safeQuery.after_client_id === "string")
+      parameters.set("after_client_id", safeQuery.after_client_id);
+    const operation = LOCAL_RUNTIME_OPERATIONS.listAccessClients;
+    const suffix = parameters.toString();
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path + (suffix ? `?${suffix}` : ""),
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      responseParser: (value) =>
+        parseListAccessClientsResponse(value, safeQuery),
+      responseLabel: "Client inventory response",
       options,
     });
   }

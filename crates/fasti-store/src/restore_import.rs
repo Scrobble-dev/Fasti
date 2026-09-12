@@ -993,6 +993,7 @@ fn accepted_archive_schema(
         || (format_version == WORKSPACE_ARCHIVE_V4_FORMAT_VERSION && matches!(version, 13 | 14))
         || (format_version == WORKSPACE_ARCHIVE_V5_FORMAT_VERSION && version == 15)
         || (format_version == WORKSPACE_ARCHIVE_V6_FORMAT_VERSION && version == 16)
+        || (format_version == 7 && version == 17)
     {
         // Continue to the exact historical fingerprint match below.
     } else if format_version == fasti_application::WORKSPACE_ARCHIVE_FORMAT_VERSION
@@ -1020,6 +1021,7 @@ fn accepted_archive_schema(
             14 => "sha256:630bc759b1bc6148931fe1b496e6e149553c5c005cf8d5956da683f2872c0375",
             15 => "sha256:36720ca62ef606e52f960e71cb40452323269f14e4a4af984e2fe875279a155e",
             16 => "sha256:d7ae3b1ab15c0223245d1a9008833049e58e9ec882a6e1ba70a2a080fa3fd7a6",
+            17 => "sha256:7b481b2bf2a23ad261884c171710c7ceece6bd70312d8dca6a034a4f830c4649",
             _ => return false,
         }
 }
@@ -1526,8 +1528,9 @@ fn import_row(
                 transaction.execute(
                     r#"
                     INSERT INTO clients(
-                        client_id, workspace_id, status, current_credential_epoch, created_at
-                    ) VALUES (?1, ?2, ?3, 0, ?4)
+                        client_id, workspace_id, status, current_credential_epoch, created_at,
+                        authentication_type, purpose, owner_subject_id, name
+                    ) VALUES (?1, ?2, ?3, 0, ?4, 'confidential', 'integration', NULL, NULL)
                     "#,
                     params![
                         row.client_id.to_string(),
@@ -5633,6 +5636,48 @@ mod tests {
     }
 
     #[test]
+    fn historical_v17_archive_v7_restores_ownerless_inventory_shells() {
+        let fixture = full_fixture();
+        let archive = rewrite_manifest_schema(
+            &fixture.archive,
+            17,
+            "sha256:7b481b2bf2a23ad261884c171710c7ceece6bd70312d8dca6a034a4f830c4649",
+        );
+        let restore_root = tempfile::tempdir().unwrap();
+        let lock = LockedDataRoot::acquire(restore_root.path()).unwrap();
+        let attempt_id = RestoreAttemptId::new_v7();
+        let staged = stage_workspace_archive_pass_two(
+            &lock,
+            &mut Cursor::new(archive),
+            attempt_id,
+            RequestCorrelationId::new_v7(),
+            limits(),
+            &CancellationSignal::new(),
+        )
+        .unwrap();
+        let database = Connection::open_with_flags(
+            staged.database_path(),
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .unwrap();
+        let (total, unsafe_rows): (i64, i64) = database.query_row(
+            "SELECT COUNT(*), COALESCE(SUM(current_credential_epoch <> 0 OR authentication_type <> 'confidential' OR purpose <> 'integration' OR owner_subject_id IS NOT NULL OR name IS NOT NULL), 0) FROM clients",
+            [], |row| Ok((row.get(0)?, row.get(1)?)),
+        ).unwrap();
+        assert!(total > 0);
+        assert_eq!(unsafe_rows, 0);
+        assert_eq!(
+            database
+                .query_row(NODE_LOCAL_STATE_COUNT_SQL, [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        drop(database);
+        staged.cleanup().unwrap();
+        assert_attempt_removed(restore_root.path(), attempt_id);
+    }
+
+    #[test]
     fn archive_v4_rejects_a_forged_v13_schema_fingerprint() {
         let fixture = full_fixture();
         let v4 = archive_v4_from_v5(&fixture.archive);
@@ -5693,10 +5738,20 @@ mod tests {
         assert!(!accepted_archive_schema(6, 16, "current", "current"));
         assert!(!accepted_archive_schema(6, 16, "forged", "current"));
         assert!(!accepted_archive_schema(6, 15, digest, "current"));
-        assert!(accepted_archive_schema(7, 17, "current", "current"));
+        assert!(accepted_archive_schema(
+            7,
+            17,
+            "sha256:7b481b2bf2a23ad261884c171710c7ceece6bd70312d8dca6a034a4f830c4649",
+            "current"
+        ));
+        assert!(!accepted_archive_schema(7, 17, "current", "current"));
         assert!(!accepted_archive_schema(7, 17, "forged", "current"));
         assert!(!accepted_archive_schema(7, 16, "current", "current"));
         assert!(!accepted_archive_schema(6, 17, "current", "current"));
+        assert!(accepted_archive_schema(7, 18, "current", "current"));
+        assert!(!accepted_archive_schema(7, 18, "forged", "current"));
+        assert!(!accepted_archive_schema(6, 18, "current", "current"));
+        assert!(!accepted_archive_schema(7, 19, "current", "current"));
     }
 
     #[test]
