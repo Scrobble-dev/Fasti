@@ -29,6 +29,8 @@ INHERITED_REMOTE_ENVIRONMENT = (
 INHERITED_FIXTURE_ENVIRONMENT = (
     "FASTI_TMDB_SMOKE_RESOLVE",
     "FASTI_TMDB_SMOKE_CA_PEM",
+    "FASTI_IGDB_SMOKE_RESOLVE",
+    "FASTI_IGDB_SMOKE_CA_PEM",
 )
 RECORD_ID = "rec_0199a8e3a62c70008000000000000001"
 OTHER_RECORD_ID = "rec_0199a8e3a62c70008000000000000002"
@@ -197,6 +199,209 @@ class SmokeAccessBrowserStartupTest(unittest.TestCase):
         stop.assert_called_once_with(captured["process"])
         self.assert_process_group_absent(captured["process"])
         self.assert_fixture_environment(captured["environment"])
+
+    def test_changed_daemon_is_rejected_before_process_start(self):
+        with (
+            mock.patch.object(self.harness.runtime, "sha256_file", return_value="changed"),
+            mock.patch.object(self.harness.runtime, "start_managed_process_group") as start,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "artifact changed"):
+                self.harness._start_fastid(Path("data"), Path("trailbase"), expected_sha256="expected")
+            start.assert_not_called()
+
+
+class ClientInventoryOptInTest(unittest.TestCase):
+    def test_inventory_is_disabled_by_default_and_exclusive_with_m4(self):
+        harness = load_harness()
+        with mock.patch.object(sys, "argv", ["smoke-access-browser.py"]):
+            self.assertFalse(harness._arguments().c2_client_inventory)
+        with mock.patch.object(sys, "argv", ["smoke-access-browser.py", "--c2-client-inventory"]):
+            arguments = harness._arguments()
+            self.assertTrue(arguments.c2_client_inventory)
+            self.assertFalse(arguments.m4_search_journey)
+            self.assertFalse(arguments.m4_igdb_journey)
+        for mode in ("--m4-search-journey", "--m4-igdb-journey"):
+            with self.subTest(mode=mode):
+                with mock.patch.object(sys, "argv", ["smoke-access-browser.py", mode]):
+                    self.assertFalse(harness._arguments().c2_client_inventory)
+                with (
+                    mock.patch.object(sys, "argv", ["smoke-access-browser.py", mode, "--c2-client-inventory"]),
+                    mock.patch("sys.stderr"),
+                ):
+                    with self.assertRaises(SystemExit):
+                        harness._arguments()
+
+    def test_inventory_timeout_is_bounded_without_changing_existing_modes(self):
+        harness = load_harness()
+        result = type("Result", (), {"returncode": 0, "stdout": b"{}", "stderr": b""})()
+        for payload, timeout in (
+            ({}, 60),
+            ({"clientInventoryJourney": True}, 120),
+            ({"clientInventoryJourney": False}, 60),
+            ({"m4SearchJourney": True}, 180),
+            ({"m4IgdbJourney": True}, 180),
+        ):
+            with self.subTest(payload=payload):
+                with mock.patch.object(harness.subprocess, "run", return_value=result) as run:
+                    self.assertEqual(harness._browser(payload), {})
+                self.assertEqual(run.call_args.kwargs["timeout"], timeout)
+
+
+class ArtifactIdentityTest(unittest.TestCase):
+    def test_browser_helper_secret_failure_does_not_echo_output(self):
+        harness = load_harness()
+        for returncode in (0, 1):
+            with self.subTest(returncode=returncode):
+                result = type("Result", (), {
+                    "returncode": returncode,
+                    "stdout": b'{"value":"synthetic-provider-sentinel"}',
+                    "stderr": b"synthetic-provider-sentinel",
+                })()
+                with mock.patch.object(harness.subprocess, "run", return_value=result):
+                    with self.assertRaises(RuntimeError) as error:
+                        harness._browser({"forbiddenProviderValues": ["synthetic-provider-sentinel"]})
+                self.assertNotIn("synthetic-provider-sentinel", str(error.exception))
+
+    def test_clean_source_identity_rejects_dirty_tree(self):
+        harness = load_harness()
+        with mock.patch.object(harness.subprocess, "check_output", side_effect=[b"", b"commit\n", b"tree\n"]):
+            self.assertEqual(harness._source_identity(),
+                             {"git_commit": "commit", "git_tree": "tree", "dirty": False})
+        with mock.patch.object(harness.subprocess, "check_output", return_value=b" M source"):
+            with self.assertRaises(RuntimeError):
+                harness._source_identity()
+
+    def test_web_digest_binds_content_names_and_rejects_symlinks(self):
+        harness = load_harness()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with self.assertRaises(RuntimeError):
+                harness._web_digest(root)
+            (root / "index.html").write_text("first")
+            first = harness._web_digest(root)
+            self.assertEqual(first, harness._web_digest(root))
+            (root / "index.html").write_text("second")
+            self.assertNotEqual(first, harness._web_digest(root))
+            (root / "asset.js").write_text("asset")
+            before_rename = harness._web_digest(root)
+            (root / "asset.js").rename(root / "other.js")
+            self.assertNotEqual(before_rename, harness._web_digest(root))
+            (root / "link.js").symlink_to(root / "other.js")
+            with self.assertRaises(RuntimeError):
+                harness._web_digest(root)
+
+
+class MainPathRegressionTest(unittest.TestCase):
+    def patch(self, owner, name, **kwargs):
+        patcher = mock.patch.object(owner, name, **kwargs)
+        self.addCleanup(patcher.stop)
+        return patcher.start()
+
+    def setUp(self):
+        self.harness = load_harness()
+        self.patch(self.harness.runtime, "install_termination_cleanup")
+        self.patch(self.harness, "_execv_failure_self_test")
+        self.patch(self.harness.fixture, "_require_free_port")
+        self.patch(self.harness, "_source_identity", return_value={"dirty": False})
+
+    def select_mode(self, mode):
+        with mock.patch.object(sys, "argv", [str(SCRIPT), mode]):
+            arguments = self.harness._arguments()
+        self.patch(self.harness, "_arguments", return_value=arguments)
+
+    def test_inventory_main_builds_exact_artifacts_before_hashing(self):
+        self.select_mode("--c2-client-inventory")
+        events = []
+        stopped = RuntimeError("stop at first artifact digest")
+        run = self.patch(self.harness.subprocess, "run",
+                         side_effect=lambda command, **kwargs: events.append(command))
+        def digest(_directory):
+            events.append("digest")
+            raise stopped
+        self.patch(self.harness, "_web_digest", side_effect=digest)
+        start = self.patch(self.harness, "_start_fastid")
+        with self.assertRaises(RuntimeError) as raised:
+            self.harness.main()
+        self.assertIs(raised.exception, stopped)
+        self.assertEqual(events, [
+            ["cargo", "build", "--locked", "--offline", "-p", "fastid", "-p",
+             "fasti-cli", "--target-dir", "target"],
+            ["pnpm", "run", "build"],
+            "digest",
+        ])
+        for call in run.call_args_list:
+            self.assertEqual(call.kwargs, {"cwd": self.harness.ROOT, "check": True, "timeout": 900})
+        start.assert_not_called()
+
+    def test_inventory_main_build_failures_stop_before_hashing_or_runtime(self):
+        self.select_mode("--c2-client-inventory")
+        for completed_builds in (0, 1):
+            with self.subTest(completed_builds=completed_builds):
+                failure = RuntimeError("synthetic build failure")
+                with (
+                    mock.patch.object(self.harness.subprocess, "run",
+                                      side_effect=[None] * completed_builds + [failure]) as run,
+                    mock.patch.object(self.harness, "_web_digest",
+                                      side_effect=AssertionError("hashed before builds passed")) as digest,
+                    mock.patch.object(self.harness.runtime, "sha256_file") as file_digest,
+                    mock.patch.object(self.harness, "_start_fastid") as start,
+                ):
+                    with self.assertRaises(RuntimeError) as raised:
+                        self.harness.main()
+                    self.assertIs(raised.exception, failure)
+                    self.assertEqual(run.call_count, completed_builds + 1)
+                    digest.assert_not_called()
+                    file_digest.assert_not_called()
+                    start.assert_not_called()
+
+    def test_tmdb_main_supplies_secret_to_sign_in_and_restart_browser(self):
+        self.select_mode("--m4-search-journey")
+        self.patch(self.harness.subprocess, "run")
+        self.patch(self.harness, "_web_digest", return_value="web-digest")
+        self.patch(self.harness.runtime, "sha256_file", return_value="artifact-digest")
+        for name in ("_private_directory", "_bootstrap_disposable_installation", "_write_fixture_config"):
+            self.patch(self.harness.fixture, name)
+        self.patch(self.harness.fixture, "_copy_exact_release_input", return_value=Path("fixture-release"))
+        self.patch(self.harness.fixture, "_register_verified_human", return_value=("fixture@example.invalid", "fixture-password"))
+        for name in ("prepare_runtime_lock", "prepare_installation", "verify_installation", "stop_managed_process_group"):
+            self.patch(self.harness.runtime, name)
+        self.patch(self.harness.smoke, "start_fixture_release", return_value=(mock.sentinel.trailbase, None))
+        self.patch(self.harness.smoke, "stop_process")
+        smtp = self.patch(self.harness.smoke, "SmtpServer").return_value
+        smtp.server_address = ("127.0.0.1", 12345)
+        self.patch(self.harness.threading, "Thread")
+        self.patch(self.harness, "_start_fastid", return_value=mock.sentinel.fastid)
+        self.patch(self.harness, "_bootstrap_cli")
+        self.patch(Path, "read_text", return_value="synthetic-bootstrap-secret")
+        connection = self.patch(self.harness.sqlite3, "connect").return_value
+        connection.execute.return_value.fetchone.return_value = (1,)
+        self.patch(self.harness, "_search_database_evidence", return_value={})
+        capabilities = {"capabilities": [
+            {"capability_id": name, "credential_state": "valid", "credential_test": {"state": "passed"}}
+            for name in ("metadata.search", "metadata.read")
+        ]}
+        self.patch(self.harness, "_post", side_effect=[
+            (200, {"initialization_proof": "synthetic-proof"}),
+            (200, {"credential": "synthetic-enrollment"}),
+            (200, capabilities), (200, capabilities),
+        ])
+        provider = self.patch(self.harness, "TmdbSmokeFixture").return_value
+        provider.child_environment.return_value = FixtureProvider().child_environment()
+        provider.requests.return_value = ["/3/configuration"] * 2 + ["/3/search/multi"] + [
+            f"/3/movie/{value}" for value in self.harness.PROVIDER_IDS for _ in range(2)
+        ]
+        stopped = RuntimeError("stop at restart browser")
+        browser = self.patch(self.harness, "_browser", side_effect=[
+            {"m4SearchJourney": {"recordId": RECORD_ID, "recordPath": "/records/fixture"}}, stopped,
+        ])
+        with self.assertRaises(RuntimeError) as raised:
+            self.harness.main()
+        self.assertIs(raised.exception, stopped)
+        payloads = [call.args[0] for call in browser.call_args_list]
+        self.assertEqual([payload["mode"] for payload in payloads], ["sign-in", "restart-record"])
+        for payload in payloads:
+            with self.subTest(mode=payload["mode"]):
+                self.assertEqual(payload.get("forbiddenProviderValues"), ("fixture-header-only-token",))
 
 
 class SearchDatabaseEvidenceTest(unittest.TestCase):

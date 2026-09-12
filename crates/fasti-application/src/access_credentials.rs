@@ -79,6 +79,37 @@ pub struct AccessInventoryQuery<Id> {
     page: AccessInventoryPage<Id>,
 }
 
+/// One bounded client page. The continuation refers to the last returned item,
+/// never the extra row used to detect another page; it conveys no authority.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccessClientInventory {
+    clients: Vec<ApplicationClient>,
+    next: Option<(DateTime<Utc>, ClientId)>,
+}
+
+impl AccessClientInventory {
+    pub fn from_window(
+        mut clients: Vec<ApplicationClient>,
+        page: &AccessInventoryPage<ClientId>,
+    ) -> Self {
+        let has_more = clients.len() > usize::from(page.limit());
+        clients.truncate(usize::from(page.limit()));
+        let next = clients
+            .last()
+            .filter(|_| has_more)
+            .map(|client| (client.created_at(), client.id()));
+        Self { clients, next }
+    }
+
+    pub fn clients(&self) -> &[ApplicationClient] {
+        &self.clients
+    }
+
+    pub const fn next(&self) -> Option<&(DateTime<Utc>, ClientId)> {
+        self.next.as_ref()
+    }
+}
+
 impl<Id> AccessInventoryQuery<Id> {
     pub const fn new(
         request: BrowserSessionQuery,

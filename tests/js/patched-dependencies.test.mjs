@@ -31,6 +31,38 @@ function check(name, payload) {
   assert.equal(result.status, 0, result.stderr);
 }
 
+test("installed contract and Nx parsers reject bounded denial-of-service inputs", () => {
+  const workspace = createRequire(
+    new URL("../../package.json", import.meta.url),
+  );
+  const parser = createRequire(workspace.resolve("@asyncapi/parser"));
+  const yaml = parser("js-yaml");
+  assert.deepEqual(yaml.load("value: 1"), { value: 1 });
+  assert.throws(
+    () => yaml.load("a: &a [{}, {}]\nb: {<<: *a}\n", { maxTotalMergeKeys: 1 }),
+    yaml.YAMLException,
+  );
+
+  const nx = createRequire(workspace.resolve("nx/package.json"));
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--eval",
+      `
+    const assert = require("node:assert/strict");
+    const { parse, TomlError } = require(${JSON.stringify(nx.resolve("smol-toml"))});
+    assert.deepEqual(parse("value = 1"), { value: 1 });
+    for (const input of ["a=[1 #", "a={b=1 #"]) {
+      assert.throws(() => parse(input), TomlError);
+    }
+  `,
+    ],
+    { encoding: "utf8", timeout: 1_000 },
+  );
+  assert.notEqual(result.error?.code, "ETIMEDOUT", "TOML parser hung");
+  assert.equal(result.status, 0, result.stderr);
+});
+
 test("patched image parsers reject zero-length records without hanging", () => {
   const icns = Buffer.alloc(16);
   icns.write("icns", 0);

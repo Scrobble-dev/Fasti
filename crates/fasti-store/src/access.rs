@@ -247,7 +247,7 @@ fn insert_recovery_provisional(
     let credential_id = CredentialId::new_v7();
     let grant_id = ProfileGrantId::new_v7();
     recovery_sql(transaction.execute(
-        "INSERT INTO clients(client_id, workspace_id, status, current_credential_epoch, created_at) VALUES (?1, ?2, 'active', 1, ?3)",
+        "INSERT INTO clients(client_id, workspace_id, status, current_credential_epoch, created_at, authentication_type, purpose) VALUES (?1, ?2, 'active', 1, ?3, 'first_party', 'node')",
         params![
             client_id.to_string(),
             request.workspace_id().to_string(),
@@ -366,6 +366,13 @@ fn require_one_row(
 }
 
 impl AccessAdministrationPort for SqliteKernel {
+    fn list_access_clients(
+        &self,
+        query: fasti_application::AccessInventoryQuery<ClientId>,
+    ) -> ApplicationResult<fasti_application::AccessClientInventory> {
+        crate::client_credentials::list_access_clients(self, query)
+    }
+
     fn ensure_bootstrap_secret(&self) -> ApplicationResult<SecretMaterial> {
         let capability = CapabilityKey::InitializeNode;
         let correlation_id = fasti_domain::RequestCorrelationId::new_v7();
@@ -544,7 +551,7 @@ impl AccessAdministrationPort for SqliteKernel {
         )?;
         map_sql(
             transaction.execute(
-                "INSERT INTO clients(client_id, workspace_id, status, current_credential_epoch, created_at) VALUES (?1, ?2, 'active', 1, ?3)",
+                "INSERT INTO clients(client_id, workspace_id, status, current_credential_epoch, created_at, authentication_type, purpose) VALUES (?1, ?2, 'active', 1, ?3, 'first_party', 'node')",
                 params![client_id.to_string(), workspace_id.to_string(), created_at_text],
             ),
             capability,
@@ -1589,6 +1596,22 @@ mod tests {
     use std::sync::{Arc, Barrier};
     use tempfile::TempDir;
 
+    fn assert_node_inventory_metadata(connection: &rusqlite::Connection, client_id: ClientId) {
+        let row: (String, String, Option<String>, Option<String>) = connection.query_row(
+            "SELECT authentication_type, purpose, owner_subject_id, name FROM clients WHERE client_id = ?1",
+            [client_id.to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        ).unwrap();
+        assert_eq!(row, ("first_party".into(), "node".into(), None, None));
+    }
+
+    #[test]
+    fn initial_node_client_has_explicit_inventory_classification() {
+        let node = TestNode::new();
+        let connection = node.kernel.inner.connection.lock().unwrap();
+        assert_node_inventory_metadata(&connection, node.client_id);
+    }
+
     struct TestNode {
         _root: TempDir,
         kernel: SqliteKernel,
@@ -2021,6 +2044,7 @@ mod tests {
             )
             .expect("prepared recovery composition");
         assert_eq!(client, prepared.client_id().to_string());
+        assert_node_inventory_metadata(&connection, prepared.client_id());
         assert_eq!(attempt, node.restore_attempt_id.to_string());
         assert_eq!(scope, scope_storage_key(ScopeKey::ClientEnroll));
         assert_ne!(digest, proof_hex);

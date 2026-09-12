@@ -262,6 +262,16 @@ assistive-technology evidence. Do not weaken Secure cookies or claim packaged
 desktop authentication before that follow-up passes. Exact-head review, CI,
 merge, and merged-tree evidence remain required for C1 delivery.
 
+For the bounded C2 inventory runtime proof, use
+`cargo xtask test access-client-inventory` only after building the daemon, CLI
+and web artifacts from the recorded clean source and preparing `.dev-trailbase`.
+The command requires real cookie-only inventory and retained-cookie denial after
+session revocation. Its separate receipt does not complete C2, prove packaged
+Tauri authentication or replace canonical PR and prepared-artifact evidence.
+Run the focused `cargo test -p xtask ordinary_browser` receipt regressions and
+`PYTHONPATH=scripts python3 -m unittest scripts/test_smoke_access_browser.py`
+after changing this boundary; coordinate actual runtime ports and resources.
+
 ## Quality and Security Invariants
 
 - **Permanent Codex Security exclusion**: Do not use the Codex Security plugin,

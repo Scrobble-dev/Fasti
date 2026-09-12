@@ -9,6 +9,7 @@ pub enum CapabilityBody {
     B2,
     B3,
     C1,
+    C2,
     M1,
     M2,
     M3,
@@ -23,6 +24,7 @@ impl CapabilityBody {
             Self::B2 => "B2",
             Self::B3 => "B3",
             Self::C1 => "C1",
+            Self::C2 => "C2",
             Self::M1 => "M1",
             Self::M2 => "M2",
             Self::M3 => "M3",
@@ -113,6 +115,27 @@ macro_rules! define_capabilities {
 }
 
 define_capabilities!(
+    (
+        ListAccessClients,
+        C2,
+        C2,
+        Finalized,
+        Implemented,
+        BrowserSession,
+        [],
+        [
+            AuthenticationFailed,
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
+            CapabilityUnavailable,
+            Forbidden,
+            IntegrityFailed,
+            SessionPolicyChanged,
+            StorageUnavailable,
+            ValidationFailed
+        ],
+        []
+    ),
     (
         SearchMetadata,
         M4,

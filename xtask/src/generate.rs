@@ -197,7 +197,18 @@ const PRODUCTION_BOOTSTRAP_OPERATIONS: [ConformanceOperation; 2] = [
 /// surface. Kept separate from `PRODUCTION_BOOTSTRAP_OPERATIONS` because that
 /// array also drives the bootstrap-only SDK slice in
 /// `render_production_bootstrap_contract`, which must not grow to include them.
-const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 46] = [
+const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 47] = [
+    ConformanceOperation {
+        alias: "listAccessClients",
+        operation_id: "list_access_clients",
+        method: "get",
+        path: "/api/access/v1/clients",
+        capability_id: "access.client.list",
+        authenticated: false,
+        request: None,
+        response: Some("ListAccessClientsResponse"),
+        retry: "safe",
+    },
     ConformanceOperation {
         alias: "readProviderIdentifierDetails",
         operation_id: "read_provider_identifier_details",
@@ -790,6 +801,17 @@ fn production_problem_codes(
     capability: &Value,
 ) -> anyhow::Result<Vec<Value>> {
     let exact: Option<&[&str]> = match operation.operation_id {
+        "list_access_clients" => Some(&[
+            "authentication_failed",
+            "browser_session_expired",
+            "browser_session_revoked",
+            "capability_unavailable",
+            "forbidden",
+            "integrity_failed",
+            "session_policy_changed",
+            "storage_unavailable",
+            "validation_failed",
+        ]),
         "start_trailbase_sign_in" => Some(&START_TRAILBASE_SIGN_IN_PROBLEMS),
         "read_trailbase_continuation" => Some(&READ_TRAILBASE_CONTINUATION_PROBLEMS),
         "complete_trailbase_continuation" => Some(&COMPLETE_TRAILBASE_CONTINUATION_PROBLEMS),
@@ -1952,7 +1974,7 @@ fn enrich_discovery_collection_schema(
         ),
         (
             "/components/schemas/CapabilitySurfaceDispositionDto/properties/body",
-            vec!["b0", "b1", "b2", "b3", "c1", "m1", "m2", "m3", "m4"],
+            vec!["b0", "b1", "b2", "b3", "c1", "c2", "m1", "m2", "m3", "m4"],
         ),
         (
             "/components/schemas/CapabilityUatDto/properties/relationship",
@@ -1960,7 +1982,7 @@ fn enrich_discovery_collection_schema(
         ),
         (
             "/components/schemas/CapabilityUatDto/properties/owner_body",
-            vec!["b1", "b2", "b3", "c1", "m1", "m2", "m3"],
+            vec!["b1", "b2", "b3", "c1", "c2", "m1", "m2", "m3"],
         ),
     ] {
         openapi
@@ -2472,9 +2494,10 @@ fn validate_production_operation_security(
         | "cancel_trailbase_continuation" => {
             Some(serde_json::json!([{"auth_continuation_cookie": []}]))
         }
-        "read_access_projection" | "read_browser_session" | "list_browser_sessions" => {
-            Some(serde_json::json!([{"browser_session_cookie": []}]))
-        }
+        "read_access_projection"
+        | "read_browser_session"
+        | "list_browser_sessions"
+        | "list_access_clients" => Some(serde_json::json!([{"browser_session_cookie": []}])),
         "end_browser_session"
         | "revoke_browser_session"
         | "revoke_other_browser_sessions"
@@ -2970,6 +2993,41 @@ fn resolve_required_binding(
             _ => anyhow::bail!("unknown package-smoke binding"),
         },
         "ui" => match binding {
+            "ui:access-client-inventory" => {
+                ensure!(
+                    capability_id == "access.client.list",
+                    "the client inventory UI binding belongs only to access.client.list"
+                );
+                let types = fs::read_to_string(workspace_root.join("packages/ui/src/types.ts"))?;
+                let host = fs::read_to_string(workspace_root.join("apps/web/src/web-host.ts"))?;
+                let view = fs::read_to_string(
+                    workspace_root.join("packages/ui/src/account-security-view.svelte"),
+                )?;
+                let browser = fs::read_to_string(
+                    workspace_root.join("tests/e2e/access-client-inventory.spec.ts"),
+                )?;
+                ensure!(
+                    types.contains("listAccessClients?")
+                        && types.contains("ListAccessClientsQueryParameters")
+                        && types.contains("ListAccessClientsResponse")
+                        && host.contains("accessClient.listAccessClients(query, { signal })")
+                        && view.contains("host.listAccessClients(")
+                        && view.contains("function clearClientInventory")
+                        && view.contains("identity !== inventoryIdentity")
+                        && view.contains("currentGeneration !== inventoryGeneration")
+                        && view.contains("return () => untrack(clearClientInventory)")
+                        && view.contains("onProjection?.(undefined)")
+                        && view.contains("after_created_at: clientInventory.next.created_at")
+                        && view.contains("after_client_id: clientInventory.next.client_id")
+                        && view.matches("{@render registeredClients()}").count() == 2
+                        && browser.contains(
+                            "A and C inspect bounded client inventory through the cookie-only host"
+                        )
+                        && browser.contains("client inventory retries the failed cursor page")
+                        && browser.contains("client inventory discards late responses after authority loss"),
+                    "client inventory UI is missing its governed host, paging, authority, or A+C witnesses"
+                );
+            }
             "ui:account-security" => {
                 ensure!(
                     capability_id == "access.projection.read",
@@ -3251,7 +3309,10 @@ fn bind_governed_examples(
         } else {
             ensure!(
                 example_id == "system.capabilities.success"
-                    || example_id == "integration.status.success",
+                    || example_id == "integration.status.success"
+                    || (example_id == "access.client.list.success"
+                        && expected.capability_id == "access.client.list"
+                        && expected.operation_id == "list_access_clients"),
                 "finite HTTP example {example_id} has no deterministic response binding rule"
             );
             ("200".to_owned(), "application/json")
@@ -3677,6 +3738,9 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
     let mut output = String::new();
     for name in [
         "ObservationIngressKind",
+        "AccessClientAuthenticationTypeDto",
+        "AccessClientPurposeDto",
+        "AccessClientLifecycleDto",
         "TrackingDispositionDto",
         "TrackingDispositionUpdateDto",
         "ProviderKindDto",
@@ -3818,6 +3882,10 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         "BrowserSessionDto",
         "ReadBrowserSessionResponse",
         "ListBrowserSessionsResponse",
+        "ListAccessClientsQueryParameters",
+        "AccessClientInventoryItemDto",
+        "AccessClientInventoryCursorDto",
+        "ListAccessClientsResponse",
         "RevokeBrowserSessionsResponse",
         "RotateBrowserSessionResponse",
         "SelectBrowserSessionProfileResponse",
@@ -4142,6 +4210,59 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
             "// prettier-ignore\nexport function {alias}(value: unknown): {dto} {{\n  return parseProductionDto(\"{dto}\", value);\n}}\n"
         )?;
     }
+    output.push_str(r#"
+// prettier-ignore
+export function parseListAccessClientsQueryParameters(value: unknown): ListAccessClientsQueryParameters {
+  const query = parseProductionDto<ListAccessClientsQueryParameters>("ListAccessClientsQueryParameters", value);
+  if (query.limit === null || query.after_created_at === null || query.after_client_id === null ||
+      (query.after_created_at === undefined) !== (query.after_client_id === undefined)) {
+    throw new FastiContractParseError("Client inventory requires both cursor fields or neither, without null values");
+  }
+  return query;
+}
+
+// prettier-ignore
+export function parseListAccessClientsResponse(value: unknown, query?: ListAccessClientsQueryParameters): ListAccessClientsResponse {
+  const response = parseProductionDto<ListAccessClientsResponse>("ListAccessClientsResponse", value);
+  const request = query === undefined ? undefined : parseListAccessClientsQueryParameters(query);
+  const limit = request === undefined ? 100 : request.limit ?? 32;
+  if (response.clients.length > limit ||
+      (request !== undefined && response.next !== null && response.clients.length !== limit)) {
+    throw new FastiContractParseError("Client inventory page does not match its requested limit");
+  }
+  if (response.next !== null) {
+    const last = response.clients.at(-1);
+    if (last === undefined || response.next.client_id !== last.client_id || response.next.created_at !== last.created_at) {
+      throw new FastiContractParseError("Client inventory cursor must identify its last returned row");
+    }
+  }
+  const ids = new Set<string>();
+  let previous = typeof request?.after_created_at !== "string" ? undefined :
+    { created_at: request.after_created_at, client_id: request.after_client_id! };
+  for (const client of response.clients) {
+    if (ids.has(client.client_id) ||
+        (previous !== undefined && compareClientInventoryPosition(client, previous) >= 0) ||
+        (client.authentication_type === "first_party") !== (client.purpose === "node") ||
+        (client.authentication_type === "first_party" && client.owner_subject_id !== null) ||
+        (client.name !== null && (/^\p{White_Space}|\p{White_Space}$/u.test(client.name) ||
+          new TextEncoder().encode(client.name).length > 128 || /[\p{Cc}\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/u.test(client.name)))) {
+      throw new FastiContractParseError("Client inventory contains invalid ownership, classification, name, identity or cursor order");
+    }
+    ids.add(client.client_id);
+    previous = client;
+  }
+  return response;
+}
+
+// Canonical time validation precedes this comparison; never round through Date.
+// prettier-ignore
+function compareClientInventoryPosition(left: AccessClientInventoryCursorDto, right: AccessClientInventoryCursorDto): number {
+  const years = Number(left.created_at.slice(0, -23)) - Number(right.created_at.slice(0, -23));
+  const leftTail = left.created_at.slice(-23), rightTail = right.created_at.slice(-23);
+  return years || (leftTail < rightTail ? -1 : leftTail > rightTail ? 1 :
+    left.client_id < right.client_id ? -1 : left.client_id > right.client_id ? 1 : 0);
+}
+"#);
     Ok(output)
 }
 
@@ -4946,6 +5067,13 @@ function validateOpenApiValue(value: unknown, schemaValue: unknown, path: string
     if (schema.format === "iso-date-or-rfc3339" && !isRealIsoDateOrRfc3339(value)) {
       throw new FastiContractParseError(`${path} is not a real ISO date or RFC3339 instant`);
     }
+    if (schema.format === "fasti-inventory-utc-micros" && !isInventoryUtcMicros(value)) {
+      throw new FastiContractParseError(`${path} is not a canonical inventory time`);
+    }
+    if (schema.format === "fasti-credential-epoch" &&
+        (!/^(0|[1-9][0-9]{0,18})$/.test(value) || (value.length === 19 && value > "9223372036854775807"))) {
+      throw new FastiContractParseError(`${path} is not an exact credential epoch`);
+    }
     return;
   }
   if (schemaTypes.includes("integer")) {
@@ -5076,6 +5204,19 @@ function isRealRfc3339Instant(value: string): boolean {
     offsetHour <= 23 &&
     offsetMinute <= 59
   );
+}
+
+// prettier-ignore
+function isInventoryUtcMicros(value: string): boolean {
+  if (value.length < 27 || value.length > 30) return false;
+  const match = /^([0-9]{4}|-[0-9]{4,6}|\+[0-9]{5,6})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})\.([0-9]{6})Z$/.exec(value);
+  if (match === null) return false;
+  const year = Number(match[1]);
+  if (year < -262143 || year > 262142) return false;
+  const yearText = year >= 0 && year <= 9999 ? String(year).padStart(4, "0") :
+    (year < 0 ? "-" : "+") + String(Math.abs(year)).padStart(4, "0");
+  return match[1] === yearText && isRealCalendarDate(year, Number(match[2]), Number(match[3])) &&
+    Number(match[4]) <= 23 && Number(match[5]) <= 59 && Number(match[6]) <= 60;
 }
 
 // prettier-ignore
@@ -5433,6 +5574,44 @@ fn collect_generated_files(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn access_ui_bindings_are_capability_specific() {
+        let resolve = |binding, capability| {
+            resolve_required_binding(
+                workspace_root(),
+                "ui",
+                binding,
+                capability,
+                &BTreeMap::new(),
+                &Value::Null,
+                &Value::Null,
+                &Value::Null,
+                &Value::Null,
+                &Value::Null,
+                "",
+                "",
+            )
+        };
+        for (binding, owner, other) in [
+            (
+                "ui:access-client-inventory",
+                "access.client.list",
+                "access.projection.read",
+            ),
+            (
+                "ui:account-security",
+                "access.projection.read",
+                "access.client.list",
+            ),
+        ] {
+            resolve(binding, owner).expect("the owning capability has real source witnesses");
+            assert!(
+                resolve(binding, other).is_err(),
+                "UI ownership must not cross capabilities"
+            );
+        }
+    }
 
     #[test]
     fn artifact_inventory_is_fixed_and_unique() {

@@ -11,30 +11,36 @@ use crate::{
     FASTI_ACCESS_CONTINUATION_COOKIE, FASTI_ACCESS_CONTINUATION_PATH, FASTI_ACCESS_HOST,
 };
 use axum::{
-    extract::{rejection::JsonRejection, DefaultBodyLimit, Path, RawQuery, State},
-    http::{header, HeaderMap, HeaderValue, Method, StatusCode},
+    extract::{
+        rejection::JsonRejection, DefaultBodyLimit, OriginalUri, Path, Query, RawQuery, State,
+    },
+    http::{header, HeaderMap, HeaderValue, Method, StatusCode, Uri},
     response::{IntoResponse, Response},
     routing::{any, delete, get, post, put},
     Json, Router,
 };
 use fasti_application::{
     AccessBrowserSessionSummary, AccessCeremonyEvidence, AccessEvidenceKind, AccessEvidenceState,
-    AccessFirstRunStep, AccessFirstRunStepKey, AccessMembershipSummary, AccessProfileGrantSummary,
-    AccessProjection, AccessSessionAuthenticationSummary, AccessSubjectSummary,
-    AccessTrailBaseActivationSummary, AuthSelectionChoice, BrowserSessionSummary,
-    CancelTrailBaseSignInContinuationCommand, CapabilityKey,
-    CompleteTrailBaseSignInContinuationCommand, CreatedBrowserSession, FastiProblem, LocalKernel,
-    ProblemCode, ReadTrailBaseSignInContinuationQuery, SelectBrowserSessionProfileCommand,
-    TargetBrowserSessionCommand, Violation, C1_AUTH_CEREMONY_LIFETIME,
+    AccessFirstRunStep, AccessFirstRunStepKey, AccessInventoryPage, AccessInventoryQuery,
+    AccessMembershipSummary, AccessProfileGrantSummary, AccessProjection,
+    AccessSessionAuthenticationSummary, AccessSubjectSummary, AccessTrailBaseActivationSummary,
+    AuthSelectionChoice, BrowserSessionSummary, CancelTrailBaseSignInContinuationCommand,
+    CapabilityKey, CompleteTrailBaseSignInContinuationCommand, CreatedBrowserSession, FastiProblem,
+    LocalKernel, ProblemCode, ReadTrailBaseSignInContinuationQuery,
+    SelectBrowserSessionProfileCommand, TargetBrowserSessionCommand, Violation,
+    C1_AUTH_CEREMONY_LIFETIME,
 };
 use fasti_contracts::{
     AccessAuthenticationMethodDto, AccessCeremonyFailureDto, AccessCeremonyStateDto,
+    AccessClientAuthenticationTypeDto, AccessClientInventoryCursorDto,
+    AccessClientInventoryItemDto, AccessClientLifecycleDto, AccessClientPurposeDto,
     AccessEvidenceDto, AccessEvidenceKindDto, AccessEvidenceStateDto, AccessFirstRunStepDto,
     AccessFirstRunStepKeyDto, AccessMembershipDto, AccessMembershipLifecycleDto,
     AccessProfileGrantDto, AccessProjectionResponse, AccessSessionAuthenticationDto,
     AccessSubjectDto, AccessSubjectLifecycleDto, AccessWorkspaceRoleDto, BrowserSessionDto,
     BrowserSessionPolicyDto, CompleteTrailBaseAuthenticationQuery,
-    CompleteTrailBaseContinuationRequest, ListBrowserSessionsResponse, ProblemDetails,
+    CompleteTrailBaseContinuationRequest, ListAccessClientsQueryParameters,
+    ListAccessClientsResponse, ListBrowserSessionsResponse, ProblemDetails,
     ReadBrowserSessionResponse, ReadTrailBaseContinuationResponse, RecentAuthenticationDto,
     RevokeBrowserSessionsResponse, RotateBrowserSessionResponse,
     SelectBrowserSessionProfileRequest, SelectBrowserSessionProfileResponse,
@@ -42,14 +48,16 @@ use fasti_contracts::{
     TrailBaseActivationDto, TrailBaseActivationStateDto, TrailBaseContinuationChoiceDto,
 };
 use fasti_domain::{
-    AuthCeremonyFailure, AuthCeremonyState, AuthReturnTarget, AuthSubjectLifecycle,
-    AuthenticationMethod, BrowserSessionId, FastiBrowserSession, MembershipLifecycle,
+    ApplicationClient, ApplicationClientLifecycle, ApplicationClientPurpose, AuthCeremonyFailure,
+    AuthCeremonyState, AuthReturnTarget, AuthSubjectLifecycle, AuthenticationMethod,
+    BrowserSessionId, ClientAuthenticationType, ClientId, FastiBrowserSession, MembershipLifecycle,
     ProfileGrantId, RequestCorrelationId, Sha256Digest, TrailBaseActivationBlocker,
     TrailBaseActivationState, WorkspaceRole,
 };
 use std::{str::FromStr, sync::Arc};
 
 const MAX_ACCESS_JSON_BODY_BYTES: usize = 4 * 1024;
+const MAX_CLIENT_INVENTORY_QUERY_BYTES: usize = 512;
 
 type HttpResponse = Result<Response, HttpProblem>;
 
@@ -66,6 +74,127 @@ fn no_store(mut response: Response) -> Response {
         HeaderValue::from_static("private, no-store"),
     );
     response
+}
+
+fn inventory_time(time: chrono::DateTime<chrono::Utc>) -> String {
+    time.to_rfc3339_opts(chrono::SecondsFormat::Micros, true)
+}
+
+fn inventory_page(
+    uri: &Uri,
+    correlation_id: RequestCorrelationId,
+) -> Result<AccessInventoryPage<ClientId>, HttpProblem> {
+    let invalid = || {
+        invalid_request(
+            CapabilityKey::ListAccessClients,
+            correlation_id,
+            "/query",
+            "limit 1 through 100 and both canonical cursor fields, or neither",
+        )
+    };
+    if uri
+        .query()
+        .is_some_and(|query| query.len() > MAX_CLIENT_INVENTORY_QUERY_BYTES)
+    {
+        return Err(invalid());
+    }
+    let Query(query) =
+        Query::<ListAccessClientsQueryParameters>::try_from_uri(uri).map_err(|_| invalid())?;
+    let after_time = query
+        .after_created_at
+        .map(|value| {
+            if !(27..=30).contains(&value.len()) {
+                return Err(invalid());
+            }
+            let parsed = value
+                .parse::<chrono::DateTime<chrono::Utc>>()
+                .map_err(|_| invalid())?;
+            if inventory_time(parsed) != value {
+                return Err(invalid());
+            }
+            Ok(parsed)
+        })
+        .transpose()?;
+    let after_id = query
+        .after_client_id
+        .map(|value| value.parse::<ClientId>().map_err(|_| invalid()))
+        .transpose()?;
+    AccessInventoryPage::try_new(query.limit, after_time, after_id).map_err(|_| invalid())
+}
+
+fn inventory_client_dto(client: &ApplicationClient) -> AccessClientInventoryItemDto {
+    AccessClientInventoryItemDto {
+        client_id: client.id().to_string(),
+        owner_subject_id: client.owner_subject_id().map(|id| id.to_string()),
+        name: client.name().map(|name| name.as_str().to_owned()),
+        authentication_type: match client.classification().authentication_type() {
+            ClientAuthenticationType::FirstParty => AccessClientAuthenticationTypeDto::FirstParty,
+            ClientAuthenticationType::Confidential => {
+                AccessClientAuthenticationTypeDto::Confidential
+            }
+        },
+        purpose: match client.classification().purpose() {
+            ApplicationClientPurpose::Node => AccessClientPurposeDto::Node,
+            ApplicationClientPurpose::Cli => AccessClientPurposeDto::Cli,
+            ApplicationClientPurpose::Device => AccessClientPurposeDto::Device,
+            ApplicationClientPurpose::Integration => AccessClientPurposeDto::Integration,
+        },
+        lifecycle: match client.lifecycle() {
+            ApplicationClientLifecycle::Active => AccessClientLifecycleDto::Active,
+            ApplicationClientLifecycle::Revoked => AccessClientLifecycleDto::Revoked,
+        },
+        current_credential_epoch: client.current_credential_epoch().to_string(),
+        created_at: inventory_time(client.created_at()),
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/access/v1/clients",
+    operation_id = "list_access_clients",
+    tag = "access",
+    security(("browser_session_cookie" = [])),
+    params(ListAccessClientsQueryParameters),
+    responses(
+        (status = 200, description = "Bounded clients visible to the current workspace membership", body = ListAccessClientsResponse),
+        (status = 401, description = "Browser authentication is invalid or inactive", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "Browser request boundary is invalid", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "Inventory query is invalid", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 500, description = "Stored client failed integrity checks", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 501, description = "Client inventory is not available from this kernel", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 503, description = "Local storage or capability is unavailable", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub(crate) async fn list_access_clients(
+    State(state): State<AccessApiState>,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+) -> HttpResponse {
+    let capability = CapabilityKey::ListAccessClients;
+    let correlation_id = RequestCorrelationId::new_v7();
+    let (request, boundary) =
+        browser_session_query(&headers, &state.boundary, capability, correlation_id)?;
+    let query = AccessInventoryQuery::new(request, boundary, inventory_page(&uri, correlation_id)?);
+    let inventory = run_kernel(capability, correlation_id, move || {
+        state.kernel.list_access_clients(query)
+    })
+    .await?;
+    Ok(no_store(
+        Json(ListAccessClientsResponse {
+            clients: inventory
+                .clients()
+                .iter()
+                .map(inventory_client_dto)
+                .collect(),
+            next: inventory
+                .next()
+                .map(|(created_at, client_id)| AccessClientInventoryCursorDto {
+                    created_at: inventory_time(*created_at),
+                    client_id: client_id.to_string(),
+                }),
+        })
+        .into_response(),
+    ))
 }
 
 fn invalid_request(
@@ -1279,6 +1408,7 @@ pub(crate) fn router(
                 .delete(cancel_trailbase_continuation),
         )
         .route("/api/access/v1/projection", get(read_access_projection))
+        .route("/api/access/v1/clients", get(list_access_clients))
         .route(
             "/api/access/v1/browser-session",
             get(read_browser_session).delete(end_browser_session),
@@ -1314,6 +1444,75 @@ pub(crate) fn router(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn client_inventory_query_preserves_exact_cursor_values_and_rejects_ambiguity() {
+        let id = ClientId::new_v7();
+        for time in [
+            inventory_time(chrono::DateTime::<chrono::Utc>::MIN_UTC),
+            inventory_time(chrono::DateTime::<chrono::Utc>::MAX_UTC),
+            "2016-12-31T23:59:60.999999Z".to_owned(),
+            "+10000-01-01T00:00:00.000000Z".to_owned(),
+        ] {
+            let uri: Uri = format!(
+                "/api/access/v1/clients?limit=1&after_created_at={}&after_client_id={id}",
+                time.replace('+', "%2B")
+            )
+            .parse()
+            .unwrap();
+            let page = inventory_page(&uri, RequestCorrelationId::new_v7())
+                .unwrap_or_else(|_| panic!("valid inventory cursor"));
+            assert_eq!(page.limit(), 1);
+            assert_eq!(inventory_time(page.after().unwrap().0), time);
+            assert_eq!(page.after().unwrap().1, id);
+        }
+        for query in [
+            "limit=0".to_owned(), "limit=101".to_owned(), "limit=1&limit=2".to_owned(),
+            "limit=1&%6cimit=2".to_owned(), "unknown=1".to_owned(),
+            "limit=%".to_owned(), "limit=%G0".to_owned(), "limit=%FF".to_owned(),
+            format!("after_client_id={id}"),
+            "after_created_at=2026-01-01T00:00:00.000000Z".to_owned(),
+            format!("after_created_at=+10000-01-01T00:00:00.000000Z&after_client_id={id}"),
+            format!("after_created_at=2026-01-01T00:00:00Z&after_client_id={id}"),
+            format!("after_created_at=2026-02-30T00:00:00.000000Z&after_client_id={id}"),
+            format!("after_created_at=2026-01-01T00:00:00.000000Z&after_client_id={id}&after_client_id={id}"),
+            format!("limit=1{}", "&".repeat(506)),
+        ] {
+            let uri = format!("/api/access/v1/clients?{query}").parse().unwrap();
+            let response = inventory_page(&uri, RequestCorrelationId::new_v7()).unwrap_err().into_response();
+            assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+            assert_eq!(response.headers().get(header::CACHE_CONTROL).unwrap(), "private, no-store");
+        }
+        let at_bound: Uri = format!("/api/access/v1/clients?limit=1{}", "&".repeat(505))
+            .parse()
+            .unwrap();
+        assert_eq!(at_bound.query().unwrap().len(), 512);
+        assert!(inventory_page(&at_bound, RequestCorrelationId::new_v7()).is_ok());
+    }
+
+    #[test]
+    fn client_inventory_dto_does_not_round_epoch_or_time() {
+        let client = ApplicationClient::try_from_persisted(
+            ClientId::new_v7(),
+            fasti_domain::WorkspaceId::new_v7(),
+            None,
+            None,
+            fasti_domain::ApplicationClientClassification::try_from_persisted(
+                ClientAuthenticationType::FirstParty,
+                ApplicationClientPurpose::Node,
+            )
+            .unwrap(),
+            ApplicationClientLifecycle::Active,
+            i64::MAX as u64,
+            chrono::DateTime::<chrono::Utc>::MAX_UTC,
+        )
+        .unwrap();
+        let dto = inventory_client_dto(&client);
+        assert_eq!(dto.current_credential_epoch, "9223372036854775807");
+        assert_eq!(dto.created_at, inventory_time(client.created_at()));
+        assert_eq!(dto.owner_subject_id, None);
+        assert_eq!(dto.name, None);
+    }
 
     #[test]
     fn session_cookie_attributes_keep_credentials_out_of_script_and_cross_site_requests() {

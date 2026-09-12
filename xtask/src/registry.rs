@@ -9,7 +9,7 @@ use std::fs;
 use std::path::Path;
 
 const REGISTRY_PATH: &str = "contracts/registry/v1/capabilities.yaml";
-const EXPECTED_PROFILES: [&str; 18] = [
+const EXPECTED_PROFILES: [&str; 19] = [
     "b1_durable_bootstrap",
     "b1_http_fixture",
     "b1_integration_status",
@@ -21,6 +21,7 @@ const EXPECTED_PROFILES: [&str; 18] = [
     "c1_access_projection",
     "c1_browser_session_foundation",
     "c1_identity_bootstrap",
+    "c2_access_inventory",
     "health",
     "later_b2",
     "later_b3",
@@ -220,6 +221,7 @@ pub(crate) fn finalized_required_bindings(
             capability.contract_body,
             CapabilityBody::B1
                 | CapabilityBody::C1
+                | CapabilityBody::C2
                 | CapabilityBody::M1
                 | CapabilityBody::M2
                 | CapabilityBody::M3
@@ -657,6 +659,7 @@ const fn expected_surface_profile(key: CapabilityKey) -> &'static str {
         | CapabilityKey::SelectBrowserSessionProfile => "c1_browser_session_foundation",
         CapabilityKey::AccessIdentityBootstrap => "c1_identity_bootstrap",
         CapabilityKey::ReadAccessProjection => "c1_access_projection",
+        CapabilityKey::ListAccessClients => "c2_access_inventory",
         CapabilityKey::ListProviders
         | CapabilityKey::ConfigureProviderCredential
         | CapabilityKey::TestProviderCredential
@@ -674,6 +677,7 @@ const fn expected_surface_profile(key: CapabilityKey) -> &'static str {
             CapabilityBody::B3 => "later_b3",
             CapabilityBody::B0 => "health",
             CapabilityBody::C1 => "c1_browser_session_foundation",
+            CapabilityBody::C2 => "c2_access_inventory",
             CapabilityBody::M1 => "m1_providers",
             CapabilityBody::M2 => "m2_metadata",
             CapabilityBody::M3 => "m3_identity_routing",
@@ -693,6 +697,7 @@ const fn body_rank(body: CapabilityBody) -> u8 {
         CapabilityBody::M2 => 6,
         CapabilityBody::M3 => 7,
         CapabilityBody::M4 => 8,
+        CapabilityBody::C2 => 9,
     }
 }
 

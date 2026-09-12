@@ -152,6 +152,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     "/api/access/v1/browser-sessions",
     "/api/access/v1/browser-sessions/others",
     "/api/access/v1/browser-sessions/{browser_session_id}",
+    "/api/access/v1/clients",
     "/api/access/v1/projection",
     "/api/access/v1/trailbase/callback",
     "/api/access/v1/trailbase/continuation",
@@ -272,7 +273,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
 
   assert.equal(registry.contract_version, "1.0.0");
   assert.equal(registry.capability_base_uri.endsWith("/v1/"), true);
-  assert.equal(registry.capabilities.length, 53);
+  assert.equal(registry.capabilities.length, 54);
   const capabilityIds = registry.capabilities.map(({ id }) => id);
   assert.equal(new Set(capabilityIds).size, capabilityIds.length);
   assert.deepEqual(capabilityIds, [...capabilityIds].sort());
@@ -281,6 +282,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
   );
   const expectedProfile = (capability) => {
     if (capability.id === "metadata.search") return "m4_search";
+    if (capability.id === "access.client.list") return "c2_access_inventory";
     if (capability.lifecycle.contract_state === "reserved") {
       return `later_${capability.contract_body}`;
     }
@@ -475,6 +477,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
   assert.equal(healthOperation.security, undefined);
 
   const browserReads = new Set([
+    "list_access_clients",
     "read_access_projection",
     "read_browser_session",
     "list_browser_sessions",
@@ -580,6 +583,17 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     }
   }
   const accessProblems = {
+    list_access_clients: [
+      "authentication_failed",
+      "browser_session_expired",
+      "browser_session_revoked",
+      "capability_unavailable",
+      "forbidden",
+      "integrity_failed",
+      "session_policy_changed",
+      "storage_unavailable",
+      "validation_failed",
+    ],
     start_trailbase_sign_in: [
       "capacity_exceeded",
       "forbidden",
@@ -852,13 +866,15 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
             binding,
             capability.id === "access.projection.read"
               ? "ui:account-security"
-              : capability.id.startsWith("provider.")
-                ? "ui:provider-settings"
-                : capability.id.startsWith("metadata.")
-                  ? "ui:metadata-provenance"
-                  : capability.surface_profile === "m3_identity_routing"
-                    ? "ui:anime-grouping-policy"
-                    : `ui:${capability.id}`,
+              : capability.id === "access.client.list"
+                ? "ui:access-client-inventory"
+                : capability.id.startsWith("provider.")
+                  ? "ui:provider-settings"
+                  : capability.id.startsWith("metadata.")
+                    ? "ui:metadata-provenance"
+                    : capability.surface_profile === "m3_identity_routing"
+                      ? "ui:anime-grouping-policy"
+                      : `ui:${capability.id}`,
           );
           break;
         default:

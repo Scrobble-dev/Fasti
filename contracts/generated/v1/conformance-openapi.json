@@ -81,6 +81,7 @@
               "b2",
               "b3",
               "c1",
+              "c2",
               "m1",
               "m2",
               "m3",
@@ -91,6 +92,7 @@
           "examples": {
             "items": {
               "enum": [
+                "access.client.list.success",
                 "client.enroll.forbidden",
                 "credential.revoke.capability_unavailable",
                 "credential.rotate.capability_unavailable",
@@ -127,6 +129,7 @@
           },
           "id": {
             "enum": [
+              "access.client.list",
               "access.identity.bootstrap",
               "access.projection.read",
               "browser.session.create",
@@ -242,6 +245,7 @@
               "b2",
               "b3",
               "c1",
+              "c2",
               "m1",
               "m2",
               "m3",
@@ -294,6 +298,7 @@
               "c1_access_projection",
               "c1_browser_session_foundation",
               "c1_identity_bootstrap",
+              "c2_access_inventory",
               "health",
               "later_b2",
               "later_b3",
@@ -333,8 +338,8 @@
             "items": {
               "$ref": "#/components/schemas/CapabilityDescriptorDto"
             },
-            "maxItems": 53,
-            "minItems": 53,
+            "maxItems": 54,
+            "minItems": 54,
             "type": "array",
             "uniqueItems": true
           },
@@ -372,8 +377,8 @@
               },
               "type": "object"
             },
-            "maxProperties": 18,
-            "minProperties": 18,
+            "maxProperties": 19,
+            "minProperties": 19,
             "propertyNames": {
               "enum": [
                 "b1_durable_bootstrap",
@@ -387,6 +392,7 @@
                 "c1_access_projection",
                 "c1_browser_session_foundation",
                 "c1_identity_bootstrap",
+                "c2_access_inventory",
                 "health",
                 "later_b2",
                 "later_b3",
@@ -425,6 +431,7 @@
               "b1",
               "b2",
               "c1",
+              "c2",
               "m1",
               "m2",
               "m3",
@@ -475,6 +482,7 @@
               "b2",
               "b3",
               "c1",
+              "c2",
               "m1",
               "m2",
               "m3",
@@ -518,6 +526,7 @@
               "b2",
               "b3",
               "c1",
+              "c2",
               "m1",
               "m2",
               "m3"
@@ -1021,6 +1030,35 @@
                   "system.capabilities.success": {
                     "value": {
                       "capabilities": [
+                        {
+                          "authorization": "browser_session",
+                          "bounded_context": "access.credentials",
+                          "contract_body": "c2",
+                          "examples": [
+                            "access.client.list.success"
+                          ],
+                          "id": "access.client.list",
+                          "lifecycle": {
+                            "contract_state": "finalized",
+                            "introduced_in": "c2",
+                            "runtime_availability": "implemented"
+                          },
+                          "problems": [
+                            "authentication_failed",
+                            "browser_session_expired",
+                            "browser_session_revoked",
+                            "capability_unavailable",
+                            "forbidden",
+                            "integrity_failed",
+                            "session_policy_changed",
+                            "storage_unavailable",
+                            "validation_failed"
+                          ],
+                          "runtime_body": "c2",
+                          "scopes": [],
+                          "surface_profile": "c2_access_inventory",
+                          "uat": []
+                        },
                         {
                           "authorization": "local_operator",
                           "bounded_context": "access.identity",
@@ -3173,6 +3211,59 @@
                           "ui": {
                             "reason": "The active first-administrator operation is the trusted local CLI; packaged first-run authentication remains unavailable until C1-TAURI-AUTH.",
                             "state": "not_applicable"
+                          }
+                        },
+                        "c2_access_inventory": {
+                          "cli": {
+                            "reason": "This inventory uses first-party browser session authority.",
+                            "state": "not_applicable"
+                          },
+                          "domain_application": {
+                            "binding_visibility": "internal",
+                            "state": "required"
+                          },
+                          "http_openapi": {
+                            "binding": "openapi:{capability_id}",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "json_ld": {
+                            "reason": "Private client ownership and lifecycle state is not linked data.",
+                            "state": "not_applicable"
+                          },
+                          "json_schema": {
+                            "binding": "schema:production-openapi-operation:{capability_id}",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "knowledge": {
+                            "binding": "knowledge:problem-catalog",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "okf": {
+                            "binding": "okf:capability-catalog",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "package_smoke": {
+                            "body": "c2",
+                            "reason": "Native and OCI inventory package proof remains separate from ordinary-browser runtime proof; packaged Tauri authentication is deferred.",
+                            "state": "later_body"
+                          },
+                          "sdk": {
+                            "binding": "sdk:{capability_id}",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "sse_asyncapi": {
+                            "reason": "Client inventory is a finite read without an event stream.",
+                            "state": "not_applicable"
+                          },
+                          "ui": {
+                            "binding": "ui:access-client-inventory",
+                            "binding_visibility": "public",
+                            "state": "required"
                           }
                         },
                         "health": {

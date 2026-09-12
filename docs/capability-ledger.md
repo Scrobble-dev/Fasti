@@ -14,6 +14,14 @@ Those commands report contract state. They do not activate later-body runtime be
 
 ## Current runtime truth
 
+`access.client.list` implements a bounded, read-only client inventory through the
+C1 browser-session authority and shared A+C surface. It has real ordinary-browser
+runtime evidence, including independent sessions and revoked-session denial.
+It does not issue, rotate or revoke client credentials. Native/OCI inventory
+package proof and packaged Tauri authentication are not claimed by that evidence.
+See the [C2-I delivery record](plans/fasti-access-c2-inventory.md) for exact source
+and still-open final delivery gates.
+
 | Capability group                                                                                             | Runtime truth                                                                                                                                                             |
 | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `system.health`                                                                                              | Implemented by the production daemon and its production OpenAPI document                                                                                                  |

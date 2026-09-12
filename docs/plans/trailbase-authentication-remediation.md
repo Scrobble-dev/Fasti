@@ -1,5 +1,27 @@
 # Fasti Access and TrailBase authentication programme
 
+## Current delivery override — 2026-09-12
+
+The user approved capability-level C–H delivery and a freeze on new
+qualification-only subprojects unless a concrete delivery failure requires one.
+This checkpoint supersedes stale waits below, not the approved requirements.
+C1 and the C2 pure foundation are merged. Live `dev` is `d274e037`.
+C2-I owns migration18 and archive7, and no longer waits for M3/M4 release.
+Its ordinary-browser runtime passed at clean `5fc79019`; final activation,
+canonical/CI/review, merge and exact Metadata handoff remain open. Follow the
+[inventory record](fasti-access-c2-inventory.md) for exact source and receipts.
+
+Continue bounded C3 custody and future capability preparation in parallel.
+Recent-authentication proof remains a specific prerequisite for sensitive
+mutations, not inventory reads. Passkey enrollment cannot itself resolve that
+bootstrap prerequisite. The OIDC first-link administrator-approval alternative
+and mandatory recent-authentication clause need one consistent authority
+decision before activation; neither callback time nor an old vendor session
+is proof of fresh authentication. Keep all C–H capabilities in scope.
+No framework re-selection, Secure-cookie weakening, or packaged-Tauri claim.
+
+## Approved baseline and historical checkpoints
+
 Status: `APPROVED`
 
 Owner: Commander / Mothership

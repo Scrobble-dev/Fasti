@@ -259,6 +259,8 @@ export function createWebHost(
       accessClient.cancelTrailBaseContinuation(),
     readAccessProjection: (signal) =>
       accessClient.readAccessProjection({ signal }),
+    listAccessClients: (query, signal) =>
+      accessClient.listAccessClients(query, { signal }),
     endBrowserSession: () => accessClient.endBrowserSession(),
     revokeBrowserSession: (browserSessionId) =>
       accessClient.revokeBrowserSession(browserSessionId),

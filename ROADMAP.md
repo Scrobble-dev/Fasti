@@ -1,5 +1,27 @@
 # Fasti Roadmap
 
+## Access delivery checkpoint — 2026-09-12
+
+The approved C–H programme uses capability dependencies, not a blanket wait for
+all of C. C1 browser authentication is merged. C2 client inventory now passes
+real ordinary-browser proof and A+C interaction tests; final canonical/CI/review
+and merge gates remain open. C2 owns migration18 and preserves archive7.
+
+Next: deliver inventory, then continue client management/PATs against genuine
+recent-authentication proof. C3 custody, E1 OIDC and G connections may progress
+on their own proven inputs. D cannot bootstrap recent authentication by itself
+when passkey enrollment already requires it. Resolve the existing first-link
+authority conflict before activating an alternative proof path; do not invent
+freshness from a callback timestamp. F follows usable custody; E2 and H follow
+their actual client/authorization contracts. Packaged Tauri auth stays deferred.
+
+No new qualification-only subproject without a concrete delivery failure.
+Preserve required capabilities and gates; use one integration writer for shared
+files and bounded independent reviews. See [inventory delivery](docs/plans/fasti-access-c2-inventory.md)
+and the [canonical programme](docs/plans/trailbase-authentication-remediation.md).
+
+## Original product-body roadmap
+
 The roadmap is ordered by proof, not by visible feature count. Each body begins only after its predecessor is independently green. Mandatory QA gates every body; rendered UI and UX also require design review.
 
 A pre-body diagnostic harness may render an already implemented capability solely to gather design, accessibility, and developer-experience evidence. It must remain local, private, unpackaged, and excluded from capability activation. It does not satisfy a body entry gate or milestone deliverable.

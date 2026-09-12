@@ -1,0 +1,25 @@
+{
+  "clients": [
+    {
+      "client_id": "cli_018f0e0e7f7b70008000000000000002",
+      "owner_subject_id": "sub_018f0e0e7f7b70008000000000000003",
+      "name": "Personal CLI",
+      "authentication_type": "confidential",
+      "purpose": "cli",
+      "lifecycle": "revoked",
+      "current_credential_epoch": "2",
+      "created_at": "2026-09-08T12:00:00.000001Z"
+    },
+    {
+      "client_id": "cli_018f0e0e7f7b70008000000000000001",
+      "owner_subject_id": null,
+      "name": null,
+      "authentication_type": "first_party",
+      "purpose": "node",
+      "lifecycle": "active",
+      "current_credential_epoch": "1",
+      "created_at": "2026-09-08T12:00:00.000000Z"
+    }
+  ],
+  "next": null
+}
