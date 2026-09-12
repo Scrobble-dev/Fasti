@@ -1,23 +1,38 @@
 # Fasti Access and TrailBase authentication programme
 
-## Current delivery override — 2026-09-12
+## Current delivery override — 2026-09-13
 
 The user approved capability-level C–H delivery and a freeze on new
 qualification-only subprojects unless a concrete delivery failure requires one.
 This checkpoint supersedes stale waits below, not the approved requirements.
-C1 and the C2 pure foundation are merged. Live `dev` is `d274e037`.
-C2-I owns migration18 and archive7, and no longer waits for M3/M4 release.
-Its ordinary-browser runtime passed at clean `5fc79019`; final activation,
-canonical/CI/review, merge and exact Metadata handoff remain open. Follow the
+C1, the C2 pure foundation and C2 inventory are merged. Verified inventory merge
+is `f46687cd9425ae725c5a003e5454f18b9f7fab3d`, tree
+`c3fb7a102fc2a528d024686eb1fd21f6b66c6477`, with applicable exact-head gates green
+and Metadata handoff released. Schema18 is published; archive7 remains frozen.
+E1 owns append-only migration19. Metadata's returned shared Search slice is local
+unmerged `12613181bc6031b69056d0f4ea87dda0d31e026d`; it is not a new dev base.
+Follow the [E1 execution gate](fasti-access-e1.md#current-execution-gate--2026-09-13)
+for current paths, verification and the narrow persistence implementation. Follow the
 [inventory record](fasti-access-c2-inventory.md) for exact source and receipts.
 
 Continue bounded C3 custody and future capability preparation in parallel.
 Recent-authentication proof remains a specific prerequisite for sensitive
 mutations, not inventory reads. Passkey enrollment cannot itself resolve that
-bootstrap prerequisite. The OIDC first-link administrator-approval alternative
-and mandatory recent-authentication clause need one consistent authority
-decision before activation; neither callback time nor an old vendor session
-is proof of fresh authentication. Keep all C–H capabilities in scope.
+bootstrap prerequisite. The user approved an expiring, one-use local-operator
+exception for the installation's original existing administrator to link an
+exact OIDC issuer/subject. It requires the original active Fasti browser session
+and never counts as recent authentication. Bind the stable installation,
+activation generation, subject, authentication epoch and authorization epoch.
+Callback stages proof only; same-site completion rechecks authority and atomically
+commits the unique link, approval consumption, permanent eligibility consumption,
+audit and ceremony completion. It creates no person, anchor, role, grant or session.
+Any successful first link for that original administrator exhausts eligibility,
+including a normally authorized link; unlink, restart and pruning cannot revive it.
+Missing or ambiguous original-bootstrap history stays unavailable. Operator
+approval precedes browser start; do not persist the process-memory PKCE verifier.
+Neither callback time nor an old vendor session proves fresh authentication.
+The unsuppressed OIDC dependency gate remains applicable to runtime adoption,
+not to independent domain/persistence work. Keep all C–H capabilities in scope.
 No framework re-selection, Secure-cookie weakening, or packaged-Tauri claim.
 
 ## Approved baseline and historical checkpoints

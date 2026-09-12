@@ -20,11 +20,11 @@ use fasti_domain::{
     AuthCallbackPath, AuthCeremony, AuthCeremonyConfirmation, AuthCeremonyFailure,
     AuthCeremonyProtocol, AuthCeremonyPurpose, AuthCeremonySelection, AuthCeremonyState,
     AuthReturnTarget, AuthSubject, AuthSubjectId, AuthSubjectLifecycle, AuthenticationAssurance,
-    AuthenticationMethod, AuthenticationProvenance, BrowserSessionId, ClientId, MembershipId,
-    MembershipLifecycle, MembershipLifecycleAction, OperationId, ProfileGrantId, ProfileId,
-    RecentAuthentication, RequestCorrelationId, Sha256Digest, TrailBaseActivationState,
-    TrailBaseExternalAnchor, TrailBaseInstallation, TrailBaseInstanceId, WorkspaceId,
-    WorkspaceMembership, WorkspaceRole,
+    AuthenticationMethod, AuthenticationProvenance, BrowserSessionId, ClientId,
+    FirstOidcLinkEligibility, MembershipId, MembershipLifecycle, MembershipLifecycleAction,
+    OperationId, ProfileGrantId, ProfileId, RecentAuthentication, RequestCorrelationId,
+    Sha256Digest, TrailBaseActivationState, TrailBaseExternalAnchor, TrailBaseInstallation,
+    TrailBaseInstanceId, WorkspaceId, WorkspaceMembership, WorkspaceRole,
 };
 use rusqlite::{
     params, Connection, ErrorCode, OptionalExtension, Transaction, TransactionBehavior,
@@ -839,6 +839,17 @@ impl SqliteKernel {
         insert_subject(&transaction, &subject)?;
         insert_anchor(&transaction, &anchor)?;
         insert_membership(&transaction, &membership)?;
+        let eligibility = FirstOidcLinkEligibility::from_original_bootstrap(
+            anchor.trailbase_instance_id(),
+            subject.id(),
+        );
+        transaction.execute(
+            "INSERT INTO first_oidc_link_eligibility(trailbase_instance_id, original_administrator_subject_id) VALUES (?1, ?2)",
+            params![
+                eligibility.trailbase_instance_id().to_string(),
+                eligibility.original_administrator_subject_id().to_string(),
+            ],
+        )?;
         transaction.execute(
             "INSERT INTO auth_subject_profile_grants(auth_subject_id, profile_grant_id) VALUES (?1, ?2)",
             params![
@@ -3341,6 +3352,52 @@ mod tests {
         (subject_id, membership_id, workspace_id)
     }
 
+    #[test]
+    fn first_oidc_link_eligibility_survives_pruning_and_reopen() {
+        let node = TestNode::new();
+        let installation = node
+            .kernel
+            .verify_trailbase_installation(
+                TrailBaseInstanceId::new_v7(),
+                fixture_root_identity(),
+                fixture_release_lock_identity(),
+                false,
+                RequestCorrelationId::new_v7(),
+                at(0),
+            )
+            .unwrap();
+        let (subject_id, _, _) = bootstrap_administrator(&node, &installation);
+        {
+            let connection = node.kernel.inner.connection.lock().unwrap();
+            let transaction = connection.unchecked_transaction().unwrap();
+            prune_audit_age(&transaction, at(3) + Duration::days(91)).unwrap();
+            assert_eq!(
+                transaction
+                    .query_row("SELECT COUNT(*) FROM access_audit_events", [], |row| row
+                        .get::<_, i64>(0))
+                    .unwrap(),
+                0
+            );
+            transaction.commit().unwrap();
+        }
+        let (root, _) = node.into_stopped();
+        let reopened = SqliteKernel::open(root.path()).unwrap();
+        let connection = reopened.inner.connection.lock().unwrap();
+        let row: (String, String, Option<String>) = connection.query_row(
+            "SELECT trailbase_instance_id, original_administrator_subject_id, consumed_by FROM first_oidc_link_eligibility",
+            [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).unwrap();
+        let eligibility = FirstOidcLinkEligibility::from_persisted(
+            row.0.parse().unwrap(),
+            row.1.parse().unwrap(),
+            row.2.map(|id| id.parse().unwrap()),
+        );
+        assert_eq!(
+            eligibility,
+            FirstOidcLinkEligibility::from_original_bootstrap(installation.id(), subject_id)
+        );
+    }
+
     fn add_subject(
         node: &TestNode,
         installation: &TrailBaseInstallation,
@@ -4788,6 +4845,16 @@ mod tests {
             )
             .expect("rolled-back operator bootstrap");
         assert_eq!(state, (0, 0, 0, 0, 0, "claimed".to_owned()));
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM first_oidc_link_eligibility",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0
+        );
     }
 
     #[test]
@@ -4876,6 +4943,16 @@ mod tests {
             )
             .expect("rolled-back bootstrap");
         assert_eq!(state, (0, 0, 0, 0, 0, "claimed".to_owned()));
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM first_oidc_link_eligibility",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0
+        );
     }
 
     #[test]
@@ -4951,6 +5028,16 @@ mod tests {
             )
             .expect("bootstrap winner counts");
         assert_eq!(counts, (1, 1, 1, 1, 1, 1));
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM first_oidc_link_eligibility",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            1
+        );
     }
 
     #[test]

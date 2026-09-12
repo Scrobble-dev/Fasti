@@ -1,6 +1,70 @@
 # Fasti Access E1 — generic OIDC implementation gate
 
-Status: `FIRST_LINK_DOMAIN_IMPLEMENTATION_ACTIVE`; no OIDC runtime support claim.
+Status: `FIRST_LINK_PERSISTENCE_IMPLEMENTATION_ACTIVE`; no OIDC runtime support claim.
+
+## Current execution gate — 2026-09-13
+
+PR139 is merged at `f46687cd9425ae725c5a003e5454f18b9f7fab3d`, tree
+`c3fb7a102fc2a528d024686eb1fd21f6b66c6477`. This existing branch rebased cleanly
+onto that head at `ffbb66474d8c92789d5389e8875f8a1426fffe42`; safety ref
+`codex/e1-before-dev-20260913` preserves the previous local work.
+
+E1 now owns append-only migration **19**. Published migrations through 18 remain
+unchanged. This gate supersedes historical allocation and writer restrictions
+below. The commander owns schema dispatch/migration, the existing human Access
+bootstrap transaction, archive compatibility and integration tests. A separate
+writer owns only `oidc_first_link_migration_tests.rs`; independent reviewers are
+read-only. Metadata returned its shared files at local **unmerged**
+`12613181bc6031b69056d0f4ea87dda0d31e026d`, tree
+`8561106c310c7502769f3ef842fd2c0bbd800f93`. Its additive optional Search domains
+must be preserved when combined; this slice does not touch those files.
+
+Persist the existing domain eligibility record, keyed by stable installation and
+immutable original administrator. Backfill only one unambiguous retained actual
+bootstrap event joined to its immutable anchor. Missing or ambiguous history
+leaves no eligibility. Future successful bootstraps create the record within the
+existing transaction. SQLite guards prevent deletion, replacement, identity
+changes and resetting consumption. No standalone consume capability or unused
+approval framework is added. Eventual successful linking must consume eligibility
+in its own atomic link transaction, not during approval or callback staging.
+
+Archive 7 stays frozen: eligibility is node-local authority, not an export stream.
+Retain exact historical schema17 and schema18 fingerprint acceptance; restoration
+must not manufacture eligibility. Verify migration rollback/fresh parity,
+backfill refusals, permanent-state guards, actual bootstrap rollback and reopen,
+and archive compatibility. Run focused tests, relevant full suites, formatting,
+strict Clippy and independent diff review before committing this coherent slice.
+No standalone foundation PR; complete first-link delivery still needs the real
+approval/session-bound journey and the unsuppressed runtime dependency gate.
+No new dependency, endpoint, contract, UI or Tauri transport work is included.
+
+### Persistence verification checkpoint
+
+Implemented the bounded slice above. Two independent read-only diff reviews found
+no concrete defect. Published migration bodies through v18 are byte-identical to
+the rebased parent. The first full store run exposed only the legacy v4-upgrade
+test's explicit table inventory missing the new table; that assertion was updated.
+The repeated full suite passes **526 unit + 3 integration tests**. Six existing
+unit entries remain separately gated (four subprocess workers exercised through
+their parents and two release-performance fixtures); one historical doctest stays
+ignored. Domain tests pass **118**, none ignored. Strict all-target/all-feature
+domain/store Clippy, rustfmt and whitespace checks pass.
+
+File-bound local logs (not full PR/canonical delivery receipts):
+
+| Log under `target/` | SHA-256 |
+| --- | --- |
+| `e1-eligibility-store-tests-final.log` | `e3206690010c5a2b062d60d45c837fe767201280a39d855e30711cb26a094a03` |
+| `e1-eligibility-domain-tests.log` | `cf9b295ce306dc18023bd2f8f09f82e3a93f1ea2a156efea7d672c02028446ee` |
+| `e1-eligibility-clippy.log` | `ad07b6442204fe0878997f62d191167a18580813333f94839ebdfb363dc0b9ff` |
+
+Archive7/schema18 compatibility uses the actual measured predecessor fingerprint
+`sha256:dc37c51ed8566673dff5523c20d6e201811bfac1f8592ed736bbbd3c26f90bdf`.
+The next E1 implementation remains the actual expiring approval and session-bound
+link journey, with consumption in the successful link transaction. No standalone
+consume method was added for future use. The OIDC runtime dependency gate, real
+first-link journey, canonical/PR gates and merge remain open. Headless persistence
+has no visual QA claim. G's separately owned readiness table proceeds independently.
 
 ## Approved first-link execution — 2026-09-12
 

@@ -7,7 +7,7 @@ use fasti_domain::{Grain, MetadataClaimId, MAX_EXTERNAL_IDENTIFIER_BYTES};
 use rusqlite::{Connection, Result, Transaction, TransactionBehavior};
 use std::fmt::Write as _;
 
-pub(crate) const SCHEMA_VERSION: i64 = 18;
+pub(crate) const SCHEMA_VERSION: i64 = 19;
 
 pub(crate) fn migrate(connection: &Connection) -> Result<()> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -101,12 +101,77 @@ pub(crate) fn migrate(connection: &Connection) -> Result<()> {
     }
 
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version == 18 {
+        migrate_v19(connection)?;
+    }
+
+    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if version == SCHEMA_VERSION {
         let transaction = Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
         repair_legacy_provider_coordinates_v1(&transaction)?;
         transaction.commit()?;
     }
     Ok(())
+}
+
+fn migrate_v19(connection: &Connection) -> Result<()> {
+    let transaction = Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+    transaction.execute_batch(
+        r#"
+        CREATE TABLE first_oidc_link_eligibility (
+            trailbase_instance_id TEXT PRIMARY KEY
+                REFERENCES trailbase_installation(trailbase_instance_id),
+            original_administrator_subject_id TEXT NOT NULL
+                REFERENCES auth_subjects(auth_subject_id),
+            consumed_by TEXT CHECK (consumed_by IS NULL OR (
+                length(consumed_by) = 35
+                AND substr(consumed_by, 1, 3) = 'op_'
+                AND substr(consumed_by, 4) NOT GLOB '*[^0-9a-f]*'
+                AND substr(consumed_by, 16, 1) = '7'
+                AND substr(consumed_by, 20, 1) GLOB '[89ab]'
+            ))
+        ) STRICT, WITHOUT ROWID;
+
+        CREATE TRIGGER first_oidc_link_eligibility_insert_guard
+        BEFORE INSERT ON first_oidc_link_eligibility
+        WHEN EXISTS (SELECT 1 FROM first_oidc_link_eligibility
+                     WHERE trailbase_instance_id = NEW.trailbase_instance_id)
+          OR NOT EXISTS (SELECT 1 FROM trailbase_auth_anchors
+                         WHERE trailbase_instance_id = NEW.trailbase_instance_id
+                           AND auth_subject_id = NEW.original_administrator_subject_id)
+        BEGIN SELECT RAISE(ABORT, 'first OIDC link requires a new anchored eligibility'); END;
+
+        CREATE TRIGGER first_oidc_link_eligibility_update_guard
+        BEFORE UPDATE ON first_oidc_link_eligibility
+        WHEN OLD.trailbase_instance_id IS NOT NEW.trailbase_instance_id
+          OR OLD.original_administrator_subject_id IS NOT NEW.original_administrator_subject_id
+          OR OLD.consumed_by IS NOT NULL OR NEW.consumed_by IS NULL
+        BEGIN SELECT RAISE(ABORT, 'first OIDC link eligibility can only be consumed once'); END;
+
+        CREATE TRIGGER first_oidc_link_eligibility_no_delete
+        BEFORE DELETE ON first_oidc_link_eligibility
+        BEGIN SELECT RAISE(ABORT, 'first OIDC link eligibility is permanent'); END;
+
+        -- Audits are pruned. Missing or ambiguous original bootstrap evidence
+        -- must not turn a current administrator into the original administrator.
+        INSERT INTO first_oidc_link_eligibility (
+            trailbase_instance_id, original_administrator_subject_id, consumed_by
+        )
+        SELECT a.trailbase_instance_id, a.auth_subject_id, NULL
+        FROM access_audit_events a
+        JOIN trailbase_installation i ON i.trailbase_instance_id = a.trailbase_instance_id
+        JOIN trailbase_auth_anchors anchor
+          ON anchor.trailbase_instance_id = a.trailbase_instance_id
+         AND anchor.auth_subject_id = a.auth_subject_id
+        WHERE a.event_kind = 'first_administrator_bootstrapped'
+          AND a.operation_id IS NOT NULL
+          AND (SELECT COUNT(*) FROM access_audit_events other
+               WHERE other.event_kind = 'first_administrator_bootstrapped'
+                 AND other.trailbase_instance_id = a.trailbase_instance_id) = 1;
+        PRAGMA user_version = 19;
+    "#,
+    )?;
+    transaction.commit()
 }
 
 fn migrate_v18(connection: &Connection) -> Result<()> {
@@ -3644,6 +3709,7 @@ pub(crate) fn workspace_revision(connection: &Connection, workspace_id: &str) ->
 
 #[cfg(test)]
 mod tests {
+    include!("oidc_first_link_migration_tests.rs");
     include!("metadata_policy_migration_tests.rs");
 
     fn version_seventeen_connection() -> Connection {
@@ -3807,8 +3873,9 @@ mod tests {
         migrate_v18(&connection).unwrap();
         let correlation = fasti_domain::RequestCorrelationId::new_v7();
         let upgraded = crate::portability::schema_fingerprint(&connection, correlation).unwrap();
-        let fresh =
-            crate::portability::schema_fingerprint(&migrated_connection(), correlation).unwrap();
+        let fresh_connection = version_seventeen_connection();
+        migrate_v18(&fresh_connection).unwrap();
+        let fresh = crate::portability::schema_fingerprint(&fresh_connection, correlation).unwrap();
         assert_eq!(upgraded.migration_version(), 18);
         assert_eq!(upgraded.digest(), fresh.digest());
     }
@@ -6099,6 +6166,7 @@ mod tests {
                 "search_action_receipts".to_owned(),
                 "trailbase_installation".to_owned(),
                 "trailbase_auth_anchors".to_owned(),
+                "first_oidc_link_eligibility".to_owned(),
                 "workspace_memberships".to_owned(),
                 "auth_ceremonies".to_owned(),
                 "fasti_browser_session_authentication".to_owned(),

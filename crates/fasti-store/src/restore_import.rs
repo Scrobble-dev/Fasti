@@ -993,7 +993,7 @@ fn accepted_archive_schema(
         || (format_version == WORKSPACE_ARCHIVE_V4_FORMAT_VERSION && matches!(version, 13 | 14))
         || (format_version == WORKSPACE_ARCHIVE_V5_FORMAT_VERSION && version == 15)
         || (format_version == WORKSPACE_ARCHIVE_V6_FORMAT_VERSION && version == 16)
-        || (format_version == 7 && version == 17)
+        || (format_version == 7 && matches!(version, 17 | 18))
     {
         // Continue to the exact historical fingerprint match below.
     } else if format_version == fasti_application::WORKSPACE_ARCHIVE_FORMAT_VERSION
@@ -1022,6 +1022,7 @@ fn accepted_archive_schema(
             15 => "sha256:36720ca62ef606e52f960e71cb40452323269f14e4a4af984e2fe875279a155e",
             16 => "sha256:d7ae3b1ab15c0223245d1a9008833049e58e9ec882a6e1ba70a2a080fa3fd7a6",
             17 => "sha256:7b481b2bf2a23ad261884c171710c7ceece6bd70312d8dca6a034a4f830c4649",
+            18 => "sha256:dc37c51ed8566673dff5523c20d6e201811bfac1f8592ed736bbbd3c26f90bdf",
             _ => return false,
         }
 }
@@ -1227,6 +1228,7 @@ const NODE_LOCAL_STATE_COUNT_SQL: &str = r#"
          + (SELECT COUNT(*) FROM fasti_browser_session_grants)
          + (SELECT COUNT(*) FROM trailbase_installation)
          + (SELECT COUNT(*) FROM trailbase_auth_anchors)
+         + (SELECT COUNT(*) FROM first_oidc_link_eligibility)
          + (SELECT COUNT(*) FROM workspace_memberships)
          + (SELECT COUNT(*) FROM auth_ceremonies)
          + (SELECT COUNT(*) FROM fasti_browser_session_authentication)
@@ -5748,10 +5750,19 @@ mod tests {
         assert!(!accepted_archive_schema(7, 17, "forged", "current"));
         assert!(!accepted_archive_schema(7, 16, "current", "current"));
         assert!(!accepted_archive_schema(6, 17, "current", "current"));
-        assert!(accepted_archive_schema(7, 18, "current", "current"));
+        assert!(accepted_archive_schema(
+            7,
+            18,
+            "sha256:dc37c51ed8566673dff5523c20d6e201811bfac1f8592ed736bbbd3c26f90bdf",
+            "current"
+        ));
+        assert!(!accepted_archive_schema(7, 18, "current", "current"));
         assert!(!accepted_archive_schema(7, 18, "forged", "current"));
         assert!(!accepted_archive_schema(6, 18, "current", "current"));
-        assert!(!accepted_archive_schema(7, 19, "current", "current"));
+        assert!(accepted_archive_schema(7, 19, "current", "current"));
+        assert!(!accepted_archive_schema(7, 19, "forged", "current"));
+        assert!(!accepted_archive_schema(6, 19, "current", "current"));
+        assert!(!accepted_archive_schema(7, 20, "current", "current"));
     }
 
     #[test]

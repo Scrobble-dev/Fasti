@@ -70,6 +70,10 @@ Generated files are outputs, not sources of truth.
 - Local operation must work without external services.
 - Fail closed on missing authorization, stale state, missing evidence, or unsafe input.
 - Keep secrets out of logs, URLs, fixtures, and documentation.
+- First-OIDC-link eligibility is permanent node-local history, not authorization.
+  Preserve its original bootstrap subject and one-way consumption across audit
+  pruning and activation changes. Never export it in workspace archives or infer
+  missing eligibility from current administrator roles. Follow the [E1 gate](docs/plans/fasti-access-e1.md).
 - Mount durable local routes only for direct loopback access or an explicitly declared loopback-only port forward inside a detected container boundary, with an explicit `FASTI_DATA_ROOT`. Keep bootstrap routes on those local exposures. Require `FASTI_REMOTE_TRUSTED_PROXY=true` plus an absolute HTTPS `FASTI_PUBLIC_URL` before mounting the authenticated non-loopback router. Never infer a data directory.
 - Resolve provider hosts once, reject every unsafe answer, disable redirects and system proxies, and pin the authorized addresses before loading a credential.
 - Treat `TMDB_API_READ_ACCESS_TOKEN` as a TMDB API Read Access Token. Send it only in a sensitive `Authorization: Bearer` header; never fall back to the v3 `api_key` URL parameter.
