@@ -19,6 +19,7 @@ identifiers:
   - receipt.replay
   - receipt.stream
   - access.identity.bootstrap
+  - access.client.list
   - access.projection.read
   - browser.session.create
   - browser.session.end
@@ -71,6 +72,7 @@ authorization_assignments:
   receipt.stream: scoped
   access.identity.bootstrap: local_operator
   access.projection.read: browser_session
+  access.client.list: browser_session
   browser.session.create: unauthenticated
   browser.session.end: browser_session
   browser.session.profile.select: browser_session
@@ -129,6 +131,7 @@ not automatically an implemented runtime. Read each entry together with the
 | `receipt.stream`                | `observation.receipts`      | `scoped`          | Fixture only; durable behavior belongs to B2 |
 | `access.identity.bootstrap`     | `access.identity`           | `local_operator`  | Implemented                                  |
 | `access.projection.read`        | `access.projection`         | `browser_session` | Implemented                                  |
+| `access.client.list`            | `access.credentials`        | `browser_session` | Implemented ordinary-browser read; package proof remains separate |
 | `browser.session.create`        | `browser.authentication`    | `unauthenticated` | Implemented                                  |
 | `browser.session.end`           | `browser.authentication`    | `browser_session` | Implemented                                  |
 | `browser.session.profile.select` | `browser.authentication`   | `browser_session` | Implemented                                  |
