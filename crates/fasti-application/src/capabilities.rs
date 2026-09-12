@@ -119,8 +119,8 @@ define_capabilities!(
         ListAccessClients,
         C2,
         C2,
-        Reserved,
-        Guarded,
+        Finalized,
+        Implemented,
         BrowserSession,
         [],
         [

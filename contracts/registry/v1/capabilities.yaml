@@ -35,7 +35,7 @@ surface_profiles:
       {
         state: later_body,
         body: c2,
-        reason: Inventory runtime evidence follows complete route integration.,
+        reason: Native and OCI inventory package proof remains separate from ordinary-browser runtime proof; packaged Tauri authentication is deferred.,
       }
     ui: { state: required, binding: "ui:access-client-inventory" }
   m4_search:
@@ -659,8 +659,8 @@ capabilities:
     lifecycle:
       {
         introduced_in: c2,
-        contract_state: reserved,
-        runtime_availability: guarded,
+        contract_state: finalized,
+        runtime_availability: implemented,
       }
     surface_profile: c2_access_inventory
     scopes: []

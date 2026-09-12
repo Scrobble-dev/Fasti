@@ -5743,7 +5743,7 @@
           "validation_failed"
         ],
         "x-fasti-required-scopes": [],
-        "x-fasti-runtime-availability": "guarded"
+        "x-fasti-runtime-availability": "implemented"
       }
     },
     "/api/access/v1/projection": {

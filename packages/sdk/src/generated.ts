@@ -5805,7 +5805,7 @@ export interface AccessProjectionResponse {
 
 // prettier-ignore
 export const LOCAL_RUNTIME_OPERATIONS = {
-  listAccessClients: { operationId: "list_access_clients", method: "GET", path: "/api/access/v1/clients", capabilityId: "access.client.list", authorization: "browser_session", requiredScopes: [], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","integrity_failed","session_policy_changed","storage_unavailable","validation_failed"], exampleIds: ["access.client.list.success"], authenticated: false, runtimeAvailability: "guarded", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ListAccessClientsResponse" },
+  listAccessClients: { operationId: "list_access_clients", method: "GET", path: "/api/access/v1/clients", capabilityId: "access.client.list", authorization: "browser_session", requiredScopes: [], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","forbidden","integrity_failed","session_policy_changed","storage_unavailable","validation_failed"], exampleIds: ["access.client.list.success"], authenticated: false, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ListAccessClientsResponse" },
   readProviderIdentifierDetails: { operationId: "read_provider_identifier_details", method: "GET", path: "/api/v1/search/providers/{provider_id}/{grain}/details", capabilityId: "metadata.search", authorization: "scoped_or_browser_session", requiredScopes: ["metadata_search"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ProviderIdentifierDetailsResponse" },
   searchRecords: { operationId: "search_local_records", method: "POST", path: "/api/v1/search/records", capabilityId: "metadata.search", authorization: "scoped_or_browser_session", requiredScopes: ["metadata_search"], problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","malformed_json","payload_too_large","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: "LocalSearchRequestDto", responseSchema: "LocalSearchResponseDto" },
   saveSearchCandidate: { operationId: "save_search_candidate", method: "POST", path: "/api/v1/search/candidates/{provider_id}/{grain}/{candidate_receipt_id}/actions", capabilityId: "identity.identifier.attach", authorization: "scoped_or_browser_session", requiredScopes: ["identity_write"], conditionalRequiredScopes: {"new_operation":["metadata_search"]}, problemCodes: ["authentication_failed","browser_session_expired","browser_session_revoked","capability_unavailable","capacity_exceeded","forbidden","idempotency_conflict","identity_conflict","integrity_failed","invalid_identifier","malformed_json","payload_too_large","record_not_found","session_policy_changed","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["identity.identifier.attach.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: "SearchCandidateActionRequest", responseSchema: "SearchCandidateActionResponse" },
@@ -7729,9 +7729,9 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       ],
       "id": "access.client.list",
       "lifecycle": {
-        "contract_state": "reserved",
+        "contract_state": "finalized",
         "introduced_in": "c2",
-        "runtime_availability": "guarded"
+        "runtime_availability": "implemented"
       },
       "problems": [
         "authentication_failed",
@@ -9934,7 +9934,7 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       },
       "package_smoke": {
         "body": "c2",
-        "reason": "Inventory runtime evidence follows complete route integration.",
+        "reason": "Native and OCI inventory package proof remains separate from ordinary-browser runtime proof; packaged Tauri authentication is deferred.",
         "state": "later_body"
       },
       "sdk": {

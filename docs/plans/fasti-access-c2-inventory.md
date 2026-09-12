@@ -33,6 +33,19 @@ and revoked-session denial assertions. The original failed runtime log remains
 `target/c2-inventory-runtime-455b0039.log`. Rerun the same runtime gate before
 claiming this correction passes. No production cookie or session change.
 
+Correction `5fc79019252a7b52a665e3cadcda38172af33948`, tree
+`b7a5137b831b11f7fda9b327c34e829b6e9d6255`, passed clean Rust/web builds and
+the same real ordinary-browser inventory gate. The strict receipt records
+cookie-only inventory, two independent sessions and revoked-session denial.
+Twelve harness tests passed; additive review found no issue with the three-call
+fix. The investigation is closed without changing production authentication.
+
+Activate only `access.client.list` in the existing application/registry and
+regenerate projections. Final canonical, exact CI/review/merge gates remain open.
+The ordinary-browser receipt is not native/OCI inventory package proof and does
+not prove packaged Tauri authentication or all of C2. Preserve those distinctions
+in the existing surface profile; no new qualification subproject is needed.
+
 ## Current implementation checkpoint
 
 Saved 2026-09-09. Source remains uncommitted at `d274e037`; nothing is staged.
