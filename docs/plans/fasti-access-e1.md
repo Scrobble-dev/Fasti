@@ -1,6 +1,46 @@
 # Fasti Access E1 — generic OIDC implementation gate
 
-Status: `QUALIFICATION_ACTIVE`; no production OIDC implementation or support claim.
+Status: `FIRST_LINK_DOMAIN_IMPLEMENTATION_ACTIVE`; no OIDC runtime support claim.
+
+## Approved first-link execution — 2026-09-12
+
+The user approved one expiring local-operator authorization for the installation's
+original existing administrator to link an exact OIDC issuer/subject, with the
+original active browser session at same-site completion. It never creates a
+person, role or session and never counts as recent authentication. The canonical
+decision is recorded in `fasti-access-c3-final-eof`'s existing programme plan.
+All protocol, custody and dependency-advisory gates below remain applicable.
+
+Proceed now in this existing E1 worktree, not a duplicate qualification branch.
+The first bounded writer owns only a first-link eligibility domain leaf, its
+focused tests, and the domain module export. Reuse TrailBaseInstanceId,
+AuthSubjectId and OperationId. Model immutable historical eligibility and
+permanent consumption; no new ID, provider parser, dependency, trait, database,
+endpoint or authentication implementation. Authoritative bootstrap provenance
+and session authorization remain application/store obligations. A consumed
+record cannot be restored to eligible by unlink, restart or generation changes.
+Test the original subject, wrong-subject denial, first consume and repeated
+consume using existing test conventions; run domain formatting/tests/lint and
+independent review. This code is part of the complete first-link delivery unit,
+not a separately shippable foundation or evidence of OIDC support.
+
+PR139 has no dependency on Metadata. Only live CI/review gates delay its merge.
+After verified merge, Metadata owns its named Search/generated/Workbench window;
+E1 avoids those shared paths until their exact return handoff. No migration is
+allocated here. Isolated domain work does not wait for that window. These exact
+file permissions supersede the earlier qualification-only writer restriction;
+they do not authorize runtime dependency adoption or migration edits.
+
+Local domain checkpoint: the eligibility leaf is implemented with three focused
+tests; the independent integration read found no concrete defect. The complete
+domain suite in this E1 checkout passes 113 tests, with zero failures/ignored;
+focused strict Clippy, domain formatting and whitespace checks pass. No database,
+protocol, API or UI path is activated. Current official dependency readback still
+finds openidconnect4.0.1 with mandatory rsa0.9.10 and an unsuppressed advisory;
+public-signature verification is not private-key decryption, but that distinction
+does not waive the existing adoption policy. Pure domain work and PR139 do not
+depend on that policy decision. The next work is approval/session-bound domain
+and application integration, then actual persistence after exact allocation.
 
 Started 2026-09-05 from merged `dev`
 `62e10d2e9bd738ed5da425c008eb839f89cdbea5`, tree

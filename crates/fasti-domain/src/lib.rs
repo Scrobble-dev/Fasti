@@ -6,6 +6,7 @@
 
 pub mod access;
 pub mod access_credentials;
+pub mod access_identity_links;
 pub mod chronicle;
 pub mod evidence;
 pub mod identity;
@@ -21,6 +22,7 @@ pub mod time;
 
 pub use access::*;
 pub use access_credentials::*;
+pub use access_identity_links::*;
 pub use chronicle::*;
 pub use evidence::*;
 pub use identity::*;
