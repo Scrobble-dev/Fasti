@@ -130,8 +130,10 @@ class IgdbSmokeFixtureTest(unittest.TestCase):
         self.assertEqual(self.request(method="GET")[0], 501)
         with self.assertRaises(ssl.SSLError):
             self.request(sni="example.invalid")
+        untrusted_context = ssl.create_default_context()
+        untrusted_context.minimum_version = ssl.TLSVersion.TLSv1_2
         with self.assertRaises(ssl.SSLError):
-            self.request(context=ssl.create_default_context())
+            self.request(context=untrusted_context)
         self.assertEqual(self.fixture.events(), accepted)
         self.assertEqual(self.fixture.http_request_count(), 16)
 

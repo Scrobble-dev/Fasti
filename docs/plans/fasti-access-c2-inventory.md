@@ -4,6 +4,13 @@ Status: `IMPLEMENTING; DELIVERY_GATES_OPEN`.
 
 ## Final delivery and CI repair — 2026-09-12
 
+Source `40d0e985` passed clean Rust/web builds, real inventory runtime and the
+complete local canonical PR gate. The new dependency regression and all eight
+fixture tests passed; remote JavaScript audit passed. Final CodeQL #45 identifies
+the supplied untrusted-CA test context specifically. Declare its TLS1.2 minimum
+at construction as well; retain the shared floor, stricter-context behavior and
+certificate-rejection assertion. No production TLS or bridge change is needed.
+
 Draft PR #139 owns this branch. Source `1b146e8e`, tree
 `53274958fb3bf20e2e624f86cbfff796b77ac318`, passed the complete local canonical
 PR gate with `TMPDIR=/mnt/secondary-ssd/cache/home/tmp` and system pkg-config.
