@@ -291,6 +291,119 @@ class ArtifactIdentityTest(unittest.TestCase):
                 harness._web_digest(root)
 
 
+class MainPathRegressionTest(unittest.TestCase):
+    def patch(self, owner, name, **kwargs):
+        patcher = mock.patch.object(owner, name, **kwargs)
+        self.addCleanup(patcher.stop)
+        return patcher.start()
+
+    def setUp(self):
+        self.harness = load_harness()
+        self.patch(self.harness.runtime, "install_termination_cleanup")
+        self.patch(self.harness, "_execv_failure_self_test")
+        self.patch(self.harness.fixture, "_require_free_port")
+        self.patch(self.harness, "_source_identity", return_value={"dirty": False})
+
+    def select_mode(self, mode):
+        with mock.patch.object(sys, "argv", [str(SCRIPT), mode]):
+            arguments = self.harness._arguments()
+        self.patch(self.harness, "_arguments", return_value=arguments)
+
+    def test_inventory_main_builds_exact_artifacts_before_hashing(self):
+        self.select_mode("--c2-client-inventory")
+        events = []
+        stopped = RuntimeError("stop at first artifact digest")
+        run = self.patch(self.harness.subprocess, "run",
+                         side_effect=lambda command, **kwargs: events.append(command))
+        def digest(_directory):
+            events.append("digest")
+            raise stopped
+        self.patch(self.harness, "_web_digest", side_effect=digest)
+        start = self.patch(self.harness, "_start_fastid")
+        with self.assertRaises(RuntimeError) as raised:
+            self.harness.main()
+        self.assertIs(raised.exception, stopped)
+        self.assertEqual(events, [
+            ["cargo", "build", "--locked", "--offline", "-p", "fastid", "-p",
+             "fasti-cli", "--target-dir", "target"],
+            ["pnpm", "run", "build"],
+            "digest",
+        ])
+        for call in run.call_args_list:
+            self.assertEqual(call.kwargs, {"cwd": self.harness.ROOT, "check": True, "timeout": 900})
+        start.assert_not_called()
+
+    def test_inventory_main_build_failures_stop_before_hashing_or_runtime(self):
+        self.select_mode("--c2-client-inventory")
+        for completed_builds in (0, 1):
+            with self.subTest(completed_builds=completed_builds):
+                failure = RuntimeError("synthetic build failure")
+                with (
+                    mock.patch.object(self.harness.subprocess, "run",
+                                      side_effect=[None] * completed_builds + [failure]) as run,
+                    mock.patch.object(self.harness, "_web_digest",
+                                      side_effect=AssertionError("hashed before builds passed")) as digest,
+                    mock.patch.object(self.harness.runtime, "sha256_file") as file_digest,
+                    mock.patch.object(self.harness, "_start_fastid") as start,
+                ):
+                    with self.assertRaises(RuntimeError) as raised:
+                        self.harness.main()
+                    self.assertIs(raised.exception, failure)
+                    self.assertEqual(run.call_count, completed_builds + 1)
+                    digest.assert_not_called()
+                    file_digest.assert_not_called()
+                    start.assert_not_called()
+
+    def test_tmdb_main_supplies_secret_to_sign_in_and_restart_browser(self):
+        self.select_mode("--m4-search-journey")
+        self.patch(self.harness.subprocess, "run")
+        self.patch(self.harness, "_web_digest", return_value="web-digest")
+        self.patch(self.harness.runtime, "sha256_file", return_value="artifact-digest")
+        for name in ("_private_directory", "_bootstrap_disposable_installation", "_write_fixture_config"):
+            self.patch(self.harness.fixture, name)
+        self.patch(self.harness.fixture, "_copy_exact_release_input", return_value=Path("fixture-release"))
+        self.patch(self.harness.fixture, "_register_verified_human", return_value=("fixture@example.invalid", "fixture-password"))
+        for name in ("prepare_runtime_lock", "prepare_installation", "verify_installation", "stop_managed_process_group"):
+            self.patch(self.harness.runtime, name)
+        self.patch(self.harness.smoke, "start_fixture_release", return_value=(mock.sentinel.trailbase, None))
+        self.patch(self.harness.smoke, "stop_process")
+        smtp = self.patch(self.harness.smoke, "SmtpServer").return_value
+        smtp.server_address = ("127.0.0.1", 12345)
+        self.patch(self.harness.threading, "Thread")
+        self.patch(self.harness, "_start_fastid", return_value=mock.sentinel.fastid)
+        self.patch(self.harness, "_bootstrap_cli")
+        self.patch(Path, "read_text", return_value="synthetic-bootstrap-secret")
+        connection = self.patch(self.harness.sqlite3, "connect").return_value
+        connection.execute.return_value.fetchone.return_value = (1,)
+        self.patch(self.harness, "_search_database_evidence", return_value={})
+        capabilities = {"capabilities": [
+            {"capability_id": name, "credential_state": "valid", "credential_test": {"state": "passed"}}
+            for name in ("metadata.search", "metadata.read")
+        ]}
+        self.patch(self.harness, "_post", side_effect=[
+            (200, {"initialization_proof": "synthetic-proof"}),
+            (200, {"credential": "synthetic-enrollment"}),
+            (200, capabilities), (200, capabilities),
+        ])
+        provider = self.patch(self.harness, "TmdbSmokeFixture").return_value
+        provider.child_environment.return_value = FixtureProvider().child_environment()
+        provider.requests.return_value = ["/3/configuration"] * 2 + ["/3/search/multi"] + [
+            f"/3/movie/{value}" for value in self.harness.PROVIDER_IDS for _ in range(2)
+        ]
+        stopped = RuntimeError("stop at restart browser")
+        browser = self.patch(self.harness, "_browser", side_effect=[
+            {"m4SearchJourney": {"recordId": RECORD_ID, "recordPath": "/records/fixture"}}, stopped,
+        ])
+        with self.assertRaises(RuntimeError) as raised:
+            self.harness.main()
+        self.assertIs(raised.exception, stopped)
+        payloads = [call.args[0] for call in browser.call_args_list]
+        self.assertEqual([payload["mode"] for payload in payloads], ["sign-in", "restart-record"])
+        for payload in payloads:
+            with self.subTest(mode=payload["mode"]):
+                self.assertEqual(payload.get("forbiddenProviderValues"), ("fixture-header-only-token",))
+
+
 class SearchDatabaseEvidenceTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:

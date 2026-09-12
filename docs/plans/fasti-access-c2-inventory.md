@@ -4,6 +4,17 @@ Status: `IMPLEMENTING; DELIVERY_GATES_OPEN`.
 
 ## Final delivery and CI repair — 2026-09-12
 
+Final review follow-up: CodeRabbit identified two real harness omissions at
+`a96991a8`. C2 hashes existing base artifacts without preparing them; earlier
+receipts included separately executed clean builds, but the runner itself must
+perform the locked/offline base daemon/CLI and web builds before hashing. Add
+that C2-only branch without entering M4's feature build. TMDB fixture startup
+must pass its token to the existing browser secret-absence check, as IGDB does.
+The integration writer owns only the existing harness and focused tests for
+these fixes. Run failing-before main-path regressions, implement the small
+corrections, review, commit, rerun actual C2 proof/canonical checks and fresh
+exact-head CI. Preserve old receipts and all source/artifact verification.
+
 Source `40d0e985` passed clean Rust/web builds, real inventory runtime and the
 complete local canonical PR gate. The new dependency regression and all eight
 fixture tests passed; remote JavaScript audit passed. Final CodeQL #45 identifies

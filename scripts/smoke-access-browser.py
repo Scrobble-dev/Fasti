@@ -388,6 +388,13 @@ def main() -> None:
         ]:
             subprocess.run(command, cwd=ROOT, check=True, timeout=900)
         subprocess.run(["pnpm", "run", "build"], cwd=ROOT, check=True, timeout=900)
+    elif arguments.c2_client_inventory:
+        subprocess.run(
+            ["cargo", "build", "--locked", "--offline", "-p", "fastid",
+             "-p", "fasti-cli", "--target-dir", "target"],
+            cwd=ROOT, check=True, timeout=900,
+        )
+        subprocess.run(["pnpm", "run", "build"], cwd=ROOT, check=True, timeout=900)
     web_digest = _web_digest(ROOT / "apps/web/dist")
     daemon_digest = runtime.sha256_file(daemon_path)
     cli_digest = runtime.sha256_file(ROOT / "target/debug/fasti")
@@ -422,6 +429,7 @@ def main() -> None:
             email, password = fixture._register_verified_human(smoke, smtp.messages)
             if arguments.m4_search_journey:
                 provider = TmdbSmokeFixture(workspace / "tmdb")
+                secret_values = (provider.child_environment()["TMDB_API_READ_ACCESS_TOKEN"],)
             elif arguments.m4_igdb_journey:
                 provider = IgdbSmokeFixture(workspace / "igdb")
                 secret_values = (*json.loads(provider.child_environment()["IGDB_CLIENT_CREDENTIALS"]).values(), provider._token)
@@ -550,6 +558,7 @@ def main() -> None:
                 restarted = _browser({
                     "mode": "restart-record", "email": email, "password": password,
                     "recordId": journey["recordId"], "recordPath": journey["recordPath"],
+                    "forbiddenProviderValues": secret_values,
                 })
                 runtime.stop_managed_process_group(fastid)
                 fastid = None
