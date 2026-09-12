@@ -47,7 +47,10 @@ class IgdbSmokeFixtureTest(unittest.TestCase):
         address, port = self.fixture.address.rsplit(":", 1)
         plain = socket.create_connection((address, int(port)), timeout=3)
         try:
-            tls = (context or self.context).wrap_socket(plain, server_hostname=sni or host)
+            tls_context = context or self.context
+            if tls_context.minimum_version < ssl.TLSVersion.TLSv1_2:
+                tls_context.minimum_version = ssl.TLSVersion.TLSv1_2
+            tls = tls_context.wrap_socket(plain, server_hostname=sni or host)
         except BaseException:
             plain.close()
             raise
@@ -69,6 +72,11 @@ class IgdbSmokeFixtureTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(headers["cache-control"], "no-store")
         self.token = json.loads(body)["access_token"]
+
+    def test_client_enforces_tls_floor(self):
+        self.context.minimum_version = ssl.TLSVersion.MINIMUM_SUPPORTED
+        self.authorize()
+        self.assertGreaterEqual(self.context.minimum_version, ssl.TLSVersion.TLSv1_2)
 
     def test_two_origins_search_health_detail_and_nonsecret_evidence(self):
         self.authorize()

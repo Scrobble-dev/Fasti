@@ -2,6 +2,32 @@
 
 Status: `IMPLEMENTING; DELIVERY_GATES_OPEN`.
 
+## Final delivery and CI repair — 2026-09-12
+
+Draft PR #139 owns this branch. Source `1b146e8e`, tree
+`53274958fb3bf20e2e624f86cbfff796b77ac318`, passed the complete local canonical
+PR gate with `TMPDIR=/mnt/secondary-ssd/cache/home/tmp` and system pkg-config.
+The initial inherited symlink temporary directory caused four snapshot failures;
+all seven focused snapshot tests and the full workspace passed with the physical
+directory, without a source safety change. Retain all failed logs.
+
+Two inherited JavaScript advisories require the published fixes: js-yaml4.3.2
+([GHSA-2883-xcg3-v3hh](https://github.com/advisories/GHSA-2883-xcg3-v3hh)) and
+smol-toml1.7.1 ([GHSA-7w5x-hrqm-74c2](https://github.com/advisories/GHSA-7w5x-hrqm-74c2)).
+The existing consumers reproduce the empty-merge limit bypass and a bounded
+one-second malformed-TOML timeout. Update only the affected transitive versions
+through the existing override mechanism, regenerate the lockfile, and add one
+actual-consumer regression. Do not add a parser, dependency, suppression or
+audit-policy exception. Metadata owns no competing repair.
+
+CodeQL #43 is source-triaged as false-positive fixture IPC and recorded as such
+on GitHub: disposable generated values travel only through the private stdio
+bridge used by the checked-in PIPE consumer. Preserve the bridge. For the
+separate test-client TLS finding, enforce an explicit minimum TLS1.2 while
+retaining a stricter supplied minimum, and test that boundary. This does not
+resume packaged-Tauri transport work. Rerun audit, focused fixture/dependency
+tests, canonical checks and exact activated-source browser proof before merge.
+
 ## Resumed delivery: 2026-09-12
 
 The user approved capability-level delivery with no new qualification-only
