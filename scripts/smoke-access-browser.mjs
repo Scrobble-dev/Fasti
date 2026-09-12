@@ -184,10 +184,12 @@ async function runClientInventoryJourney() {
         ),
       "second browser session identifier is invalid",
     );
-    const secondCookie = (await secondContext.cookies(FASTI_ORIGIN)).find(
+    // Playwright's HTTP URL filter omits Secure cookies Chromium sends on loopback.
+    // Use the same cookie-store inspection as the strict policy checks below.
+    const secondCookie = (await secondContext.cookies()).find(
       (cookie) => cookie.name === "__Host-fasti_session",
     );
-    const originalCookie = (await context.cookies(FASTI_ORIGIN)).find(
+    const originalCookie = (await context.cookies()).find(
       (cookie) => cookie.name === "__Host-fasti_session",
     );
     requireValue(
@@ -218,7 +220,7 @@ async function runClientInventoryJourney() {
         throw new Error("second browser session was not revoked exactly once");
     }, targetSessionId);
     requireValue(
-      (await secondContext.cookies(FASTI_ORIGIN)).find(
+      (await secondContext.cookies()).find(
         (cookie) => cookie.name === "__Host-fasti_session",
       )?.value === secondCookie.value,
       "revoked-session probe lost its original cookie",

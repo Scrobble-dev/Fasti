@@ -22,6 +22,17 @@ The four existing inventory screenshot directories are preserved under
 `~/.gstack/projects/Scrobble-dev-Fasti/reviews/c2-inventory-preserved-20260912/`.
 No screenshot or failed evidence was deleted. Real-browser evidence remains open.
 
+Source committed as `455b00392b06a55b650375563db76c57c6a5e571`, tree
+`6225a0d013f18176f6cd4c633ebb5f65a9dfcd32`. Clean daemon/CLI and Workbench builds
+passed. All 10 A+C UI tests passed. The first real inventory run failed at the
+independent-session assertion: Playwright's HTTP URL filter omitted Secure
+loopback cookies. A synthetic Chromium probe reproduced one stored cookie but
+zero HTTP-filtered cookies. Reuse the harness's existing unfiltered cookie-store
+inspection; preserve strict cookie-policy, distinct-session, cookie-only request
+and revoked-session denial assertions. The original failed runtime log remains
+`target/c2-inventory-runtime-455b0039.log`. Rerun the same runtime gate before
+claiming this correction passes. No production cookie or session change.
+
 ## Current implementation checkpoint
 
 Saved 2026-09-09. Source remains uncommitted at `d274e037`; nothing is staged.
