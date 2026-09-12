@@ -6,7 +6,6 @@
   import IconPlug from "@tabler/icons-svelte/icons/plug";
   import IconRefresh from "@tabler/icons-svelte/icons/refresh";
   import IconRadio from "@tabler/icons-svelte/icons/radio";
-  import IconSettings from "@tabler/icons-svelte/icons/settings";
   import { onMount } from "svelte";
   import ApiClientsPanel from "./api-clients-panel.svelte";
   import {
@@ -86,8 +85,8 @@
     <div>
       <h1 class="view-title">Connections</h1>
       <p class="view-subtitle">
-        Configure external observers and see the state reported by the running
-        Fasti node.
+        Adapter readiness reported by the running Fasti node, not a health check
+        of configured connections.
       </p>
     </div>
     <button
@@ -102,33 +101,12 @@
   </header>
 
   <section
-    class="card availability-card"
-    aria-labelledby="connections-availability-title"
-  >
-    <div class="card-body availability-body">
-      <IconInfoCircle size={28} stroke={1.75} aria-hidden="true" />
-      <div>
-        <h2 id="connections-availability-title" class="card-title">
-          Connection status comes from the running node
-        </h2>
-        <p class="text-secondary mb-0">
-          Endpoint readiness and platform support are not inferred from this
-          page. A connection becomes active only when its runtime reports that
-          state.
-        </p>
-      </div>
-    </div>
-  </section>
-
-  <ApiClientsPanel {host} />
-
-  <section
     class="connectors-section"
     aria-labelledby="integration-status-title"
   >
     <div class="section-heading">
       <h2 class="section-title" id="integration-status-title">
-        Integration status
+        Adapter readiness
       </h2>
       <p class="status-summary" aria-live="polite">
         {#if loading}
@@ -142,6 +120,10 @@
         {/if}
       </p>
     </div>
+    <p class="readiness-note" id="readiness-note">
+      Endpoint readiness, platform support, and active states come from the
+      runtime. This page does not infer them.
+    </p>
 
     {#if problem}
       <div class="alert alert-warning" role="status">
@@ -164,24 +146,44 @@
     {/if}
 
     {#if integrations.length > 0}
-      <div class="connectors-grid">
-        {#each integrations as integration (integration.id)}
-          {@const IntegrationIcon = iconFor(integration.id)}
-          {@const StateIcon = stateIcon(integration.state)}
-          <article
-            class="card connector-card"
-            data-integration={integration.id}
-          >
-            <div class="card-body">
-              <div class="card-head">
-                <IntegrationIcon
-                  size={26}
-                  stroke={1.75}
-                  class="conn-icon"
-                  aria-hidden="true"
-                />
-                <div class="card-heading-copy">
-                  <h3 class="card-title conn-name">{integration.label}</h3>
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard users must be able to scroll the responsive table.) -->
+      <div
+        class="table-responsive readiness-scroll"
+        role="region"
+        aria-label="Adapter readiness table"
+        tabindex="0"
+      >
+        <table
+          class="table readiness-table"
+          aria-labelledby="integration-status-title"
+          aria-describedby="readiness-note"
+        >
+          <thead>
+            <tr>
+              <th scope="col">Adapter</th>
+              <th scope="col">Readiness</th>
+              <th scope="col">Endpoint</th>
+              <th scope="col">Platform</th>
+              <th scope="col">Setup action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each integrations as integration (integration.id)}
+              {@const IntegrationIcon = iconFor(integration.id)}
+              {@const StateIcon = stateIcon(integration.state)}
+              <tr data-integration={integration.id}>
+                <th scope="row">
+                  <span class="conn-name">
+                    <IntegrationIcon
+                      size={20}
+                      stroke={1.75}
+                      aria-hidden="true"
+                    />
+                    {integration.label}
+                  </span>
+                  <p class="conn-desc">{integration.detail}</p>
+                </th>
+                <td>
                   <span
                     class="badge conn-status-pill"
                     data-state={integration.state}
@@ -189,37 +191,24 @@
                     <StateIcon size={14} stroke={2} aria-hidden="true" />
                     {stateLabel(integration.state)}
                   </span>
-                </div>
-              </div>
-              <p class="text-secondary conn-desc">{integration.detail}</p>
-              <div class="setup-action">
-                <IconSettings size={18} stroke={1.75} aria-hidden="true" />
-                <span>{integration.setup_action}</span>
-              </div>
-              <dl class="runtime-facts">
-                <div>
-                  <dt>Endpoint</dt>
-                  <dd>
-                    {integration.endpoint_ready ? "Ready" : "Not exposed"}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Platform</dt>
-                  <dd>{integration.available ? "Supported" : "Unavailable"}</dd>
-                </div>
-              </dl>
-            </div>
-          </article>
-        {/each}
+                </td>
+                <td>{integration.endpoint_ready ? "Ready" : "Not exposed"}</td>
+                <td>{integration.available ? "Supported" : "Unavailable"}</td>
+                <td>{integration.setup_action}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
       </div>
     {/if}
   </section>
+
+  <ApiClientsPanel {host} />
 </div>
 
 <style>
   .connections-container {
-    max-width: 1040px;
-    margin: 0 auto;
+    min-width: 0;
     padding: 32px 24px 64px;
     display: flex;
     flex-direction: column;
@@ -258,42 +247,39 @@
     line-height: 1.5;
   }
   .refresh-button {
+    --tblr-btn-color: var(--fasti-text-muted);
+    --tblr-btn-hover-color: var(--fasti-text-primary);
+    --tblr-btn-hover-bg: var(--fasti-surface-paper);
+    --tblr-btn-active-color: var(--fasti-text-primary);
+    --tblr-btn-active-bg: var(--fasti-surface-paper);
     min-height: 44px;
     display: inline-flex;
     align-items: center;
     gap: 8px;
     flex-shrink: 0;
   }
-  .refresh-button:focus-visible {
+  .refresh-button:focus-visible,
+  .readiness-scroll:focus-visible {
     outline: 3px solid var(--fasti-focus);
     outline-offset: 2px;
   }
 
-  .availability-card {
-    background: var(--fasti-surface-paper);
-  }
-  .availability-body {
-    display: flex;
-    gap: 16px;
-    align-items: flex-start;
-  }
-  .availability-body :global(svg) {
-    flex-shrink: 0;
-    color: var(--fasti-text-muted);
-  }
-
   .section-heading {
-    margin-bottom: 16px;
+    margin-bottom: 8px;
     align-items: baseline;
   }
   .section-title {
     font-size: 1.4rem;
     margin: 0;
   }
-  .status-summary {
+  .status-summary,
+  .readiness-note {
     margin: 0;
     color: var(--fasti-text-muted);
     font-size: 0.875rem;
+  }
+  .readiness-note {
+    margin-bottom: 16px;
   }
 
   .alert {
@@ -301,43 +287,64 @@
     gap: 12px;
     align-items: flex-start;
   }
-  .connectors-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
-    gap: 20px;
-  }
-  .connector-card,
+  .readiness-scroll,
   .empty-card {
     background: var(--fasti-surface-paper);
   }
-  .connector-card .card-body {
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
+  .readiness-scroll {
+    max-width: 100%;
+    overflow-x: auto;
   }
-  .card-head {
-    display: flex;
-    gap: 12px;
-    align-items: flex-start;
+  .readiness-table {
+    width: 100%;
+    min-width: 720px;
+    margin: 0;
+    color: var(--fasti-text-primary);
   }
-  .card-heading-copy {
-    min-width: 0;
+  .readiness-table th,
+  .readiness-table td {
+    padding: 12px;
+    vertical-align: top;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    border-bottom: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
   }
-  :global(.conn-icon) {
+  .readiness-table th:first-child {
+    width: 32%;
+  }
+  .readiness-table th:last-child {
+    width: 28%;
+  }
+  .readiness-table thead th {
     color: var(--fasti-text-muted);
-    flex-shrink: 0;
-    margin-top: 2px;
+    background: transparent;
+  }
+  .readiness-table thead th,
+  .readiness-table td:nth-child(3),
+  .readiness-table td:nth-child(4) {
+    white-space: nowrap;
+    overflow-wrap: normal;
   }
   .conn-name {
-    margin: 0 0 6px;
-    font-size: 1.1rem;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+    font-weight: 600;
+  }
+  .conn-name :global(svg),
+  .conn-status-pill :global(svg) {
+    flex-shrink: 0;
   }
   .conn-status-pill {
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    white-space: normal;
+    white-space: nowrap;
+    overflow-wrap: normal;
     text-align: left;
+    color: var(--fasti-text-primary);
   }
   .conn-status-pill[data-state="active"] {
     background: color-mix(
@@ -358,37 +365,9 @@
   }
   .conn-desc {
     margin: 0;
-    line-height: 1.5;
-  }
-  .setup-action {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    font-size: 0.875rem;
-    line-height: 1.45;
-  }
-  .setup-action :global(svg) {
-    flex-shrink: 0;
-    margin-top: 1px;
-  }
-  .runtime-facts {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
-    margin: 0;
-  }
-  .runtime-facts div {
-    padding-top: 10px;
-    border-top: 1px solid
-      color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
-  }
-  .runtime-facts dt {
     color: var(--fasti-text-muted);
-    font-size: 0.75rem;
-  }
-  .runtime-facts dd {
-    margin: 2px 0 0;
-    font-weight: 600;
+    font-weight: 400;
+    line-height: 1.5;
   }
 
   @media (max-width: 47.99rem) {

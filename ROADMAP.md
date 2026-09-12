@@ -16,6 +16,10 @@ freshness from a callback timestamp. F follows usable custody; E2 and H follow
 their actual client/authorization contracts. Packaged Tauri auth stays deferred.
 
 No new qualification-only subproject without a concrete delivery failure.
+G's [compact Connections readiness view](docs/plans/fasti-access-g-connections-view.md)
+is implemented locally with nine passing browser regressions, independently of
+E1. Configured connection lifecycle and full PR delivery remain open. Metadata
+owns its next named Search wire-integration window; Access is not a blanket wait.
 Preserve required capabilities and gates; use one integration writer for shared
 files and bounded independent reviews. See [inventory delivery](docs/plans/fasti-access-c2-inventory.md)
 and the [canonical programme](docs/plans/trailbase-authentication-remediation.md).
