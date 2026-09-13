@@ -1,13 +1,14 @@
 # Fasti Roadmap
 
-## Access delivery checkpoint — 2026-09-12
+## Access delivery checkpoint — 2026-09-13
 
 The approved C–H programme uses capability dependencies, not a blanket wait for
-all of C. C1 browser authentication is merged. C2 client inventory now passes
-real ordinary-browser proof and A+C interaction tests; final canonical/CI/review
-and merge gates remain open. C2 owns migration18 and preserves archive7.
+all of C. C1 browser authentication and C2 client inventory are merged. PR139
+landed at `f46687cd9425ae725c5a003e5454f18b9f7fab3d` after its applicable
+delivery gates passed. Schema18 is published; archive7 remains frozen.
+This does not complete all of C2.
 
-Next: deliver inventory, then continue client management/PATs against genuine
+Next: continue client management/PATs against genuine
 recent-authentication proof. C3 custody, E1 OIDC and G connections may progress
 on their own proven inputs. D cannot bootstrap recent authentication by itself
 when passkey enrollment already requires it. Resolve the existing first-link
