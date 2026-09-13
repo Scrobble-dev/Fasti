@@ -19,6 +19,17 @@ Schema19 remains E1-owned; no migration20 allocation or merge handoff is made.
 G is being delivered separately without the unfinished E1 ancestors. The complete
 first-link journey remains the E1 delivery unit; no foundation-only PR is opened.
 
+Next E1 implementation must keep operator approval and its browser-link consumer
+together. Do not activate an issuance-only CLI that users cannot complete. Reuse
+the existing ten-minute ceremony lifetime from approval issuance; browser start
+and callback do not extend it, and it is not a recent-authentication window.
+The selected OIDC adapter owns issuer/subject protocol validation; domain/store
+preserve the exact validated pair and enforce uniqueness and authorization.
+Do not add a second parser or verifier while runtime dependency adoption is gated.
+Keep pushed migration19 unchanged for roots already upgraded to it. Allocate one
+forward migration for the actual approval/link/ceremony integration after checking
+the shared migration owner; migration20 is not allocated by this checkpoint.
+
 ## Current execution gate — 2026-09-13
 
 PR139 is merged at `f46687cd9425ae725c5a003e5454f18b9f7fab3d`, tree
