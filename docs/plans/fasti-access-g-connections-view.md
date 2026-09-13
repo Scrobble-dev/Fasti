@@ -37,6 +37,31 @@ or packaged Tauri claim follows from this view change.
 
 Rollback is the isolated UI commit. No data migration or user state is changed.
 
+## Standalone delivery gate — 2026-09-13
+
+Delivery uses `codex/fasti-access-g-connections`, based on merged `dev`
+`f46687cd9425ae725c5a003e5454f18b9f7fab3d`. Only G commit
+`a17a24443cd7fdd8684ecceb416951bc11d0b7cb` was cherry-picked; no E1
+qualification, domain or schema19 commit is included. DCO sign-off was added
+to the unpublished cherry-pick without changing its tree. The standalone diff
+contains only ROADMAP, this plan, the Connections view and its browser test.
+
+Locked/offline Cargo and frozen/offline pnpm dependency preparation passed.
+The initial canonical attempt passed its contract, JavaScript and workspace
+Rust checks but exited nonzero because these gate notes were uncommitted;
+the verifier correctly emitted no contract receipt. Its log is retained at
+`target/g-delivery/canonical-pr-initial.log`. An intermediate retry was stopped
+before completion to avoid verifying a throwaway head.
+
+The standalone browser suite and final canonical PR gate remain pending at
+this documentation checkpoint. Run both on the clean committed head, with
+system `pkg-config`, two Rust build jobs and the assigned browser ports
+4173/18422. Record final results in retained logs and the delivery handoff or PR,
+not another tracked edit that would invalidate the tested head. Earlier local
+evidence below belongs to the combined E1 checkout and does not replace these
+standalone gates. Remote push, PR and merge remain the commander's
+responsibility; none is claimed here.
+
 ## Local verification — 2026-09-13
 
 Implemented the native Tabler table and focused browser test leaf. Source review

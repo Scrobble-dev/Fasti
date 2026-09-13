@@ -20,6 +20,9 @@ G's [compact Connections readiness view](docs/plans/fasti-access-g-connections-v
 is implemented locally with nine passing browser regressions, independently of
 E1. Configured connection lifecycle and full PR delivery remain open. Metadata
 owns its next named Search wire-integration window; Access is not a blanket wait.
+The G-only delivery branch starts at merged `f46687cd` and excludes unfinished
+E1 ancestors. Its clean-head canonical and browser verification are pending at
+this documentation checkpoint; final evidence belongs in the delivery handoff.
 Preserve required capabilities and gates; use one integration writer for shared
 files and bounded independent reviews. See [inventory delivery](docs/plans/fasti-access-c2-inventory.md)
 and the [canonical programme](docs/plans/trailbase-authentication-remediation.md).
