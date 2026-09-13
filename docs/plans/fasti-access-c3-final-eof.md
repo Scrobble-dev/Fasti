@@ -1,9 +1,58 @@
 # C3 final physical-EOF failure regression
 
-Status: CLEAN_SOURCE_CANONICAL_AND_DEPENDENCY_GATES_PASS;
-CURRENT_TREE_FINAL_DELIVERY_PENDING.
+Status at the 2026-09-13 checkpoint: FOCUSED_DELIVERY_CHECKS_PASS;
+FINAL_CANONICAL_AND_REMOTE_DELIVERY_PENDING.
 
-## Current delivery checkpoint
+## Delivery reconciliation: 2026-09-13
+
+PR #136 head `c4561eddcfe00228ddb507acdbef510ed7ddd7ac` was merged with
+`dev` commit `f46687cd9425ae725c5a003e5454f18b9f7fab3d` in a separate clean
+delivery worktree. The signed-off merge is
+`22d6f327fee22e15887ce9fca8ee200e6362c51c`, tree
+`15a92f61ebc23edcec6448bc8f4a6dfd80e6ecfc`. The original dirty programme
+checkout was not changed. No rebase or force update occurred.
+
+The diff against that `dev` commit still contains only the original five EOF
+files. Framing adapter, tests, isolated lock and workflow bytes match the PR
+head. The merged base supplies the existing `js-yaml` 4.3.2 override and lock
+resolution; this slice adds no dependency or advisory-policy change.
+
+Fresh focused checks on the clean merge above, before this documentation update:
+
+| Check                                               | Result                                                                                    |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Full framing debug and release suites               | Each 22 unit tests and two compile-fail doctests passed; zero failed, ignored or filtered |
+| Rust 1.97.1 formatting and strict all-target Clippy | Passed                                                                                    |
+| `cargo deny` 0.20.2 licenses, bans and sources      | Passed with existing policy warnings                                                      |
+| `cargo audit` 0.22.2, isolated lock                 | Passed; 146 dependencies, 1243 advisories, no reported vulnerability                      |
+| `pnpm audit`                                        | Exit 0; two existing ignored high advisories; no unsuppressed finding                     |
+| Existing patched-dependency tests                   | All six passed after frozen offline dependency preparation                                |
+
+The RustSec database was `b50980aad8b8f14f77e25a97b32dd94bf008b0af`.
+Framing used one build job, one test thread, offline locked resolution, system
+CC, the package-local target and the documented four unset SODIUM overrides.
+Both debug and release native outputs identify static sodium from their own
+`out/installed/lib` and `out/source/libsodium-stable` directories. These are
+functional qualification checks, not a memory or production-crypto result.
+
+Raw logs remain in the delivery worktree's `.gstack/reviews/`, including
+`eof-delivery-debug.log` (SHA256
+`b8ef7d3b74b7c33c8f2987a41f33c8dc84bdf1143a7ff97a119762c4dab2b3cc`)
+and `eof-delivery-release.log` (SHA256
+`5d31ee1e0eddda3338790e065eff709be4f37a0d69d176393bb27080a162aa30`).
+The initial local Cargo-wrapper target error and missing-node-modules test
+failure remain retained; explicit target configuration and frozen offline
+installation resolved those preparation failures without source or lock edits.
+Markdown formatting warnings in the unchanged README and AGENTS also reproduce
+on the merged base; the edited gate has its own formatting check.
+
+The final clean delivery commit still requires its canonical PR gate. That
+receipt must identify the actual tested commit and tree; neither the focused
+merge-tree results nor the historical receipts below replace it. Hosted checks
+must cover the submitted head, and review disposition, merge and merged-tree
+verification remain required. This checkpoint does not claim those later gates.
+
+## Historical delivery checkpoint: 2026-09-08 and 2026-09-09
 
 Constructor PR #135 merged into `dev` at
 416843b40f6112e8498e9da976d48041b54886d5, tree
@@ -15,16 +64,20 @@ its retained log is 2026-09-08T16-59-23-260Z-tests-1667901-d1238422.log,
 SHA256 da45c195d4300f3c93876fe76cc2c688342f77e769b33ce355794d8e07af00d4.
 That clean-source tree's isolated dependency policy and advisory checks also
 exited 0 without a new suppression; existing policy warnings remain recorded.
-The current tree, 73006096022f072df0c2b5175be1f0537564e962, adds only this
-documentation correction and has not received a separate canonical or
-dependency run.
+The later clean head `2f06571a52622081b11b666165edf951c3aa72ae`, tree
+`73006096022f072df0c2b5175be1f0537564e962`, also passed a separate canonical
+run. Its retained log is `2026-09-08T17-21-20-064Z-tests-1760842-d1238422.log`,
+SHA256 `9f17c83d4b8f4b0f977c955a9e33cc49d28682e1bd8d885d064f739cff4b8384`.
+The evidence record reports exit 0 and a clean source tree. The earlier wording
+that this tree had no canonical run was incorrect. This is historical evidence;
+it does not describe the later PR documentation commit or the delivery merge.
 
-This documentation correction labels the earlier checkpoints below as
-historical. Source, adapter and dependency inputs are unchanged. The
+That documentation correction labelled the earlier checkpoints below as
+historical. Source, adapter and dependency inputs were unchanged. The
 `access-c3-signing-qualification.yml` workflow input changed with this EOF
 regression: its Framing expected unit-test count moved from 21 to 22; the
-current tree leaves that workflow change unchanged. Final documentation
-verification, hosted checks and merge remain required.
+documentation correction left that workflow change unchanged. Final
+documentation verification, hosted checks and merge were still required then.
 No complete-C3, production-crypto or packaged-authentication claim follows.
 
 ## Historical preparation and verification bases
@@ -123,5 +176,6 @@ review and additive Ponytail review found no required changes: existing archive,
 encryption and fault-source helpers suffice. The unit-test description is kept
 separate from the Debug/Clone compile-fail checks.
 
-Remaining: final documentation verification, hosted checks and merge. No
-production crypto, physical-erasure or packaged-auth claim is made.
+At this historical checkpoint, final documentation verification, hosted checks
+and merge remained pending. No production crypto, physical-erasure or
+packaged-auth claim is made.
