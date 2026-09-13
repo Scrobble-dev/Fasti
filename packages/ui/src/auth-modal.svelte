@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { IconExternalLink, IconX } from "@tabler/icons-svelte";
+  import IconExternalLink from "@tabler/icons-svelte/icons/external-link";
+  import IconX from "@tabler/icons-svelte/icons/x";
   import { dialogFocus } from "./dialog-focus.js";
   import type { AccessProjectionResponse } from "./types.js";
 

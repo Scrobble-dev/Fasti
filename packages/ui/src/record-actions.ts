@@ -1,18 +1,16 @@
-import {
-  IconAdjustments,
-  IconBan,
-  IconBookmark,
-  IconCircleCheck,
-  IconCopy,
-  IconEye,
-  IconFolderPlus,
-  IconHistoryToggle,
-  IconMessage,
-  IconPlayerPlay,
-  IconRefresh,
-  IconScale,
-  IconTags,
-} from "@tabler/icons-svelte";
+import IconAdjustments from "@tabler/icons-svelte/icons/adjustments";
+import IconBan from "@tabler/icons-svelte/icons/ban";
+import IconBookmark from "@tabler/icons-svelte/icons/bookmark";
+import IconCircleCheck from "@tabler/icons-svelte/icons/circle-check";
+import IconCopy from "@tabler/icons-svelte/icons/copy";
+import IconEye from "@tabler/icons-svelte/icons/eye";
+import IconFolderPlus from "@tabler/icons-svelte/icons/folder-plus";
+import IconHistoryToggle from "@tabler/icons-svelte/icons/history-toggle";
+import IconMessage from "@tabler/icons-svelte/icons/message";
+import IconPlayerPlay from "@tabler/icons-svelte/icons/player-play";
+import IconRefresh from "@tabler/icons-svelte/icons/refresh";
+import IconScale from "@tabler/icons-svelte/icons/scale";
+import IconTags from "@tabler/icons-svelte/icons/tags";
 import { DEFAULT_CONTEXT_MENU_ITEMS } from "./defaults.js";
 import type { ContextMenuItem } from "./context-menu.svelte";
 import type {

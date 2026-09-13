@@ -34,7 +34,13 @@ const PORTABILITY_V4_EXAMPLE_PATH: &str =
 const PORTABILITY_V5_SCHEMA_PATH: &str = "contracts/portability/v5/workspace-manifest.schema.json";
 const PORTABILITY_V5_EXAMPLE_PATH: &str =
     "contracts/portability/v5/workspace-manifest.example.json";
+const PORTABILITY_V6_SCHEMA_PATH: &str = "contracts/portability/v6/workspace-manifest.schema.json";
+const PORTABILITY_V6_EXAMPLE_PATH: &str =
+    "contracts/portability/v6/workspace-manifest.example.json";
 const SDK_GENERATED_PATH: &str = "packages/sdk/src/generated.ts";
+const PORTABILITY_V7_SCHEMA_PATH: &str = "contracts/portability/v7/workspace-manifest.schema.json";
+const PORTABILITY_V7_EXAMPLE_PATH: &str =
+    "contracts/portability/v7/workspace-manifest.example.json";
 const RUST_CAPABILITY_IDS_PATH: &str = "crates/fasti-contracts/src/generated_capability_ids.rs";
 const PROVIDER_MANIFEST_SCHEMA_PATH: &str =
     "contracts/addons/generated/v0.1/provider-manifest.schema.json";
@@ -191,7 +197,84 @@ const PRODUCTION_BOOTSTRAP_OPERATIONS: [ConformanceOperation; 2] = [
 /// surface. Kept separate from `PRODUCTION_BOOTSTRAP_OPERATIONS` because that
 /// array also drives the bootstrap-only SDK slice in
 /// `render_production_bootstrap_contract`, which must not grow to include them.
-const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 40] = [
+const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 47] = [
+    ConformanceOperation {
+        alias: "listAccessClients",
+        operation_id: "list_access_clients",
+        method: "get",
+        path: "/api/access/v1/clients",
+        capability_id: "access.client.list",
+        authenticated: false,
+        request: None,
+        response: Some("ListAccessClientsResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "readProviderIdentifierDetails",
+        operation_id: "read_provider_identifier_details",
+        method: "get",
+        path: "/api/v1/search/providers/{provider_id}/{grain}/details",
+        capability_id: "metadata.search",
+        authenticated: true,
+        request: None,
+        response: Some("ProviderIdentifierDetailsResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "searchRecords",
+        operation_id: "search_local_records",
+        method: "post",
+        path: "/api/v1/search/records",
+        capability_id: "metadata.search",
+        authenticated: true,
+        request: Some("LocalSearchRequestDto"),
+        response: Some("LocalSearchResponseDto"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "saveSearchCandidate",
+        operation_id: "save_search_candidate",
+        method: "post",
+        path: "/api/v1/search/candidates/{provider_id}/{grain}/{candidate_receipt_id}/actions",
+        capability_id: "identity.identifier.attach",
+        authenticated: true,
+        request: Some("SearchCandidateActionRequest"),
+        response: Some("SearchCandidateActionResponse"),
+        retry: "stable_body_operation_id",
+    },
+    ConformanceOperation {
+        alias: "saveProviderIdentifier",
+        operation_id: "save_provider_identifier",
+        method: "post",
+        path: "/api/v1/search/providers/{provider_id}/{grain}/actions",
+        capability_id: "identity.identifier.attach",
+        authenticated: true,
+        request: Some("ProviderIdentifierActionRequest"),
+        response: Some("ProviderIdentifierActionResponse"),
+        retry: "stable_body_operation_id",
+    },
+    ConformanceOperation {
+        alias: "readSearchCandidate",
+        operation_id: "read_search_candidate",
+        method: "get",
+        path: "/api/v1/search/candidates/{provider_id}/{grain}/{candidate_receipt_id}",
+        capability_id: "metadata.search",
+        authenticated: true,
+        request: None,
+        response: Some("SearchCandidateDetailsResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "searchProviderPage",
+        operation_id: "search_provider_page",
+        method: "post",
+        path: "/api/v1/search/providers/{provider_id}",
+        capability_id: "metadata.search",
+        authenticated: true,
+        request: Some("SearchProviderPageRequest"),
+        response: Some("SearchProviderPageResponse"),
+        retry: "never",
+    },
     ConformanceOperation {
         alias: "submitObservation",
         operation_id: "submit_observation",
@@ -718,6 +801,17 @@ fn production_problem_codes(
     capability: &Value,
 ) -> anyhow::Result<Vec<Value>> {
     let exact: Option<&[&str]> = match operation.operation_id {
+        "list_access_clients" => Some(&[
+            "authentication_failed",
+            "browser_session_expired",
+            "browser_session_revoked",
+            "capability_unavailable",
+            "forbidden",
+            "integrity_failed",
+            "session_policy_changed",
+            "storage_unavailable",
+            "validation_failed",
+        ]),
         "start_trailbase_sign_in" => Some(&START_TRAILBASE_SIGN_IN_PROBLEMS),
         "read_trailbase_continuation" => Some(&READ_TRAILBASE_CONTINUATION_PROBLEMS),
         "complete_trailbase_continuation" => Some(&COMPLETE_TRAILBASE_CONTINUATION_PROBLEMS),
@@ -884,6 +978,10 @@ fn build(workspace_root: &Path) -> anyhow::Result<Artifacts> {
     let portability_v4_example = portability_v4_example(workspace_root)?;
     let portability_v5_schema = portability_v5_schema()?;
     let portability_v5_example = portability_v5_example(workspace_root)?;
+    let portability_v6_schema = portability_v6_schema()?;
+    let portability_v6_example = portability_v6_example(workspace_root)?;
+    let portability_v7_schema = portability_v7_schema()?;
+    let portability_v7_example = portability_v7_example(workspace_root)?;
     let asyncapi = load_yaml(workspace_root, ASYNCAPI_PATH)?;
     let mut production_openapi = serde_json::to_value(fasti_api::openapi())
         .context("production OpenAPI is not serializable")?;
@@ -994,6 +1092,26 @@ fn build(workspace_root: &Path) -> anyhow::Result<Artifacts> {
         &mut artifacts,
         PORTABILITY_V5_EXAMPLE_PATH,
         portability_v5_example,
+    )?;
+    insert(
+        &mut artifacts,
+        PORTABILITY_V6_SCHEMA_PATH,
+        portability_v6_schema,
+    )?;
+    insert(
+        &mut artifacts,
+        PORTABILITY_V6_EXAMPLE_PATH,
+        portability_v6_example,
+    )?;
+    insert(
+        &mut artifacts,
+        PORTABILITY_V7_SCHEMA_PATH,
+        portability_v7_schema,
+    )?;
+    insert(
+        &mut artifacts,
+        PORTABILITY_V7_EXAMPLE_PATH,
+        portability_v7_example,
     )?;
     insert_bytes(&mut artifacts, SDK_GENERATED_PATH, sdk_source.into_bytes())?;
     insert_bytes(
@@ -1349,7 +1467,7 @@ fn portability_v5_schema() -> anyhow::Result<Value> {
         .context("generated portability schema omits format_version")? = serde_json::json!({
         "const": 5
     });
-    let entities = WorkspaceExportEntity::ALL
+    let entities = WorkspaceExportEntity::V5
         .iter()
         .map(|entity| entity.as_str())
         .collect::<Vec<_>>();
@@ -1389,7 +1507,7 @@ fn portability_v5_example(workspace_root: &Path) -> anyhow::Result<Value> {
         .and_then(Value::as_array_mut)
         .context("archive-v4 example omits streams")?;
     let empty_digest = format!("sha256:{}", crate::evidence::sha256_bytes(&[]));
-    for entity in WorkspaceExportEntity::ALL[WorkspaceExportEntity::V4.len()..]
+    for entity in WorkspaceExportEntity::V5[WorkspaceExportEntity::V4.len()..]
         .iter()
         .map(|entity| entity.as_str())
     {
@@ -1406,6 +1524,77 @@ fn portability_v5_example(workspace_root: &Path) -> anyhow::Result<Value> {
     let canonical = serde_json_canonicalizer::to_vec(manifest)
         .context("archive-v5 example manifest is not canonicalizable")?;
     example["manifest_digest"] = Value::String(format!(
+        "sha256:{}",
+        crate::evidence::sha256_bytes(&canonical)
+    ));
+    Ok(example)
+}
+
+fn portability_v6_schema() -> anyhow::Result<Value> {
+    let mut schema = portability_v5_schema()?;
+    schema["$id"] = serde_json::json!(
+        "https://fasti.scrobble.dev/schemas/internal-staged/portability/v6/workspace-manifest.json"
+    );
+    schema["title"] = serde_json::json!("InternalStagedChecksummedWorkspaceManifestV6");
+    schema["$comment"] = serde_json::json!("Internal staged B3 archive v6. It appends durable Search action receipts to frozen v5. Temporary Search results and authentication state remain excluded.");
+    schema["x-fasti-contract-state"] = serde_json::json!("internal_staged_archive_v6");
+    schema["$defs"]["WorkspaceManifestDto"]["properties"]["format_version"] =
+        serde_json::json!({"const": 6});
+    let entity = WorkspaceExportEntity::SearchActionReceipts.as_str();
+    schema["$defs"]["WorkspaceExportEntityDto"]["enum"]
+        .as_array_mut()
+        .context("archive-v5 schema omits entity enum")?
+        .push(serde_json::json!(entity));
+    let streams = &mut schema["$defs"]["WorkspaceManifestDto"]["properties"]["streams"];
+    streams["minItems"] = serde_json::json!(WorkspaceExportEntity::V6.len());
+    streams["maxItems"] = serde_json::json!(WorkspaceExportEntity::V6.len());
+    streams["prefixItems"]
+        .as_array_mut()
+        .context("archive-v5 schema omits stream prefix")?
+        .push(serde_json::json!({"allOf": [
+            {"$ref": "#/$defs/WorkspaceStreamDescriptorDto"},
+            {"type": "object", "properties": {"entity": {"const": entity}}}
+        ]}));
+    Ok(schema)
+}
+
+fn portability_v6_example(workspace_root: &Path) -> anyhow::Result<Value> {
+    let mut example = portability_v5_example(workspace_root)?;
+    example["manifest"]["format_version"] = serde_json::json!(6);
+    example["manifest"]["streams"]
+        .as_array_mut()
+        .context("archive-v5 example omits streams")?
+        .push(serde_json::json!({
+            "entity": WorkspaceExportEntity::SearchActionReceipts.as_str(),
+            "row_count": 0, "byte_length": 0,
+            "digest": format!("sha256:{}", crate::evidence::sha256_bytes(&[])),
+        }));
+    let canonical = serde_json_canonicalizer::to_vec(&example["manifest"])?;
+    example["manifest_digest"] = serde_json::json!(format!(
+        "sha256:{}",
+        crate::evidence::sha256_bytes(&canonical)
+    ));
+    Ok(example)
+}
+
+fn portability_v7_schema() -> anyhow::Result<Value> {
+    let mut schema = portability_v6_schema()?;
+    schema["$id"] = serde_json::json!(
+        "https://fasti.scrobble.dev/schemas/internal-staged/portability/v7/workspace-manifest.json"
+    );
+    schema["title"] = serde_json::json!("InternalStagedChecksummedWorkspaceManifestV7");
+    schema["$comment"] = serde_json::json!("Internal staged B3 archive v7. MetadataClaims retain nullable response policy evidence. The 35-entity inventory is unchanged; v6 row shapes remain frozen for restore.");
+    schema["x-fasti-contract-state"] = serde_json::json!("internal_staged_archive_v7");
+    schema["$defs"]["WorkspaceManifestDto"]["properties"]["format_version"] =
+        serde_json::json!({"const": 7});
+    Ok(schema)
+}
+
+fn portability_v7_example(workspace_root: &Path) -> anyhow::Result<Value> {
+    let mut example = portability_v6_example(workspace_root)?;
+    example["manifest"]["format_version"] = serde_json::json!(7);
+    let canonical = serde_json_canonicalizer::to_vec(&example["manifest"])?;
+    example["manifest_digest"] = serde_json::json!(format!(
         "sha256:{}",
         crate::evidence::sha256_bytes(&canonical)
     ));
@@ -1785,7 +1974,7 @@ fn enrich_discovery_collection_schema(
         ),
         (
             "/components/schemas/CapabilitySurfaceDispositionDto/properties/body",
-            vec!["b0", "b1", "b2", "b3", "c1", "m1", "m2", "m3"],
+            vec!["b0", "b1", "b2", "b3", "c1", "c2", "m1", "m2", "m3", "m4"],
         ),
         (
             "/components/schemas/CapabilityUatDto/properties/relationship",
@@ -1793,7 +1982,7 @@ fn enrich_discovery_collection_schema(
         ),
         (
             "/components/schemas/CapabilityUatDto/properties/owner_body",
-            vec!["b1", "b2", "b3", "c1", "m1", "m2", "m3"],
+            vec!["b1", "b2", "b3", "c1", "c2", "m1", "m2", "m3"],
         ),
     ] {
         openapi
@@ -1880,6 +2069,30 @@ fn enrich_production_openapi(
             .context("anime grouping policy change variant must be an object")?
             .insert("additionalProperties".to_owned(), Value::Bool(false));
     }
+    for (name, count) in [
+        ("SearchProviderPageResponse", 3),
+        ("SearchCandidateDetailsResponse", 6),
+        ("ProviderIdentifierDetailsResponse", 2),
+        ("SearchCandidateActionResponse", 2),
+        ("ProviderIdentifierActionResponse", 2),
+        ("SearchRecordActionDto", 2),
+    ] {
+        let search_outcomes = openapi
+            .pointer_mut(&format!("/components/schemas/{name}/oneOf"))
+            .and_then(Value::as_array_mut)
+            .with_context(|| format!("{name} variants are absent"))?;
+        ensure!(
+            search_outcomes.len() == count,
+            "{name} variant count changed: expected {count}, got {}",
+            search_outcomes.len()
+        );
+        for variant in search_outcomes {
+            variant
+                .as_object_mut()
+                .with_context(|| format!("{name} outcome must be an object"))?
+                .insert("additionalProperties".to_owned(), Value::Bool(false));
+        }
+    }
     let capabilities = array_at(public_registry, "/capabilities")?;
     for expected in PRODUCTION_BOOTSTRAP_OPERATIONS
         .into_iter()
@@ -1916,6 +2129,21 @@ fn enrich_production_openapi(
             "x-fasti-required-scopes".to_owned(),
             Value::Array(array_at(capability, "/scopes")?.clone()),
         );
+        if matches!(
+            expected.operation_id,
+            "save_search_candidate" | "save_provider_identifier"
+        ) {
+            let search_capability = capabilities
+                .iter()
+                .find(|candidate| string_at(candidate, "/id").ok() == Some("metadata.search"))
+                .context("Search candidate save requires the metadata.search capability")?;
+            operation.insert(
+                "x-fasti-conditional-required-scopes".to_owned(),
+                serde_json::json!({
+                    "new_operation": array_at(search_capability, "/scopes")?
+                }),
+            );
+        }
         operation.insert(
             "x-fasti-authorization".to_owned(),
             Value::String(
@@ -1927,6 +2155,12 @@ fn enrich_production_openapi(
             ),
         );
         let problems = production_problem_codes(expected, capability)?;
+        if expected.operation_id == "search_local_records" {
+            operation.insert(
+                "x-fasti-max-response-bytes".to_owned(),
+                serde_json::json!(fasti_application::MAX_LOCAL_SEARCH_RESPONSE_BYTES),
+            );
+        }
         operation.insert(
             "x-fasti-problem-codes".to_owned(),
             Value::Array(problems.clone()),
@@ -2260,9 +2494,10 @@ fn validate_production_operation_security(
         | "cancel_trailbase_continuation" => {
             Some(serde_json::json!([{"auth_continuation_cookie": []}]))
         }
-        "read_access_projection" | "read_browser_session" | "list_browser_sessions" => {
-            Some(serde_json::json!([{"browser_session_cookie": []}]))
-        }
+        "read_access_projection"
+        | "read_browser_session"
+        | "list_browser_sessions"
+        | "list_access_clients" => Some(serde_json::json!([{"browser_session_cookie": []}])),
         "end_browser_session"
         | "revoke_browser_session"
         | "revoke_other_browser_sessions"
@@ -2274,6 +2509,9 @@ fn validate_production_operation_security(
             "csrf_header": []
         }])),
         "submit_observation"
+        | "search_provider_page"
+        | "save_search_candidate"
+        | "save_provider_identifier"
         | "create_record"
         | "attach_identifier"
         | "register_namespace"
@@ -2307,6 +2545,10 @@ fn validate_production_operation_security(
     let expected = match operation_id {
         "initialize_node" => vec!["bootstrap_bearer"],
         "list_records"
+        | "list_providers"
+        | "read_search_candidate"
+        | "read_provider_identifier_details"
+        | "search_local_records"
         | "list_tracking_dispositions"
         | "get_nuvio_collections"
         | "resolve_identity_route"
@@ -2314,8 +2556,7 @@ fn validate_production_operation_security(
         | "preview_anime_grouping_policy_change" => {
             vec!["credential_bearer", "browser_session_cookie"]
         }
-        "list_providers"
-        | "configure_provider_credential"
+        "configure_provider_credential"
         | "remove_provider_credential"
         | "test_provider_credential"
         | "read_provider_health"
@@ -2752,6 +2993,41 @@ fn resolve_required_binding(
             _ => anyhow::bail!("unknown package-smoke binding"),
         },
         "ui" => match binding {
+            "ui:access-client-inventory" => {
+                ensure!(
+                    capability_id == "access.client.list",
+                    "the client inventory UI binding belongs only to access.client.list"
+                );
+                let types = fs::read_to_string(workspace_root.join("packages/ui/src/types.ts"))?;
+                let host = fs::read_to_string(workspace_root.join("apps/web/src/web-host.ts"))?;
+                let view = fs::read_to_string(
+                    workspace_root.join("packages/ui/src/account-security-view.svelte"),
+                )?;
+                let browser = fs::read_to_string(
+                    workspace_root.join("tests/e2e/access-client-inventory.spec.ts"),
+                )?;
+                ensure!(
+                    types.contains("listAccessClients?")
+                        && types.contains("ListAccessClientsQueryParameters")
+                        && types.contains("ListAccessClientsResponse")
+                        && host.contains("accessClient.listAccessClients(query, { signal })")
+                        && view.contains("host.listAccessClients(")
+                        && view.contains("function clearClientInventory")
+                        && view.contains("identity !== inventoryIdentity")
+                        && view.contains("currentGeneration !== inventoryGeneration")
+                        && view.contains("return () => untrack(clearClientInventory)")
+                        && view.contains("onProjection?.(undefined)")
+                        && view.contains("after_created_at: clientInventory.next.created_at")
+                        && view.contains("after_client_id: clientInventory.next.client_id")
+                        && view.matches("{@render registeredClients()}").count() == 2
+                        && browser.contains(
+                            "A and C inspect bounded client inventory through the cookie-only host"
+                        )
+                        && browser.contains("client inventory retries the failed cursor page")
+                        && browser.contains("client inventory discards late responses after authority loss"),
+                    "client inventory UI is missing its governed host, paging, authority, or A+C witnesses"
+                );
+            }
             "ui:account-security" => {
                 ensure!(
                     capability_id == "access.projection.read",
@@ -3033,7 +3309,10 @@ fn bind_governed_examples(
         } else {
             ensure!(
                 example_id == "system.capabilities.success"
-                    || example_id == "integration.status.success",
+                    || example_id == "integration.status.success"
+                    || (example_id == "access.client.list.success"
+                        && expected.capability_id == "access.client.list"
+                        && expected.operation_id == "list_access_clients"),
                 "finite HTTP example {example_id} has no deterministic response binding rule"
             );
             ("200".to_owned(), "application/json")
@@ -3459,6 +3738,9 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
     let mut output = String::new();
     for name in [
         "ObservationIngressKind",
+        "AccessClientAuthenticationTypeDto",
+        "AccessClientPurposeDto",
+        "AccessClientLifecycleDto",
         "TrackingDispositionDto",
         "TrackingDispositionUpdateDto",
         "ProviderKindDto",
@@ -3495,6 +3777,12 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         "AnimeGroupingPolicyScopeKindDto",
         "AnimeGroupingPolicySourceDto",
         "AnimeGroupingPolicyChangeDto",
+        "SearchCacheStateDto",
+        "SearchCandidateEvidenceModeDto",
+        "SearchRecordActionDispositionDto",
+        "ProviderIdentifierActionOriginDto",
+        "SearchEvidenceStatusDto",
+        "SearchRecordActionDto",
     ] {
         let schema = schemas
             .get(name)
@@ -3521,6 +3809,7 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         "RecordIdentifierDto",
         "RecordSummaryDto",
         "ListRecordsResponse",
+        "ListRecordsQueryParameters",
         "AttachIdentifierRequest",
         "AttachIdentifierResponse",
         "RegisterNamespaceRequest",
@@ -3537,6 +3826,25 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         "ProviderCapabilityResponse",
         "ProviderHealthResponse",
         "RefreshMetadataClaimsRequest",
+        "SearchProviderPageRequest",
+        "LocalSearchRequestDto",
+        "LocalSearchResponseDto",
+        "LocalSearchCursorDto",
+        "SearchProviderPageResponse",
+        "SearchCandidateDetailsQueryParameters",
+        "SearchCandidateDetailsResponse",
+        "ProviderIdentifierDetailsQueryParameters",
+        "ProviderIdentifierDetailsResponse",
+        "SearchCandidateSnapshotDto",
+        "SearchCandidateActionRequest",
+        "SearchCandidateActionResponse",
+        "SearchCandidateActionReceiptDto",
+        "ProviderIdentifierActionRequest",
+        "ProviderIdentifierActionResponse",
+        "ProviderIdentifierActionReceiptDto",
+        "SearchCandidateReceiptDto",
+        "SearchCandidateDto",
+        "SearchReceiptLifetimeDto",
         "MetadataClaimProvenanceDto",
         "MetadataClaimDto",
         "RatingScaleDto",
@@ -3574,6 +3882,10 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         "BrowserSessionDto",
         "ReadBrowserSessionResponse",
         "ListBrowserSessionsResponse",
+        "ListAccessClientsQueryParameters",
+        "AccessClientInventoryItemDto",
+        "AccessClientInventoryCursorDto",
+        "ListAccessClientsResponse",
         "RevokeBrowserSessionsResponse",
         "RotateBrowserSessionResponse",
         "SelectBrowserSessionProfileResponse",
@@ -3672,11 +3984,17 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
 
         let required_scopes =
             serde_json::to_string(array_at(operation, "/x-fasti-required-scopes")?)?;
+        let conditional_required_scopes = operation
+            .get("x-fasti-conditional-required-scopes")
+            .map(serde_json::to_string)
+            .transpose()?
+            .map(|value| format!(", conditionalRequiredScopes: {value}"))
+            .unwrap_or_default();
         let problem_codes = serde_json::to_string(array_at(operation, "/x-fasti-problem-codes")?)?;
         let example_ids = serde_json::to_string(array_at(operation, "/x-fasti-example-ids")?)?;
         writeln!(
             output,
-            "  {}: {{ operationId: {}, method: {}, path: {}, capabilityId: {}, authorization: {}, requiredScopes: {required_scopes}, problemCodes: {problem_codes}, exampleIds: {example_ids}, authenticated: {}, runtimeAvailability: {}, durability: \"durable\", retry: {}, requestSchema: {}, responseSchema: {} }},",
+            "  {}: {{ operationId: {}, method: {}, path: {}, capabilityId: {}, authorization: {}, requiredScopes: {required_scopes}{conditional_required_scopes}, problemCodes: {problem_codes}, exampleIds: {example_ids}, authenticated: {}, runtimeAvailability: {}, durability: \"durable\", retry: {}, requestSchema: {}, responseSchema: {} }},",
             expected.alias,
             json_string(expected.operation_id)?,
             json_string(&expected.method.to_ascii_uppercase())?,
@@ -3701,8 +4019,21 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
     }
     output.push_str("} as const;\n\n");
 
+    writeln!(
+        output,
+        "export const LOCAL_SEARCH_MAX_RESPONSE_BYTES = {} as const;\n",
+        value_at(
+            openapi,
+            "/paths/~1api~1v1~1search~1records/post/x-fasti-max-response-bytes"
+        )?
+        .as_u64()
+        .context("local Search must publish its response byte limit")?
+    )?;
+
     for (alias, dto) in [
         ("parseSubmitObservationRequest", "SubmitObservationRequest"),
+        ("parseLocalSearchRequestDto", "LocalSearchRequestDto"),
+        ("parseLocalSearchResponseDto", "LocalSearchResponseDto"),
         (
             "parseSubmitObservationResponse",
             "SubmitObservationResponse",
@@ -3710,6 +4041,10 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         ("parseCreateRecordRequest", "CreateRecordRequest"),
         ("parseCreateRecordResponse", "CreateRecordResponse"),
         ("parseListRecordsResponse", "ListRecordsResponse"),
+        (
+            "parseListRecordsQueryParameters",
+            "ListRecordsQueryParameters",
+        ),
         ("parseAttachIdentifierRequest", "AttachIdentifierRequest"),
         ("parseAttachIdentifierResponse", "AttachIdentifierResponse"),
         ("parseRegisterNamespaceRequest", "RegisterNamespaceRequest"),
@@ -3744,6 +4079,46 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
             "ProviderCapabilityResponse",
         ),
         ("parseProviderHealthResponse", "ProviderHealthResponse"),
+        (
+            "parseSearchProviderPageRequest",
+            "SearchProviderPageRequest",
+        ),
+        (
+            "parseSearchProviderPageResponse",
+            "SearchProviderPageResponse",
+        ),
+        (
+            "parseSearchCandidateDetailsQueryParameters",
+            "SearchCandidateDetailsQueryParameters",
+        ),
+        (
+            "parseSearchCandidateDetailsResponse",
+            "SearchCandidateDetailsResponse",
+        ),
+        (
+            "parseProviderIdentifierDetailsQueryParameters",
+            "ProviderIdentifierDetailsQueryParameters",
+        ),
+        (
+            "parseProviderIdentifierDetailsResponse",
+            "ProviderIdentifierDetailsResponse",
+        ),
+        (
+            "parseSearchCandidateActionRequest",
+            "SearchCandidateActionRequest",
+        ),
+        (
+            "parseSearchCandidateActionResponse",
+            "SearchCandidateActionResponse",
+        ),
+        (
+            "parseProviderIdentifierActionRequest",
+            "ProviderIdentifierActionRequest",
+        ),
+        (
+            "parseProviderIdentifierActionResponse",
+            "ProviderIdentifierActionResponse",
+        ),
         (
             "parseRefreshMetadataClaimsRequest",
             "RefreshMetadataClaimsRequest",
@@ -3835,6 +4210,59 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
             "// prettier-ignore\nexport function {alias}(value: unknown): {dto} {{\n  return parseProductionDto(\"{dto}\", value);\n}}\n"
         )?;
     }
+    output.push_str(r#"
+// prettier-ignore
+export function parseListAccessClientsQueryParameters(value: unknown): ListAccessClientsQueryParameters {
+  const query = parseProductionDto<ListAccessClientsQueryParameters>("ListAccessClientsQueryParameters", value);
+  if (query.limit === null || query.after_created_at === null || query.after_client_id === null ||
+      (query.after_created_at === undefined) !== (query.after_client_id === undefined)) {
+    throw new FastiContractParseError("Client inventory requires both cursor fields or neither, without null values");
+  }
+  return query;
+}
+
+// prettier-ignore
+export function parseListAccessClientsResponse(value: unknown, query?: ListAccessClientsQueryParameters): ListAccessClientsResponse {
+  const response = parseProductionDto<ListAccessClientsResponse>("ListAccessClientsResponse", value);
+  const request = query === undefined ? undefined : parseListAccessClientsQueryParameters(query);
+  const limit = request === undefined ? 100 : request.limit ?? 32;
+  if (response.clients.length > limit ||
+      (request !== undefined && response.next !== null && response.clients.length !== limit)) {
+    throw new FastiContractParseError("Client inventory page does not match its requested limit");
+  }
+  if (response.next !== null) {
+    const last = response.clients.at(-1);
+    if (last === undefined || response.next.client_id !== last.client_id || response.next.created_at !== last.created_at) {
+      throw new FastiContractParseError("Client inventory cursor must identify its last returned row");
+    }
+  }
+  const ids = new Set<string>();
+  let previous = typeof request?.after_created_at !== "string" ? undefined :
+    { created_at: request.after_created_at, client_id: request.after_client_id! };
+  for (const client of response.clients) {
+    if (ids.has(client.client_id) ||
+        (previous !== undefined && compareClientInventoryPosition(client, previous) >= 0) ||
+        (client.authentication_type === "first_party") !== (client.purpose === "node") ||
+        (client.authentication_type === "first_party" && client.owner_subject_id !== null) ||
+        (client.name !== null && (/^\p{White_Space}|\p{White_Space}$/u.test(client.name) ||
+          new TextEncoder().encode(client.name).length > 128 || /[\p{Cc}\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/u.test(client.name)))) {
+      throw new FastiContractParseError("Client inventory contains invalid ownership, classification, name, identity or cursor order");
+    }
+    ids.add(client.client_id);
+    previous = client;
+  }
+  return response;
+}
+
+// Canonical time validation precedes this comparison; never round through Date.
+// prettier-ignore
+function compareClientInventoryPosition(left: AccessClientInventoryCursorDto, right: AccessClientInventoryCursorDto): number {
+  const years = Number(left.created_at.slice(0, -23)) - Number(right.created_at.slice(0, -23));
+  const leftTail = left.created_at.slice(-23), rightTail = right.created_at.slice(-23);
+  return years || (leftTail < rightTail ? -1 : leftTail > rightTail ? 1 :
+    left.client_id < right.client_id ? -1 : left.client_id > right.client_id ? 1 : 0);
+}
+"#);
     Ok(output)
 }
 
@@ -4639,6 +5067,13 @@ function validateOpenApiValue(value: unknown, schemaValue: unknown, path: string
     if (schema.format === "iso-date-or-rfc3339" && !isRealIsoDateOrRfc3339(value)) {
       throw new FastiContractParseError(`${path} is not a real ISO date or RFC3339 instant`);
     }
+    if (schema.format === "fasti-inventory-utc-micros" && !isInventoryUtcMicros(value)) {
+      throw new FastiContractParseError(`${path} is not a canonical inventory time`);
+    }
+    if (schema.format === "fasti-credential-epoch" &&
+        (!/^(0|[1-9][0-9]{0,18})$/.test(value) || (value.length === 19 && value > "9223372036854775807"))) {
+      throw new FastiContractParseError(`${path} is not an exact credential epoch`);
+    }
     return;
   }
   if (schemaTypes.includes("integer")) {
@@ -4769,6 +5204,19 @@ function isRealRfc3339Instant(value: string): boolean {
     offsetHour <= 23 &&
     offsetMinute <= 59
   );
+}
+
+// prettier-ignore
+function isInventoryUtcMicros(value: string): boolean {
+  if (value.length < 27 || value.length > 30) return false;
+  const match = /^([0-9]{4}|-[0-9]{4,6}|\+[0-9]{5,6})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})\.([0-9]{6})Z$/.exec(value);
+  if (match === null) return false;
+  const year = Number(match[1]);
+  if (year < -262143 || year > 262142) return false;
+  const yearText = year >= 0 && year <= 9999 ? String(year).padStart(4, "0") :
+    (year < 0 ? "-" : "+") + String(Math.abs(year)).padStart(4, "0");
+  return match[1] === yearText && isRealCalendarDate(year, Number(match[2]), Number(match[3])) &&
+    Number(match[4]) <= 23 && Number(match[5]) <= 59 && Number(match[6]) <= 60;
 }
 
 // prettier-ignore
@@ -5128,6 +5576,44 @@ mod tests {
     use super::*;
 
     #[test]
+    fn access_ui_bindings_are_capability_specific() {
+        let resolve = |binding, capability| {
+            resolve_required_binding(
+                workspace_root(),
+                "ui",
+                binding,
+                capability,
+                &BTreeMap::new(),
+                &Value::Null,
+                &Value::Null,
+                &Value::Null,
+                &Value::Null,
+                &Value::Null,
+                "",
+                "",
+            )
+        };
+        for (binding, owner, other) in [
+            (
+                "ui:access-client-inventory",
+                "access.client.list",
+                "access.projection.read",
+            ),
+            (
+                "ui:account-security",
+                "access.projection.read",
+                "access.client.list",
+            ),
+        ] {
+            resolve(binding, owner).expect("the owning capability has real source witnesses");
+            assert!(
+                resolve(binding, other).is_err(),
+                "UI ownership must not cross capabilities"
+            );
+        }
+    }
+
+    #[test]
     fn artifact_inventory_is_fixed_and_unique() {
         let artifacts = build(workspace_root()).expect("contract generation succeeds");
         let actual: BTreeSet<_> = artifacts.keys().map(|path| path.as_path()).collect();
@@ -5148,6 +5634,10 @@ mod tests {
             Path::new(PORTABILITY_V4_EXAMPLE_PATH),
             Path::new(PORTABILITY_V5_SCHEMA_PATH),
             Path::new(PORTABILITY_V5_EXAMPLE_PATH),
+            Path::new(PORTABILITY_V6_SCHEMA_PATH),
+            Path::new(PORTABILITY_V6_EXAMPLE_PATH),
+            Path::new(PORTABILITY_V7_SCHEMA_PATH),
+            Path::new(PORTABILITY_V7_EXAMPLE_PATH),
             Path::new(SDK_GENERATED_PATH),
             Path::new(RUST_CAPABILITY_IDS_PATH),
         ]
@@ -5191,6 +5681,14 @@ mod tests {
             ),
             (
                 portability_v5_schema().expect("archive-v5 schema"),
+                WorkspaceExportEntity::V5.as_slice(),
+            ),
+            (
+                portability_v6_schema().expect("archive-v6 schema"),
+                WorkspaceExportEntity::V6.as_slice(),
+            ),
+            (
+                portability_v7_schema().expect("archive-v7 schema"),
                 WorkspaceExportEntity::ALL.as_slice(),
             ),
         ] {
@@ -5469,7 +5967,7 @@ mod tests {
     }
 
     #[test]
-    fn generated_openapi_keeps_browser_auth_on_the_hybrid_ten_only() {
+    fn generated_openapi_keeps_browser_auth_on_governed_hybrid_routes() {
         let artifacts = build(workspace_root()).expect("contract generation succeeds");
         let openapi: Value = serde_json::from_slice(
             artifacts
@@ -5481,6 +5979,8 @@ mod tests {
             "/paths/~1api~1v1~1records/get/security",
             "/paths/~1api~1v1~1profile~1record-tracking-dispositions/get/security",
             "/paths/~1api~1v1~1profile~1nuvio-collections/get/security",
+            "/paths/~1api~1v1~1search~1records/post/security",
+            "/paths/~1api~1v1~1search~1candidates~1{provider_id}~1{grain}~1{candidate_receipt_id}/get/security",
         ] {
             assert_eq!(
                 value_at(&openapi, pointer).expect("hybrid operation security"),
@@ -5499,6 +5999,8 @@ mod tests {
             "/paths/~1api~1v1~1profile~1record-tracking-dispositions~1{record_id}/put/security",
             "/paths/~1api~1v1~1profile~1nuvio-collections/put/security",
             "/paths/~1api~1v1~1profile~1nuvio-collections/delete/security",
+            "/paths/~1api~1v1~1search~1providers~1{provider_id}/post/security",
+            "/paths/~1api~1v1~1search~1candidates~1{provider_id}~1{grain}~1{candidate_receipt_id}~1actions/post/security",
         ] {
             assert_eq!(
                 value_at(&openapi, pointer).expect("hybrid mutation security"),
@@ -5531,6 +6033,37 @@ mod tests {
                 .expect("webhook problems")
                 .contains(&Value::String(problem.to_owned())));
         }
+        for path in [
+            "/paths/~1api~1v1~1search~1candidates~1{provider_id}~1{grain}~1{candidate_receipt_id}~1actions/post",
+            "/paths/~1api~1v1~1search~1providers~1{provider_id}~1{grain}~1actions/post",
+        ] {
+            assert_eq!(
+                array_at(&openapi, &format!("{path}/x-fasti-required-scopes"))
+                    .expect("Search action scopes"),
+                &[serde_json::json!("identity_write")]
+            );
+            assert_eq!(
+                array_at(
+                    &openapi,
+                    &format!("{path}/x-fasti-conditional-required-scopes/new_operation")
+                )
+                .expect("new Search action scopes"),
+                &[serde_json::json!("metadata_search")]
+            );
+        }
+        let sdk = std::str::from_utf8(
+            artifacts
+                .get(Path::new(SDK_GENERATED_PATH))
+                .expect("production SDK generated"),
+        )
+        .expect("production SDK is UTF-8");
+        assert_eq!(
+            sdk.matches(
+                "requiredScopes: [\"identity_write\"], conditionalRequiredScopes: {\"new_operation\":[\"metadata_search\"]}"
+            )
+            .count(),
+            2
+        );
 
         let conformance: Value = serde_json::from_slice(
             artifacts

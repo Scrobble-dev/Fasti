@@ -1,14 +1,12 @@
 <script lang="ts">
   import type { MediaRecord } from "./types.js";
-  import {
-    IconEye,
-    IconEyeCheck,
-    IconBookmark,
-    IconBookmarkFilled,
-    IconFolder,
-    IconMessage,
-    IconDotsVertical,
-  } from "@tabler/icons-svelte";
+  import IconEye from "@tabler/icons-svelte/icons/eye";
+  import IconEyeCheck from "@tabler/icons-svelte/icons/eye-check";
+  import IconBookmark from "@tabler/icons-svelte/icons/bookmark";
+  import IconBookmarkFilled from "@tabler/icons-svelte/icons/bookmark-filled";
+  import IconFolder from "@tabler/icons-svelte/icons/folder";
+  import IconMessage from "@tabler/icons-svelte/icons/message";
+  import IconDotsVertical from "@tabler/icons-svelte/icons/dots-vertical";
 
   interface Props {
     record: MediaRecord;

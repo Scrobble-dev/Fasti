@@ -28,6 +28,7 @@ mod portability;
 mod profile_state;
 mod providers;
 mod records;
+mod search;
 
 pub use access::*;
 pub use bootstrap::*;
@@ -42,6 +43,7 @@ pub use portability::*;
 pub use profile_state::*;
 pub use providers::*;
 pub use records::*;
+pub use search::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(deny_unknown_fields)]

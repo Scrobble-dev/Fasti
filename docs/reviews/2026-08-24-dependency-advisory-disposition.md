@@ -2,12 +2,14 @@
 
 **Scope:** Open dependency and code-scanning alerts on `dev`.
 **Method:** Reachability and upgrade-path analysis against the exact lockfiles, not advisory metadata alone.
+**Scope correction:** 2026-09-05, source `21fb4a9e24b4724341302bf208399a6dda2283a6`.
 
 ---
 
 ## 1. `GHSA-wrw7-89jp-8q8g` / `RUSTSEC-2024-0429` — glib
 
-**Status:** Accepted, tracked. Not fixable at this baseline. Not present in the product.
+**Status:** Existing tracked exception. Present in the Desktop product dependency
+graph as well as the isolated benchmark. This advisory is not resolved.
 
 | Field          | Value                                                                                |
 | -------------- | ------------------------------------------------------------------------------------ |
@@ -16,17 +18,29 @@
 | Title          | Unsoundness in `Iterator` and `DoubleEndedIterator` impls for `glib::VariantStrIter` |
 | Affected range | `>= 0.15.0, < 0.20.0`                                                                |
 | First patched  | `0.20.0`                                                                             |
-| Manifest       | `benchmarks/b1/tauri-shell/src-tauri/Cargo.lock`                                     |
+| Lockfiles      | `apps/desktop/src-tauri/Cargo.lock`; `benchmarks/b1/tauri-shell/src-tauri/Cargo.lock` |
 
-### Why it is not in the product
+### Current scope and evidence limit
 
-`glib` appears **zero** times in the workspace `Cargo.lock`. It exists only in the isolated Tauri benchmark fixture, which declares its own workspace and is deliberately excluded from the product dependency graph.
+The root workspace lockfile does not contain `glib`, but it is not the complete
+product inventory. Both the separately locked Desktop and benchmark graphs
+contain `glib 0.18.5`. The earlier benchmark-only conclusion was incorrect.
 
-The fixture is a 16-line empty shell that writes a ready-file so a governed Linux desktop run can measure resident memory. Its policy declares `benchmark_only: true` and `product_surface: false`. It contains no direct reference to `glib` or to `VariantStrIter`.
+The benchmark policy declares `benchmark_only: true` and `product_surface: false`;
+those properties do not apply to Desktop. A source search under both first-party
+Rust source trees found no direct `glib::` or `VariantStrIter` references. This
+does not prove transitive Tauri/GTK paths cannot reach the affected iterator.
+No new reachable exploit was established by this bounded review.
 
-### Why it cannot be upgraded
+The [RustSec advisory](https://rustsec.org/advisories/RUSTSEC-2024-0429.html)
+classifies the defect as unsoundness and lists versions from 0.20.0 as patched.
+An informational classification is not a guarantee that an affected API is safe.
 
-`tauri 2.11.5` is the latest published release. `cargo add tauri@'>=2.12'` reports that no such version exists in the registry index.
+### Historical resolver evidence and upgrade constraint
+
+The 2026-08-24 investigation used `tauri 2.11.5` and could not resolve a
+`>=2.12` release from its registry snapshot. This is historical evidence, not a
+claim about the latest available Tauri release today.
 
 The dependency is structural to the Tauri Linux stack:
 
@@ -45,32 +59,48 @@ required by package `gtk v0.18.2`
     ... which satisfies dependency `gtk = "^0.18"` of package `tauri v2.11.5`
 ```
 
-No `0.18.x` patch exists; the advisory's first fixed version is `0.20.0`. Removing `glib` therefore means removing `gtk`, which means the fixture is no longer a Tauri Linux shell and can no longer produce the desktop memory receipt that B1 requires.
+The recorded GTK `^0.18` requirement cannot accept `glib 0.20.0` by a direct
+version substitution. A supported stack upgrade or reviewed backport needs its
+own compatibility and runtime evidence. Deleting GTK or the Desktop surface is
+not an acceptable remediation. No dependency change was made in this correction.
 
 ### Why the repository gate passes
 
-`cargo audit` scans this lockfile explicitly in `.github/workflows/security.yml`:
+The current `.github/workflows/security.yml` scans the root, benchmark and
+Desktop lockfiles separately. Its Desktop command explicitly retains the existing
+exception:
 
 ```bash
-cargo audit --file benchmarks/b1/tauri-shell/src-tauri/Cargo.lock
+cargo audit --file apps/desktop/src-tauri/Cargo.lock --ignore RUSTSEC-2024-0429
 ```
 
-It reports the entry as `Warning: unsound` and exits successfully. Unsoundness advisories are informational: they record an API that can be misused to cause undefined behavior, not a reachable exploit. `.github/dependabot.yml` has no `cargo` entry for the fixture directory, so Dependabot will not raise a pull request for it either.
+That exception is owned by the Desktop maintainer and leaves other advisories
+fatal. A passing gate does not resolve this advisory. Open Dependabot alerts
+[#1](https://github.com/Scrobble-dev/Fasti/security/dependabot/1) and
+[#3](https://github.com/Scrobble-dev/Fasti/security/dependabot/3) were still present
+at the 2026-09-05 read-only check. No alert was dismissed and no workflow or ignore
+configuration was changed.
 
 ### Review trigger
 
 Re-evaluate when **any** of these becomes true:
 
-- a Tauri release adopts `gtk 0.20+` / `glib 0.20+`;
+- a supported Tauri/GTK dependency path provides patched `glib`;
+- a compatible backport becomes available for review;
 - the advisory is reclassified from unsoundness to a reachable vulnerability;
-- the fixture stops being benchmark-only, or any `glib` API is called directly;
-- `glib` appears in the product workspace `Cargo.lock`.
+- first-party code begins using the affected iterator, or transitive reachability is established;
+- the next Desktop dependency review occurs.
 
-Until then this must not be described as a product vulnerability, and it must not be used to claim the fixture is unsafe to run.
+Keep the affected Desktop dependency and the accepted exception visible. Neither
+absence of direct calls nor a green audit with an ignore proves unreachability.
 
 ### Unrelated warnings in the same scan
 
-`cargo audit` also reports `unic-ucd-ident 0.9.0` and `unic-ucd-version 0.9.0` as **unmaintained** (`RUSTSEC-2025-0100`, `RUSTSEC-2025-0098`). Same disposition: fixture-only, informational, no upgrade path at this Tauri version.
+The historical scan also reported `unic-ucd-ident 0.9.0` and
+`unic-ucd-version 0.9.0` as unmaintained (`RUSTSEC-2025-0100`,
+`RUSTSEC-2025-0098`). Both packages are in the current Desktop and benchmark locks,
+not only the fixture. Their current upgrade paths were not reassessed by this
+scope correction.
 
 ---
 

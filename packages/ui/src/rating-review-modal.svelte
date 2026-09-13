@@ -1,12 +1,10 @@
 <script lang="ts">
   import type { MediaRecord } from "./types.js";
   import { dialogFocus } from "./dialog-focus.js";
-  import {
-    IconX,
-    IconStarFilled,
-    IconStar,
-    IconCheck,
-  } from "@tabler/icons-svelte";
+  import IconX from "@tabler/icons-svelte/icons/x";
+  import IconStarFilled from "@tabler/icons-svelte/icons/star-filled";
+  import IconStar from "@tabler/icons-svelte/icons/star";
+  import IconCheck from "@tabler/icons-svelte/icons/check";
 
   interface Props {
     record: MediaRecord;

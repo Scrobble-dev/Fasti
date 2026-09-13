@@ -2,7 +2,8 @@ use crate::kernel::{now, scope_storage_key, timestamp};
 use crate::SqliteKernel;
 use fasti_application::{
     AccessAdministrationPort, EnrollFirstClientCommand, EvidenceUploadPort, EvidenceUploadRequest,
-    InitializeNodeCommand, RequestAccessContext, ScopeKey, SecretMaterial,
+    InitializeNodeCommand, RequestAccessContext, ScopeKey, SearchActionReceiptLimits,
+    SecretMaterial,
 };
 use fasti_domain::{ProfileGrantId, ProfileId, RequestCorrelationId};
 use rusqlite::params;
@@ -16,8 +17,13 @@ pub(crate) struct TestNode {
 
 impl TestNode {
     pub(crate) fn new() -> Self {
+        Self::with_search_action_receipt_limits(SearchActionReceiptLimits::supported_default())
+    }
+
+    pub(crate) fn with_search_action_receipt_limits(limits: SearchActionReceiptLimits) -> Self {
         let root = tempfile::tempdir().expect("temporary data root");
-        let kernel = SqliteKernel::open(root.path()).expect("SQLite kernel");
+        let kernel = SqliteKernel::open_with_search_action_receipt_limits(root.path(), limits)
+            .expect("SQLite kernel");
         let initialized = kernel
             .initialize_node(InitializeNodeCommand::new(RequestCorrelationId::new_v7()))
             .expect("initialize node");

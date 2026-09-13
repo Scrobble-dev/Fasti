@@ -4,6 +4,90 @@ capability_base_uri: https://fasti.scrobble.dev/ns/capabilities/v1/
 # Profiles keep repeated transport dispositions in one place. A required
 # binding is a contract-generation target, not a claim that its runtime exists.
 surface_profiles:
+  c2_access_inventory:
+    domain_application:
+      { state: required, binding: "application:{application_key}" }
+    http_openapi: { state: required, binding: "openapi:{capability_id}" }
+    sse_asyncapi:
+      {
+        state: not_applicable,
+        reason: Client inventory is a finite read without an event stream.,
+      }
+    cli:
+      {
+        state: not_applicable,
+        reason: This inventory uses first-party browser session authority.,
+      }
+    json_schema:
+      {
+        state: required,
+        binding: "schema:production-openapi-operation:{capability_id}",
+      }
+    json_ld:
+      {
+        state: not_applicable,
+        reason: Private client ownership and lifecycle state is not linked data.,
+      }
+    okf: { state: required, binding: "okf:capability-catalog" }
+    sdk: { state: required, binding: "sdk:{capability_id}" }
+    knowledge: { state: required, binding: "knowledge:problem-catalog" }
+    package_smoke:
+      {
+        state: later_body,
+        body: c2,
+        reason: Native and OCI inventory package proof remains separate from ordinary-browser runtime proof; packaged Tauri authentication is deferred.,
+      }
+    ui: { state: required, binding: "ui:access-client-inventory" }
+  m4_search:
+    domain_application:
+      { state: required, binding: "application:{application_key}" }
+    http_openapi: { state: required, binding: "openapi:{capability_id}" }
+    sse_asyncapi:
+      {
+        state: not_applicable,
+        reason: Search returns finite result pages without an event stream.,
+      }
+    cli:
+      {
+        state: later_body,
+        body: m4,
+        reason: Search CLI projection follows the frozen M4 contract.,
+      }
+    json_schema:
+      {
+        state: required,
+        binding: "schema:production-openapi-operation:{capability_id}",
+      }
+    json_ld:
+      {
+        state: not_applicable,
+        reason: Private query and candidate receipts are not linked data.,
+      }
+    okf:
+      {
+        state: later_body,
+        body: m4,
+        reason: Search catalogue projection follows M4 activation.,
+      }
+    sdk: { state: required, binding: "sdk:{capability_id}" }
+    knowledge:
+      {
+        state: later_body,
+        body: m4,
+        reason: Search recovery guidance follows M4 route integration.,
+      }
+    package_smoke:
+      {
+        state: later_body,
+        body: m4,
+        reason: Search runtime package verification remains an M4 gate.,
+      }
+    ui:
+      {
+        state: later_body,
+        body: m4,
+        reason: Search Workbench integration remains an M4 gate.,
+      }
   health:
     domain_application:
       { state: required, binding: "application:{application_key}" }
@@ -566,6 +650,68 @@ surface_profiles:
     ui: { state: not_applicable, reason: Fasti is headless through B3. }
 
 capabilities:
+  - application_key: list_access_clients
+    id: access.client.list
+    bounded_context: access.credentials
+    contract_body: c2
+    runtime_body: c2
+    authorization: browser_session
+    lifecycle:
+      {
+        introduced_in: c2,
+        contract_state: finalized,
+        runtime_availability: implemented,
+      }
+    surface_profile: c2_access_inventory
+    scopes: []
+    problems:
+      [
+        authentication_failed,
+        browser_session_expired,
+        browser_session_revoked,
+        capability_unavailable,
+        forbidden,
+        integrity_failed,
+        session_policy_changed,
+        storage_unavailable,
+        validation_failed,
+      ]
+    examples: [access.client.list.success]
+    uat: []
+
+  - application_key: search_metadata
+    id: metadata.search
+    bounded_context: search.candidates
+    contract_body: m4
+    runtime_body: m4
+    authorization: scoped_or_browser_session
+    lifecycle:
+      {
+        introduced_in: m4,
+        contract_state: finalized,
+        runtime_availability: implemented,
+      }
+    surface_profile: m4_search
+    scopes: [metadata_search]
+    problems:
+      [
+        authentication_failed,
+        browser_session_expired,
+        browser_session_revoked,
+        capability_unavailable,
+        capacity_exceeded,
+        forbidden,
+        idempotency_conflict,
+        integrity_failed,
+        malformed_json,
+        payload_too_large,
+        session_policy_changed,
+        storage_unavailable,
+        unsupported_media_type,
+        validation_failed,
+      ]
+    examples: []
+    uat: []
   - application_key: system_health
     id: system.health
     bounded_context: system.operations
@@ -1246,7 +1392,9 @@ capabilities:
         browser_session_expired,
         browser_session_revoked,
         capability_unavailable,
+        capacity_exceeded,
         forbidden,
+        idempotency_conflict,
         identity_conflict,
         integrity_failed,
         invalid_identifier,
@@ -1285,6 +1433,7 @@ capabilities:
         integrity_failed,
         session_policy_changed,
         storage_unavailable,
+        validation_failed,
       ]
     examples: [identity.record.list.forbidden]
     uat: []
@@ -1637,7 +1786,7 @@ capabilities:
     bounded_context: connections.providers
     contract_body: m1
     runtime_body: m1
-    authorization: scoped
+    authorization: scoped_or_browser_session
     lifecycle:
       {
         introduced_in: m1,
@@ -1647,7 +1796,15 @@ capabilities:
     surface_profile: m1_providers
     scopes: [provider_read]
     problems:
-      [authentication_failed, forbidden, integrity_failed, storage_unavailable]
+      [
+        authentication_failed,
+        forbidden,
+        integrity_failed,
+        storage_unavailable,
+        browser_session_expired,
+        browser_session_revoked,
+        session_policy_changed,
+      ]
     examples: [provider.list.forbidden]
     uat: []
 

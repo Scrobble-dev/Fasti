@@ -81,15 +81,18 @@
               "b2",
               "b3",
               "c1",
+              "c2",
               "m1",
               "m2",
-              "m3"
+              "m3",
+              "m4"
             ],
             "type": "string"
           },
           "examples": {
             "items": {
               "enum": [
+                "access.client.list.success",
                 "client.enroll.forbidden",
                 "credential.revoke.capability_unavailable",
                 "credential.rotate.capability_unavailable",
@@ -126,6 +129,7 @@
           },
           "id": {
             "enum": [
+              "access.client.list",
               "access.identity.bootstrap",
               "access.projection.read",
               "browser.session.create",
@@ -156,6 +160,7 @@
               "metadata.claim.refresh",
               "metadata.projection.configure",
               "metadata.projection.read",
+              "metadata.search",
               "node.initialize",
               "observation.accept",
               "portability.workspace.export",
@@ -240,9 +245,11 @@
               "b2",
               "b3",
               "c1",
+              "c2",
               "m1",
               "m2",
-              "m3"
+              "m3",
+              "m4"
             ],
             "type": "string"
           },
@@ -260,6 +267,7 @@
                 "metadata_claim_refresh",
                 "metadata_projection_configure",
                 "metadata_projection_read",
+                "metadata_search",
                 "observation_accept",
                 "profile_select",
                 "profile_state_read",
@@ -290,12 +298,14 @@
               "c1_access_projection",
               "c1_browser_session_foundation",
               "c1_identity_bootstrap",
+              "c2_access_inventory",
               "health",
               "later_b2",
               "later_b3",
               "m1_providers",
               "m2_metadata",
-              "m3_identity_routing"
+              "m3_identity_routing",
+              "m4_search"
             ],
             "type": "string"
           },
@@ -328,8 +338,8 @@
             "items": {
               "$ref": "#/components/schemas/CapabilityDescriptorDto"
             },
-            "maxItems": 52,
-            "minItems": 52,
+            "maxItems": 54,
+            "minItems": 54,
             "type": "array",
             "uniqueItems": true
           },
@@ -367,8 +377,8 @@
               },
               "type": "object"
             },
-            "maxProperties": 17,
-            "minProperties": 17,
+            "maxProperties": 19,
+            "minProperties": 19,
             "propertyNames": {
               "enum": [
                 "b1_durable_bootstrap",
@@ -382,12 +392,14 @@
                 "c1_access_projection",
                 "c1_browser_session_foundation",
                 "c1_identity_bootstrap",
+                "c2_access_inventory",
                 "health",
                 "later_b2",
                 "later_b3",
                 "m1_providers",
                 "m2_metadata",
-                "m3_identity_routing"
+                "m3_identity_routing",
+                "m4_search"
               ],
               "type": "string"
             },
@@ -419,9 +431,11 @@
               "b1",
               "b2",
               "c1",
+              "c2",
               "m1",
               "m2",
-              "m3"
+              "m3",
+              "m4"
             ],
             "type": "string"
           },
@@ -468,9 +482,11 @@
               "b2",
               "b3",
               "c1",
+              "c2",
               "m1",
               "m2",
-              "m3"
+              "m3",
+              "m4"
             ],
             "type": [
               "string",
@@ -510,6 +526,7 @@
               "b2",
               "b3",
               "c1",
+              "c2",
               "m1",
               "m2",
               "m3"
@@ -1014,6 +1031,35 @@
                     "value": {
                       "capabilities": [
                         {
+                          "authorization": "browser_session",
+                          "bounded_context": "access.credentials",
+                          "contract_body": "c2",
+                          "examples": [
+                            "access.client.list.success"
+                          ],
+                          "id": "access.client.list",
+                          "lifecycle": {
+                            "contract_state": "finalized",
+                            "introduced_in": "c2",
+                            "runtime_availability": "implemented"
+                          },
+                          "problems": [
+                            "authentication_failed",
+                            "browser_session_expired",
+                            "browser_session_revoked",
+                            "capability_unavailable",
+                            "forbidden",
+                            "integrity_failed",
+                            "session_policy_changed",
+                            "storage_unavailable",
+                            "validation_failed"
+                          ],
+                          "runtime_body": "c2",
+                          "scopes": [],
+                          "surface_profile": "c2_access_inventory",
+                          "uat": []
+                        },
+                        {
                           "authorization": "local_operator",
                           "bounded_context": "access.identity",
                           "contract_body": "c1",
@@ -1448,7 +1494,9 @@
                             "browser_session_expired",
                             "browser_session_revoked",
                             "capability_unavailable",
+                            "capacity_exceeded",
                             "forbidden",
+                            "idempotency_conflict",
                             "identity_conflict",
                             "integrity_failed",
                             "invalid_identifier",
@@ -1557,7 +1605,8 @@
                             "forbidden",
                             "integrity_failed",
                             "session_policy_changed",
-                            "storage_unavailable"
+                            "storage_unavailable",
+                            "validation_failed"
                           ],
                           "runtime_body": "b2",
                           "scopes": [
@@ -1838,6 +1887,40 @@
                             "metadata_projection_read"
                           ],
                           "surface_profile": "m2_metadata",
+                          "uat": []
+                        },
+                        {
+                          "authorization": "scoped_or_browser_session",
+                          "bounded_context": "search.candidates",
+                          "contract_body": "m4",
+                          "examples": [],
+                          "id": "metadata.search",
+                          "lifecycle": {
+                            "contract_state": "finalized",
+                            "introduced_in": "m4",
+                            "runtime_availability": "implemented"
+                          },
+                          "problems": [
+                            "authentication_failed",
+                            "browser_session_expired",
+                            "browser_session_revoked",
+                            "capability_unavailable",
+                            "capacity_exceeded",
+                            "forbidden",
+                            "idempotency_conflict",
+                            "integrity_failed",
+                            "malformed_json",
+                            "payload_too_large",
+                            "session_policy_changed",
+                            "storage_unavailable",
+                            "unsupported_media_type",
+                            "validation_failed"
+                          ],
+                          "runtime_body": "m4",
+                          "scopes": [
+                            "metadata_search"
+                          ],
+                          "surface_profile": "m4_search",
                           "uat": []
                         },
                         {
@@ -2393,7 +2476,7 @@
                           "uat": []
                         },
                         {
-                          "authorization": "scoped",
+                          "authorization": "scoped_or_browser_session",
                           "bounded_context": "connections.providers",
                           "contract_body": "m1",
                           "examples": [
@@ -2407,8 +2490,11 @@
                           },
                           "problems": [
                             "authentication_failed",
+                            "browser_session_expired",
+                            "browser_session_revoked",
                             "forbidden",
                             "integrity_failed",
+                            "session_policy_changed",
                             "storage_unavailable"
                           ],
                           "runtime_body": "m1",
@@ -3127,6 +3213,59 @@
                             "state": "not_applicable"
                           }
                         },
+                        "c2_access_inventory": {
+                          "cli": {
+                            "reason": "This inventory uses first-party browser session authority.",
+                            "state": "not_applicable"
+                          },
+                          "domain_application": {
+                            "binding_visibility": "internal",
+                            "state": "required"
+                          },
+                          "http_openapi": {
+                            "binding": "openapi:{capability_id}",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "json_ld": {
+                            "reason": "Private client ownership and lifecycle state is not linked data.",
+                            "state": "not_applicable"
+                          },
+                          "json_schema": {
+                            "binding": "schema:production-openapi-operation:{capability_id}",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "knowledge": {
+                            "binding": "knowledge:problem-catalog",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "okf": {
+                            "binding": "okf:capability-catalog",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "package_smoke": {
+                            "body": "c2",
+                            "reason": "Native and OCI inventory package proof remains separate from ordinary-browser runtime proof; packaged Tauri authentication is deferred.",
+                            "state": "later_body"
+                          },
+                          "sdk": {
+                            "binding": "sdk:{capability_id}",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "sse_asyncapi": {
+                            "reason": "Client inventory is a finite read without an event stream.",
+                            "state": "not_applicable"
+                          },
+                          "ui": {
+                            "binding": "ui:access-client-inventory",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          }
+                        },
                         "health": {
                           "cli": {
                             "reason": "Health is exposed as the process HTTP probe.",
@@ -3448,6 +3587,60 @@
                             "binding": "ui:anime-grouping-policy",
                             "binding_visibility": "public",
                             "state": "required"
+                          }
+                        },
+                        "m4_search": {
+                          "cli": {
+                            "body": "m4",
+                            "reason": "Search CLI projection follows the frozen M4 contract.",
+                            "state": "later_body"
+                          },
+                          "domain_application": {
+                            "binding_visibility": "internal",
+                            "state": "required"
+                          },
+                          "http_openapi": {
+                            "binding": "openapi:{capability_id}",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "json_ld": {
+                            "reason": "Private query and candidate receipts are not linked data.",
+                            "state": "not_applicable"
+                          },
+                          "json_schema": {
+                            "binding": "schema:production-openapi-operation:{capability_id}",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "knowledge": {
+                            "body": "m4",
+                            "reason": "Search recovery guidance follows M4 route integration.",
+                            "state": "later_body"
+                          },
+                          "okf": {
+                            "body": "m4",
+                            "reason": "Search catalogue projection follows M4 activation.",
+                            "state": "later_body"
+                          },
+                          "package_smoke": {
+                            "body": "m4",
+                            "reason": "Search runtime package verification remains an M4 gate.",
+                            "state": "later_body"
+                          },
+                          "sdk": {
+                            "binding": "sdk:{capability_id}",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "sse_asyncapi": {
+                            "reason": "Search returns finite result pages without an event stream.",
+                            "state": "not_applicable"
+                          },
+                          "ui": {
+                            "body": "m4",
+                            "reason": "Search Workbench integration remains an M4 gate.",
+                            "state": "later_body"
                           }
                         }
                       }
@@ -4147,7 +4340,7 @@
                       "next_actions": [
                         {
                           "id": "release_capacity",
-                          "label": "Release retained capacity before retrying"
+                          "label": "Increase or release governed capacity before retrying"
                         }
                       ],
                       "param": null,

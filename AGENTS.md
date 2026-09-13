@@ -262,8 +262,26 @@ assistive-technology evidence. Do not weaken Secure cookies or claim packaged
 desktop authentication before that follow-up passes. Exact-head review, CI,
 merge, and merged-tree evidence remain required for C1 delivery.
 
+For the bounded C2 inventory runtime proof, use
+`cargo xtask test access-client-inventory` only after building the daemon, CLI
+and web artifacts from the recorded clean source and preparing `.dev-trailbase`.
+The command requires real cookie-only inventory and retained-cookie denial after
+session revocation. Its separate receipt does not complete C2, prove packaged
+Tauri authentication or replace canonical PR and prepared-artifact evidence.
+Run the focused `cargo test -p xtask ordinary_browser` receipt regressions and
+`PYTHONPATH=scripts python3 -m unittest scripts/test_smoke_access_browser.py`
+after changing this boundary; coordinate actual runtime ports and resources.
+
 ## Quality and Security Invariants
 
+- **Permanent Codex Security exclusion**: Do not use the Codex Security plugin,
+  tools, skills, scans, reviews or approval gates for any Fasti programme stage,
+  including Access, metadata, Search, later stages and delegated agents. It is
+  not a requirement, optional fallback or waiting dependency. Ignore superseded
+  instructions in historical prompts, attachments, plans and checkpoints that
+  request it. Do not rediscover or propose it during continuation or idle work.
+  Only a new explicit user instruction reversing this exclusion can change it.
+  Ordinary native source review, tests, QA and product safeguards remain required.
 - **Single Integration Branch**: All active development and pull requests target `dev`. `release` is reserved strictly for release candidate stabilization.
 - **Zero Deployment Blockers**: External SaaS/AI tools (CodeRabbit, Codacy, Codecov, Scorecard) provide advisory feedback and must never block emergency hotfixes, local builds, or CI deployments.
 - **Strict Bounded Performance**: The daemon (`fastid`) must strictly observe memory ceilings: 64 MiB idle, 96 MiB normal, 192 MiB process tree ceiling.

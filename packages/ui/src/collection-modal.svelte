@@ -1,11 +1,9 @@
 <script lang="ts">
   import type { MediaRecord } from "./types.js";
-  import {
-    IconX,
-    IconFolderPlus,
-    IconCheck,
-    IconFolder,
-  } from "@tabler/icons-svelte";
+  import IconX from "@tabler/icons-svelte/icons/x";
+  import IconFolderPlus from "@tabler/icons-svelte/icons/folder-plus";
+  import IconCheck from "@tabler/icons-svelte/icons/check";
+  import IconFolder from "@tabler/icons-svelte/icons/folder";
 
   interface Props {
     record: MediaRecord;

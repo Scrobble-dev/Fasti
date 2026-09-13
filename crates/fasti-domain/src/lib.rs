@@ -16,6 +16,7 @@ pub mod metadata;
 pub mod observation;
 pub mod portability;
 pub mod review;
+pub mod search;
 pub mod time;
 
 pub use access::*;
@@ -30,4 +31,5 @@ pub use metadata::*;
 pub use observation::*;
 pub use portability::*;
 pub use review::*;
+pub use search::*;
 pub use time::*;

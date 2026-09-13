@@ -30,6 +30,7 @@ pub mod providers;
 pub mod receipts;
 pub mod requests;
 pub mod scopes;
+pub mod search;
 
 pub use access_credentials::*;
 pub use access_projection::*;
@@ -56,3 +57,4 @@ pub use providers::*;
 pub use receipts::*;
 pub use requests::*;
 pub use scopes::*;
+pub use search::*;

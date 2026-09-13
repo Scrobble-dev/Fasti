@@ -375,6 +375,7 @@ impl AuthorizationRequirement {
                 | CapabilityKey::SetTrackingDisposition
                 | CapabilityKey::ReplaceNuvioCollections
                 | CapabilityKey::ClearNuvioCollections
+                | CapabilityKey::ApplyAnimeGroupingPolicyChange
         )
     }
 
@@ -657,6 +658,7 @@ mod tests {
             CapabilityKey::SetTrackingDisposition,
             CapabilityKey::ReplaceNuvioCollections,
             CapabilityKey::ClearNuvioCollections,
+            CapabilityKey::ApplyAnimeGroupingPolicyChange,
         ];
         let reads = [
             CapabilityKey::ListRecords,

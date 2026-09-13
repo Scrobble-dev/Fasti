@@ -12,6 +12,10 @@ description = "Fasti Node daemon exposing the currently implemented local HTTP s
 name = "fastid"
 path = "src/main.rs"
 
+[features]
+default = []
+tmdb-smoke-fixture = ["fasti-provider-runtime/tmdb-smoke-fixture"]
+
 [dependencies]
 fasti-api = { workspace = true }
 fasti-application = { workspace = true }

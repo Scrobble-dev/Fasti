@@ -1,6 +1,7 @@
 use anyhow::{bail, ensure, Context};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::ffi::{OsStr, OsString};
@@ -14,6 +15,8 @@ const RECEIPT_PATH: &str = "target/fasti-receipts/b1-contract-verification.json"
 const GENERATED_REGISTRY_PATH: &str = "contracts/generated/v1/capabilities.json";
 const EXAMPLES_DIRECTORY: &str = "contracts/examples/v1";
 const ORDINARY_BROWSER_RECEIPT_PATH: &str = "target/fasti-receipts/access-c1-ordinary-browser.json";
+pub(crate) const INVENTORY_BROWSER_RECEIPT_PATH: &str =
+    "target/fasti-receipts/access-c2-inventory-ordinary-browser.json";
 const PREFLIGHT_GATES: [&str; 6] = [
     "registry.validate",
     "generation.first",
@@ -457,6 +460,11 @@ fn command_gates(locked: bool) -> Vec<CommandGate> {
                 "tests/js/generated-contracts.test.mjs",
                 "tests/js/patched-dependencies.test.mjs",
                 "tests/js/sdk-client.test.mjs",
+                "tests/js/search-provider-transport.test.mjs",
+                "tests/js/local-search-transport.test.mjs",
+                "tests/js/search-candidate-details-transport.test.mjs",
+                "tests/js/search-candidate-action-transport.test.mjs",
+                "tests/js/web-host-record-origin.test.mjs",
             ],
             "fix the failing mutation sentinel, dependency patch, or black-box SDK behavior",
         ),
@@ -585,6 +593,9 @@ struct SourceState {
 struct OrdinaryBrowserReceipt {
     schema_version: String,
     source: SourceState,
+    web_artifact_sha256: String,
+    daemon_artifact_sha256: String,
+    cli_artifact_sha256: String,
     trailbase_release: String,
     checks: OrdinaryBrowserChecks,
     active_browser_sessions: u64,
@@ -598,7 +609,42 @@ struct OrdinaryBrowserChecks {
     chromium: String,
     account_security_surface_loaded: bool,
     cookies: OrdinaryBrowserCookies,
+    m3_anime_grouping_policy: OrdinaryBrowserM3Policy,
+    client_inventory: Option<OrdinaryBrowserClientInventory>,
     fasti_origin_vendor_credential_storage_absent: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct OrdinaryBrowserM3Policy {
+    real_fastid: bool,
+    real_sqlite: bool,
+    browser_session: bool,
+    csrf_mutation_boundary: bool,
+    durable_record_id: String,
+    preview_records: u64,
+    final_revision: u64,
+    final_preference: String,
+    apply_replay_exact: bool,
+    rollback_replay_exact: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct OrdinaryBrowserClientInventory {
+    capability_id: String,
+    requested_limit: u64,
+    returned_clients: u64,
+    node_client_id: String,
+    node_witness_source: String,
+    cookie_only: bool,
+    no_store: bool,
+    exact_node_client_observed: bool,
+    second_session_revoked: bool,
+    retained_cookie_denied: bool,
+    denial_status: u16,
+    denial_code: String,
+    original_session_still_authorized: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -773,13 +819,9 @@ pub(crate) fn write_gate_suite_receipt(
         !source.dirty,
         "source tree is dirty after gate execution; no suite receipt was emitted"
     );
-    let ordinary_browser = if kind == "fasti.access-c1.delivery" {
-        ensure!(
-            gates
-                .iter()
-                .any(|gate| gate.id == "access.ordinary_browser_runtime"),
-            "C1 delivery receipt omits the ordinary-browser runtime gate"
-        );
+    let require_inventory = kind == "fasti.access-c2-inventory.runtime";
+    let ordinary_browser = if kind == "fasti.access-c1.delivery" || require_inventory {
+        validate_browser_process_gate(gates, require_inventory)?;
         let release: Value = serde_json::from_slice(
             &fs::read(root.join("third_party/trailbase/release.json"))
                 .context("failed to read the TrailBase release lock")?,
@@ -789,7 +831,12 @@ pub(crate) fn write_gate_suite_receipt(
             .get("version")
             .and_then(Value::as_str)
             .context("TrailBase release lock omits version")?;
-        Some(validate_ordinary_browser_receipt(root, &source, version)?)
+        Some(validate_ordinary_browser_receipt(
+            root,
+            &source,
+            version,
+            require_inventory,
+        )?)
     } else {
         None
     };
@@ -840,8 +887,13 @@ fn validate_ordinary_browser_receipt(
     root: &Path,
     source: &SourceState,
     trailbase_release: &str,
+    require_inventory: bool,
 ) -> anyhow::Result<OrdinaryBrowserEvidence> {
-    let path = root.join(ORDINARY_BROWSER_RECEIPT_PATH);
+    let path = root.join(if require_inventory {
+        INVENTORY_BROWSER_RECEIPT_PATH
+    } else {
+        ORDINARY_BROWSER_RECEIPT_PATH
+    });
     let bytes = fs::read(&path)
         .with_context(|| format!("ordinary-browser receipt is missing: {}", path.display()))?;
     let receipt: OrdinaryBrowserReceipt = serde_json::from_slice(&bytes)
@@ -854,6 +906,51 @@ fn validate_ordinary_browser_receipt(
         receipt.source == *source,
         "ordinary-browser receipt is not bound to the current clean commit and tree"
     );
+    ensure!(!source.dirty, "ordinary-browser source must be clean");
+    ensure!(
+        receipt.daemon_artifact_sha256
+            == browser_artifact_digest(&root.join("target/debug/fastid"))?
+            && receipt.cli_artifact_sha256
+                == browser_artifact_digest(&root.join("target/debug/fasti"))?
+            && receipt.web_artifact_sha256 == browser_web_digest(&root.join("apps/web/dist"))?,
+        "ordinary-browser artifact digest differs"
+    );
+    let m3 = &receipt.checks.m3_anime_grouping_policy;
+    ensure!(
+        m3.real_fastid
+            && m3.real_sqlite
+            && m3.browser_session
+            && m3.csrf_mutation_boundary
+            && m3.apply_replay_exact
+            && m3.rollback_replay_exact
+            && browser_evidence_id(&m3.durable_record_id, "rec_")
+            && m3.preview_records == 1
+            && m3.final_revision == 2
+            && m3.final_preference == "automatic",
+        "ordinary-browser M3 policy evidence differs"
+    );
+    ensure!(
+        !require_inventory || receipt.checks.client_inventory.is_some(),
+        "ordinary-browser inventory evidence is missing"
+    );
+    if let Some(inventory) = &receipt.checks.client_inventory {
+        ensure!(
+            inventory.capability_id == "access.client.list"
+                && inventory.requested_limit == 1
+                && inventory.returned_clients == 1
+                && browser_evidence_id(&inventory.node_client_id, "cli_")
+                && inventory.node_witness_source == "stopped_fasti_sqlite_node_state"
+                && inventory.cookie_only
+                && inventory.no_store
+                && inventory.exact_node_client_observed
+                && inventory.second_session_revoked
+                && inventory.retained_cookie_denied
+                && inventory.denial_status == 401
+                && inventory.denial_code == "browser_session_revoked"
+                && inventory.original_session_still_authorized,
+            "ordinary-browser inventory evidence differs"
+        );
+    }
     ensure!(
         receipt.trailbase_release == trailbase_release,
         "ordinary-browser receipt is not bound to the locked TrailBase release"
@@ -915,10 +1012,93 @@ fn validate_ordinary_browser_receipt(
     })
 }
 
+fn browser_evidence_id(value: &str, prefix: &str) -> bool {
+    value.strip_prefix(prefix).is_some_and(|id| {
+        id.len() == 32
+            && id
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            && id.as_bytes()[12] == b'7'
+            && matches!(id.as_bytes()[16], b'8' | b'9' | b'a' | b'b')
+    })
+}
+
+fn browser_artifact_digest(path: &Path) -> anyhow::Result<String> {
+    ensure!(
+        fs::symlink_metadata(path)?.file_type().is_file(),
+        "browser artifact must be a regular file"
+    );
+    crate::evidence::sha256_reader(&mut File::open(path)?, "ordinary-browser artifact")
+        .map(|(digest, _)| digest)
+}
+
+fn browser_web_digest(root: &Path) -> anyhow::Result<String> {
+    ensure!(
+        fs::symlink_metadata(root)?.is_dir(),
+        "browser web artifact must be a directory"
+    );
+    ensure!(
+        root.join("index.html").is_file(),
+        "browser web artifact index is missing"
+    );
+    let mut directories = vec![root.to_path_buf()];
+    let mut files = BTreeMap::new();
+    while let Some(directory) = directories.pop() {
+        for entry in fs::read_dir(directory)? {
+            let path = entry?.path();
+            let metadata = fs::symlink_metadata(&path)?;
+            if metadata.is_dir() {
+                directories.push(path);
+            } else {
+                ensure!(
+                    metadata.is_file(),
+                    "browser web artifact contains a symlink or special file"
+                );
+                let components = path
+                    .strip_prefix(root)?
+                    .components()
+                    .map(|component| {
+                        component
+                            .as_os_str()
+                            .to_str()
+                            .context("browser web artifact path is not UTF-8")
+                            .map(str::to_owned)
+                    })
+                    .collect::<anyhow::Result<Vec<_>>>()?;
+                // Match Python Path ordering, not lexicographic slash-separated text.
+                files.insert(components, path);
+            }
+        }
+    }
+    let mut digest = Sha256::new();
+    for (components, path) in files {
+        digest.update(components.join("/").as_bytes());
+        digest.update([0]);
+        let file_digest = browser_artifact_digest(&path)?;
+        for index in (0..file_digest.len()).step_by(2) {
+            digest.update([u8::from_str_radix(&file_digest[index..index + 2], 16)?]);
+        }
+    }
+    Ok(crate::evidence::encode_hex(&digest.finalize()))
+}
+
 fn gate_suite_scope(
     kind: &str,
     ordinary_browser: Option<&OrdinaryBrowserEvidence>,
 ) -> Option<Value> {
+    if kind == "fasti.access-c2-inventory.runtime" {
+        let evidence = ordinary_browser.expect("validated inventory ordinary-browser evidence");
+        return Some(json!({
+            "capability_id": "access.client.list",
+            "runtime_evidence": {
+                "receipt": INVENTORY_BROWSER_RECEIPT_PATH,
+                "receipt_sha256": evidence.receipt_sha256
+            },
+            "complete_c2_claimed": false,
+            "deferred": ["packaged_tauri_authentication"],
+            "packaged_desktop_authentication_claimed": false
+        }));
+    }
     (kind == "fasti.access-c1.delivery").then(|| {
         let evidence = ordinary_browser.expect("validated C1 ordinary-browser evidence");
         json!({
@@ -939,6 +1119,31 @@ fn gate_suite_scope(
             "packaged_desktop_authentication_claimed": false
         })
     })
+}
+
+fn validate_browser_process_gate(gates: &[GateRecord], inventory: bool) -> anyhow::Result<()> {
+    let expected = if inventory {
+        crate::orchestration::access_client_inventory_gate()
+    } else {
+        crate::orchestration::access_c1_gates()[6].clone()
+    };
+    let matching = gates
+        .iter()
+        .filter(|gate| gate.id == expected.id)
+        .collect::<Vec<_>>();
+    ensure!(
+        matching.len() == 1,
+        "ordinary-browser runtime gate must occur exactly once"
+    );
+    let gate = matching[0];
+    ensure!(
+        gate.execution == "process"
+            && gate.status == "pass"
+            && gate.exit_code == Some(0)
+            && gate.command == expected.argv()?,
+        "ordinary-browser runtime gate must bind the exact successful process and arguments"
+    );
+    Ok(())
 }
 
 fn write_receipt(
@@ -1327,7 +1532,17 @@ mod tests {
         assert!(!root.path().join(receipt).exists());
     }
 
-    fn ordinary_browser_fixture(source: &SourceState) -> Value {
+    fn ordinary_browser_fixture(root: &Path, source: &SourceState) -> Value {
+        for (path, bytes) in [
+            ("target/debug/fastid", b"daemon\n".as_slice()),
+            ("target/debug/fasti", b"cli\n".as_slice()),
+            ("apps/web/dist/index.html", b"index\n".as_slice()),
+        ] {
+            let path = root.join(path);
+            fs::create_dir_all(path.parent().expect("artifact parent"))
+                .expect("artifact directory");
+            fs::write(path, bytes).expect("fixture artifact");
+        }
         json!({
             "schema_version": "fasti.access-ordinary-browser.v1",
             "source": {
@@ -1336,6 +1551,9 @@ mod tests {
                 "dirty": source.dirty,
             },
             "trailbase_release": "0.33.5",
+            "web_artifact_sha256": "544e0f07764dd3fb887abd87df53545040278d4dd80677f9662db2ba69d0823f",
+            "daemon_artifact_sha256": sha256_bytes(b"daemon\n"),
+            "cli_artifact_sha256": sha256_bytes(b"cli\n"),
             "checks": {
                 "chromium": "151.0.0.0",
                 "accountSecuritySurfaceLoaded": true,
@@ -1345,6 +1563,12 @@ mod tests {
                     "distinct": true,
                 },
                 "fastiOriginVendorCredentialStorageAbsent": true,
+                "m3AnimeGroupingPolicy": {
+                    "realFastid": true, "realSqlite": true, "browserSession": true,
+                    "csrfMutationBoundary": true, "applyReplayExact": true, "rollbackReplayExact": true,
+                    "durableRecordId": "rec_0199a8e3a62c70008000000000000001",
+                    "previewRecords": 1, "finalRevision": 2, "finalPreference": "automatic"
+                },
             },
             "active_browser_sessions": 1,
             "active_administrators": 1,
@@ -1371,9 +1595,9 @@ mod tests {
             git_tree: "2".repeat(40),
             dirty: false,
         };
-        let fixture = ordinary_browser_fixture(&source);
+        let fixture = ordinary_browser_fixture(root.path(), &source);
         write_ordinary_browser_fixture(root.path(), &fixture);
-        let evidence = validate_ordinary_browser_receipt(root.path(), &source, "0.33.5")
+        let evidence = validate_ordinary_browser_receipt(root.path(), &source, "0.33.5", false)
             .expect("validate exact receipt");
         assert_eq!(evidence.receipt_sha256.len(), 64);
 
@@ -1381,7 +1605,7 @@ mod tests {
         wrong_head["source"]["git_commit"] = Value::String("3".repeat(40));
         write_ordinary_browser_fixture(root.path(), &wrong_head);
         assert!(
-            validate_ordinary_browser_receipt(root.path(), &source, "0.33.5")
+            validate_ordinary_browser_receipt(root.path(), &source, "0.33.5", false)
                 .expect_err("wrong head must fail")
                 .to_string()
                 .contains("current clean commit and tree")
@@ -1391,7 +1615,7 @@ mod tests {
         weak_cookie["checks"]["cookies"]["session"]["secure"] = Value::Bool(false);
         write_ordinary_browser_fixture(root.path(), &weak_cookie);
         assert!(
-            validate_ordinary_browser_receipt(root.path(), &source, "0.33.5")
+            validate_ordinary_browser_receipt(root.path(), &source, "0.33.5", false)
                 .expect_err("weak cookie must fail")
                 .to_string()
                 .contains("session cookie policy")
@@ -1401,7 +1625,7 @@ mod tests {
         wrong_count["active_administrators"] = Value::from(0);
         write_ordinary_browser_fixture(root.path(), &wrong_count);
         assert!(
-            validate_ordinary_browser_receipt(root.path(), &source, "0.33.5")
+            validate_ordinary_browser_receipt(root.path(), &source, "0.33.5", false)
                 .expect_err("wrong administrator count must fail")
                 .to_string()
                 .contains("exactly one active administrator")
@@ -1417,10 +1641,216 @@ mod tests {
             dirty: false,
         };
         assert!(
-            validate_ordinary_browser_receipt(root.path(), &source, "0.33.5")
+            validate_ordinary_browser_receipt(root.path(), &source, "0.33.5", false)
                 .expect_err("missing receipt must fail")
                 .to_string()
                 .contains("ordinary-browser receipt is missing")
+        );
+    }
+
+    #[test]
+    fn ordinary_browser_inventory_receipt_rejects_missing_and_changed_evidence() {
+        let root = tempfile::tempdir().expect("temporary workspace");
+        let source = SourceState {
+            git_commit: "1".repeat(40),
+            git_tree: "2".repeat(40),
+            dirty: false,
+        };
+        let mut fixture = ordinary_browser_fixture(root.path(), &source);
+        write_ordinary_browser_fixture(root.path(), &fixture);
+        // C1 evidence must not satisfy the separate inventory receipt path.
+        assert!(validate_ordinary_browser_receipt(root.path(), &source, "0.33.5", true).is_err());
+        let path = root.path().join(INVENTORY_BROWSER_RECEIPT_PATH);
+        fs::write(&path, serde_json::to_vec(&fixture).unwrap()).unwrap();
+        assert!(
+            validate_ordinary_browser_receipt(root.path(), &source, "0.33.5", true)
+                .unwrap_err()
+                .to_string()
+                .contains("inventory evidence is missing")
+        );
+        fixture["checks"]["clientInventory"] = json!({
+            "capabilityId": "access.client.list", "requestedLimit": 1, "returnedClients": 1,
+            "nodeClientId": "cli_0199a8e3a62c70008000000000000001",
+            "nodeWitnessSource": "stopped_fasti_sqlite_node_state", "cookieOnly": true,
+            "noStore": true, "exactNodeClientObserved": true, "secondSessionRevoked": true,
+            "retainedCookieDenied": true, "denialStatus": 401, "denialCode": "browser_session_revoked",
+            "originalSessionStillAuthorized": true
+        });
+        fs::write(&path, serde_json::to_vec(&fixture).unwrap()).unwrap();
+        validate_ordinary_browser_receipt(root.path(), &source, "0.33.5", true).unwrap();
+        for (pointer, value) in [
+            ("/checks/clientInventory/cookieOnly", json!(false)),
+            ("/checks/clientInventory/noStore", json!(false)),
+            (
+                "/checks/clientInventory/exactNodeClientObserved",
+                json!(false),
+            ),
+            ("/checks/clientInventory/secondSessionRevoked", json!(false)),
+            ("/checks/clientInventory/retainedCookieDenied", json!(false)),
+            (
+                "/checks/clientInventory/originalSessionStillAuthorized",
+                json!(false),
+            ),
+            (
+                "/checks/clientInventory/capabilityId",
+                json!("browser.sessions.list"),
+            ),
+            ("/checks/clientInventory/requestedLimit", json!(2)),
+            ("/checks/clientInventory/returnedClients", json!(0)),
+            (
+                "/checks/clientInventory/nodeClientId",
+                json!("cli_0199a8e3a62c40008000000000000001"),
+            ),
+            (
+                "/checks/clientInventory/nodeWitnessSource",
+                json!("invented"),
+            ),
+            ("/checks/clientInventory/denialStatus", json!(200)),
+            ("/checks/clientInventory/denialCode", json!("forbidden")),
+            ("/checks/m3AnimeGroupingPolicy/realFastid", json!(false)),
+            ("/checks/m3AnimeGroupingPolicy/realSqlite", json!(false)),
+            ("/checks/m3AnimeGroupingPolicy/browserSession", json!(false)),
+            (
+                "/checks/m3AnimeGroupingPolicy/csrfMutationBoundary",
+                json!(false),
+            ),
+            (
+                "/checks/m3AnimeGroupingPolicy/applyReplayExact",
+                json!(false),
+            ),
+            (
+                "/checks/m3AnimeGroupingPolicy/rollbackReplayExact",
+                json!(false),
+            ),
+            ("/checks/m3AnimeGroupingPolicy/previewRecords", json!(0)),
+            ("/checks/m3AnimeGroupingPolicy/finalRevision", json!(1)),
+            (
+                "/checks/m3AnimeGroupingPolicy/finalPreference",
+                json!("group_by_tv_work"),
+            ),
+            (
+                "/checks/m3AnimeGroupingPolicy/durableRecordId",
+                json!("rec_wrong"),
+            ),
+            ("/web_artifact_sha256", json!("A".repeat(64))),
+            ("/daemon_artifact_sha256", json!("a".repeat(63))),
+            ("/cli_artifact_sha256", json!("a".repeat(64))),
+            ("/packaged_tauri_authentication", json!("complete")),
+        ] {
+            let mut changed = fixture.clone();
+            *changed.pointer_mut(pointer).unwrap() = value;
+            fs::write(&path, serde_json::to_vec(&changed).unwrap()).unwrap();
+            assert!(
+                validate_ordinary_browser_receipt(root.path(), &source, "0.33.5", true).is_err(),
+                "{pointer}"
+            );
+        }
+        for pointer in [
+            "",
+            "/checks",
+            "/checks/clientInventory",
+            "/checks/m3AnimeGroupingPolicy",
+        ] {
+            for remove in [false, true] {
+                let mut changed = fixture.clone();
+                let object = changed
+                    .pointer_mut(pointer)
+                    .unwrap()
+                    .as_object_mut()
+                    .unwrap();
+                if remove {
+                    let key = object.keys().next().unwrap().clone();
+                    object.remove(&key);
+                } else {
+                    object.insert("unproven".to_owned(), json!(true));
+                }
+                fs::write(&path, serde_json::to_vec(&changed).unwrap()).unwrap();
+                assert!(
+                    validate_ordinary_browser_receipt(root.path(), &source, "0.33.5", true)
+                        .is_err(),
+                    "{pointer}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn ordinary_browser_web_digest_binds_names_bytes_and_regular_files() {
+        let root = tempfile::tempdir().unwrap();
+        let web = root.path();
+        assert!(browser_web_digest(web).is_err());
+        fs::write(web.join("index.html"), b"index\n").unwrap();
+        assert_eq!(
+            browser_web_digest(web).unwrap(),
+            "544e0f07764dd3fb887abd87df53545040278d4dd80677f9662db2ba69d0823f"
+        );
+        fs::write(web.join("asset.js"), b"first").unwrap();
+        let first = browser_web_digest(web).unwrap();
+        fs::write(web.join("asset.js"), b"second").unwrap();
+        let second = browser_web_digest(web).unwrap();
+        assert_ne!(first, second);
+        fs::rename(web.join("asset.js"), web.join("other.js")).unwrap();
+        assert_ne!(second, browser_web_digest(web).unwrap());
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(web.join("index.html"), web.join("link")).unwrap();
+            assert!(browser_web_digest(web).is_err());
+            assert!(browser_artifact_digest(&web.join("link")).is_err());
+        }
+    }
+
+    #[test]
+    fn ordinary_browser_process_gate_requires_exact_opt_in_and_success() {
+        let expected = crate::orchestration::access_client_inventory_gate();
+        let record = GateRecord {
+            id: expected.id.to_owned(),
+            execution: "process".to_owned(),
+            command: expected.argv().unwrap(),
+            status: "pass".to_owned(),
+            exit_code: Some(0),
+            stdout_sha256: "a".repeat(64),
+            stderr_sha256: "b".repeat(64),
+            tool_version: "Python".to_owned(),
+            stdout: String::new(),
+            stderr: String::new(),
+        };
+        validate_browser_process_gate(std::slice::from_ref(&record), true).unwrap();
+        assert!(validate_browser_process_gate(&[], true).is_err());
+        assert!(validate_browser_process_gate(&[record.clone(), record.clone()], true).is_err());
+        assert!(validate_browser_process_gate(std::slice::from_ref(&record), false).is_err());
+        for change in 0..5 {
+            let mut changed = record.clone();
+            match change {
+                0 => changed.command.retain(|arg| arg != "--c2-client-inventory"),
+                1 => {
+                    *changed.command.last_mut().unwrap() = ORDINARY_BROWSER_RECEIPT_PATH.to_owned()
+                }
+                2 => changed.execution = "in_process".to_owned(),
+                3 => changed.exit_code = Some(1),
+                _ => changed.status = "fail".to_owned(),
+            }
+            assert!(validate_browser_process_gate(&[changed], true).is_err());
+        }
+        let evidence = OrdinaryBrowserEvidence {
+            receipt_sha256: "a".repeat(64),
+        };
+        let scope = gate_suite_scope("fasti.access-c2-inventory.runtime", Some(&evidence)).unwrap();
+        assert_eq!(scope["capability_id"], "access.client.list");
+        assert_eq!(scope["complete_c2_claimed"], false);
+        assert_eq!(scope["packaged_desktop_authentication_claimed"], false);
+    }
+
+    #[test]
+    fn ordinary_browser_web_digest_matches_python_component_order() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(root.path().join("assets/a")).unwrap();
+        fs::write(root.path().join("index.html"), b"index\n").unwrap();
+        fs::write(root.path().join("assets/a.js"), b"sibling\n").unwrap();
+        fs::write(root.path().join("assets/a/chunk.js"), b"nested\n").unwrap();
+        // Independent hashlib/PurePosixPath vector: nested a precedes sibling a.js.
+        assert_eq!(
+            browser_web_digest(root.path()).unwrap(),
+            "46eeb3ffa01f0e1c000e52ea63d55827f980f603d1fdefd586df02ad3925f006"
         );
     }
 

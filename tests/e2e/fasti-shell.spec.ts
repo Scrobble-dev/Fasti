@@ -73,15 +73,18 @@ async function mockTrustedHost(
   providerConfigured = false,
   holdProviderTest = false,
   environmentManaged = false,
+  credentialFreeKitsu = false,
 ) {
   const mockOptions =
     (providerConfigured ? 1 : 0) |
     (holdProviderTest ? 2 : 0) |
-    (environmentManaged ? 4 : 0);
+    (environmentManaged ? 4 : 0) |
+    (credentialFreeKitsu ? 8 : 0);
   await page.addInitScript((options) => {
     const managed = Boolean(options & 4);
     const configured = Boolean(options & 1) || managed;
     const holdTest = Boolean(options & 2);
+    const kitsu = Boolean(options & 8);
     const networkConfiguration = {
       connection: {
         service_url: {
@@ -103,31 +106,52 @@ async function mockTrustedHost(
       },
     };
     let providerIsConfigured = configured;
-    const providerStatus = () => [
-      {
-        provider: "google-books",
-        capability_id: "metadata.search",
-        label: "Google Books",
-        purpose: "Search book metadata",
-        credential_requirement: "optional_api_key",
-        credential_state: providerIsConfigured ? "valid" : "optional",
-        state: "available",
-        source: managed
-          ? "environment"
-          : providerIsConfigured
-            ? "credential_store"
-            : "none",
-        writable: !managed,
-        testable: true,
-        docs_url: "https://developers.google.com/books/docs/v1/using",
-      },
-    ];
+    const providerStatus = () =>
+      kitsu
+        ? ["metadata.search", "metadata.read"].map((capability_id) => ({
+            provider: "kitsu",
+            capability_id,
+            label: "Kitsu",
+            purpose:
+              capability_id === "metadata.search"
+                ? "Search manga metadata"
+                : "Read manga metadata",
+            credential_requirement: "none",
+            credential_state: "not_required",
+            state: "available",
+            source: "none",
+            writable: false,
+            testable: false,
+            health_checkable: true,
+            docs_url: "https://kitsu.docs.apiary.io",
+          }))
+        : [
+            {
+              provider: "google-books",
+              capability_id: "metadata.search",
+              label: "Google Books",
+              purpose: "Search book metadata",
+              credential_requirement: "optional_api_key",
+              credential_state: providerIsConfigured ? "valid" : "optional",
+              state: "available",
+              source: managed
+                ? "environment"
+                : providerIsConfigured
+                  ? "credential_store"
+                  : "none",
+              writable: !managed,
+              testable: true,
+              docs_url: "https://developers.google.com/books/docs/v1/using",
+            },
+          ];
     let nuvioDocument: unknown = null;
     const browserWindow = window as typeof window & {
       __PROVIDER_SECRET_MATCH__?: boolean;
       __PROVIDER_SAVE_CALLS__?: number;
       __PROVIDER_STATUS_CALLS__?: number;
       __PROVIDER_TEST_CALLS__?: number;
+      __KITSU_HEALTH_CALLS__?: unknown[];
+      __KITSU_HOST_COMMANDS__?: string[];
       __RESOLVE_PROVIDER_TEST__?: () => void;
       __NUVIO_REPLACE_COUNT__?: number;
       __TAURI_INTERNALS__: {
@@ -136,6 +160,9 @@ async function mockTrustedHost(
     };
     browserWindow.__TAURI_INTERNALS__ = {
       invoke: async (command, arguments_) => {
+        if (kitsu) {
+          (browserWindow.__KITSU_HOST_COMMANDS__ ??= []).push(command);
+        }
         switch (command) {
           case "setup_status":
             return { phase: "ready", proof_cleanup_pending: false };
@@ -195,6 +222,12 @@ async function mockTrustedHost(
             }
             if (managed) return providerStatus();
             throw new Error("Trusted provider execution is unavailable.");
+          case "read_provider_health":
+            if (!kitsu) {
+              throw new Error(`Unexpected trusted-host command: ${command}`);
+            }
+            (browserWindow.__KITSU_HEALTH_CALLS__ ??= []).push(arguments_);
+            return providerStatus();
           default:
             throw new Error(`Unexpected trusted-host command: ${command}`);
         }
@@ -207,6 +240,7 @@ test("global search and configured record actions use durable tracking state", a
   page,
 }) => {
   const recordId = "rec_01991f588e0070008000000000000002";
+  const csrf = "a".repeat(64);
   let updatedDisposition: string | null = null;
 
   await page.addInitScript(() => {
@@ -219,7 +253,16 @@ test("global search and configured record actions use durable tracking state", a
       }),
     );
   });
-  await page.route(/\/api\/v1\/records$/, (route) =>
+  await page.context().addCookies([
+    {
+      name: "__Host-fasti_csrf",
+      value: csrf,
+      url: "https://127.0.0.1:4173",
+      secure: true,
+      sameSite: "Strict",
+    },
+  ]);
+  await page.route(/\/api\/v1\/records(?:\?record_id=[^&]+)?$/, (route) =>
     route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({
@@ -259,6 +302,10 @@ test("global search and configured record actions use durable tracking state", a
         return;
       }
       expect(request.method()).toBe("PUT");
+      expect(request.headers()["x-csrf-token"]).toBe(csrf);
+      expect(request.headers().authorization).toBeUndefined();
+      expect(new URL(request.url()).origin).toBe("http://127.0.0.1:4173");
+      expect(request.headers().origin).toBe("http://127.0.0.1:4173");
       updatedDisposition = request.postDataJSON().disposition;
       await route.fulfill({
         contentType: "application/json",
@@ -286,7 +333,7 @@ test("global search and configured record actions use durable tracking state", a
   await expect(page.getByRole("heading", { name: "Alpha Film" })).toBeVisible();
   await expect(
     page.getByRole("combobox", { name: "Profile tracking state" }),
-  ).toHaveValue("unset");
+  ).toHaveValue("unknown");
   await page.getByRole("button", { name: "Back to Library" }).click();
 
   await page.getByRole("group", { name: "Alpha Film card" }).click({
@@ -314,6 +361,17 @@ test("global search and configured record actions use durable tracking state", a
   );
   await expect(page.getByText("on hold", { exact: true })).toBeVisible();
   expect(updatedDisposition).toBe("on_hold");
+
+  await page.keyboard.press("Control+K");
+  await search.fill("Alpha");
+  await search.press("Enter");
+  await expect(
+    page.getByRole("combobox", { name: "Profile tracking state" }),
+  ).toHaveValue("on_hold");
+  await page.getByRole("button", { name: "Back to Library" }).click();
+  await expect(page.getByRole("status")).toContainText(
+    "Records still use their activity fallback.",
+  );
 
   await page.keyboard.press("Control+K");
   await expect(search).toBeFocused();
@@ -510,7 +568,13 @@ test("record metadata can refresh or switch through a configured provider", asyn
                       source: "googlebooks.volume",
                     },
                   },
-                ],
+                ].filter((record) => {
+                  const selected = (
+                    arguments_ as
+                      { query?: { record_id?: string | null } } | undefined
+                  )?.query?.record_id;
+                  return selected == null || record.record_id === selected;
+                }),
                 truncated: false,
               };
             case "search_provider":
@@ -518,6 +582,7 @@ test("record metadata can refresh or switch through a configured provider", asyn
                 {
                   provider: "tmdb",
                   provider_id: "693134",
+                  grain: "film",
                   title: "Dune: Part Two",
                   original_title: "Dune: Part Two",
                   kind: "movie",
@@ -1080,6 +1145,87 @@ test("trusted-host provider settings retain a rejected secret for correction", a
     animations: "disabled",
   });
 });
+
+for (const theme of ["light", "dark", "night"] as const) {
+  test(`Kitsu native health controls do not require credential controls (${theme})`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width: 320, height: 900 });
+    await page.addInitScript((mode) => {
+      localStorage.setItem("fasti-theme-settings", JSON.stringify({ mode }));
+    }, theme);
+    await mockTrustedHost(page, false, false, false, true);
+    await page.goto("/settings/metadata");
+    await expect(page.locator("html")).toHaveAttribute(
+      "data-fasti-theme",
+      theme,
+    );
+
+    const rows = page.getByRole("row", { name: /Kitsu/u });
+    await expect(rows).toHaveCount(2);
+    for (const capability of ["metadata.search", "metadata.read"]) {
+      const row = rows.filter({ hasText: capability });
+      await expect(row).toContainText("available");
+      await expect(row).toContainText("No credential is required.");
+      await expect(
+        row.getByRole("button", { name: /Save|Remove|Test credential/u }),
+      ).toHaveCount(0);
+      await expect(row.locator("input")).toHaveCount(0);
+    }
+    const health = rows.getByRole("button", {
+      name: "Check provider health",
+      exact: true,
+    });
+    await expect(health).toHaveCount(1);
+    await expect(
+      rows
+        .filter({ hasText: "metadata.read" })
+        .getByRole("button", { name: "Check provider health" }),
+    ).toHaveCount(0);
+    await expect(health).toBeEnabled();
+    await health.focus();
+    await expect(health).toBeFocused();
+    const healthBounds = await health.boundingBox();
+    expect(healthBounds?.width).toBeGreaterThanOrEqual(44);
+    expect(healthBounds?.height).toBeGreaterThanOrEqual(44);
+    await page.screenshot({
+      path: testInfo.outputPath("kitsu-health-before-320.png"),
+      fullPage: true,
+    });
+    await health.press("Enter");
+    await expect(
+      page
+        .getByRole("status")
+        .filter({ hasText: "Provider health check passed." }),
+    ).toBeVisible();
+    const calls = await page.evaluate(() => {
+      const fixture = window as typeof window & {
+        __KITSU_HEALTH_CALLS__?: unknown[];
+        __KITSU_HOST_COMMANDS__?: string[];
+      };
+      return {
+        health: fixture.__KITSU_HEALTH_CALLS__ ?? [],
+        credentials: (fixture.__KITSU_HOST_COMMANDS__ ?? []).filter((command) =>
+          [
+            "save_provider_credential",
+            "delete_provider_credential",
+            "test_provider_credential",
+          ].includes(command),
+        ),
+      };
+    });
+    expect(calls.health).toEqual([{ input: { provider: "kitsu" } }]);
+    expect(calls.credentials).toEqual([]);
+    await expect(
+      rows.getByRole("button", { name: "Test credential" }),
+    ).toHaveCount(0);
+    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+    await page.screenshot({
+      path: testInfo.outputPath("kitsu-health-after-320.png"),
+      fullPage: true,
+    });
+  });
+}
 
 test("provider credential tests fail closed when trusted execution is unavailable", async ({
   page,

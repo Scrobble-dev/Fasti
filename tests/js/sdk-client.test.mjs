@@ -20,6 +20,8 @@ import {
   parseAcceptObservationRequest,
   parseHealthResponse,
   parseListRecordsResponse,
+  parseListAccessClientsQueryParameters,
+  parseListAccessClientsResponse,
   parseConfigureMetadataProjectionRequest,
   parseRefreshMetadataClaimsRequest,
   parseReceiptCommittedEvent,
@@ -52,6 +54,394 @@ const contractIds = {
   record: v7("rec", "8"),
   browserSession: v7("ses", "9"),
 };
+
+function clientInventoryPage(
+  createdAt = "+10000-01-01T00:00:00.000000Z",
+  epoch = "9223372036854775807",
+) {
+  const client = {
+    client_id: contractIds.client,
+    owner_subject_id: null,
+    name: null,
+    authentication_type: "confidential",
+    purpose: "integration",
+    lifecycle: "revoked",
+    current_credential_epoch: epoch,
+    created_at: createdAt,
+  };
+  return {
+    clients: [client],
+    next: { client_id: client.client_id, created_at: createdAt },
+  };
+}
+
+test("client inventory parsers retain exact time and epoch values", () => {
+  for (const time of [
+    "-262143-01-01T00:00:00.000000Z",
+    "+262142-12-31T23:59:59.999999Z",
+    "-0001-12-31T23:59:59.999999Z",
+    "0000-01-01T00:00:00.000000Z",
+    "+10000-01-01T00:00:00.000000Z",
+    "2016-12-31T23:59:60.999999Z",
+  ]) {
+    for (const epoch of ["0", "9007199254740992", "9223372036854775807"]) {
+      const response = clientInventoryPage(time, epoch);
+      assert.deepEqual(parseListAccessClientsResponse(response), response);
+      const query = {
+        after_created_at: time,
+        after_client_id: contractIds.client,
+        limit: 1,
+      };
+      assert.deepEqual(parseListAccessClientsQueryParameters(query), query);
+    }
+  }
+  for (const time of [
+    "2026-02-30T00:00:00.000000Z",
+    "2026-01-01T00:00:61.000000Z",
+    "2026-01-01T00:00:00Z",
+    "2026-01-01T00:00:00.000000+00:00",
+    "-0000-01-01T00:00:00.000000Z",
+    "+010000-01-01T00:00:00.000000Z",
+    "-262144-01-01T00:00:00.000000Z",
+    "+262143-01-01T00:00:00.000000Z",
+  ]) {
+    assert.throws(
+      () => parseListAccessClientsResponse(clientInventoryPage(time)),
+      FastiContractParseError,
+    );
+    assert.throws(
+      () =>
+        parseListAccessClientsQueryParameters({
+          after_created_at: time,
+          after_client_id: contractIds.client,
+        }),
+      FastiContractParseError,
+    );
+  }
+  for (const epoch of [
+    "-1",
+    "01",
+    "1.0",
+    "9223372036854775808",
+    9007199254740992,
+  ]) {
+    assert.throws(
+      () =>
+        parseListAccessClientsResponse(clientInventoryPage(undefined, epoch)),
+      FastiContractParseError,
+    );
+  }
+  for (const query of [
+    { limit: 0 },
+    { limit: 101 },
+    { limit: null },
+    { after_client_id: contractIds.client },
+    { after_created_at: null, after_client_id: null },
+    { unknown: true },
+  ]) {
+    assert.throws(
+      () => parseListAccessClientsQueryParameters(query),
+      FastiContractParseError,
+    );
+  }
+  const response = clientInventoryPage();
+  assert.throws(
+    () => parseListAccessClientsResponse({ ...response, clients: [] }),
+    FastiContractParseError,
+  );
+  assert.throws(
+    () =>
+      parseListAccessClientsResponse({
+        ...response,
+        clients: [...response.clients, ...response.clients],
+      }),
+    FastiContractParseError,
+  );
+  assert.throws(
+    () =>
+      parseListAccessClientsResponse({
+        ...response,
+        next: { ...response.next, client_id: v7("cli", "e") },
+      }),
+    FastiContractParseError,
+  );
+  for (const change of [
+    { authentication_type: "first_party" },
+    { name: "é".repeat(65) },
+    { name: "bad\u202e" },
+    { name: " padded " },
+  ]) {
+    assert.throws(
+      () =>
+        parseListAccessClientsResponse({
+          ...response,
+          clients: [{ ...response.clients[0], ...change }],
+        }),
+      FastiContractParseError,
+    );
+  }
+  assert.deepEqual(
+    parseListAccessClientsResponse({ clients: [], next: null }),
+    { clients: [], next: null },
+  );
+});
+
+test("client inventory transport encodes cursor plus without bearer or mutation credentials", async () => {
+  const response = clientInventoryPage("+10000-01-01T00:00:00.000001Z");
+  const query = {
+    limit: 1,
+    after_created_at: "+10000-01-01T00:00:00.000002Z",
+    after_client_id: contractIds.client,
+  };
+  let calls = 0;
+  const client = new FastiClient({
+    baseUrl: "http://127.0.0.1:8420",
+    credential: "must-not-be-attached",
+    fetch: async (url, init) => {
+      calls += 1;
+      const target = new URL(String(url));
+      assert.equal(target.pathname, "/api/access/v1/clients");
+      assert.ok(target.search.includes("%2B10000"));
+      assert.equal(
+        target.searchParams.get("after_created_at"),
+        query.after_created_at,
+      );
+      assert.equal(init.method, "GET");
+      assert.equal(new Headers(init.headers).get("Authorization"), null);
+      assert.equal(new Headers(init.headers).get("X-CSRF-Token"), null);
+      assert.equal(init.body, undefined);
+      assert.equal(init.credentials, "same-origin");
+      return new Response(JSON.stringify(response), {
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+  assert.deepEqual(await client.listAccessClients(query), response);
+  assert.equal(calls, 1);
+  assert.throws(
+    () =>
+      client.listAccessClients({ after_client_id: response.next.client_id }),
+    FastiContractParseError,
+  );
+  assert.equal(calls, 1);
+});
+
+test("client inventory names preserve Rust whitespace semantics", () => {
+  for (const name of ["\uFEFFname", "name\uFEFF", "é".repeat(64)]) {
+    const response = clientInventoryPage();
+    response.clients[0].name = name;
+    assert.deepEqual(parseListAccessClientsResponse(response), response);
+  }
+  for (const name of ["\u00a0name", "name\u2003", "\u0085name", "\u3000"]) {
+    const response = clientInventoryPage();
+    response.clients[0].name = name;
+    assert.throws(
+      () => parseListAccessClientsResponse(response),
+      FastiContractParseError,
+    );
+  }
+});
+
+test("client inventory pagination binds limits and exact descending order", () => {
+  const page = clientInventoryPage();
+  const cursor = {
+    limit: 1,
+    after_created_at: page.next.created_at,
+    after_client_id: page.next.client_id,
+  };
+  assert.throws(
+    () => parseListAccessClientsResponse(page, cursor),
+    FastiContractParseError,
+  );
+  assert.throws(
+    () => parseListAccessClientsResponse(page, {}),
+    FastiContractParseError,
+  );
+  assert.throws(
+    () => parseListAccessClientsResponse(page, { limit: 0 }),
+    FastiContractParseError,
+  );
+  const times = [
+    "+262142-12-31T23:59:59.999999Z",
+    "+10000-01-01T00:00:00.000000Z",
+    "9999-12-31T23:59:59.999999Z",
+    "2017-01-01T00:00:00.000000Z",
+    "2016-12-31T23:59:60.999999Z",
+    "2016-12-31T23:59:60.000000Z",
+    "2016-12-31T23:59:59.999999Z",
+    "0000-01-01T00:00:00.000000Z",
+    "-0001-12-31T23:59:59.999999Z",
+    "-10000-01-01T00:00:00.000000Z",
+    "-262143-01-01T00:00:00.000000Z",
+  ];
+  for (let index = 1; index < times.length; index += 1) {
+    const response = clientInventoryPage(times[index]);
+    const query = {
+      limit: 1,
+      after_created_at: times[index - 1],
+      after_client_id: contractIds.client,
+    };
+    assert.deepEqual(parseListAccessClientsResponse(response, query), response);
+    assert.throws(
+      () =>
+        parseListAccessClientsResponse(clientInventoryPage(times[index - 1]), {
+          ...query,
+          after_created_at: times[index],
+        }),
+      FastiContractParseError,
+    );
+  }
+  const laterId = v7("cli", "e");
+  assert.deepEqual(
+    parseListAccessClientsResponse(page, {
+      ...cursor,
+      after_client_id: laterId,
+    }),
+    page,
+  );
+  assert.throws(
+    () =>
+      parseListAccessClientsResponse(page, {
+        ...cursor,
+        after_client_id: v7("cli", "1"),
+      }),
+    FastiContractParseError,
+  );
+  const rows = [{ ...page.clients[0], client_id: laterId }, page.clients[0]];
+  const ordered = { clients: rows, next: null };
+  assert.deepEqual(
+    parseListAccessClientsResponse(ordered, { limit: 2 }),
+    ordered,
+  );
+  assert.throws(
+    () => parseListAccessClientsResponse(ordered, { limit: 1 }),
+    FastiContractParseError,
+  );
+  assert.throws(
+    () =>
+      parseListAccessClientsResponse({
+        clients: rows.toReversed(),
+        next: null,
+      }),
+    FastiContractParseError,
+  );
+  const defaultOverflow = {
+    clients: Array.from({ length: 33 }, (_, i) => ({
+      ...page.clients[0],
+      client_id: contractIds.client.slice(0, -2) + (100 - i).toString(16),
+    })),
+    next: null,
+  };
+  assert.deepEqual(
+    parseListAccessClientsResponse(defaultOverflow),
+    defaultOverflow,
+  );
+  assert.throws(
+    () => parseListAccessClientsResponse(defaultOverflow, {}),
+    FastiContractParseError,
+  );
+});
+
+test("client inventory transport validates against an immutable request snapshot", async () => {
+  const response = clientInventoryPage();
+  const query = {
+    limit: 1,
+    after_created_at: "+10001-01-01T00:00:00.000000Z",
+    after_client_id: contractIds.client,
+  };
+  let deliver;
+  let started;
+  const ready = new Promise((resolve) => {
+    started = resolve;
+  });
+  const client = new FastiClient({
+    baseUrl: "http://127.0.0.1:8420",
+    fetch: () =>
+      new Promise((resolve) => {
+        deliver = resolve;
+        started();
+      }),
+  });
+  const pending = client.listAccessClients(query);
+  await ready;
+  query.after_created_at = "0000-01-01T00:00:00.000000Z";
+  query.limit = 100;
+  deliver(
+    new Response(JSON.stringify(response), {
+      headers: { "content-type": "application/json" },
+    }),
+  );
+  assert.deepEqual(await pending, response);
+  const invalidClient = new FastiClient({
+    baseUrl: "http://127.0.0.1:8420",
+    fetch: async () =>
+      new Response(JSON.stringify(response), {
+        headers: { "content-type": "application/json" },
+      }),
+  });
+  await assert.rejects(
+    invalidClient.listAccessClients({
+      limit: 1,
+      after_created_at: response.next.created_at,
+      after_client_id: response.next.client_id,
+    }),
+    FastiProtocolError,
+  );
+});
+
+test("client inventory web host retains browser origin and cookie authority", async () => {
+  const { createWebHost } = await import("../../apps/web/src/web-host.ts");
+  const originals = new Map(
+    ["window", "localStorage", "fetch"].map((name) => [
+      name,
+      Object.getOwnPropertyDescriptor(globalThis, name),
+    ]),
+  );
+  const origin = "http://127.0.0.1:4173";
+  const response = { clients: [], next: null };
+  let calls = 0;
+  try {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { location: { origin } },
+    });
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      value: { getItem: () => null },
+    });
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      value: async (url, init) => {
+        if (init.signal?.aborted)
+          throw new DOMException("Aborted", "AbortError");
+        calls += 1;
+        const target = new URL(url);
+        assert.equal(target.origin, origin);
+        assert.equal(target.pathname, "/api/access/v1/clients");
+        assert.equal(target.searchParams.get("limit"), "1");
+        assert.equal(new Headers(init.headers).get("Authorization"), null);
+        assert.equal(init.credentials, "same-origin");
+        return new Response(JSON.stringify(response), {
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+    const host = createWebHost("http://127.0.0.1:8422", "scoped-test-token");
+    assert.deepEqual(await host.listAccessClients({ limit: 1 }), response);
+    const controller = new AbortController();
+    controller.abort();
+    await assert.rejects(
+      host.listAccessClients({ limit: 1 }, controller.signal),
+      FastiAbortError,
+    );
+    assert.equal(calls, 1);
+  } finally {
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else delete globalThis[name];
+    }
+  }
+});
 
 test("metadata refresh parser enforces canonical operation IDs", () => {
   const request = {
@@ -237,6 +627,7 @@ test("browser authentication SDK exposes callable operations but never the callb
     "readBrowserSession",
     "endBrowserSession",
     "listBrowserSessions",
+    "listAccessClients",
     "revokeBrowserSession",
     "revokeOtherBrowserSessions",
     "revokeAllBrowserSessions",
@@ -948,6 +1339,7 @@ test("credentials are header-only on authenticated surfaces and no offline queue
           "health",
           "initializeDurableNode",
           "initializeNode",
+          "listAccessClients",
           "listBrowserSessions",
           "listIntegrations",
           "listProviders",
@@ -959,6 +1351,8 @@ test("credentials are header-only on authenticated surfaces and no offline queue
           "readBrowserSession",
           "readMetadataProjection",
           "readProviderHealth",
+          "readProviderIdentifierDetails",
+          "readSearchCandidate",
           "readTrailBaseContinuation",
           "receiptEvents",
           "refreshMetadataClaims",
@@ -973,6 +1367,10 @@ test("credentials are header-only on authenticated surfaces and no offline queue
           "revokeOtherBrowserSessions",
           "rotateBrowserSession",
           "rotateCredential",
+          "saveProviderIdentifier",
+          "saveSearchCandidate",
+          "searchProviderPage",
+          "searchRecords",
           "selectBrowserSessionProfile",
           "selectProfile",
           "setTrackingDisposition",
@@ -1149,6 +1547,69 @@ test("client.listRecords() surfaces the truncated flag through the transport", a
   });
 });
 
+test("Record selection preserves call options and binds the response identity", async () => {
+  let attempts = 0;
+  let response = { records: [], truncated: false };
+  const client = new FastiClient({
+    baseUrl: "http://127.0.0.1:8420",
+    credential: "records-secret",
+    fetch: async (url, init) => {
+      attempts += 1;
+      assert.equal(
+        new URL(url).searchParams.get("record_id"),
+        contractIds.record,
+      );
+      assert.equal(init.method, "GET");
+      assert.equal(init.body, undefined);
+      return new Response(JSON.stringify(response), {
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+  const select = () =>
+    client.listRecords({ timeoutMs: 1000 }, { record_id: contractIds.record });
+  assert.deepEqual(await select(), response);
+  assert.throws(
+    () => client.listRecords({}, { record_id: "../invalid" }),
+    FastiProtocolError,
+  );
+  assert.throws(
+    () => client.listRecords({}, { unknown: true }),
+    FastiProtocolError,
+  );
+  assert.equal(attempts, 1);
+  response = { records: [], truncated: true };
+  await assert.rejects(select(), FastiProtocolError);
+  const record = {
+    record_id: contractIds.record,
+    grain: "film",
+    status: "active",
+    title: { tier: "empty", value: null, source: null, is_stale: false },
+    poster: { tier: "empty", value: null, source: null, is_stale: false },
+    latest_activity: null,
+  };
+  response = { records: [record], truncated: false };
+  assert.deepEqual(await select(), response);
+  response = { records: [record, record], truncated: false };
+  await assert.rejects(select(), FastiProtocolError);
+  response = {
+    records: [{ ...record, record_id: v7("rec", "a") }],
+    truncated: false,
+  };
+  await assert.rejects(select(), FastiProtocolError);
+  const omitted = new FastiClient({
+    baseUrl: "http://127.0.0.1:8420",
+    credential: "records-secret",
+    fetch: async (url) => {
+      assert.equal(new URL(url).search, "");
+      return new Response(JSON.stringify({ records: [], truncated: false }), {
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+  await omitted.listRecords({}, { record_id: null });
+});
+
 test("provider SDK keeps reads retry-safe and credential mutations single-attempt", async (context) => {
   await context.test("provider list retries a transient response", async () => {
     let attempts = 0;
@@ -1274,10 +1735,10 @@ test("connection endpoints reject unsafe origins", () => {
   }
 });
 test("generated public metadata preserves complete registry and surface dispositions", () => {
-  assert.equal(PUBLIC_CAPABILITY_REGISTRY.capabilities.length, 52);
+  assert.equal(PUBLIC_CAPABILITY_REGISTRY.capabilities.length, 54);
   assert.equal(
     Object.keys(PUBLIC_CAPABILITY_REGISTRY.surface_profiles).length,
-    17,
+    19,
   );
   const stream = PUBLIC_CAPABILITY_REGISTRY.capabilities.find(
     (capability) => capability.id === "receipt.stream",
@@ -1811,7 +2272,7 @@ test("all implemented contract routes complete against the loopback Rust fixture
       discovery.surface_profiles,
       PUBLIC_CAPABILITY_REGISTRY.surface_profiles,
     );
-    assert.equal(discovery.capabilities.length, 52);
+    assert.equal(discovery.capabilities.length, 54);
     assert.ok(
       discovery.capabilities.some(
         (capability) =>

@@ -1,15 +1,47 @@
-use crate::kernel::{now, timestamp, SqliteKernel};
+use crate::kernel::{authorize_application_transaction, map_sql, now, timestamp, SqliteKernel};
 use chrono::{DateTime, SecondsFormat, Utc};
 use fasti_application::{
-    ConfigurationDigest, CredentialReference, CredentialRequirement, ProblemCode,
-    ProviderCapabilityId, ProviderCapabilityState, ProviderCapabilityStatus, ProviderCheckMetadata,
-    ProviderCheckStatus, ProviderCredentialStatus, ProviderId, ProviderStatePort,
-    ProviderStatePortError, ProviderStateWriteOutcome,
+    ApplicationAccessContext, ApplicationResult, CapabilityKey, ConfigurationDigest,
+    CredentialReference, CredentialRequirement, FastiProblem, ProblemCode, ProviderCapabilityId,
+    ProviderCapabilityState, ProviderCapabilityStatus, ProviderCheckMetadata, ProviderCheckStatus,
+    ProviderCredentialStatus, ProviderId, ProviderStatePort, ProviderStatePortError,
+    ProviderStateWriteOutcome,
 };
-use fasti_domain::WorkspaceId;
-use rusqlite::{params, types::Type, OptionalExtension, Row, Transaction, TransactionBehavior};
+use fasti_domain::{RequestCorrelationId, WorkspaceId};
+use rusqlite::{
+    params, types::Type, Connection, OptionalExtension, Row, Transaction, TransactionBehavior,
+};
 
 impl ProviderStatePort for SqliteKernel {
+    fn authorize_and_list_provider_capability_states(
+        &self,
+        correlation_id: RequestCorrelationId,
+        access: &ApplicationAccessContext,
+    ) -> ApplicationResult<Vec<ProviderCapabilityState>> {
+        let capability = CapabilityKey::ListProviders;
+        let mut connection = self.inner.connection.lock().map_err(|_| {
+            Box::new(FastiProblem::storage_unavailable(
+                capability,
+                correlation_id,
+            ))
+        })?;
+        let transaction = map_sql(connection.transaction(), capability, correlation_id)?;
+        let authority =
+            authorize_application_transaction(&transaction, capability, access, correlation_id)?;
+        let states = list_states(&transaction, authority.workspace_id()).map_err(|error| {
+            Box::new(match map_store_error(error) {
+                ProviderStatePortError::Corrupt | ProviderStatePortError::RevisionConflict => {
+                    FastiProblem::integrity_failed(capability, correlation_id)
+                }
+                ProviderStatePortError::Unavailable => {
+                    FastiProblem::storage_unavailable(capability, correlation_id)
+                }
+            })
+        })?;
+        map_sql(transaction.commit(), capability, correlation_id)?;
+        Ok(states)
+    }
+
     fn get_provider_capability_state(
         &self,
         workspace_id: WorkspaceId,
@@ -46,17 +78,7 @@ impl ProviderStatePort for SqliteKernel {
             .connection
             .lock()
             .map_err(|_| ProviderStatePortError::Unavailable)?;
-        let mut statement = connection
-            .prepare(&state_select(
-                "WHERE workspace_id = ?1 ORDER BY provider_id, capability_id",
-            ))
-            .map_err(map_store_error)?;
-        let states = statement
-            .query_map([workspace_id.to_string()], read_state)
-            .map_err(map_store_error)?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(map_store_error)?;
-        Ok(states)
+        list_states(&connection, workspace_id).map_err(map_store_error)
     }
 
     fn put_provider_capability_state(
@@ -92,7 +114,18 @@ impl ProviderStatePort for SqliteKernel {
     }
 }
 
-fn state_select(suffix: &str) -> String {
+fn list_states(
+    connection: &Connection,
+    workspace_id: WorkspaceId,
+) -> rusqlite::Result<Vec<ProviderCapabilityState>> {
+    let mut statement = connection.prepare(&state_select(
+        "WHERE workspace_id = ?1 ORDER BY provider_id, capability_id",
+    ))?;
+    let rows = statement.query_map([workspace_id.to_string()], read_state)?;
+    rows.collect()
+}
+
+pub(crate) fn state_select(suffix: &str) -> String {
     format!(
         r#"
         SELECT provider_id, capability_id, capability_status, capability_version,
@@ -237,7 +270,7 @@ fn check_timestamp(check: &ProviderCheckMetadata) -> Option<String> {
         .map(|value| value.to_rfc3339_opts(SecondsFormat::Micros, true))
 }
 
-fn read_state(row: &Row<'_>) -> rusqlite::Result<ProviderCapabilityState> {
+pub(crate) fn read_state(row: &Row<'_>) -> rusqlite::Result<ProviderCapabilityState> {
     let provider_id = ProviderId::try_new(row.get::<_, String>(0)?)
         .map_err(|error| conversion_error(0, error))?;
     let capability_id = ProviderCapabilityId::try_new(row.get::<_, String>(1)?)

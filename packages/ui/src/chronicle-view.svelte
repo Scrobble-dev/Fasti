@@ -1,12 +1,10 @@
 <script lang="ts">
   import type { ChronicleOccurrence } from "./types.js";
-  import {
-    IconRepeat,
-    IconStarFilled,
-    IconDeviceTv,
-    IconCalendarTime,
-    IconSparkles,
-  } from "@tabler/icons-svelte";
+  import IconRepeat from "@tabler/icons-svelte/icons/repeat";
+  import IconStarFilled from "@tabler/icons-svelte/icons/star-filled";
+  import IconDeviceTv from "@tabler/icons-svelte/icons/device-tv";
+  import IconCalendarTime from "@tabler/icons-svelte/icons/calendar-time";
+  import IconSparkles from "@tabler/icons-svelte/icons/sparkles";
 
   interface Props {
     occurrences: ChronicleOccurrence[];

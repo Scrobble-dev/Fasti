@@ -47,6 +47,170 @@ test("governed examples validate semantically", async () => {
   assert.ok(result.problemCount >= 11);
 });
 
+for (const [field, value] of [
+  ["created_at", "2026-02-30T12:00:00.000001Z"],
+  ["created_at", "+010000-01-01T00:00:00.000000Z"],
+  ["created_at", "-0000-01-01T00:00:00.000000Z"],
+  ["created_at", "+262143-01-01T00:00:00.000000Z"],
+  ["created_at", "2026-09-08T12:00:61.000000Z"],
+  ["current_credential_epoch", "9223372036854775808"],
+  ["current_credential_epoch", "01"],
+]) {
+  test(`inventory example rejects ${field}=${value}`, async () => {
+    await withContractCopy(
+      (root) =>
+        mutateJson(
+          root,
+          "contracts/examples/v1/access.client.list.success.json",
+          (example) => {
+            example.clients[0][field] = value;
+          },
+        ),
+      (result) => assert.rejects(result, /format|pattern/u),
+    );
+  });
+}
+
+for (const createdAt of [
+  "0000-02-29T00:00:00.000000Z",
+  "-262143-01-01T00:00:00.000000Z",
+  "+262142-12-31T23:59:60.999999Z",
+]) {
+  test(`inventory example preserves exact time ${createdAt}`, async () => {
+    await withContractCopy(
+      async (root) => {
+        let expected;
+        await mutateJson(
+          root,
+          "contracts/examples/v1/access.client.list.success.json",
+          (example) => {
+            example.clients = [example.clients[0]];
+            example.clients[0].created_at = createdAt;
+            example.clients[0].current_credential_epoch = "9223372036854775807";
+            expected = example;
+          },
+        );
+        await mutateJson(
+          root,
+          "contracts/generated/v1/openapi.json",
+          (openapi) => {
+            openapi.paths["/api/access/v1/clients"].get.responses[
+              "200"
+            ].content["application/json"].examples[
+              "access.client.list.success"
+            ].value = expected;
+          },
+        );
+      },
+      (result) => assert.doesNotReject(result),
+    );
+  });
+}
+
+test("inventory success example cannot change owner", async () => {
+  await withContractCopy(
+    (root) =>
+      mutateJson(
+        root,
+        "contracts/generated/v1/capabilities.json",
+        (registry) => {
+          registry.capabilities.find(
+            ({ id }) => id === "access.client.list",
+          ).examples = [];
+          registry.capabilities
+            .find(({ id }) => id === "browser.sessions.list")
+            .examples.push("access.client.list.success");
+        },
+      ),
+    (result) => assert.rejects(result, /wrong owner/u),
+  );
+});
+
+test("inventory example validates the supplied root schema", async () => {
+  await withContractCopy(
+    (root) =>
+      mutateJson(root, "contracts/generated/v1/openapi.json", (openapi) => {
+        openapi.components.schemas.ListAccessClientsResponse.properties.clients.maxItems = 0;
+      }),
+    (result) => assert.rejects(result, /more than 0 items/u),
+  );
+});
+
+test("public inventory epoch does not permit credential fields in other examples", async () => {
+  await withContractCopy(
+    (root) =>
+      mutateJson(
+        root,
+        "contracts/examples/v1/receipt.replay.receipt_not_found.json",
+        (example) => {
+          example.current_credential_epoch = "1";
+        },
+      ),
+    (result) => assert.rejects(result, /credential or secret field/u),
+  );
+});
+
+test("inventory names still reject secret-shaped values", async () => {
+  await withContractCopy(
+    (root) =>
+      mutateJson(
+        root,
+        "contracts/examples/v1/access.client.list.success.json",
+        (example) => {
+          example.clients[0].name = "a".repeat(64);
+        },
+      ),
+    (result) => assert.rejects(result, /secret-shaped value/u),
+  );
+});
+
+test("inventory success example must match its embedded response", async () => {
+  await withContractCopy(
+    (root) =>
+      mutateJson(
+        root,
+        "contracts/examples/v1/access.client.list.success.json",
+        (example) => {
+          example.clients[0].name = "Another name";
+        },
+      ),
+    (result) => assert.rejects(result, /embedded production OpenAPI example/u),
+  );
+});
+
+test("inventory conformance twin cannot hide a changed production example", async () => {
+  await withContractCopy(
+    async (root) => {
+      const openapi = JSON.parse(
+        await readFile(
+          join(root, "contracts/generated/v1/openapi.json"),
+          "utf8",
+        ),
+      );
+      await mutateJson(
+        root,
+        "contracts/generated/v1/conformance-openapi.json",
+        (conformance) => {
+          conformance.paths["/api/access/v1/clients"] =
+            openapi.paths["/api/access/v1/clients"];
+        },
+      );
+      await mutateJson(
+        root,
+        "contracts/generated/v1/openapi.json",
+        (production) => {
+          production.paths["/api/access/v1/clients"].get.responses[
+            "200"
+          ].content["application/json"].examples[
+            "access.client.list.success"
+          ].value.clients[0].name = "Changed production";
+        },
+      );
+    },
+    (result) => assert.rejects(result, /embedded production OpenAPI example/u),
+  );
+});
+
 test("problem examples cannot claim another capability", async () => {
   await withContractCopy(
     (root) =>

@@ -1,38 +1,36 @@
 <script lang="ts">
   import type { ActiveNavSection, NavItemConfig } from "./types.js";
   import { DEFAULT_NAV_ITEMS } from "./defaults.js";
-  import {
-    IconAdjustments,
-    IconBook,
-    IconBook2,
-    IconBookmarks,
-    IconBox,
-    IconCalendar,
-    IconChartBar,
-    IconChevronLeft,
-    IconChevronRight,
-    IconClock,
-    IconCompass,
-    IconDatabase,
-    IconDeviceGamepad2,
-    IconDeviceTv,
-    IconDice,
-    IconEyeOff,
-    IconFileText,
-    IconHeadphones,
-    IconHome,
-    IconLibrary,
-    IconListDetails,
-    IconMicrophone,
-    IconMovie,
-    IconPin,
-    IconPlugConnected,
-    IconSettings,
-    IconShieldCheck,
-    IconStack2,
-    IconTag,
-    IconX,
-  } from "@tabler/icons-svelte";
+  import IconAdjustments from "@tabler/icons-svelte/icons/adjustments";
+  import IconBook from "@tabler/icons-svelte/icons/book";
+  import IconBook2 from "@tabler/icons-svelte/icons/book-2";
+  import IconBookmarks from "@tabler/icons-svelte/icons/bookmarks";
+  import IconBox from "@tabler/icons-svelte/icons/box";
+  import IconCalendar from "@tabler/icons-svelte/icons/calendar";
+  import IconChartBar from "@tabler/icons-svelte/icons/chart-bar";
+  import IconChevronLeft from "@tabler/icons-svelte/icons/chevron-left";
+  import IconChevronRight from "@tabler/icons-svelte/icons/chevron-right";
+  import IconClock from "@tabler/icons-svelte/icons/clock";
+  import IconCompass from "@tabler/icons-svelte/icons/compass";
+  import IconDatabase from "@tabler/icons-svelte/icons/database";
+  import IconDeviceGamepad2 from "@tabler/icons-svelte/icons/device-gamepad-2";
+  import IconDeviceTv from "@tabler/icons-svelte/icons/device-tv";
+  import IconDice from "@tabler/icons-svelte/icons/dice";
+  import IconEyeOff from "@tabler/icons-svelte/icons/eye-off";
+  import IconFileText from "@tabler/icons-svelte/icons/file-text";
+  import IconHeadphones from "@tabler/icons-svelte/icons/headphones";
+  import IconHome from "@tabler/icons-svelte/icons/home";
+  import IconLibrary from "@tabler/icons-svelte/icons/library";
+  import IconListDetails from "@tabler/icons-svelte/icons/list-details";
+  import IconMicrophone from "@tabler/icons-svelte/icons/microphone";
+  import IconMovie from "@tabler/icons-svelte/icons/movie";
+  import IconPin from "@tabler/icons-svelte/icons/pin";
+  import IconPlugConnected from "@tabler/icons-svelte/icons/plug-connected";
+  import IconSettings from "@tabler/icons-svelte/icons/settings";
+  import IconShieldCheck from "@tabler/icons-svelte/icons/shield-check";
+  import IconStack2 from "@tabler/icons-svelte/icons/stack-2";
+  import IconTag from "@tabler/icons-svelte/icons/tag";
+  import IconX from "@tabler/icons-svelte/icons/x";
 
   interface Props {
     activeSection: ActiveNavSection;

@@ -1,11 +1,32 @@
 <script lang="ts">
   import type {
     CreateRecordResult,
+    LocalSearchCursorDto,
+    LocalSearchResponseDto,
     ProviderCredentialStatus,
     ProviderSearchCandidate,
+    SearchCandidateDto,
+    SearchCandidateDetailsResponse,
+    ProviderIdentifierDetailsResponse,
+    SearchCandidateReceiptDto,
+    SearchProviderPageResponse,
+    SearchRecordActionDto,
   } from "./types.js";
+  import { onDestroy, tick, untrack } from "svelte";
+  import {
+    LOCAL_SEARCH_MAX_RESPONSE_BYTES,
+    parseLocalSearchResponseDto,
+    parseSearchProviderPageForRequest,
+  } from "@fasti/sdk";
+  import { dialogFocus } from "./dialog-focus.js";
+  import {
+    routeSlug,
+    canonicalLiveCandidatePath,
+    type SearchCandidateRoute,
+  } from "./route-slug.js";
   import { hostProblemText } from "./host-problem.js";
-  import { IconCompass, IconSearch } from "@tabler/icons-svelte";
+  import IconCompass from "@tabler/icons-svelte/icons/compass";
+  import IconSearch from "@tabler/icons-svelte/icons/search";
 
   interface Props {
     providerCredentials?: ProviderCredentialStatus[];
@@ -14,12 +35,43 @@
     onSearch: (
       provider: string,
       query: string,
+      signal?: AbortSignal,
     ) => Promise<ProviderSearchCandidate[]>;
+    onSearchLocal?: (
+      query: string,
+      after?: LocalSearchCursorDto,
+      signal?: AbortSignal,
+    ) => Promise<LocalSearchResponseDto>;
+    onSearchAttachTargets?: (
+      query: string,
+      grain: string,
+      after?: LocalSearchCursorDto,
+      signal?: AbortSignal,
+    ) => Promise<LocalSearchResponseDto>;
+    onSearchProviderPage?: (
+      provider: string,
+      query: string,
+      page: number,
+      offline: boolean,
+      signal?: AbortSignal,
+    ) => Promise<SearchProviderPageResponse>;
     onOpenSettings: () => void;
     onRetry: () => void;
+    onOpenRecord?: (recordId: string) => void;
     onCandidateAction?: (
       candidate: ProviderSearchCandidate,
+      action?: SearchRecordActionDto,
     ) => Promise<CreateRecordResult | void>;
+    onCandidateReceiptAction?: (
+      receipt: SearchCandidateReceiptDto,
+      evidenceMode: "cached" | "refetch",
+      action?: SearchRecordActionDto,
+    ) => Promise<CreateRecordResult | void>;
+    onReadCandidate?: (
+      receipt: SearchCandidateReceiptDto,
+      offline: boolean,
+      signal?: AbortSignal,
+    ) => Promise<SearchCandidateDetailsResponse>;
     embedded?: boolean;
     actionLabel?: string;
     pendingLabel?: string;
@@ -29,6 +81,18 @@
     actionUnavailableText?: string;
     selectedProviderId?: string;
     selectionExplicit?: boolean;
+    candidateRoute?: SearchCandidateRoute;
+    candidateRouteProblem?: string;
+    onOpenCandidate?: (receipt: SearchCandidateReceiptDto) => void;
+    onOpenLiveCandidate?: (candidate: ProviderSearchCandidate) => void;
+    onCloseCandidateRoute?: () => void;
+    onReadCandidateRoute?: (
+      route: SearchCandidateRoute,
+      offline: boolean,
+      signal?: AbortSignal,
+    ) => Promise<
+      SearchCandidateDetailsResponse | ProviderIdentifierDetailsResponse
+    >;
   }
 
   let {
@@ -36,9 +100,15 @@
     loading = false,
     hostProblem,
     onSearch,
+    onSearchLocal,
+    onSearchAttachTargets,
+    onSearchProviderPage,
     onOpenSettings,
     onRetry,
+    onOpenRecord,
     onCandidateAction,
+    onCandidateReceiptAction,
+    onReadCandidate,
     embedded = false,
     actionLabel = "Create Record",
     pendingLabel = "Creating…",
@@ -48,12 +118,82 @@
     actionUnavailableText = "Search does not create a Record. Record creation is unavailable until the host can save the Record, identifier, and metadata together.",
     selectedProviderId = $bindable(""),
     selectionExplicit = $bindable(false),
+    candidateRoute,
+    candidateRouteProblem,
+    onOpenCandidate,
+    onOpenLiveCandidate,
+    onCloseCandidateRoute,
+    onReadCandidateRoute,
   }: Props = $props();
   let query = $state("");
-  let results: ProviderSearchCandidate[] = $state([]);
+  interface ProviderResult {
+    candidate: ProviderSearchCandidate;
+    receipt?: SearchCandidateReceiptDto;
+    cacheState?: "observed" | "fresh" | "stale_on_error";
+  }
+  interface ProviderPage {
+    providerId: string;
+    results: ProviderResult[];
+    nextPage?: number;
+  }
+  interface ProviderPages {
+    results: ProviderResult[];
+    nextPages: Record<string, number>;
+    problem?: string;
+    accepted: boolean;
+    full: boolean;
+    blockedProviders: string[];
+  }
+  interface ProviderWindow {
+    results: ProviderResult[];
+    nextPages: Record<string, number>;
+    problem: string;
+    full: boolean;
+    blockedProviders: string[];
+    details: Record<string, ProviderSearchCandidate>;
+    detailProblems: Record<string, string>;
+  }
+  interface GroupedProviderResult {
+    result: ProviderResult;
+    groupIndex: number;
+    groupPosition: number;
+    groupSize: number;
+    providers: string[];
+  }
+  let results: ProviderResult[] = $state([]);
+  let providerNextPages = $state<Record<string, number>>({});
+  let providerWindowFull = $state(false);
+  let blockedProviders = $state<string[]>([]);
+  let otherProviderWindow = $state<{
+    direction: "previous" | "next";
+    window: ProviderWindow;
+  }>();
+  let providerResultsHeading = $state<HTMLElement>();
+  const MAX_PROVIDER_WINDOW_ROWS = 200;
+  const MAX_PROVIDER_WINDOW_BYTES = 16 * 1024 * 1024;
+  const providerCacheState = $derived(
+    results.length > 0 &&
+      results.every((result) => result.cacheState === results[0].cacheState)
+      ? results[0].cacheState
+      : undefined,
+  );
+  let cachedOnly = $state(false);
+  let detailKey = $state("");
+  let candidateDetails = $state<Record<string, ProviderSearchCandidate>>({});
+  let candidateDetailProblems = $state<Record<string, string>>({});
+  let localResults: LocalSearchResponseDto["records"] = $state([]);
+  let localNext: LocalSearchCursorDto | undefined = $state();
+  interface AdjacentLocalPage {
+    direction: "previous" | "next";
+    page: LocalSearchResponseDto;
+  }
+  let otherLocalPage = $state<AdjacentLocalPage>();
+  let localResultsHeading = $state<HTMLElement>();
+  let localProblem = $state("");
   let searching = $state(false);
   let problem = $state("");
   let searched = $state(false);
+  let completedProviderCount = $state(0);
   let completedQuery = $state("");
   let actionKey = $state("");
   let completedKeys = $state<Set<string>>(new Set());
@@ -61,31 +201,471 @@
   let actionProblem = $state("");
   let actionProblemKey = $state("");
   let searchRevision = 0;
+  let searchController: AbortController | undefined;
   let searchProviderId = "";
+  let routeCandidate = $state<ProviderSearchCandidate>();
+  let routeReceipt = $state<SearchCandidateReceiptDto>();
+  let routeLoading = $state(false);
+  let routeProblem = $state("");
+  let routeGeneration = 0;
+  let detailController: AbortController | undefined;
+  let attachDialog = $state<HTMLDialogElement>();
+  let attachResult = $state<{ result: ProviderResult }>();
+  let attachQuery = $state("");
+  let attachCompletedQuery = "";
+  let attachRecords = $state<LocalSearchResponseDto["records"]>([]);
+  let attachNext = $state<LocalSearchCursorDto>();
+  let otherAttachPage = $state<AdjacentLocalPage>();
+  let attachResultsHeading = $state<HTMLElement>();
+  let attachRecordId = $state("");
+  let attachLoading = $state(false);
+  let attachSearched = $state(false);
+  let attachProblem = $state("");
+  let attachGeneration = 0;
+  let attachController: AbortController | undefined;
+  const ALL_PROVIDERS = "all";
 
-  function candidateKey(candidate: ProviderSearchCandidate): string {
-    return `${candidate.provider}:${candidate.kind}:${candidate.provider_id}`;
+  function canonicalCandidatePath(
+    providerId: string,
+    grain: string,
+    receiptId: string,
+    title: string,
+  ): string {
+    return `/explore/${encodeURIComponent(providerId)}/${encodeURIComponent(grain)}/${receiptId}/${routeSlug(title)}`;
   }
 
-  async function runCandidateAction(
-    candidate: ProviderSearchCandidate,
+  function routeSnapshot(
+    response:
+      SearchCandidateDetailsResponse | ProviderIdentifierDetailsResponse,
+  ): SearchCandidateReceiptDto | undefined {
+    return "snapshot" in response ? response.snapshot.receipt : undefined;
+  }
+
+  function routeDetails(
+    response:
+      SearchCandidateDetailsResponse | ProviderIdentifierDetailsResponse,
+  ): ProviderSearchCandidate | undefined {
+    if ("details" in response) return providerCandidate(response.details);
+    const receipt = routeSnapshot(response);
+    return receipt ? providerCandidate(receipt.candidate) : undefined;
+  }
+
+  async function loadCandidateRoute(
+    route: SearchCandidateRoute,
+    generation: number,
+    offline: boolean,
+    signal: AbortSignal,
   ): Promise<void> {
-    const key = candidateKey(candidate);
-    if (!onCandidateAction || actionKey || completedKeys.has(key)) return;
+    if (!onReadCandidateRoute) {
+      routeProblem = "Sign in to read this provider candidate.";
+      return;
+    }
+    routeLoading = true;
+    routeProblem = "";
+    try {
+      const response = await onReadCandidateRoute(route, offline, signal);
+      if (generation !== routeGeneration) return;
+      routeCandidate = routeDetails(response);
+      routeReceipt = routeSnapshot(response);
+      if (response.outcome === "missing") {
+        routeProblem =
+          "This candidate is no longer available. Start a new Search.";
+      } else if (
+        response.outcome === "unavailable" ||
+        response.outcome === "unavailable_without_snapshot"
+      ) {
+        routeProblem = `Provider details are unavailable (${response.problem_code}).`;
+      }
+      if (routeCandidate) {
+        const path =
+          route.kind === "live"
+            ? canonicalLiveCandidatePath(
+                route.providerId,
+                route.grain,
+                route.providerRecordId,
+                route.locale,
+              )
+            : canonicalCandidatePath(
+                routeReceipt?.candidate.provider ?? route.providerId,
+                routeReceipt?.grain ?? route.grain,
+                routeReceipt?.candidate_receipt_id ?? route.candidateReceiptId,
+                routeCandidate.title,
+              );
+        if (window.location.pathname + window.location.search !== path)
+          window.history.replaceState(window.history.state, "", path);
+      }
+    } catch (error) {
+      if (generation !== routeGeneration) return;
+      routeProblem = hostProblemText(
+        error,
+        "Fasti could not read the candidate details.",
+      );
+    } finally {
+      if (generation === routeGeneration) routeLoading = false;
+    }
+  }
+
+  $effect(() => {
+    const route = candidateRoute;
+    const offline = providerOffline();
+    const generation = ++routeGeneration;
+    const controller = new AbortController();
+    if (route || candidateRouteProblem) untrack(cancelSearchRead);
+    detailController?.abort();
+    detailKey = "";
+    untrack(closeAttachPicker);
+    routeCandidate = undefined;
+    routeReceipt = undefined;
+    routeLoading = false;
+    routeProblem = candidateRouteProblem ?? "";
+    if (route && !candidateRouteProblem)
+      void loadCandidateRoute(route, generation, offline, controller.signal);
+    return () => {
+      routeGeneration += 1;
+      controller.abort();
+    };
+  });
+
+  onDestroy(() => {
+    cancelSearchRead();
+    attachGeneration += 1;
+    attachController?.abort();
+    detailController?.abort();
+  });
+
+  function cancelSearchRead(): void {
+    searchRevision += 1;
+    searchController?.abort();
+    searchController = undefined;
+    searching = false;
+  }
+
+  function closeAttachPicker(): void {
+    attachGeneration += 1;
+    attachController?.abort();
+    attachController = undefined;
+    attachDialog?.close();
+    attachResult = undefined;
+    attachRecords = [];
+    attachNext = undefined;
+    otherAttachPage = undefined;
+    attachRecordId = "";
+    attachProblem = "";
+    attachLoading = false;
+    attachSearched = false;
+  }
+
+  function openAttachPicker(result: ProviderResult): void {
+    if (!onSearchAttachTargets || searching || actionKey || detailKey) return;
+    closeAttachPicker();
+    attachQuery = result.candidate.title;
+    attachResult = { result };
+  }
+
+  $effect(() => {
+    if (attachResult && attachDialog && !attachDialog.open)
+      attachDialog.showModal();
+  });
+
+  async function searchAttachTargets(
+    after?: LocalSearchCursorDto,
+  ): Promise<void> {
+    const selection = attachResult;
+    const value = after ? attachCompletedQuery : attachQuery.trim();
+    if (
+      !selection ||
+      !onSearchAttachTargets ||
+      attachLoading ||
+      actionKey ||
+      !value
+    )
+      return;
+    const generation = ++attachGeneration;
+    const previousFocus = document.activeElement;
+    attachController?.abort();
+    const controller = new AbortController();
+    attachController = controller;
+    attachLoading = true;
+    attachProblem = "";
+    if (!after) {
+      attachRecords = [];
+      attachNext = undefined;
+      otherAttachPage = undefined;
+      attachRecordId = "";
+      attachSearched = false;
+    }
+    try {
+      const page = checkedLocalPage(
+        await onSearchAttachTargets(
+          value,
+          selection.result.candidate.grain,
+          after,
+          controller.signal,
+        ),
+      );
+      if (generation !== attachGeneration) return;
+      if (
+        page.records.some(
+          (record) => record.grain !== selection.result.candidate.grain,
+        )
+      )
+        throw new Error(
+          "The host returned a Record with an incompatible identity grain.",
+        );
+      if (after) {
+        otherAttachPage = {
+          direction: "previous",
+          page: { records: attachRecords, next: attachNext ?? null },
+        };
+      }
+      attachRecords = [...page.records];
+      attachRecordId = "";
+      attachNext = page.next ?? undefined;
+      attachCompletedQuery = value;
+      attachSearched = true;
+      if (after) {
+        await tick();
+        if (generation === attachGeneration)
+          focusReplacedResults(attachResultsHeading, previousFocus);
+      }
+    } catch (error) {
+      if (generation === attachGeneration)
+        attachProblem = hostProblemText(
+          error,
+          "Fasti could not search local Records.",
+        );
+    } finally {
+      if (attachController === controller) attachController = undefined;
+      if (generation === attachGeneration) attachLoading = false;
+    }
+  }
+
+  // Keep one current and one adjacent page, never an all-history cursor stack.
+  // The shared response contract bounds each page's rows and retained bytes.
+  function checkedLocalPage(
+    page: LocalSearchResponseDto,
+  ): LocalSearchResponseDto {
+    if (
+      new TextEncoder().encode(JSON.stringify(page)).byteLength >
+      LOCAL_SEARCH_MAX_RESPONSE_BYTES
+    )
+      throw new Error(
+        "The host returned a local Search page that exceeds its size limit.",
+      );
+    return parseLocalSearchResponseDto(page);
+  }
+
+  function focusReplacedResults(
+    heading: HTMLElement | undefined,
+    previous: Element | null,
+  ): void {
+    if (
+      document.activeElement === previous ||
+      (previous &&
+        (!previous.isConnected || previous.matches(":disabled")) &&
+        document.activeElement === document.body)
+    )
+      heading?.focus();
+  }
+
+  async function switchAttachPage(): Promise<void> {
+    const other = otherAttachPage;
+    if (!other || attachLoading || actionKey) return;
+    const previousFocus = document.activeElement;
+    const generation = attachGeneration;
+    otherAttachPage = {
+      direction: other.direction === "previous" ? "next" : "previous",
+      page: { records: attachRecords, next: attachNext ?? null },
+    };
+    attachRecords = other.page.records;
+    attachNext = other.page.next ?? undefined;
+    attachRecordId = "";
+    attachProblem = "";
+    await tick();
+    if (generation === attachGeneration)
+      focusReplacedResults(attachResultsHeading, previousFocus);
+  }
+
+  async function confirmAttach(): Promise<void> {
+    const selection = attachResult;
+    if (
+      !selection ||
+      attachLoading ||
+      !attachRecords.some((record) => record.record_id === attachRecordId)
+    )
+      return;
+    const generation = attachGeneration;
+    const targetRecordId = attachRecordId;
+    const outcome = await runCandidateAction(selection.result, {
+      kind: "attach",
+      record_id: targetRecordId,
+    });
+    if (generation !== attachGeneration) return;
+    if (outcome !== undefined) {
+      closeAttachPicker();
+      onOpenRecord?.(outcome?.record_id ?? targetRecordId);
+    } else {
+      attachProblem = actionProblem;
+    }
+  }
+
+  function candidateCoordinate(result: ProviderResult): string {
+    return JSON.stringify([
+      result.candidate.provider,
+      result.candidate.kind,
+      result.candidate.provider_id,
+    ]);
+  }
+
+  function candidateKey(result: ProviderResult): string {
+    return result.receipt?.candidate_receipt_id ?? candidateCoordinate(result);
+  }
+
+  $effect(() => {
+    const retained = new Set(
+      [...results, ...(otherProviderWindow?.window.results ?? [])].map(
+        candidateKey,
+      ),
+    );
+    if (routeCandidate)
+      retained.add(
+        candidateKey({ candidate: routeCandidate, receipt: routeReceipt }),
+      );
+    if (attachResult) retained.add(candidateKey(attachResult.result));
+    if (actionKey) retained.add(actionKey);
+    const completed = [...completedKeys].filter((key) => retained.has(key));
+    if (completed.length !== completedKeys.size)
+      completedKeys = new Set(completed);
+    const records = Object.entries(createdRecordIds).filter(([key]) =>
+      retained.has(key),
+    );
+    if (records.length !== Object.keys(createdRecordIds).length)
+      createdRecordIds = Object.fromEntries(records);
+  });
+
+  async function runCandidateAction(
+    result: ProviderResult,
+    recordAction: SearchRecordActionDto = { kind: "create" },
+  ): Promise<CreateRecordResult | null | undefined> {
+    const key = candidateKey(result);
+    const action = result.receipt
+      ? onCandidateReceiptAction
+        ? () =>
+            onCandidateReceiptAction(
+              result.receipt!,
+              providerOffline() ? "cached" : "refetch",
+              recordAction,
+            )
+        : undefined
+      : onCandidateAction
+        ? () => onCandidateAction(result.candidate, recordAction)
+        : undefined;
+    if (
+      !action ||
+      searching ||
+      actionKey ||
+      detailKey ||
+      completedKeys.has(key)
+    )
+      return;
+    const revision = searchRevision;
+    const routeRevision = routeGeneration;
     actionKey = key;
     actionProblem = "";
     actionProblemKey = "";
     try {
-      const result = await onCandidateAction(candidate);
+      const outcome = await action();
+      if (revision !== searchRevision || routeRevision !== routeGeneration)
+        return;
       completedKeys = new Set([...completedKeys, key]);
-      if (result) {
-        createdRecordIds = { ...createdRecordIds, [key]: result.record_id };
+      if (outcome) {
+        createdRecordIds = { ...createdRecordIds, [key]: outcome.record_id };
+        return outcome;
       }
+      // A void callback succeeded; undefined means failure or stale delivery.
+      return null;
     } catch (error) {
+      if (revision !== searchRevision || routeRevision !== routeGeneration)
+        return;
       actionProblem = hostProblemText(error, actionProblemFallback);
       actionProblemKey = key;
     } finally {
-      actionKey = "";
+      if (revision === searchRevision && actionKey === key) actionKey = "";
+    }
+  }
+
+  async function runRoutedCandidateAction(): Promise<void> {
+    const candidate = routeCandidate;
+    const receipt = routeReceipt;
+    if (!candidate || (candidateRoute?.kind !== "live" && !receipt)) return;
+    const outcome = await runCandidateAction({ candidate, receipt });
+    if (outcome) onOpenRecord?.(outcome.record_id);
+  }
+
+  async function readCandidateDetails(result: ProviderResult): Promise<void> {
+    if (
+      !result.receipt ||
+      !onReadCandidate ||
+      searching ||
+      actionKey ||
+      detailKey
+    )
+      return;
+    const key = candidateKey(result);
+    const revision = searchRevision;
+    detailController?.abort();
+    const controller = new AbortController();
+    detailController = controller;
+    detailKey = key;
+    candidateDetailProblems = { ...candidateDetailProblems, [key]: "" };
+    try {
+      const response = await onReadCandidate(
+        result.receipt,
+        providerOffline(),
+        controller.signal,
+      );
+      if (controller.signal.aborted || revision !== searchRevision) return;
+      const details =
+        response.outcome === "refetched" ||
+        response.outcome === "refetched_without_snapshot"
+          ? response.details
+          : response.outcome === "snapshot" ||
+              response.outcome === "unavailable"
+            ? response.snapshot.receipt.candidate
+            : undefined;
+      if (details) {
+        candidateDetails = {
+          ...candidateDetails,
+          [key]: providerCandidate(details),
+        };
+      }
+      if (
+        response.outcome === "missing" ||
+        response.outcome === "unavailable" ||
+        response.outcome === "unavailable_without_snapshot"
+      ) {
+        candidateDetailProblems = {
+          ...candidateDetailProblems,
+          [key]:
+            response.outcome === "missing"
+              ? "Candidate details are no longer available."
+              : `Provider details are unavailable (${response.problem_code}).`,
+        };
+      }
+    } catch (error) {
+      if (controller.signal.aborted || revision !== searchRevision) return;
+      candidateDetailProblems = {
+        ...candidateDetailProblems,
+        [key]: hostProblemText(
+          error,
+          "Fasti could not read the candidate details.",
+        ),
+      };
+    } finally {
+      if (detailController === controller) {
+        detailController = undefined;
+        if (revision === searchRevision && detailKey === key) detailKey = "";
+      }
     }
   }
   const supportedProviders = $derived(
@@ -106,14 +686,55 @@
       (provider) => provider.provider === selectedProviderId,
     ),
   );
+  const selectedProviders = $derived(
+    selectedProviderId === ALL_PROVIDERS
+      ? supportedProviders.filter(providerAvailable)
+      : selectedProvider && providerAvailable(selectedProvider)
+        ? [selectedProvider]
+        : [],
+  );
+  const searchAvailable = $derived(
+    Boolean(onSearchLocal) || selectedProviders.length > 0,
+  );
+  const groupedProviderResults = $derived.by(() => {
+    const groups = new Map<string, Array<{ result: ProviderResult }>>();
+    results.forEach((result) => {
+      const title = result.candidate.title
+        .normalize("NFKC")
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}]+/gu, " ")
+        .trim();
+      const grain = result.candidate.grain;
+      const key =
+        title && result.candidate.release_year
+          ? `${grain}\u001f${result.candidate.release_year}\u001f${title}`
+          : `unique\u001f${candidateKey(result)}`;
+      const group = groups.get(key) ?? [];
+      group.push({ result });
+      groups.set(key, group);
+    });
+    return Array.from(groups.values()).flatMap((group, groupIndex) => {
+      const providers = Array.from(
+        new Set(group.map(({ result }) => result.candidate.provider)),
+      );
+      return group.map(({ result }, groupPosition): GroupedProviderResult => ({
+        result,
+        groupIndex,
+        groupPosition,
+        groupSize: group.length,
+        providers,
+      }));
+    });
+  });
 
   $effect(() => {
     if (supportedProviders.length === 0) return;
     if (
       selectionExplicit &&
-      supportedProviders.some(
-        (provider) => provider.provider === selectedProviderId,
-      )
+      (selectedProviderId === ALL_PROVIDERS ||
+        supportedProviders.some(
+          (provider) => provider.provider === selectedProviderId,
+        ))
     ) {
       return;
     }
@@ -127,12 +748,23 @@
     const providerId = selectedProviderId;
     if (providerId === searchProviderId) return;
     searchProviderId = providerId;
-    searchRevision += 1;
-    searching = false;
+    cancelSearchRead();
+    detailController?.abort();
     results = [];
+    providerNextPages = {};
+    providerWindowFull = false;
+    blockedProviders = [];
+    otherProviderWindow = undefined;
+    localResults = [];
+    localNext = undefined;
+    otherLocalPage = undefined;
+    localProblem = "";
     problem = "";
     actionProblem = "";
     actionProblemKey = "";
+    detailKey = "";
+    candidateDetails = {};
+    candidateDetailProblems = {};
     searched = false;
     completedQuery = "";
   });
@@ -141,52 +773,579 @@
     selectionExplicit = true;
     selectedProviderId = provider;
   }
+
+  function providerCandidate(
+    candidate: SearchCandidateDto,
+  ): ProviderSearchCandidate {
+    return {
+      ...candidate,
+      authors: [...candidate.authors],
+      image_url: candidate.image_url ?? null,
+      original_title: candidate.original_title ?? undefined,
+      overview: candidate.overview ?? undefined,
+      release_year: candidate.release_year ?? undefined,
+    };
+  }
+
+  function providerOffline(): boolean {
+    return (
+      cachedOnly ||
+      (typeof navigator !== "undefined" && navigator.onLine === false)
+    );
+  }
+
+  async function searchProviderResults(
+    provider: ProviderCredentialStatus,
+    value: string,
+    page: number,
+    signal: AbortSignal,
+  ): Promise<ProviderPage> {
+    if (!onSearchProviderPage) {
+      return {
+        providerId: provider.provider,
+        results: (await onSearch(provider.provider, value, signal)).map(
+          (candidate) => ({
+            candidate,
+          }),
+        ),
+      };
+    }
+    const providerId = provider.provider;
+    const request = { page, offline: providerOffline(), grains: [] };
+    const response = parseSearchProviderPageForRequest(
+      await onSearchProviderPage(
+        providerId,
+        value,
+        page,
+        request.offline,
+        signal,
+      ),
+      providerId,
+      request,
+    );
+    if (response.outcome === "unavailable") {
+      throw new Error(
+        `${provider.label} is unavailable (${response.problem_code}).`,
+      );
+    }
+    if (response.outcome === "live") {
+      return {
+        providerId: provider.provider,
+        results: response.candidates.map((candidate) => ({
+          candidate: providerCandidate(candidate),
+        })),
+        nextPage: response.next_page ?? undefined,
+      };
+    }
+    return {
+      providerId: provider.provider,
+      results: response.candidates.map((receipt) => ({
+        candidate: providerCandidate(receipt.candidate),
+        receipt,
+        cacheState: response.cache_state,
+      })),
+      nextPage: response.next_page ?? undefined,
+    };
+  }
+
+  async function searchProviders(
+    providers: ProviderCredentialStatus[],
+    value: string,
+    pages: Record<string, number>,
+    signal: AbortSignal,
+    previousResults: ProviderResult[] = [],
+    retainedResults: ProviderResult[] = [],
+  ): Promise<ProviderPages> {
+    let admitted = previousResults;
+    const rowBytes = (rows: ProviderResult[]) =>
+      new TextEncoder().encode(JSON.stringify(rows)).byteLength;
+    let admittedBytes = rowBytes(previousResults);
+    const capacityBlocked = new Set<number>();
+    const settled: PromiseSettledResult<ProviderPage>[] = (
+      await Promise.allSettled(
+        providers.map((provider) =>
+          searchProviderResults(
+            provider,
+            value,
+            pages[provider.provider] ?? 1,
+            signal,
+          ),
+        ),
+      )
+    ).map((outcome, index) => {
+      if (outcome.status === "rejected") return outcome;
+      try {
+        if (
+          outcome.value.results.length > 100 ||
+          rowBytes(outcome.value.results) > MAX_PROVIDER_WINDOW_BYTES
+        ) {
+          throw new Error(
+            "Provider Search returned a page that exceeds the result limits.",
+          );
+        }
+        const coordinate = candidateCoordinate;
+        const evidence = [...retainedResults, ...admitted];
+        const coordinates = new Set(evidence.map(coordinate));
+        const receipts = new Map(
+          evidence.flatMap((result) =>
+            result.receipt
+              ? [
+                  [
+                    result.receipt.candidate_receipt_id,
+                    coordinate(result),
+                  ] as const,
+                ]
+              : [],
+          ),
+        );
+        const additions: ProviderResult[] = [];
+        for (const result of outcome.value.results) {
+          const key = coordinate(result);
+          const receiptId = result.receipt?.candidate_receipt_id;
+          if (
+            receiptId &&
+            receipts.has(receiptId) &&
+            receipts.get(receiptId) !== key
+          ) {
+            throw new Error(
+              "Provider Search reused a receipt for a different candidate.",
+            );
+          }
+          if (!coordinates.has(key)) {
+            additions.push(result);
+            coordinates.add(key);
+            if (receiptId) receipts.set(receiptId, key);
+          }
+        }
+        // Both arrays include brackets; combining nonempty arrays adds one comma.
+        const combinedBytes =
+          admittedBytes +
+          rowBytes(additions) -
+          2 +
+          (admitted.length > 0 && additions.length > 0 ? 1 : 0);
+        if (
+          admitted.length + additions.length > MAX_PROVIDER_WINDOW_ROWS ||
+          combinedBytes > MAX_PROVIDER_WINDOW_BYTES
+        ) {
+          capacityBlocked.add(index);
+          throw new Error("Provider result set is full.");
+        }
+        admitted = [...admitted, ...additions];
+        admittedBytes = combinedBytes;
+        return {
+          status: "fulfilled",
+          value: { ...outcome.value, results: additions },
+        };
+      } catch (reason) {
+        // Reject only this provider's page; prior and other provider rows remain.
+        return { status: "rejected", reason };
+      }
+    });
+    const completed = settled.flatMap((outcome) =>
+      outcome.status === "fulfilled" ? [outcome.value] : [],
+    );
+    const problems = settled.flatMap((outcome, index) =>
+      outcome.status === "rejected" && !capacityBlocked.has(index)
+        ? [
+            hostProblemText(
+              outcome.reason,
+              `${providers[index].label} Search is unavailable.`,
+            ),
+          ]
+        : [],
+    );
+    const nextPages = Object.fromEntries(
+      settled.flatMap((outcome, index) =>
+        outcome.status === "rejected"
+          ? [[providers[index].provider, pages[providers[index].provider] ?? 1]]
+          : outcome.value.nextPage
+            ? [[outcome.value.providerId, outcome.value.nextPage]]
+            : [],
+      ),
+    );
+    return {
+      results: completed.flatMap((page) => page.results),
+      nextPages,
+      problem: problems.length > 0 ? problems.join(" ") : undefined,
+      accepted: completed.length > 0,
+      full:
+        capacityBlocked.size > 0 ||
+        admitted.length >= MAX_PROVIDER_WINDOW_ROWS ||
+        admittedBytes >= MAX_PROVIDER_WINDOW_BYTES,
+      blockedProviders: [...capacityBlocked].map(
+        (index) => providers[index].provider,
+      ),
+    };
+  }
+
+  function currentProviderWindow(): ProviderWindow {
+    return {
+      results,
+      nextPages: providerNextPages,
+      problem,
+      full: providerWindowFull,
+      blockedProviders,
+      details: candidateDetails,
+      detailProblems: candidateDetailProblems,
+    };
+  }
+
+  async function switchProviderWindow(): Promise<void> {
+    const other = otherProviderWindow;
+    if (!other || searching || actionKey || detailKey || attachResult) return;
+    const previousFocus = document.activeElement;
+    const revision = searchRevision;
+    const route = routeGeneration;
+    otherProviderWindow = {
+      direction: other.direction === "previous" ? "next" : "previous",
+      window: currentProviderWindow(),
+    };
+    results = other.window.results;
+    providerNextPages = other.window.nextPages;
+    problem = other.window.problem;
+    providerWindowFull = other.window.full;
+    blockedProviders = other.window.blockedProviders;
+    candidateDetails = other.window.details;
+    candidateDetailProblems = other.window.detailProblems;
+    await focusProviderResults(previousFocus, revision, route);
+  }
+
+  async function focusProviderResults(
+    previousFocus: Element | null,
+    revision: number,
+    route: number,
+  ): Promise<void> {
+    await tick();
+    if (
+      revision !== searchRevision ||
+      route !== routeGeneration ||
+      candidateRoute ||
+      candidateRouteProblem
+    )
+      return;
+    focusReplacedResults(providerResultsHeading, previousFocus);
+  }
+
   async function search(event: SubmitEvent): Promise<void> {
     event.preventDefault();
     const value = query.trim();
-    if (
-      !value ||
-      !selectedProvider ||
-      !providerAvailable(selectedProvider) ||
-      searching
-    )
-      return;
+    if (!value || searching || actionKey || detailKey) return;
     if (
       /[\u0000-\u001f\u007f]/u.test(value) ||
       new TextEncoder().encode(value).byteLength > 256
     ) {
       problem = "Use 1 to 256 UTF-8 bytes and no control characters.";
       results = [];
+      providerNextPages = {};
+      providerWindowFull = false;
+      blockedProviders = [];
+      otherProviderWindow = undefined;
+      localResults = [];
+      localNext = undefined;
+      otherLocalPage = undefined;
       searched = false;
       return;
     }
-    const provider = selectedProvider;
-    const revision = ++searchRevision;
+    const providers = [...selectedProviders];
+    providerWindowFull = false;
+    blockedProviders = [];
+    otherProviderWindow = undefined;
+    otherLocalPage = undefined;
+    cancelSearchRead();
+    const controller = new AbortController();
+    searchController = controller;
+    const revision = searchRevision;
     searching = true;
     problem = "";
+    localProblem = "";
     actionProblem = "";
     actionProblemKey = "";
+    detailKey = "";
+    candidateDetails = {};
+    candidateDetailProblems = {};
     searched = false;
     try {
-      const nextResults = await onSearch(provider.provider, value);
+      const [localOutcome, providerOutcome] = await Promise.allSettled([
+        onSearchLocal?.(value, undefined, controller.signal).then(
+          checkedLocalPage,
+        ),
+        providers.length > 0
+          ? searchProviders(providers, value, {}, controller.signal)
+          : undefined,
+      ]);
       if (revision !== searchRevision) return;
-      results = nextResults;
+      if (localOutcome.status === "fulfilled" && localOutcome.value) {
+        localResults = [...localOutcome.value.records];
+        localNext = localOutcome.value.next ?? undefined;
+      } else {
+        localResults = [];
+        localNext = undefined;
+        if (localOutcome.status === "rejected") {
+          localProblem = hostProblemText(
+            localOutcome.reason,
+            "Fasti could not search local Records.",
+          );
+        }
+      }
+      if (providerOutcome.status === "fulfilled") {
+        results = providerOutcome.value?.results ?? [];
+        providerNextPages = providerOutcome.value?.nextPages ?? {};
+        providerWindowFull = providerOutcome.value?.full ?? false;
+        blockedProviders = providerOutcome.value?.blockedProviders ?? [];
+        problem = providerOutcome.value?.problem ?? "";
+      } else {
+        results = [];
+        providerNextPages = {};
+        problem = hostProblemText(
+          providerOutcome.reason,
+          "Provider Search failed. Local results are still available.",
+        );
+      }
       completedQuery = value;
+      completedProviderCount = providers.length;
       searched = true;
-    } catch (error) {
-      if (revision !== searchRevision) return;
-      results = [];
-      problem = hostProblemText(
-        error,
-        `${provider.label} search failed. Check the provider credential and network policy.`,
-      );
     } finally {
+      if (searchController === controller) searchController = undefined;
       if (revision === searchRevision) searching = false;
     }
   }
+
+  async function loadMoreProvider(): Promise<void> {
+    const providers = selectedProviders.filter(
+      (provider) => providerNextPages[provider.provider],
+    );
+    if (
+      providers.length === 0 ||
+      !onSearchProviderPage ||
+      searching ||
+      actionKey ||
+      detailKey ||
+      attachResult ||
+      otherProviderWindow?.direction === "next"
+    )
+      return;
+    const replace = providerWindowFull;
+    if (replace) {
+      providers.sort(
+        (left, right) =>
+          Number(blockedProviders.includes(right.provider)) -
+          Number(blockedProviders.includes(left.provider)),
+      );
+    }
+    const previous = currentProviderWindow();
+    const previousFocus = document.activeElement;
+    const route = routeGeneration;
+    cancelSearchRead();
+    const controller = new AbortController();
+    searchController = controller;
+    const revision = searchRevision;
+    searching = true;
+    problem = "";
+    try {
+      const page = await searchProviders(
+        providers,
+        completedQuery,
+        providerNextPages,
+        controller.signal,
+        replace ? [] : results,
+        [
+          ...(otherProviderWindow?.window.results ?? []),
+          ...(replace ? results : []),
+        ],
+      );
+      if (revision !== searchRevision) return;
+      if (replace && !page.accepted) {
+        problem = page.problem ?? "Fasti could not load the next result set.";
+        return;
+      }
+      if (replace) {
+        otherProviderWindow = { direction: "previous", window: previous };
+        candidateDetails = {};
+        candidateDetailProblems = {};
+      }
+      results = [...(replace ? [] : results), ...page.results];
+      providerNextPages = page.nextPages;
+      problem = page.problem ?? "";
+      providerWindowFull = page.full;
+      blockedProviders = page.blockedProviders;
+      if (replace) {
+        await focusProviderResults(previousFocus, revision, route);
+      }
+    } catch (error) {
+      if (revision !== searchRevision) return;
+      problem = hostProblemText(
+        error,
+        "Fasti could not load the next provider Search page.",
+      );
+    } finally {
+      if (searchController === controller) searchController = undefined;
+      if (revision === searchRevision) searching = false;
+    }
+  }
+
+  async function loadMoreLocal(): Promise<void> {
+    if (
+      !onSearchLocal ||
+      !localNext ||
+      searching ||
+      actionKey ||
+      detailKey ||
+      attachResult ||
+      otherLocalPage?.direction === "next"
+    )
+      return;
+    const previousFocus = document.activeElement;
+    const route = routeGeneration;
+    cancelSearchRead();
+    const controller = new AbortController();
+    searchController = controller;
+    const revision = searchRevision;
+    searching = true;
+    localProblem = "";
+    try {
+      const page = checkedLocalPage(
+        await onSearchLocal(completedQuery, localNext, controller.signal),
+      );
+      if (revision !== searchRevision) return;
+      otherLocalPage = {
+        direction: "previous",
+        page: { records: localResults, next: localNext ?? null },
+      };
+      localResults = [...page.records];
+      localNext = page.next ?? undefined;
+      await tick();
+      if (
+        revision === searchRevision &&
+        route === routeGeneration &&
+        !candidateRoute
+      )
+        focusReplacedResults(localResultsHeading, previousFocus);
+    } catch (error) {
+      if (revision !== searchRevision) return;
+      localProblem = hostProblemText(
+        error,
+        "Fasti could not load the next local Search page.",
+      );
+    } finally {
+      if (searchController === controller) searchController = undefined;
+      if (revision === searchRevision) searching = false;
+    }
+  }
+
+  async function switchLocalPage(): Promise<void> {
+    const other = otherLocalPage;
+    if (!other || searching || actionKey || detailKey || attachResult) return;
+    const previousFocus = document.activeElement;
+    const revision = searchRevision;
+    const route = routeGeneration;
+    otherLocalPage = {
+      direction: other.direction === "previous" ? "next" : "previous",
+      page: { records: localResults, next: localNext ?? null },
+    };
+    localResults = other.page.records;
+    localNext = other.page.next ?? undefined;
+    localProblem = "";
+    await tick();
+    if (
+      revision === searchRevision &&
+      route === routeGeneration &&
+      !candidateRoute
+    )
+      focusReplacedResults(localResultsHeading, previousFocus);
+  }
 </script>
 
-<div class="discover-container" class:embedded>
+<div
+  class="discover-container"
+  class:embedded
+  class:candidate-active={Boolean(candidateRoute || candidateRouteProblem)}
+>
+  {#if candidateRoute || candidateRouteProblem}
+    <section class="candidate-detail" aria-busy={routeLoading}>
+      <button
+        type="button"
+        class="btn btn-outline-secondary"
+        onclick={onCloseCandidateRoute}
+        disabled={!onCloseCandidateRoute || Boolean(actionKey)}
+        >Back to Search</button
+      >
+      <h1 id="candidate-detail-title" tabindex="-1">
+        {routeCandidate?.title ?? "Candidate details"}
+      </h1>
+      {#if routeLoading}
+        <p class="alert alert-info" role="status">Loading candidate…</p>
+      {/if}
+      {#if routeProblem}
+        <p class="problem" role="alert">{routeProblem}</p>
+      {/if}
+      {#if routeCandidate}
+        {@const routeKey = candidateKey({
+          candidate: routeCandidate,
+          receipt: routeReceipt,
+        })}
+        {@const routeCompleted = completedKeys.has(routeKey)}
+        {#if routeCandidate.original_title}
+          <p>Original title: {routeCandidate.original_title}</p>
+        {/if}
+        {#if routeCandidate.authors.length > 0}
+          <p>By {routeCandidate.authors.join(", ")}</p>
+        {/if}
+        {#if routeCandidate.overview}
+          <p class="result-overview">{routeCandidate.overview}</p>
+        {/if}
+        <dl>
+          <div>
+            <dt>Provider</dt>
+            <dd>{routeCandidate.provider}</dd>
+          </div>
+          <div>
+            <dt>Type</dt>
+            <dd>{routeCandidate.kind}</dd>
+          </div>
+          {#if routeCandidate.release_year}
+            <div>
+              <dt>Year</dt>
+              <dd>{routeCandidate.release_year}</dd>
+            </div>
+          {/if}
+          <div>
+            <dt>Provider ID</dt>
+            <dd><code>{routeCandidate.provider_id}</code></dd>
+          </div>
+        </dl>
+        {#if (candidateRoute?.kind === "retained" && routeReceipt && onCandidateReceiptAction) || (candidateRoute?.kind === "live" && onCandidateAction)}
+          <button
+            type="button"
+            class="btn btn-primary"
+            aria-disabled={Boolean(actionKey) || routeLoading || routeCompleted}
+            onclick={runRoutedCandidateAction}
+            >{routeCompleted
+              ? completedLabel
+              : actionKey
+                ? pendingLabel
+                : actionLabel}</button
+          >
+          {#if onSearchAttachTargets}
+            <button
+              type="button"
+              class="btn btn-outline-secondary"
+              disabled={Boolean(actionKey) || routeLoading || routeCompleted}
+              onclick={() =>
+                openAttachPicker({
+                  candidate: routeCandidate!,
+                  receipt: routeReceipt,
+                })}>Attach to existing Record</button
+            >
+          {/if}
+        {/if}
+        {#if !attachResult && actionProblem && actionProblemKey === routeKey}
+          <p class="problem" role="alert">{actionProblem}</p>
+        {/if}
+      {:else if !routeLoading && !routeProblem}
+        <p>Candidate details are unavailable.</p>
+      {/if}
+    </section>
+  {/if}
   {#if !embedded}
     <header class="discover-header">
       <div class="heading-row">
@@ -194,10 +1353,131 @@
         <h1 id="discover-title" class="view-title" tabindex="-1">Discover</h1>
       </div>
       <p class="view-subtitle">
-        Search configured metadata providers through the trusted Fasti host.
+        Search local Records first, then a configured metadata provider.
       </p>
     </header>
   {/if}
+
+  <form class="search-form" onsubmit={search} role="search">
+    <label for="provider-search">
+      Search {selectedProvider?.label ?? "local Records and providers"}
+    </label>
+    <div class="search-row">
+      <input
+        id="provider-search"
+        type="search"
+        class="form-control"
+        required
+        maxlength="256"
+        bind:value={query}
+        disabled={searching ||
+          Boolean(actionKey) ||
+          Boolean(detailKey) ||
+          !searchAvailable}
+        placeholder="Title or provider identifier"
+        autocomplete="off"
+      />
+      <button
+        type="submit"
+        class="btn btn-primary"
+        disabled={searching ||
+          Boolean(actionKey) ||
+          Boolean(detailKey) ||
+          !searchAvailable ||
+          !query.trim()}
+      >
+        <IconSearch size={18} aria-hidden="true" />
+        {searching ? "Searching…" : "Search"}
+      </button>
+    </div>
+  </form>
+
+  <section
+    class="results"
+    aria-labelledby="local-search-results-title"
+    aria-busy={searching}
+  >
+    <svelte:element
+      this={embedded ? "h4" : "h2"}
+      id="local-search-results-title"
+      bind:this={localResultsHeading}
+      tabindex="-1"
+    >
+      Local Records
+    </svelte:element>
+    {#if localProblem}
+      <p class="problem" role="alert">{localProblem}</p>
+    {/if}
+    {#if searched && localResults.length === 0 && !localProblem}
+      <p role="status">
+        No local Records found {localNext ? "on this page" : ""} for
+        {completedQuery}.
+      </p>
+    {:else if localResults.length > 0}
+      <p role="status">
+        {localResults.length}
+        {localResults.length === 1 ? "local Record" : "local Records"} for
+        {completedQuery} on this page.
+      </p>
+      <ol>
+        {#each localResults as record (record.record_id)}
+          <li>
+            <svelte:element this={embedded ? "h5" : "h3"} class="result-title">
+              {record.title.value ?? "Untitled Record"}
+            </svelte:element>
+            <dl>
+              <div>
+                <dt>Source</dt>
+                <dd>Local Record</dd>
+              </div>
+              <div>
+                <dt>Type</dt>
+                <dd>{record.grain}</dd>
+              </div>
+              {#if record.release_year?.value}
+                <div>
+                  <dt>Year</dt>
+                  <dd>{record.release_year.value}</dd>
+                </div>
+              {/if}
+            </dl>
+            {#if onOpenRecord}
+              <button
+                type="button"
+                class="track-btn"
+                onclick={() => onOpenRecord(record.record_id)}
+                >Open Record</button
+              >
+            {/if}
+          </li>
+        {/each}
+      </ol>
+    {:else if !searched}
+      <p>Local Records remain searchable without a network connection.</p>
+    {/if}
+    {#if otherLocalPage}
+      <button
+        type="button"
+        class="btn btn-outline-secondary"
+        disabled={searching ||
+          Boolean(actionKey) ||
+          Boolean(detailKey) ||
+          Boolean(attachResult)}
+        onclick={switchLocalPage}
+        >{otherLocalPage.direction === "previous"
+          ? "Previous local Records"
+          : "Next local Records"}</button
+      >
+    {/if}
+    {#if localNext && otherLocalPage?.direction !== "next"}
+      <button
+        type="button"
+        class="btn btn-outline-secondary"
+        disabled={searching || Boolean(actionKey) || Boolean(detailKey)}
+        onclick={loadMoreLocal}>Next local Records</button
+      >
+    {/if}
+  </section>
 
   {#if loading}
     <p role="status">Loading provider status…</p>
@@ -213,7 +1493,7 @@
         Retry host connection
       </button>
     </div>
-  {:else if supportedProviders.length === 0 || !selectedProvider}
+  {:else if supportedProviders.length === 0}
     <section class="unavailable" aria-labelledby="discover-setup-title">
       <svelte:element this={embedded ? "h4" : "h2"} id="discover-setup-title">
         No search provider is available
@@ -230,8 +1510,10 @@
         id="provider-choice"
         class="form-select"
         value={selectedProviderId}
+        disabled={Boolean(actionKey) || Boolean(detailKey)}
         onchange={(event) => selectProvider(event.currentTarget.value)}
       >
+        <option value={ALL_PROVIDERS}>All available providers</option>
         {#each supportedProviders as provider (provider.provider)}
           <option value={provider.provider}>
             {provider.label}{providerAvailable(provider)
@@ -240,9 +1522,20 @@
           </option>
         {/each}
       </select>
+      {#if onSearchProviderPage}
+        <label class="form-check">
+          <input
+            class="form-check-input"
+            type="checkbox"
+            bind:checked={cachedOnly}
+            disabled={searching || Boolean(actionKey) || Boolean(detailKey)}
+          />
+          <span class="form-check-label">Use cached provider results only</span>
+        </label>
+      {/if}
     </div>
 
-    {#if !providerAvailable(selectedProvider)}
+    {#if selectedProviderId !== ALL_PROVIDERS && selectedProvider && !providerAvailable(selectedProvider)}
       <section class="unavailable" aria-labelledby="discover-setup-title">
         <svelte:element this={embedded ? "h4" : "h2"} id="discover-setup-title">
           {selectedProvider.label} needs a credential
@@ -255,102 +1548,194 @@
         >
       </section>
     {:else}
-      <form class="search-form" onsubmit={search} role="search">
-        <label for="provider-search">Search {selectedProvider.label}</label>
-        <div class="search-row">
-          <input
-            id="provider-search"
-            type="search"
-            class="form-control"
-            required
-            maxlength="256"
-            bind:value={query}
-            disabled={searching}
-            placeholder={selectedProvider.provider === "google-books"
-              ? "Title, author, or ISBN"
-              : "Movie or series title"}
-            autocomplete="off"
-          />
-          <button
-            type="submit"
-            class="btn btn-primary"
-            disabled={searching || !query.trim()}
-          >
-            <IconSearch size={18} aria-hidden="true" />
-            {searching ? "Searching…" : "Search"}
-          </button>
-        </div>
-      </form>
-
       <section
         class="results"
         aria-labelledby="search-results-title"
         aria-busy={searching}
       >
-        <svelte:element this={embedded ? "h4" : "h2"} id="search-results-title">
+        <svelte:element
+          this={embedded ? "h4" : "h2"}
+          id="search-results-title"
+          tabindex="-1"
+          bind:this={providerResultsHeading}
+        >
           Search results
         </svelte:element>
         {#if searching}
-          <p role="status">Searching {selectedProvider.label}…</p>
-        {:else if problem}
+          <p role="status">
+            Searching {selectedProvider?.label ?? "configured providers"}…
+          </p>
+        {:else if problem && results.length === 0}
           <p class="problem" role="alert">{problem}</p>
+        {:else if searched && completedProviderCount === 0}
+          <p role="status">
+            No provider was queried. Local results are shown above.
+          </p>
         {:else if searched && results.length === 0}
-          <p role="status">No compatible titles found for {completedQuery}.</p>
+          <p role="status">
+            No compatible titles found {Object.keys(providerNextPages).length >
+            0
+              ? "on this page"
+              : ""} for {completedQuery}.
+          </p>
         {:else if results.length > 0}
+          {#if problem}
+            <p class="problem" role="alert">{problem}</p>
+          {/if}
           <p role="status">
             {results.length}
             {results.length === 1 ? "result" : "results"} for
             {completedQuery}.
+            {#if providerCacheState === "stale_on_error"}
+              The provider is unavailable, so these results use retained cache
+              evidence.
+            {:else if providerCacheState === "fresh"}
+              These results came from fresh cache evidence.
+            {:else if providerCacheState === "observed"}
+              These results were observed from the provider now.
+            {/if}
           </p>
-          {#if !onCandidateAction}
+          {#if !onCandidateAction && !onCandidateReceiptAction}
             <p id="candidate-action-unavailable" class="result-action-note">
               {actionUnavailableText}
             </p>
           {/if}
           <ol>
-            {#each results as result (candidateKey(result))}
+            {#each groupedProviderResults as grouped (candidateKey(grouped.result))}
+              {@const { result } = grouped}
+              {@const candidate = result.candidate}
               {@const resultKey = candidateKey(result)}
-              <li>
+              <li
+                class:possible-duplicate={grouped.groupSize > 1}
+                aria-describedby={grouped.groupSize > 1
+                  ? `candidate-group-${grouped.groupIndex}`
+                  : undefined}
+              >
+                {#if grouped.groupSize > 1 && grouped.groupPosition === 0}
+                  <p
+                    id={`candidate-group-${grouped.groupIndex}`}
+                    class="duplicate-intro"
+                  >
+                    <strong
+                      >Possible match across {grouped.groupSize} results.</strong
+                    >
+                    Sources: {grouped.providers.join(", ")}. Review each source;
+                    Fasti has not merged these candidates.
+                  </p>
+                {/if}
                 <svelte:element
                   this={embedded ? "h5" : "h3"}
                   class="result-title"
                 >
-                  {result.title}
+                  {candidate.title}
                 </svelte:element>
-                {#if result.original_title}
-                  <p>Original title: {result.original_title}</p>
+                {#if candidate.original_title}
+                  <p>Original title: {candidate.original_title}</p>
                 {/if}
-                {#if result.authors.length > 0}
-                  <p>By {result.authors.join(", ")}</p>
+                {#if candidate.authors.length > 0}
+                  <p>By {candidate.authors.join(", ")}</p>
                 {/if}
-                {#if result.overview}
-                  <p class="result-overview">{result.overview}</p>
+                {#if candidate.overview}
+                  <p class="result-overview">{candidate.overview}</p>
                 {/if}
                 <dl>
                   <div>
                     <dt>Provider</dt>
-                    <dd>{result.provider}</dd>
+                    <dd>{candidate.provider}</dd>
                   </div>
                   <div>
                     <dt>Type</dt>
-                    <dd>{result.kind}</dd>
+                    <dd>{candidate.kind}</dd>
                   </div>
-                  {#if result.release_year}
+                  {#if candidate.release_year}
                     <div>
                       <dt>Year</dt>
-                      <dd>{result.release_year}</dd>
+                      <dd>{candidate.release_year}</dd>
                     </div>
                   {/if}
                   <div>
                     <dt>Provider ID</dt>
-                    <dd><code>{result.provider_id}</code></dd>
+                    <dd><code>{candidate.provider_id}</code></dd>
+                  </div>
+                  <div>
+                    <dt>Evidence</dt>
+                    <dd>
+                      {result.cacheState === "fresh"
+                        ? "Fresh cache evidence"
+                        : result.cacheState === "observed"
+                          ? "Observed from provider"
+                          : result.cacheState === "stale_on_error"
+                            ? "Retained cache evidence"
+                            : "Live provider result"}
+                    </dd>
                   </div>
                 </dl>
-                {#if onCandidateAction}
+                {#if result.receipt && onOpenCandidate}
+                  <a
+                    class="btn btn-outline-secondary"
+                    href={canonicalCandidatePath(
+                      result.receipt.candidate.provider,
+                      result.receipt.grain,
+                      result.receipt.candidate_receipt_id,
+                      result.receipt.candidate.title,
+                    )}
+                    onclick={(event) => {
+                      event.preventDefault();
+                      onOpenCandidate?.(result.receipt!);
+                    }}>View details</a
+                  >
+                {:else if !result.receipt && onOpenLiveCandidate}
+                  <a
+                    class="btn btn-outline-secondary"
+                    href={canonicalLiveCandidatePath(
+                      candidate.provider,
+                      candidate.grain,
+                      candidate.provider_id,
+                    )}
+                    onclick={(event) => {
+                      event.preventDefault();
+                      onOpenLiveCandidate?.(candidate);
+                    }}>View details</a
+                  >
+                {:else if result.receipt && onReadCandidate}
+                  <button
+                    type="button"
+                    class="btn btn-outline-secondary"
+                    disabled={searching ||
+                      Boolean(actionKey) ||
+                      Boolean(detailKey)}
+                    onclick={() => readCandidateDetails(result)}
+                  >
+                    {detailKey === resultKey
+                      ? "Loading details…"
+                      : "View details"}
+                  </button>
+                  {#if candidateDetails[resultKey]}
+                    <div class="result-details" role="status">
+                      {#if candidateDetails[resultKey].overview}
+                        <p>{candidateDetails[resultKey].overview}</p>
+                      {/if}
+                      {#if candidateDetails[resultKey].original_title}
+                        <p>
+                          Original title: {candidateDetails[resultKey]
+                            .original_title}
+                        </p>
+                      {/if}
+                    </div>
+                  {/if}
+                  {#if candidateDetailProblems[resultKey]}
+                    <p class="problem" role="alert">
+                      {candidateDetailProblems[resultKey]}
+                    </p>
+                  {/if}
+                {/if}
+                {#if (result.receipt && onCandidateReceiptAction) || (!result.receipt && onCandidateAction)}
                   <button
                     type="button"
                     class="track-btn"
-                    aria-disabled={Boolean(actionKey) ||
+                    aria-disabled={searching ||
+                      Boolean(actionKey) ||
+                      Boolean(detailKey) ||
                       completedKeys.has(resultKey)}
                     onclick={() => runCandidateAction(result)}
                   >
@@ -362,34 +1747,254 @@
                       {actionLabel}
                     {/if}
                   </button>
+                  {#if onSearchAttachTargets}
+                    <button
+                      type="button"
+                      class="btn btn-outline-secondary"
+                      disabled={searching ||
+                        Boolean(actionKey) ||
+                        Boolean(detailKey) ||
+                        completedKeys.has(resultKey)}
+                      onclick={() => openAttachPicker(result)}
+                      >Attach to existing Record</button
+                    >
+                  {/if}
                   {#if createdRecordIds[resultKey]}
                     <p class="result-action-status" role="status">
                       Record ID: <code>{createdRecordIds[resultKey]}</code>
                     </p>
                   {/if}
-                  {#if actionProblemKey === resultKey}
+                  {#if !attachResult && actionProblemKey === resultKey}
                     <p class="problem" role="alert">{actionProblem}</p>
                   {/if}
+                  {#if result.cacheState === "stale_on_error" && providerOffline()}
+                    <p class="result-action-note">
+                      Fasti will check whether this retained evidence can still
+                      be used. Expired evidence requires a new provider search.
+                    </p>
+                  {/if}
                 {:else}
-                  <button
-                    type="button"
-                    class="track-btn"
-                    aria-describedby="candidate-action-unavailable"
-                    disabled>{actionUnavailableLabel}</button
+                  <button type="button" class="track-btn" disabled
+                    >{actionUnavailableLabel}</button
                   >
                 {/if}
               </li>
             {/each}
           </ol>
         {:else}
-          <p>Enter a title or provider identifier.</p>
+          <p>
+            Provider results appear here when a configured source is available.
+          </p>
+        {/if}
+        {#if otherProviderWindow}
+          <button
+            type="button"
+            class="btn btn-outline-secondary text-wrap mw-100"
+            disabled={searching ||
+              Boolean(actionKey) ||
+              Boolean(detailKey) ||
+              Boolean(attachResult)}
+            onclick={switchProviderWindow}
+            >{otherProviderWindow.direction === "previous"
+              ? "Previous provider result set"
+              : "Next provider result set"}</button
+          >
+        {/if}
+        {#if Object.keys(providerNextPages).length > 0 && onSearchProviderPage && otherProviderWindow?.direction !== "next"}
+          {#if providerWindowFull}
+            <p role="status">
+              This result set is full. Continuing keeps it as the previous set
+              and replaces any older set. Restart this search to revisit older
+              results.
+            </p>
+          {/if}
+          <button
+            type="button"
+            class="btn btn-outline-secondary text-wrap mw-100"
+            disabled={searching ||
+              Boolean(actionKey) ||
+              Boolean(detailKey) ||
+              Boolean(attachResult)}
+            onclick={loadMoreProvider}
+            >{providerWindowFull
+              ? "Continue in a new result set"
+              : "Retry or load more provider results"}</button
+          >
         {/if}
       </section>
     {/if}
   {/if}
 </div>
 
+<dialog
+  class="attach-dialog"
+  bind:this={attachDialog}
+  use:dialogFocus
+  aria-labelledby="attach-record-title"
+  oncancel={(event) => {
+    event.preventDefault();
+    if (!actionKey) closeAttachPicker();
+  }}
+>
+  {#if attachResult}
+    <section class="card m-0">
+      <header class="card-header">
+        <h2
+          id="attach-record-title"
+          class="card-title"
+          bind:this={attachResultsHeading}
+          tabindex="-1"
+        >
+          Attach to existing Record
+        </h2>
+      </header>
+      <div class="card-body">
+        <p>
+          Attach {attachResult.result.candidate.provider} identifier
+          <code>{attachResult.result.candidate.provider_id}</code> for
+          <strong>{attachResult.result.candidate.title}</strong> to a Record you select.
+          This does not merge Records or change tracking state.
+        </p>
+        <form
+          onsubmit={(event) => {
+            event.preventDefault();
+            void searchAttachTargets();
+          }}
+        >
+          <label for="attach-record-search" class="form-label"
+            >Search local Records</label
+          >
+          <div class="d-flex flex-wrap gap-2">
+            <input
+              id="attach-record-search"
+              type="search"
+              class="form-control"
+              bind:value={attachQuery}
+              required
+              maxlength="256"
+              autocomplete="off"
+              disabled={attachLoading || Boolean(actionKey)}
+            />
+            <button
+              type="submit"
+              class="btn btn-outline-secondary"
+              disabled={attachLoading ||
+                Boolean(actionKey) ||
+                !attachQuery.trim()}>Find Records</button
+            >
+          </div>
+        </form>
+        <p class="text-secondary mt-2">
+          Only Records with the same identity grain ({attachResult.result
+            .candidate.grain}) can receive this identifier.
+        </p>
+        {#if attachLoading}
+          <p role="status">Searching local Records…</p>
+        {:else if attachSearched && attachRecords.length === 0}
+          <p role="status">
+            No compatible Records found{attachNext ? " on this page" : ""}.
+          </p>
+        {/if}
+        {#if attachRecords.length > 0}
+          <fieldset disabled={Boolean(actionKey) || attachLoading}>
+            <legend class="form-label">Select a Record</legend>
+            {#each attachRecords as record (record.record_id)}
+              <label class="form-check py-2">
+                <input
+                  class="form-check-input"
+                  type="radio"
+                  name="attach-record"
+                  value={record.record_id}
+                  bind:group={attachRecordId}
+                />
+                <span class="form-check-label">
+                  <strong>{record.title.value ?? "Untitled Record"}</strong>
+                  {#if record.release_year?.value}
+                    · {record.release_year.value}{/if}
+                  · {record.grain}
+                  <code class="d-block">{record.record_id}</code>
+                </span>
+              </label>
+            {/each}
+          </fieldset>
+        {/if}
+        {#if otherAttachPage}
+          <button
+            type="button"
+            class="btn btn-outline-secondary"
+            disabled={attachLoading || Boolean(actionKey)}
+            onclick={switchAttachPage}
+            >{otherAttachPage.direction === "previous"
+              ? "Previous matching Records"
+              : "Next matching Records"}</button
+          >
+        {/if}
+        {#if attachNext && otherAttachPage?.direction !== "next"}
+          <button
+            type="button"
+            class="btn btn-outline-secondary"
+            disabled={attachLoading || Boolean(actionKey)}
+            onclick={() => searchAttachTargets(attachNext)}
+            >Next matching Records</button
+          >
+        {/if}
+        {#if attachProblem}
+          <p class="problem mt-3" role="alert">{attachProblem}</p>
+        {/if}
+        {#if actionKey}
+          <p role="status">Attaching identifier. Waiting for confirmation…</p>
+        {/if}
+      </div>
+      <footer class="card-footer d-flex flex-wrap gap-2">
+        <button
+          type="button"
+          class="btn btn-outline-secondary"
+          disabled={Boolean(actionKey)}
+          onclick={closeAttachPicker}>Cancel</button
+        >
+        <button
+          type="button"
+          class="btn btn-primary"
+          disabled={!attachRecordId || attachLoading || Boolean(actionKey)}
+          onclick={confirmAttach}>Confirm attachment</button
+        >
+      </footer>
+    </section>
+  {/if}
+</dialog>
+
 <style>
+  .attach-dialog {
+    width: min(42rem, calc(100vw - 2rem));
+    max-height: calc(100dvh - 2rem);
+    margin: auto;
+    padding: 0;
+    border: 0;
+    border-radius: calc(
+      var(--tblr-border-radius-lg, 0.5rem) * var(--tblr-border-radius-scale, 1)
+    );
+    background: var(--fasti-surface-paper);
+    color: var(--fasti-text-primary);
+    overflow: auto;
+  }
+
+  .attach-dialog::backdrop {
+    background: rgb(15 23 42 / 58%);
+  }
+
+  .attach-dialog code {
+    overflow-wrap: anywhere;
+  }
+
+  .attach-dialog .form-check {
+    min-height: 44px;
+  }
+
+  .attach-dialog input[type="radio"] {
+    min-height: 0;
+    padding: 0;
+  }
+
   .discover-container {
     max-width: 1000px;
     margin: 0 auto;
@@ -403,6 +2008,10 @@
     margin: 0;
     padding: 0;
     gap: 16px;
+  }
+
+  .discover-container.candidate-active > :not(.candidate-detail) {
+    display: none;
   }
 
   .discover-header {
@@ -480,6 +2089,9 @@
   input,
   select {
     min-height: 44px;
+  }
+
+  .discover-container :is(button, input, select) {
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 35%, transparent);
     border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
@@ -487,7 +2099,7 @@
     color: var(--fasti-text-primary);
   }
 
-  button {
+  .discover-container button {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -510,7 +2122,7 @@
     opacity: 0.68;
   }
 
-  :is(button, input, select):focus-visible {
+  :is(button, input, select, a):focus-visible {
     outline: 3px solid var(--fasti-focus);
     outline-offset: 2px;
   }
@@ -527,6 +2139,20 @@
     padding: 16px 0;
     border-top: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 22%, transparent);
+  }
+
+  .duplicate-intro,
+  .possible-duplicate {
+    border-inline-start: 3px solid var(--fasti-state-attention);
+    padding-inline-start: 16px;
+  }
+
+  .duplicate-intro {
+    background: color-mix(
+      in srgb,
+      var(--fasti-state-attention) 8%,
+      transparent
+    );
   }
 
   .result-title {

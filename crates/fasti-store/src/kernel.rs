@@ -6,6 +6,8 @@ use fasti_application::{
     authorize, AccessSnapshot, ApplicationAccessContext, ApplicationResult,
     AuthorizationRequirement, AuthorizedActor, AuthorizedApplicationAccess, CapabilityKey,
     CredentialStatus, FastiProblem, GrantStatus, ProblemCode, RequestAccessContext, ScopeKey,
+    SearchActionReceiptLimits, DEFAULT_SEARCH_ACTION_RECEIPT_JSON_BYTES,
+    DEFAULT_SEARCH_ACTION_RECEIPT_ROWS,
 };
 use fasti_domain::{
     ClientId, CredentialId, ProfileGrantId, ProfileId, RequestCorrelationId, WorkspaceId,
@@ -37,6 +39,45 @@ pub const MAX_TEMP_EVIDENCE_BYTES: u64 = 32 * 1024 * 1024;
 pub const MAX_PREPARED_EVIDENCE_BYTES: u64 = 64 * 1024 * 1024;
 pub const MAX_CONCURRENT_UPLOADS: usize = 4;
 const DATA_ROOT_NONCE_BYTES: usize = 32;
+const SEARCH_ACTION_RECEIPT_ROWS_ENV: &str = "FASTI_SEARCH_ACTION_RECEIPT_MAX_ROWS";
+const SEARCH_ACTION_RECEIPT_BYTES_ENV: &str = "FASTI_SEARCH_ACTION_RECEIPT_MAX_BYTES";
+
+fn configured_limit(name: &'static str, default: u64) -> Result<u64, StoreOpenError> {
+    let Some(value) = std::env::var_os(name) else {
+        return Ok(default);
+    };
+    value
+        .to_str()
+        .and_then(|value| value.parse::<u64>().ok())
+        .ok_or(StoreOpenError::InvalidConfiguration {
+            name,
+            reason: "must be a base-10 integer",
+        })
+}
+
+fn configured_search_action_receipt_limits() -> Result<SearchActionReceiptLimits, StoreOpenError> {
+    let rows = configured_limit(
+        SEARCH_ACTION_RECEIPT_ROWS_ENV,
+        DEFAULT_SEARCH_ACTION_RECEIPT_ROWS,
+    )?;
+    let bytes = configured_limit(
+        SEARCH_ACTION_RECEIPT_BYTES_ENV,
+        DEFAULT_SEARCH_ACTION_RECEIPT_JSON_BYTES,
+    )?;
+    let limits = SearchActionReceiptLimits::try_new(rows, bytes).ok_or(
+        StoreOpenError::InvalidConfiguration {
+            name: "FASTI_SEARCH_ACTION_RECEIPT_MAX_ROWS/FASTI_SEARCH_ACTION_RECEIPT_MAX_BYTES",
+            reason: "must be non-zero and fit SQLite's signed integer range",
+        },
+    )?;
+    if !limits.meets_supported_floor() {
+        return Err(StoreOpenError::InvalidConfiguration {
+            name: "FASTI_SEARCH_ACTION_RECEIPT_MAX_ROWS/FASTI_SEARCH_ACTION_RECEIPT_MAX_BYTES",
+            reason: "must retain at least 10,000 receipts and 163,840,000 receipt JSON bytes",
+        });
+    }
+    Ok(limits)
+}
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -61,6 +102,11 @@ pub enum StoreOpenError {
     RestoreActivation,
     #[error("human Access restart recovery failed")]
     AccessRecovery,
+    #[error("invalid local Search receipt configuration: {name} {reason}")]
+    InvalidConfiguration {
+        name: &'static str,
+        reason: &'static str,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -173,6 +219,7 @@ pub(crate) struct KernelInner {
     pub(crate) scratch_root: PathBuf,
     pub(crate) connection: Mutex<Connection>,
     pub(crate) upload_budget: Mutex<UploadBudget>,
+    pub(crate) search_action_receipt_limits: SearchActionReceiptLimits,
     // Serializes ensure_bootstrap_secret's read-validate-recover sequence.
     // Without it, two concurrent callers can each see the same malformed
     // file, and the one that loses the race can delete a secret the other
@@ -197,12 +244,32 @@ pub(crate) struct UploadBudget {
 
 impl SqliteKernel {
     pub fn open(data_root: impl AsRef<Path>) -> Result<Self, StoreOpenError> {
+        Self::open_with_search_action_receipt_limits(
+            data_root,
+            configured_search_action_receipt_limits()?,
+        )
+    }
+
+    pub(crate) fn open_with_search_action_receipt_limits(
+        data_root: impl AsRef<Path>,
+        limits: SearchActionReceiptLimits,
+    ) -> Result<Self, StoreOpenError> {
         let data_root = LockedDataRoot::acquire(data_root)?;
-        Self::open_locked(data_root)
+        Self::open_locked_with_search_action_receipt_limits(data_root, limits)
     }
 
     /// Opens the local kernel without releasing an already-held data-root lock.
     pub fn open_locked(data_root: LockedDataRoot) -> Result<Self, StoreOpenError> {
+        Self::open_locked_with_search_action_receipt_limits(
+            data_root,
+            configured_search_action_receipt_limits()?,
+        )
+    }
+
+    fn open_locked_with_search_action_receipt_limits(
+        data_root: LockedDataRoot,
+        limits: SearchActionReceiptLimits,
+    ) -> Result<Self, StoreOpenError> {
         if let Some(root) = data_root.anchored_directory() {
             crate::restore_activation::recover_activation_before_database_open(root)
                 .map_err(|_| StoreOpenError::RestoreActivation)?;
@@ -306,6 +373,7 @@ impl SqliteKernel {
                 scratch_root,
                 connection: Mutex::new(connection),
                 upload_budget: Mutex::new(UploadBudget::default()),
+                search_action_receipt_limits: limits,
                 bootstrap_secret: Mutex::new(()),
                 #[cfg(any(target_os = "linux", target_os = "android"))]
                 _current_directory: current_directory,
@@ -874,6 +942,7 @@ pub(crate) fn scope_storage_key(scope: ScopeKey) -> &'static str {
         ScopeKey::MetadataClaimRefresh => "metadata_claim_refresh",
         ScopeKey::MetadataProjectionRead => "metadata_projection_read",
         ScopeKey::MetadataProjectionConfigure => "metadata_projection_configure",
+        ScopeKey::MetadataSearch => "metadata_search",
         ScopeKey::ReviewRead => "review_read",
         ScopeKey::ReviewWrite => "review_write",
         ScopeKey::CorrectionRead => "correction_read",

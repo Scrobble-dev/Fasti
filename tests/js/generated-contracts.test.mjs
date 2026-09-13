@@ -40,10 +40,10 @@ const mutateJson = async (root, relativePath, mutate) => {
 
 test("checked-in generated contracts validate", async () => {
   assert.deepEqual(await validateGeneratedContracts(), {
-    capabilityCount: 52,
+    capabilityCount: 54,
     conformanceOpenApiPathCount: 9,
-    openApiPathCount: 36,
-    problemCount: 372,
+    openApiPathCount: 43,
+    problemCount: 401,
     schemaCount: 2,
   });
 });
@@ -72,6 +72,19 @@ test("OpenAPI version mutation is rejected", async () => {
         document.openapi = "3.0.3";
       }),
     (result) => assert.rejects(result, /3\.1\.0/),
+  );
+});
+
+test("local Search response byte limit mutation is rejected", async () => {
+  await withArtifacts(
+    (root) =>
+      mutateJson(root, "contracts/generated/v1/openapi.json", (document) => {
+        document.paths["/api/v1/search/records"].post[
+          "x-fasti-max-response-bytes"
+        ] = 512 * 1024;
+      }),
+    (result) =>
+      assert.rejects(result, /operation-specific response byte limit/),
   );
 });
 
@@ -142,6 +155,48 @@ test("Access schemas reject forbidden secret properties", async () => {
       }),
     (result) =>
       assert.rejects(result, /forbidden secret property refresh_token/u),
+  );
+});
+
+for (const security of [
+  undefined,
+  [{ credential_bearer: [] }],
+  [{ browser_session_cookie: [], csrf_cookie: [], csrf_header: [] }],
+]) {
+  test(`inventory rejects non-cookie-only security ${JSON.stringify(security)}`, async () => {
+    await withArtifacts(
+      (root) =>
+        mutateJson(root, "contracts/generated/v1/openapi.json", (document) => {
+          document.paths["/api/access/v1/clients"].get.security = security;
+        }),
+      (result) =>
+        assert.rejects(result, /list_access_clients security must match/u),
+    );
+  });
+}
+
+test("inventory rejects a secret added through its response reference", async () => {
+  await withArtifacts(
+    (root) =>
+      mutateJson(root, "contracts/generated/v1/openapi.json", (document) => {
+        document.components.schemas.ListAccessClientsResponse.properties.credential =
+          { type: "string" };
+      }),
+    (result) => assert.rejects(result, /forbidden secret property credential/u),
+  );
+});
+
+test("inventory rejects omitted revocation evidence in its problem contract", async () => {
+  await withArtifacts(
+    (root) =>
+      mutateJson(root, "contracts/generated/v1/openapi.json", (document) => {
+        const operation = document.paths["/api/access/v1/clients"].get;
+        operation["x-fasti-problem-codes"] = operation[
+          "x-fasti-problem-codes"
+        ].filter((code) => code !== "browser_session_revoked");
+      }),
+    (result) =>
+      assert.rejects(result, /list_access_clients problem subset drifted/u),
   );
 });
 

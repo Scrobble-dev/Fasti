@@ -26,7 +26,8 @@ check() {
     printf '  ok    %-46s exit %s\n' "$name" "$status"
   else
     printf '  FAIL  %-46s exit %s, wanted %s\n' "$name" "$status" "$expected"
-    sed 's/^/        /' /tmp/bench-envelope-selftest.err | tail -3
+    # Keep discovery diagnostics in the hosted log; cap stderr input at 8 KiB.
+    head -c 8192 /tmp/bench-envelope-selftest.err | sed 's/^/        /'
     failures=$((failures + 1))
   fi
 }

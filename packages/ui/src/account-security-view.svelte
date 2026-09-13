@@ -4,23 +4,23 @@
     FastiProblemError,
     type ProblemDetails,
   } from "@fasti/sdk";
-  import {
-    IconAlertTriangle,
-    IconClock,
-    IconDevices,
-    IconKey,
-    IconLoader2,
-    IconLogout,
-    IconRefresh,
-    IconShieldCheck,
-    IconUserCheck,
-    IconWorld,
-    IconX,
-  } from "@tabler/icons-svelte";
-  import { onMount, tick } from "svelte";
+  import IconAlertTriangle from "@tabler/icons-svelte/icons/alert-triangle";
+  import IconClock from "@tabler/icons-svelte/icons/clock";
+  import IconDevices from "@tabler/icons-svelte/icons/devices";
+  import IconKey from "@tabler/icons-svelte/icons/key";
+  import IconLoader2 from "@tabler/icons-svelte/icons/loader-2";
+  import IconLogout from "@tabler/icons-svelte/icons/logout";
+  import IconRefresh from "@tabler/icons-svelte/icons/refresh";
+  import IconShieldCheck from "@tabler/icons-svelte/icons/shield-check";
+  import IconUserCheck from "@tabler/icons-svelte/icons/user-check";
+  import IconWorld from "@tabler/icons-svelte/icons/world";
+  import IconX from "@tabler/icons-svelte/icons/x";
+  import { onMount, tick, untrack } from "svelte";
   import { hostProblemText } from "./host-problem.js";
   import type {
     AccessProjectionResponse,
+    ListAccessClientsQueryParameters,
+    ListAccessClientsResponse,
     ReadTrailBaseContinuationResponse,
     WorkbenchHost,
   } from "./types.js";
@@ -79,6 +79,102 @@
   let notice = $state("");
   let generation = 0;
   let readController: AbortController | undefined;
+
+  let clientInventory: ListAccessClientsResponse | undefined = $state();
+  let inventoryQuery: ListAccessClientsQueryParameters = $state({ limit: 32 });
+  let inventoryBusy = $state(false);
+  let inventoryError = $state("");
+  let inventoryProblem: ProblemDetails | undefined = $state();
+  let inventoryController: AbortController | undefined;
+  let inventoryGeneration = 0;
+  const inventoryIdentity = $derived.by(() =>
+    viewState.kind === "ready" &&
+    projection?.subject.lifecycle === "active" &&
+    projection.membership.lifecycle === "active"
+      ? [
+          projection.subject.auth_subject_id,
+          projection.membership.membership_id,
+          projection.membership.workspace_id,
+          projection.membership.role,
+          projection.membership.updated_at,
+          projection.current_session.browser_session_id,
+          projection.current_session.rotation_generation,
+          projection.current_session.selected_profile_grant_id,
+        ].join(":")
+      : undefined,
+  );
+
+  function clearClientInventory(): void {
+    inventoryGeneration += 1;
+    inventoryController?.abort();
+    inventoryController = undefined;
+    clientInventory = undefined;
+    inventoryQuery = { limit: 32 };
+    inventoryBusy = false;
+    inventoryError = "";
+    inventoryProblem = undefined;
+  }
+
+  $effect(() => {
+    inventoryIdentity;
+    untrack(clearClientInventory);
+    return () => untrack(clearClientInventory);
+  });
+
+  async function loadClientInventory(
+    query: ListAccessClientsQueryParameters = { limit: 32 },
+  ): Promise<void> {
+    const identity = inventoryIdentity;
+    if (!identity || !host.listAccessClients) return;
+    inventoryController?.abort();
+    const controller = new AbortController();
+    inventoryController = controller;
+    const currentGeneration = ++inventoryGeneration;
+    inventoryQuery = { ...query };
+    inventoryBusy = true;
+    inventoryError = "";
+    inventoryProblem = undefined;
+    try {
+      const result = await host.listAccessClients(
+        inventoryQuery,
+        controller.signal,
+      );
+      if (
+        controller.signal.aborted ||
+        currentGeneration !== inventoryGeneration ||
+        identity !== inventoryIdentity
+      )
+        return;
+      clientInventory = result;
+    } catch (error) {
+      if (
+        wasAborted(error) ||
+        currentGeneration !== inventoryGeneration ||
+        identity !== inventoryIdentity
+      )
+        return;
+      const problem = problemFor(error);
+      if (problem && signedOutCodes.has(problem.code)) {
+        clearClientInventory();
+        onProjection?.(undefined);
+        viewState = { kind: "signed_out" };
+      } else {
+        inventoryProblem = problem;
+        inventoryError =
+          problem?.detail ??
+          hostProblemText(
+            error,
+            "Fasti could not load registered clients. Retry this page.",
+          );
+      }
+    } finally {
+      if (
+        currentGeneration === inventoryGeneration &&
+        identity === inventoryIdentity
+      )
+        inventoryBusy = false;
+    }
+  }
 
   $effect(() => {
     if (viewState.kind !== "problem") return;
@@ -550,7 +646,7 @@
       case "recovery":
         return "Recovery-code management activates after its complete lifecycle is implemented and reviewed.";
       case "devices_and_clients":
-        return "Device grants, registered clients, and personal access tokens activate in later Access packages.";
+        return "Device grants, new client registration, and personal access tokens activate in later Access packages.";
       case "external_identity":
         return "Generic OpenID Connect and managed Authentik support activate in later Access packages.";
       default:
@@ -587,6 +683,173 @@
     return () => readController?.abort();
   });
 </script>
+
+{#snippet registeredClients()}
+  <div class="p-3" data-testid="access-client-inventory">
+    <p class="text-secondary">
+      Inspect registered application clients. {projection?.membership.role ===
+      "administrator"
+        ? "You can inspect this workspace’s clients, including ownerless clients."
+        : "Only clients owned by your account are shown."}
+      Registration does not prove that a device is connected or that its credentials
+      are valid.
+    </p>
+    {#if !host.listAccessClients}
+      <p class="alert alert-warning" role="status">
+        Client inspection is unavailable in this host. Open Account and security
+        in the ordinary browser on this Fasti node.
+      </p>
+    {:else if inventoryIdentity}
+      <div class="d-flex flex-wrap gap-2 mb-3">
+        <button
+          type="button"
+          class="btn btn-outline-primary"
+          disabled={inventoryBusy}
+          onclick={() => void loadClientInventory()}
+        >
+          {clientInventory ? "Newest clients" : "Load clients"}
+        </button>
+        {#if inventoryBusy}
+          <button
+            type="button"
+            class="btn btn-outline-secondary"
+            onclick={() => {
+              inventoryController?.abort();
+              inventoryGeneration += 1;
+              inventoryBusy = false;
+            }}>Cancel loading</button
+          >
+        {/if}
+      </div>
+      <p class="text-secondary" role="status" aria-live="polite">
+        {inventoryBusy
+          ? "Loading registered clients…"
+          : clientInventory
+            ? `${clientInventory.clients.length} clients on this page${clientInventory.next ? "; more clients are available." : "; end of inventory."}`
+            : "Load the newest clients to inspect their recorded state."}
+      </p>
+      {#if inventoryError}
+        <div class="alert alert-warning" role="alert">
+          <p class="mb-2">{inventoryError}</p>
+          {#if inventoryProblem?.next_actions[0]}<p>
+              Next: {inventoryProblem.next_actions[0].label}
+            </p>{/if}
+          {#if clientInventory}<p>
+              The previous page remains visible. It has not been refreshed.
+            </p>{/if}
+          {#if !inventoryProblem || inventoryProblem.retryability === "retry_safe"}
+            <button
+              type="button"
+              class="btn btn-outline-primary"
+              disabled={inventoryBusy}
+              onclick={() => void loadClientInventory(inventoryQuery)}
+              >Retry client page</button
+            >
+          {/if}
+        </div>
+      {/if}
+      {#if clientInventory}
+        {#if clientInventory.clients.length === 0}
+          <p>No registered clients are visible to this account on this page.</p>
+        {:else}
+          <div
+            class="table-responsive access-table"
+            use:overflowTabStop
+            aria-label="Registered application clients"
+            aria-busy={inventoryBusy}
+          >
+            <table class="table table-fixed client-inventory-table mb-0">
+              <caption class="visually-hidden"
+                >Registered application clients</caption
+              >
+              <thead
+                ><tr
+                  ><th scope="col">Client</th><th scope="col">Purpose</th><th
+                    scope="col">State</th
+                  ><th scope="col">Details</th></tr
+                ></thead
+              >
+              <tbody>
+                {#each clientInventory.clients as client (client.client_id)}
+                  <tr>
+                    <th scope="row" class="text-break"
+                      >{client.name ??
+                        (client.purpose === "node"
+                          ? "Fasti node"
+                          : "Unnamed client")}</th
+                    >
+                    <td>{stateLabel(client.purpose)}</td>
+                    <td>{stateLabel(client.lifecycle)}</td>
+                    <td
+                      ><details>
+                        <summary
+                          class="btn btn-outline-secondary"
+                          aria-label={`Inspect ${client.name ?? client.client_id}`}
+                          >Inspect</summary
+                        >
+                        <dl class="mb-0 mt-2">
+                          <dt>Client ID</dt>
+                          <dd class="text-break">{client.client_id}</dd>
+                          <dt>Owner</dt>
+                          <dd class="text-break">
+                            {client.owner_subject_id ??
+                              "No recorded account owner"}
+                          </dd>
+                          <dt>Authentication type</dt>
+                          <dd>{stateLabel(client.authentication_type)}</dd>
+                          <dt>Credential generation</dt>
+                          <dd>
+                            {client.current_credential_epoch}{client.current_credential_epoch ===
+                            "0"
+                              ? " (no issued generation)"
+                              : ""}
+                          </dd>
+                          <dt>Created (UTC)</dt>
+                          <dd class="text-break">{client.created_at}</dd>
+                        </dl>
+                      </details></td
+                    >
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        {/if}
+        {#if clientInventory.next}
+          <button
+            type="button"
+            class="btn btn-outline-primary mt-3"
+            disabled={inventoryBusy}
+            onclick={() =>
+              clientInventory?.next &&
+              void loadClientInventory({
+                limit: 32,
+                after_created_at: clientInventory.next.created_at,
+                after_client_id: clientInventory.next.client_id,
+              })}>Next client page</button
+          >
+        {/if}
+      {/if}
+    {/if}
+    {#if host.listAccessClients && !inventoryIdentity}
+      <p class="alert alert-warning" role="status">
+        Account access is not current. Refresh account access before inspecting
+        clients.
+      </p>
+      <button
+        type="button"
+        class="btn btn-outline-primary"
+        disabled={Boolean(busy)}
+        onclick={() => void load()}>Refresh account access</button
+      >
+    {/if}
+    <p class="text-secondary mt-3 mb-0">
+      New client registration, device grants, OAuth clients and personal access
+      tokens require later Access packages. This inspection does not complete
+      device setup.
+    </p>
+  </div>
+{/snippet}
 
 <section
   class="access-surface"
@@ -914,6 +1177,15 @@
           </li>
         {/each}
       </ol>
+      <details class="card access-detail">
+        <summary class="task-row"
+          ><span class="h4 mb-0">Registered clients</span><span
+            class="btn btn-outline-primary"
+            aria-hidden="true">Inspect</span
+          ></summary
+        >
+        {@render registeredClients()}
+      </details>
       <div class="d-flex flex-wrap gap-2">
         <button
           type="button"
@@ -1108,6 +1380,16 @@
         >
       </div>
 
+      <details class="list-group-item access-detail">
+        <summary class="task-row"
+          ><span class="h4 mb-0">Registered clients</span><span
+            class="btn btn-outline-primary"
+            aria-hidden="true">Inspect</span
+          ></summary
+        >
+        {@render registeredClients()}
+      </details>
+
       <div class="list-group-item task-row">
         <IconWorld size={22} aria-hidden="true" />
         <div class="task-copy">
@@ -1269,6 +1551,25 @@
     color: var(--fasti-text-primary);
   }
 
+  .access-surface
+    :global(
+      :is(.btn-outline-primary, .btn-outline-secondary, .btn-outline-danger)
+    ) {
+    --tblr-btn-hover-bg: var(--fasti-surface-archive);
+    --tblr-btn-active-bg: var(--fasti-surface-archive);
+  }
+
+  .access-surface :global(summary:focus-visible) {
+    outline: 3px solid var(--fasti-focus);
+    outline-offset: 2px;
+  }
+
+  @media (forced-colors: active) {
+    .access-surface :global(summary:focus-visible) {
+      outline-color: Highlight;
+    }
+  }
+
   .access-surface :global(.btn-outline-primary) {
     border-color: color-mix(
       in srgb,
@@ -1345,6 +1646,10 @@
     padding: 0;
   }
 
+  .access-detail.card {
+    --tblr-card-bg: var(--fasti-surface-archive);
+  }
+
   .access-detail > summary {
     padding: var(--tblr-list-group-item-padding-y, 1rem)
       var(--tblr-list-group-item-padding-x, 1rem);
@@ -1358,6 +1663,10 @@
 
   .access-table {
     border-top: var(--tblr-border-width) solid var(--tblr-border-color);
+  }
+
+  .client-inventory-table {
+    min-width: 42rem;
   }
 
   .continuation-choice {

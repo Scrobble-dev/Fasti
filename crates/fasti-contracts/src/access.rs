@@ -8,6 +8,152 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema, IntoParams)]
+#[serde(deny_unknown_fields)]
+#[into_params(parameter_in = Query)]
+pub struct ListAccessClientsQueryParameters {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1, max = 100))]
+    #[schema(minimum = 1, maximum = 100)]
+    #[param(minimum = 1, maximum = 100)]
+    pub limit: Option<u16>,
+    /// Echo both cursor fields unchanged; omit both for the first page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(length(min = 27, max = 30), extend("format" = "fasti-inventory-utc-micros"))]
+    #[schema(
+        min_length = 27,
+        max_length = 30,
+        format = "fasti-inventory-utc-micros"
+    )]
+    #[param(
+        min_length = 27,
+        max_length = 30,
+        format = "fasti-inventory-utc-micros"
+    )]
+    pub after_created_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        length(equal = 36),
+        regex(pattern = r"^cli_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$")
+    )]
+    #[schema(
+        min_length = 36,
+        max_length = 36,
+        pattern = r"^cli_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+    )]
+    #[param(
+        min_length = 36,
+        max_length = 36,
+        pattern = r"^cli_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+    )]
+    pub after_client_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AccessClientAuthenticationTypeDto {
+    FirstParty,
+    Confidential,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AccessClientPurposeDto {
+    Node,
+    Cli,
+    Device,
+    Integration,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AccessClientLifecycleDto {
+    Active,
+    Revoked,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AccessClientInventoryItemDto {
+    #[schemars(
+        length(equal = 36),
+        regex(pattern = r"^cli_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$")
+    )]
+    #[schema(
+        min_length = 36,
+        max_length = 36,
+        pattern = r"^cli_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+    )]
+    pub client_id: String,
+    /// Null for historical/system clients without a human owner.
+    #[schemars(
+        length(equal = 36),
+        regex(pattern = r"^sub_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$")
+    )]
+    #[schema(
+        required = true,
+        nullable = true,
+        min_length = 36,
+        max_length = 36,
+        pattern = r"^sub_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+    )]
+    pub owner_subject_id: Option<String>,
+    #[schemars(length(min = 1, max = 128))]
+    #[schema(required = true, nullable = true, min_length = 1, max_length = 128)]
+    pub name: Option<String>,
+    pub authentication_type: AccessClientAuthenticationTypeDto,
+    pub purpose: AccessClientPurposeDto,
+    pub lifecycle: AccessClientLifecycleDto,
+    /// Decimal string, not a JavaScript number. Zero does not imply a credential.
+    #[schemars(length(min = 1, max = 19), regex(pattern = r"^(0|[1-9][0-9]{0,18})$"), extend("format" = "fasti-credential-epoch"))]
+    #[schema(
+        min_length = 1,
+        max_length = 19,
+        pattern = r"^(0|[1-9][0-9]{0,18})$",
+        format = "fasti-credential-epoch"
+    )]
+    pub current_credential_epoch: String,
+    #[schemars(length(min = 27, max = 30), extend("format" = "fasti-inventory-utc-micros"))]
+    #[schema(
+        min_length = 27,
+        max_length = 30,
+        format = "fasti-inventory-utc-micros"
+    )]
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AccessClientInventoryCursorDto {
+    #[schemars(length(min = 27, max = 30), extend("format" = "fasti-inventory-utc-micros"))]
+    #[schema(
+        min_length = 27,
+        max_length = 30,
+        format = "fasti-inventory-utc-micros"
+    )]
+    pub created_at: String,
+    #[schemars(
+        length(equal = 36),
+        regex(pattern = r"^cli_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$")
+    )]
+    #[schema(
+        min_length = 36,
+        max_length = 36,
+        pattern = r"^cli_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+    )]
+    pub client_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ListAccessClientsResponse {
+    #[schemars(length(max = 100))]
+    #[schema(max_items = 100)]
+    pub clients: Vec<AccessClientInventoryItemDto>,
+    #[schema(required = true, nullable = true)]
+    pub next: Option<AccessClientInventoryCursorDto>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct StartTrailBaseSignInRequest {
