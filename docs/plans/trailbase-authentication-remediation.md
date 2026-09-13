@@ -9,8 +9,12 @@ C1, the C2 pure foundation and C2 inventory are merged. Verified inventory merge
 is `f46687cd9425ae725c5a003e5454f18b9f7fab3d`, tree
 `c3fb7a102fc2a528d024686eb1fd21f6b66c6477`, with applicable exact-head gates green
 and Metadata handoff released. Schema18 is published; archive7 remains frozen.
-E1 owns append-only migration19. Metadata's returned shared Search slice is local
-unmerged `12613181bc6031b69056d0f4ea87dda0d31e026d`; it is not a new dev base.
+E1 owns append-only migration19. Its persistence and independent G presentation
+commits are pushed on `codex/fasti-access-e1` at `a17a2444`, not merged. G is
+running its own `dev`-based delivery gates without E1 ancestors. Metadata's latest
+returned shared Search slice is local unmerged
+`928c98e8e1b70bfad5b3291ec7d41d56e6290d37`; it is not a new dev base. Preserve
+optional domains on both local and provider-page Search requests when combining.
 Follow the [E1 execution gate](fasti-access-e1.md#current-execution-gate--2026-09-13)
 for current paths, verification and the narrow persistence implementation. Follow the
 [inventory record](fasti-access-c2-inventory.md) for exact source and receipts.

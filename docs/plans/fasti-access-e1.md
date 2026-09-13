@@ -2,6 +2,23 @@
 
 Status: `FIRST_LINK_PERSISTENCE_IMPLEMENTATION_ACTIVE`; no OIDC runtime support claim.
 
+## Remote and ownership checkpoint — 2026-09-13
+
+The requested remote checkpoint is verified: `origin/codex/fasti-access-e1`
+equals `a17a24443cd7fdd8684ecceb416951bc11d0b7cb`, tree
+`71b81ecacba630d68d2d612c8497239552c08701`. It contains persistence commit
+`6afb9ebe3b8892000b60a182e675ac02be9dc3b0` and independent G presentation commit
+`a17a2444`. This is a branch backup, not a merged or fully qualified E1 delivery.
+
+Metadata has returned the shared Search window at local unmerged
+`928c98e8e1b70bfad5b3291ec7d41d56e6290d37`, tree
+`7eb8927cc4a1f900430ec99c05674001843f5d87`. Preserve optional `domains` in both
+`LocalSearchRequestDto` and `SearchProviderPageRequest`, plus `MediaDomainDto`,
+when integrating generated outputs. It is not a replacement `origin/dev` base.
+Schema19 remains E1-owned; no migration20 allocation or merge handoff is made.
+G is being delivered separately without the unfinished E1 ancestors. The complete
+first-link journey remains the E1 delivery unit; no foundation-only PR is opened.
+
 ## Current execution gate — 2026-09-13
 
 PR139 is merged at `f46687cd9425ae725c5a003e5454f18b9f7fab3d`, tree
