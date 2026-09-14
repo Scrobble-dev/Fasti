@@ -543,3 +543,91 @@ async fn plex_webhook_commits_and_conflicts_on_changed_evidence() {
     let conflict = integrations.oneshot(send(changed)).await.expect("response");
     assert_eq!(conflict.status(), StatusCode::CONFLICT);
 }
+
+#[tokio::test]
+async fn hostile_observation_fixtures_return_typed_problems_without_panicking() {
+    let (root, local, integrations) = routers().await;
+    let credential = enroll_admin(&local, root.path()).await;
+    let fixtures = [
+        (
+            "oversized-source-event-id.json",
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_observation",
+            "/source_event_id",
+        ),
+        (
+            "malformed-observed-at.json",
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_observation",
+            "/observed_at",
+        ),
+        (
+            "nested-title-object.json",
+            StatusCode::BAD_REQUEST,
+            "malformed_json",
+            "/",
+        ),
+    ];
+
+    for fixture in fixtures {
+        let body = match fixture.0 {
+            "oversized-source-event-id.json" => {
+                include_str!(
+                    "../../../tests/conformance/observation-hostile/oversized-source-event-id.json"
+                )
+            }
+            "malformed-observed-at.json" => {
+                include_str!(
+                    "../../../tests/conformance/observation-hostile/malformed-observed-at.json"
+                )
+            }
+            "nested-title-object.json" => {
+                include_str!(
+                    "../../../tests/conformance/observation-hostile/nested-title-object.json"
+                )
+            }
+            _ => unreachable!("fixture table contains only checked-in cases"),
+        };
+        let response = integrations
+            .clone()
+            .oneshot(
+                bearer(
+                    Request::post("/api/v1/integrations/jellyfin/webhook"),
+                    &credential,
+                )
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body))
+                .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), fixture.1, "fixture {}", fixture.0);
+        assert_eq!(
+            response
+                .headers()
+                .get(header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok()),
+            Some("application/problem+json"),
+            "fixture {} must use the RFC 7807 media type",
+            fixture.0
+        );
+
+        let problem: ProblemDetails = serde_json::from_slice(
+            &to_bytes(response.into_body(), 16 * 1024)
+                .await
+                .expect("bounded problem body"),
+        )
+        .expect("typed RFC 7807 problem response");
+        assert_eq!(problem.status, fixture.1.as_u16(), "fixture {}", fixture.0);
+        assert_eq!(problem.code, fixture.2, "fixture {}", fixture.0);
+        assert!(
+            problem
+                .violations
+                .iter()
+                .any(|violation| violation.pointer == fixture.3),
+            "fixture {} should identify {}",
+            fixture.0,
+            fixture.3
+        );
+    }
+}

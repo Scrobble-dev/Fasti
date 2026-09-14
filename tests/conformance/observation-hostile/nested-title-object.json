@@ -1,0 +1,18 @@
+{
+  "source_event_id": "hostile-fixture:nested-title:1",
+  "observed_at": "2026-08-27T12:00:00Z",
+  "occurred_at": "2026-08-27T11:59:58Z",
+  "item_type": "episode",
+  "title": {"text": "Unexpected nested title"},
+  "series_title": "Fixture series",
+  "season_number": 1,
+  "episode_number": 2,
+  "completed": true,
+  "position_seconds": 1440,
+  "duration_seconds": 1440,
+  "provider_ids": {"imdb": "tt1234569"},
+  "series_provider_ids": {"tmdb": "12347"},
+  "server_id": "server-fixture",
+  "user_id": "user-fixture",
+  "device_id": "device-fixture"
+}
