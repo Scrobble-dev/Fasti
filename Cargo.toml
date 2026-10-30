@@ -32,13 +32,13 @@ fasti-api = { path = "crates/fasti-api", version = "0.1.0" }
 
 # Async & Runtime
 tokio = { version = "1.40", features = ["full"] }
-reqwest = { version = "=0.13.4", default-features = false, features = ["rustls", "stream"] }
+reqwest = { version = "=0.13.5", default-features = false, features = ["rustls", "stream"] }
 
 # Serialization & Models
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 schemars = "1.2"
-utoipa = "5.5"
+utoipa = "6.0"
 uuid = { version = "1.10", features = ["v4", "v7", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 
@@ -48,7 +48,7 @@ tower = { version = "0.5", features = ["util", "timeout"] }
 tower-http = { version = "0.7", features = ["fs"] }
 
 # SQLite & Persistence
-rusqlite = { version = "0.40", features = ["backup", "bundled", "chrono", "hooks", "uuid"] }
+rusqlite = { version = "0.41", features = ["backup", "bundled", "chrono", "hooks", "uuid"] }
 
 # CLI & Utilities
 clap = { version = "4.5", features = ["derive", "env"] }
@@ -57,11 +57,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 thiserror = "2.0"
 zeroize = "1.8"
 anyhow = "1.0"
-argon2 = "0.5.3"
-serde-saphyr = "1.0.1"
+argon2 = "0.6.0"
+serde-saphyr = "2.0.0"
 proptest = "1.6"
 static_assertions = "1.1"
 getrandom = "0.4"
 rustix = { version = "1.1.4", features = ["fs"] }
 tar = { version = "0.4.46", default-features = false }
-zstd = { version = "0.13.3", default-features = false }
+zstd = { version = "0.14.3", default-features = false }
