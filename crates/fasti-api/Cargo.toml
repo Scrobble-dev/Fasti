@@ -15,7 +15,7 @@ fasti-application = { workspace = true }
 fasti-contracts = { workspace = true }
 fasti-domain = { workspace = true }
 fasti-provider-runtime = { workspace = true }
-base64 = "=0.22.1"
+base64 = "=0.23.1"
 getrandom = { workspace = true }
 reqwest = { workspace = true }
 rustix = { workspace = true, features = ["process"] }
